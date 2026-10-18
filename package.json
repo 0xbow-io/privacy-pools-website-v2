@@ -131,6 +131,7 @@
       "ws": "7.5.11"
     },
     "underscore": "1.13.8",
+    "expo-modules-jsi": "56.0.14",
     "ethers": {
       "ws": "8.21.0"
     },
