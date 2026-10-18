@@ -337,6 +337,23 @@ export function torFetchIfActive(): ((input: string | URL | Request, init?: Requ
   return activeFetch ??= createTorFetch(ACTIVE_TOR_SETTINGS.gatewayUrl, ACTIVE_TOR_SETTINGS.provider);
 }
 
+/**
+ * The timeout an app RPC call gets: the caller's, raised to TOR_RPC_TIMEOUT_MS
+ * while Tor carries the call.
+ *
+ * The first call to a host over Tor pays for a cold route: name resolution,
+ * then TCP and TLS, all across the network. On Android Chrome with Nym that
+ * took 16 to 35 s per host, and 3 to 17 s with Arti on a device, where a
+ * direct call takes well under one (2026-10-17). A 5 or 10 s timeout aborts
+ * every such call, viem's retries queue the same cold calls again, and on a
+ * slower client that backlog never clears: in a five-minute run on Android not
+ * one call completed. A warm route answers in about a second, so the longer
+ * bound only matters while a route is being built.
+ */
+export function rpcTimeoutMs(configured: number | undefined): number | undefined {
+  return TOR_IN_FORCE ? Math.max(configured ?? 0, TOR_RPC_TIMEOUT_MS) : configured;
+}
+
 /** Draft probes must use the selected gateway before settings take effect on reload. */
 export function createTorFetch(gatewayUrl: string, providerId: TorProviderId = DEFAULT_TOR_PROVIDER) {
   let clientPromise: Promise<TorClientLike> | null = null;
@@ -457,3 +474,6 @@ async function probeMixnet(client: TorClientLike, signal: AbortSignal): Promise<
  * directory.
  */
 export const TOR_PROBE_TIMEOUT_MS = 120_000;
+
+/** See rpcTimeoutMs. The slowest call that still answered took 52 s. */
+export const TOR_RPC_TIMEOUT_MS = 90_000;

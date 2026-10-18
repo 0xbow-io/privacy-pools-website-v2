@@ -17,7 +17,7 @@
 import { http, stringify, type HttpTransport, type HttpTransportConfig } from 'viem';
 
 import { assertEgressAllowed, EgressRefusedError } from '@/services/egress-policy';
-import { torFetchIfActive } from '@/services/tor-fetch';
+import { rpcTimeoutMs, torFetchIfActive } from '@/services/tor-fetch';
 
 type RpcArgs = { method: string; params?: unknown };
 
@@ -59,7 +59,10 @@ export function policedHttp(url?: string, config?: HttpTransportConfig): HttpTra
         });
       },
     });
-    const transport = inner(params);
+    // Tor's first call to a host builds its route across the network, which
+    // a direct call's timeout does not allow for (see rpcTimeoutMs). Applied
+    // to the timeout viem uses, which a caller's params override.
+    const transport = inner({ ...params, timeout: rpcTimeoutMs(params.timeout ?? config?.timeout) });
     const innerRequest = transport.request;
     const request = (async (args: RpcArgs, options) => {
       assertEgressAllowed('rpc', {

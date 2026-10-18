@@ -354,6 +354,20 @@ test('closing a client ends a specifier read still in flight', async () => {
   }
 });
 
+test('app RPC timeouts allow for building a route only while Tor is in force', () => {
+  const on = transport(true, () => ({}));
+  const off = transport(false, () => ({}));
+  const timeoutOf = (loaded: typeof on, config?: { timeout?: number }, params: { timeout?: number } = {}) =>
+    loaded.policedHttp(MAINNET, config)(params).config.timeout;
+  expect(timeoutOf(on, { timeout: 5_000 })).toBe(90_000);
+  expect(timeoutOf(on)).toBe(90_000);
+  expect(timeoutOf(on, undefined, { timeout: 5_000 })).toBe(90_000);
+  expect(timeoutOf(on, { timeout: 300_000 })).toBe(300_000);
+  expect(timeoutOf(off, { timeout: 5_000 })).toBe(5_000);
+  expect(timeoutOf(off, undefined, { timeout: 7_000 })).toBe(7_000);
+  expect(timeoutOf(off)).toBe(10_000);
+});
+
 test('Nox: no gateway, no config, specifier read on Sepolia, and the Test is an eth_chainId over the mixnet', async () => {
   let init!: { address: string; specifierChainId: number; config: unknown; preExisting: { rpcProvider: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } } };
   const sent: { url: string; body: unknown }[] = [];
