@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync, readdirSync } from 'node:fs';
 import ts from 'typescript';
 import * as viem from 'viem';
+import * as abortSignal from '../abort-signal';
 import * as policy from '../egress-policy';
 import * as settings from '../../config/tor';
 import * as harness from '@0xbow/anon-rpc-rs-browser-harness';
@@ -36,6 +37,7 @@ function transport(active: boolean, importer: () => unknown, options: {
 } = {}) {
   let imports = 0;
   const tor = load('services/tor-fetch.ts', { require(name: string) {
+    if (name === '@/services/abort-signal') return abortSignal;
     if (name === '@/config/tor') return { ...settings, TOR_IN_FORCE: active, ACTIVE_TOR_SETTINGS: { enabled: active, gatewayUrl: GATEWAY, provider: 'tor-js' } };
     if (name === '@/services/egress-policy') return policy;
     if (name === '@/config/chains') return { getChainConfig: (id: number) => options.chainUrls?.[id] ? { rpcUrl: options.chainUrls[id] }
@@ -628,6 +630,7 @@ test('on a device the provider and the Test name Tor, not tor-js', () => {
   }
   const deviceTor = load('services/tor-fetch.ts', { require(name: string) {
     if (name === '@/config/tor') return device;
+    if (name === '@/services/abort-signal') return abortSignal;
     if (name === '@/services/egress-policy') return policy;
     throw new Error(`Unexpected dependency ${name}`);
   } }) as typeof import('../tor-fetch');
