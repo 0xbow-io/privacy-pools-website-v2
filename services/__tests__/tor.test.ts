@@ -328,6 +328,19 @@ test('a failing host leaves the client in place while a call to another host may
   expect(workers.map(w => [w.calls, w.closed])).toEqual([[2, false]]);
 });
 
+test('a call keeps its redirect mode over anon-rpc', async () => {
+  const modes: (string | undefined)[] = [];
+  const loaded = transport(true, () => ({ AnonRpcWorker: class {
+    ready = Promise.resolve();
+    close() {}
+    fetch = async (_url: string, init?: RequestInit) => { modes.push(init?.redirect); return new Response('{}'); };
+  } }));
+  const send = loaded.tor.createTorFetch(GATEWAY, 'tor-js');
+  await send('https://rpc.example', { redirect: 'error' });
+  await send('https://rpc.example');
+  expect(modes).toEqual(['error', 'follow']);
+});
+
 test('an RPC body still arrives when Request has no .body (React Native whatwg-fetch)', async () => {
   const RealRequest = globalThis.Request;
   class PolyfillRequest extends RealRequest {
