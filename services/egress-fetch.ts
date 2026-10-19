@@ -1,3 +1,4 @@
+import { throwIfAborted } from '@/services/abort-signal';
 import { assertEgressAllowed, EgressRefusedError, type EgressIntent, type EgressParty } from '@/services/egress-policy';
 import { AspBackoffError, createAspBackoff, createAspPacer, responseIsRateLimit, type AspProbe } from '@/services/asp-backoff';
 
@@ -60,7 +61,7 @@ export function createEgressFetch(
           if (!backoff.isCurrentProbe(probe)) throw new Error('ASP probe window ended');
         } else backoff.assertOpen();
       }
-      init.signal?.throwIfAborted();
+      throwIfAborted(init.signal);
       sentAt = backoff.now();
       // Redirects would send another request without consulting the policy.
       // These APIs use neither cookies nor the page URL as authentication.
