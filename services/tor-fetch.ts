@@ -409,6 +409,7 @@ export function createTorFetch(gatewayUrl: string, providerId: TorProviderId = D
         method: request.method,
         headers: Object.fromEntries(request.headers.entries()),
         body,
+        redirect: init?.redirect ?? request.redirect,
         signal,
       }), signal);
     } finally {
