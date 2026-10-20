@@ -1,0 +1,66 @@
+# The cross-chain private swap, headless and run by hand: shielded ETH on
+# Optimism into a shielded USDC note on Base (E2E_DEST_CHAIN=1 for Ethereum), on the STAGING deployments,
+# or into a ppUSDC yield share note with input dest_asset=ppusdc (a 0.005 ETH swap, above the share's minimum),
+# through the SDK and direct transactions instead of the UI. Same account, same
+# notes and same verdict as e2e-crosschain.yml, without the browser, the web
+# build or the dev server. See scripts/e2e/crosschain-swap-fast.ts.
+# Required secrets: E2E_ACCOUNT_A_PK, EXPO_PUBLIC_ALCHEMY_KEY.
+name: e2e-crosschain-fast
+
+# It spends REAL mainnet funds from E2E_ACCOUNT_A_PK (a 0.001 ETH swap on OP,
+# and sometimes a shield and a bridge), so it never runs on its own: only by
+# hand, `gh workflow run e2e-crosschain-fast.yml --ref <branch>`. Never on
+# pull_request, where anyone able to push a branch could run changed script
+# code with that key. Input dry_run=true quotes and stops before any transaction.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Quote only, send nothing
+        type: boolean
+        default: false
+      dest_asset:
+        description: What the swap lands in on Base, plain USDC or the ppUSDC yield share
+        type: choice
+        options:
+          - usdc
+          - ppusdc
+        default: usdc
+
+# Shared with the browser run: both spend account A's shielded notes on OP, so
+# two at once would select the same note. Queue, never cancel, so a submitted
+# swap is always followed to its verdict.
+concurrency:
+  group: e2e-crosschain-accounts
+  cancel-in-progress: false
+
+jobs:
+  swap:
+    runs-on: ubuntu-latest
+    # Above the script's worst case, below the browser run's 150: gas bridge 20
+    # + approval 45 + delivery 30 + registration, proving and the note landing
+    # ~15 = 110 min, plus install.
+    timeout-minutes: 130
+    steps:
+      # lfs: true is load-bearing: the script proves with public/artifacts, and
+      # without lfs those are pointer files and every proof fails.
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Swap shielded ETH on OP into shielded ${{ inputs.dest_asset || 'usdc' }} on Base
+        env:
+          E2E_PK: ${{ secrets.E2E_ACCOUNT_A_PK }}
+          EXPO_PUBLIC_ALCHEMY_KEY: ${{ secrets.EXPO_PUBLIC_ALCHEMY_KEY }}
+          # Test only: route this run's cross-chain quotes through Across, as
+          # the browser run does.
+          LIFI_ALLOW_BRIDGES: across
+          DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+          E2E_DEST_ASSET: ${{ inputs.dest_asset || 'usdc' }}
+        run: bun scripts/e2e/crosschain-swap-fast.ts

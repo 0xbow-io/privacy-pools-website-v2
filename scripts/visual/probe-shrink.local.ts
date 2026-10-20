@@ -1,0 +1,13 @@
+import { chromium } from 'playwright';
+const BASE = process.env.PROBE_URL ?? 'http://localhost:8080';
+const browser = await chromium.launch({ headless: true });
+const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+const page = await ctx.newPage();
+await page.addInitScript(() => { try { window.localStorage.setItem('ppv2_smartwallet_skipped_v1', '1'); } catch {} });
+await page.goto(`${BASE}/?theme=1`, { waitUntil: 'domcontentloaded' });
+await page.waitForTimeout(8000);
+const box = await page.getByTestId('explore-tab-mine').boundingBox();
+console.log('tab item box:', box ? `${Math.round(box.width)}x${Math.round(box.height)}` : 'none');
+await page.screenshot({ path: '.pwcheck/shrink-full.png' });
+await page.screenshot({ path: '.pwcheck/shrink-bar.png', clip: { x: 0, y: 700, width: 390, height: 144 } });
+await browser.close();

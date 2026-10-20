@@ -1,0 +1,21 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'io.oxbow.poseidon'
+version = '0.1.0'
+
+android {
+  namespace "io.oxbow.poseidon"
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+}
+
+dependencies {
+  // UniFFI's Kotlin bindings call the Rust library (jniLibs/<abi>/libnative_poseidon.so)
+  // through JNA. Same version as @0xbow-io/anon-rpc-native, which the app already ships.
+  implementation "net.java.dev.jna:jna:5.17.0@aar"
+}

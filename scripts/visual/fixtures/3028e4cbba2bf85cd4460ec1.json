@@ -1,0 +1,8 @@
+{
+ "method": "GET",
+ "url": "https://api-dev.0xbow.io/global/public/events?perPage=100&chainId=11155111&address=0xd3f927692168c7912189d95B1fB073eB0394dB15&includeRagequit=true&entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a",
+ "status": 200,
+ "contentType": "application/json; charset=utf-8",
+ "body": "H4sIAAAAAAACA+2STW8UMQyG/wryOa1sZ/J5q7jABSG1JxCHZOKhI3Y+NJMuW632v6NZtRJQgVoEN3yy8uZ1nFfPEeb0WSCiglmW9+eeEBXUqaYdRFYgexnrCvHjEer9LBChyDytfYUH7W2BSDooaBdJVcpVhQiMbC/QXmC4IR/RRY2Xlt0HUJCG6W7c7jT4U21iKYusK0TAQ9FdYGcDk/WtC8TkQwkmU5fRacmoQ1MyGVBQD2/Sent2pZx0kzFbk0UwsUfnnW3bpiQ0XHRHTe5MZu85OMOh86a0Lgi1gZ1rwzatH2StaZghkvOE7JtmW1ZBWlepEI+PDeBBnlmgoL1N/XiOi8gYIno4epeGLdfXW//qUdv2mL7IeH0/5Gn30qfO1qvvwnyB9/y3P/QWGaehH1PtpxEi+ZOCRfa9fL2uqd5t49I8L9NeCpzUb4ki+wuizA1T1BwNX3qkH4gi1v8CKR20a2wxnbeYkg/B6GyLR+kct9J20hIl8b7Y3PgSOFDuErnSOE7E7ilSaIMh6/8j9beR+qSg63dVlnVL9Ek4p9M3fJzu4PEEAAA=",
+ "bodyEncoding": "gzip-base64"
+}

@@ -1,0 +1,8 @@
+{
+ "method": "GET",
+ "url": "https://api.g.alchemy.com/prices/v1/ALCHEMY_KEY_REDACTED/tokens/by-symbol?symbols=ETH&symbols=USDC&symbols=USDT&symbols=SUI",
+ "status": 200,
+ "contentType": "application/json",
+ "body": "H4sIAAAAAAACA43PvQ6CMBhG4Xt559J8LdDSbkZNdAYWDUOFDiaohB8TQrh3EyYTHTqf4clZ0LjRwV4XDPPj9mphcSxOYOj6e+2HrdRT3/tnPcNiGhowvF07eVgIIzOegqF1w1h2jRt9sxthIUmqiHQkZSGFpcwmisdKXLBWK/uiyvywD7U4EQVZKXFh6J9VBFrEjTFJ0JfmOjY/Vl6egymt0mAqiTeqWj+iM6WSuAEAAA==",
+ "bodyEncoding": "gzip-base64"
+}

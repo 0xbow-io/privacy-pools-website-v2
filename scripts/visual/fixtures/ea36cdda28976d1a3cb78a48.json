@@ -1,0 +1,8 @@
+{
+ "method": "POST",
+ "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+ "requestBody": "{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_call\",\"params\":[{\"data\":\"0x696f0061000000000000000000000000d3f927692168c7912189d95b1fb073eb0394db15\",\"to\":\"0x6d264acb9c3a7a3105c29470afe2f5f1ec203c73\"},\"latest\"]}",
+ "status": 200,
+ "contentType": "application/json",
+ "body": "eyJqc29ucnBjIjoiMi4wIiwiaWQiOjEzLCJyZXN1bHQiOiIweDIyNjA2MWJlNGVjYmNlZTk5OGFhMDZjMDliOGJlYTFiNWQ4NjZiMmVlMTA4ODhhYTJhNDgyMTA2MTNmZjgzZjIifQ=="
+}

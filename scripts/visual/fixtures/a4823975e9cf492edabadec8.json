@@ -1,0 +1,7 @@
+{
+ "method": "GET",
+ "url": "https://api-dev.0xbow.io/labels/17549916362570153262362569800166128954239041070675203468413831396475892840871/status?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a",
+ "status": 200,
+ "contentType": "application/json; charset=utf-8",
+ "body": "eyJzdGF0dXMiOiJhcHByb3ZlZCIsInRpbWVzdGFtcCI6MTc4MTAyODY2MDEzOH0="
+}

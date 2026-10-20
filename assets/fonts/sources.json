@@ -1,0 +1,44 @@
+[
+  {
+    "source": "node_modules/@expo-google-fonts/geist/400Regular/Geist_400Regular.ttf",
+    "sha256": "cf1737280af17d036786e06d0eb49b2ce83fc303169a0a438c3f4b2f80ee8e06",
+    "woff2": "Geist_400Regular.woff2",
+    "bytes": 33172,
+    "glyphs": 974
+  },
+  {
+    "source": "node_modules/@expo-google-fonts/geist/500Medium/Geist_500Medium.ttf",
+    "sha256": "c9a02ce9f88729623f91fec9c3bb57b26ca02fa115116d25b44dd98921bba192",
+    "woff2": "Geist_500Medium.woff2",
+    "bytes": 34028,
+    "glyphs": 974
+  },
+  {
+    "source": "node_modules/@expo-google-fonts/geist/600SemiBold/Geist_600SemiBold.ttf",
+    "sha256": "dabe7a1eb584ae744d2d284228c5065e28b0381ef11185f6e7a406e08f85fa0f",
+    "woff2": "Geist_600SemiBold.woff2",
+    "bytes": 34036,
+    "glyphs": 974
+  },
+  {
+    "source": "node_modules/@expo-google-fonts/geist/700Bold/Geist_700Bold.ttf",
+    "sha256": "1c768ac51cc75a93fefcf3e54031e510192f3c55a9e22b4e2536b66a35ed9fed",
+    "woff2": "Geist_700Bold.woff2",
+    "bytes": 34164,
+    "glyphs": 974
+  },
+  {
+    "source": "node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf",
+    "sha256": "fa2ab7d2557819b2bfe5009e46844efa7170cf177be7735d43aa2ac1295f1d54",
+    "woff2": "Ionicons.woff2",
+    "bytes": 162584,
+    "glyphs": 1361
+  },
+  {
+    "source": "node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/MaterialIcons.ttf",
+    "sha256": "ef149f08bdd2ff09a4e2c8573476b7b0f3fbb15b623954ade59899e7175bedda",
+    "woff2": "MaterialIcons.woff2",
+    "bytes": 128380,
+    "glyphs": 2229
+  }
+]

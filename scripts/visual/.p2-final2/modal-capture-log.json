@@ -1,0 +1,258 @@
+{
+  "mode": "replay",
+  "wallet": "0xd3f927692168c7912189d95B1fB073eB0394dB15",
+  "shots": [
+    {
+      "name": "v0-light-modal-connect-picker-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-light-modal-unlock-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-light-modal-deposit-input-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-light-modal-deposit-filled-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-light-modal-deposit-review-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-light-modal-withdraw-input-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-light-modal-withdraw-filled-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-light-modal-withdraw-review-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-light-modal-send-input-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-light-modal-send-filled-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-light-modal-send-review-desktop",
+      "status": "not-capturable",
+      "detail": "review CTA \"Next: Enter Recipient\" not clickable (validation-blocked)"
+    },
+    {
+      "name": "v0-light-modal-request-input-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-light-modal-request-filled-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-light-payment-requests-widget-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-light-modal-swap-input-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-light-modal-swap-filled-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-dark-modal-connect-picker-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-dark-modal-unlock-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-dark-modal-deposit-input-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-dark-modal-deposit-filled-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-dark-modal-deposit-review-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-dark-modal-withdraw-input-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-dark-modal-withdraw-filled-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-dark-modal-withdraw-review-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-dark-modal-send-input-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-dark-modal-send-filled-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-dark-modal-send-review-desktop",
+      "status": "not-capturable",
+      "detail": "review CTA \"Next: Enter Recipient\" not clickable (validation-blocked)"
+    },
+    {
+      "name": "v0-dark-modal-request-input-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-dark-modal-request-filled-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-dark-payment-requests-widget-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-dark-modal-swap-input-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v0-dark-modal-swap-filled-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-light-modal-connect-picker-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-light-modal-unlock-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-light-modal-deposit-input-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-light-modal-deposit-filled-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-light-modal-deposit-review-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-light-modal-withdraw-input-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-light-modal-withdraw-filled-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-light-modal-withdraw-review-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-light-modal-send-input-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-light-modal-send-filled-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-light-modal-send-review-desktop",
+      "status": "not-capturable",
+      "detail": "review CTA \"Next: Enter Recipient\" not clickable (validation-blocked)"
+    },
+    {
+      "name": "v1-light-modal-request-input-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-light-modal-request-filled-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-light-modal-swap-input-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-light-modal-swap-filled-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-dark-modal-connect-picker-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-dark-modal-unlock-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-dark-modal-deposit-input-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-dark-modal-deposit-filled-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-dark-modal-deposit-review-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-dark-modal-withdraw-input-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-dark-modal-withdraw-filled-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-dark-modal-withdraw-review-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-dark-modal-send-input-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-dark-modal-send-filled-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-dark-modal-send-review-desktop",
+      "status": "not-capturable",
+      "detail": "review CTA \"Next: Enter Recipient\" not clickable (validation-blocked)"
+    },
+    {
+      "name": "v1-dark-modal-request-input-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-dark-modal-request-filled-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-dark-modal-swap-input-desktop",
+      "status": "captured"
+    },
+    {
+      "name": "v1-dark-modal-swap-filled-desktop",
+      "status": "captured"
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+# Bun runtime + install configuration.
+#
+# Docs: https://bun.com/docs/runtime/bunfig
+
+[install]
+
+# Supply-chain hardening: refuse to install package versions younger
+# than 7 days (604800 seconds). Mitigates the "publish-then-yank"
+# attack class — a compromised maintainer pushes a malicious version,
+# we install it within minutes, the version gets pulled when detected,
+# but the damage is already done. The 72h window lets the npm / GitHub
+# advisory pipelines flag obvious nasties before our CI pulls them.
+# Raised 72h -> 7 days after the 2026-08-04 keyv/Shai-Hulud npm worm
+# (434 packages / 1381 versions): detection of the long tail took days.
+#
+# Recent precedents: Shai-Hulud worm (Sep 2025), qix incident, multiple
+# "stealer" packages that lived on npm for under an hour before being
+# yanked. CI fails fast if a pinned lockfile version is too new — pin
+# to a slightly older release if you hit that, don't lower the window.
+#
+# Local development is unaffected: this only matters when resolving a
+# version that isn't already in `bun.lock`.
+minimumReleaseAge = 604800
+
+# Whitelist for packages that should bypass the age check. Leave
+# empty unless a specific dependency requires same-day patches. If
+# you find yourself wanting to add something here, prefer pinning the
+# older known-good version in `package.json` instead.
+#
+# react-native-jelly-tabs: brand-new library (first release 2026-08),
+# every version is younger than the window so no older pin exists.
+# Pinned EXACTLY in package.json; the exclusion only lets that pinned
+# version through — bump deliberately, source reviewed on GitHub.
+minimumReleaseAgeExcludes = ["react-native-jelly-tabs"]
+
+[test]
+# Pins the build default to the staging world for the unit suite; see the
+# file for why. CI runs `bun test services scripts` from the repo root.
+preload = ["./tests/bun-test-preload.ts"]

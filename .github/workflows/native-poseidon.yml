@@ -1,0 +1,104 @@
+name: native-poseidon
+
+on:
+  # Everything the jobs below build or test: the module, the shim it plugs
+  # into, the two bun tests, and the lockfile that pins circomlibjs/poseidon-lite.
+  push:
+    branches: [main]
+    paths:
+      - 'modules/native-poseidon/**'
+      - 'metro-shims/**'
+      - 'metro.config.js'
+      - 'services/__tests__/native-poseidon-module.test.ts'
+      - 'services/__tests__/native-poseidon-shim.test.ts'
+      - 'package.json'
+      - 'bun.lock'
+      - '.github/workflows/native-poseidon.yml'
+  pull_request:
+    paths:
+      - 'modules/native-poseidon/**'
+      - 'metro-shims/**'
+      - 'metro.config.js'
+      - 'services/__tests__/native-poseidon-module.test.ts'
+      - 'services/__tests__/native-poseidon-shim.test.ts'
+      - 'package.json'
+      - 'bun.lock'
+      - '.github/workflows/native-poseidon.yml'
+  workflow_dispatch:
+
+jobs:
+  rust:
+    # The crate against circomlibjs's vectors, then the JS shim against the real
+    # Rust code (the bun test runs the `wire` example when it is built), and the
+    # committed Kotlin bindings against a fresh generation.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: modules/native-poseidon/rust
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: cargo test
+        working-directory: modules/native-poseidon/rust
+        run: cargo test
+      - name: Build the wire example
+        working-directory: modules/native-poseidon/rust
+        run: cargo build --release --example wire
+      - run: bun test services/__tests__/native-poseidon-module.test.ts services/__tests__/native-poseidon-shim.test.ts
+      - name: Shim over real Rust actually ran
+        run: bun test services/__tests__/native-poseidon-module.test.ts 2>&1 | grep -q 'native shim path over the real Rust code'
+      - name: Committed Kotlin bindings are current
+        working-directory: modules/native-poseidon/rust
+        run: |
+          cargo build --lib
+          cargo run --features bindgen --bin uniffi-bindgen -- generate \
+            --library target/debug/libnative_poseidon.so --language kotlin --no-format --out-dir target/kotlin
+          diff -r target/kotlin/uniffi ../android/src/main/java/uniffi
+      - name: Host benchmark
+        working-directory: modules/native-poseidon/rust
+        run: cargo run --release --example bench
+
+  ios:
+    # No Mac on hand, so this is where iOS gets built: the xcframework for
+    # device + simulator and UniFFI's Swift bindings. Drop both artifact files
+    # into modules/native-poseidon/ios/ and the podspec switches from the stub
+    # module to the real one.
+    runs-on: macos-15
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: modules/native-poseidon
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: modules/native-poseidon/rust
+      - name: Build xcframework + Swift bindings
+        run: ./ios/build-xcframework.sh
+      - name: Size of what ships
+        run: |
+          du -sh ios/native_poseidonFFI.xcframework
+          find ios/native_poseidonFFI.xcframework -name native_poseidonFFI -type f -exec ls -l {} +
+          (cd ios && zip -qr ../xcframework.zip native_poseidonFFI.xcframework) && ls -l xcframework.zip
+      - name: Type-check the Swift bindings against the simulator slice
+        run: |
+          sdk="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          xcrun --sdk iphonesimulator swiftc -typecheck \
+            -target arm64-apple-ios16.4-simulator -sdk "$sdk" \
+            -F ios/native_poseidonFFI.xcframework/ios-arm64_x86_64-simulator \
+            ios/native_poseidon.swift
+      - name: cargo test (macOS host)
+        working-directory: modules/native-poseidon/rust
+        run: cargo test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-poseidon-ios
+          path: |
+            modules/native-poseidon/ios/native_poseidonFFI.xcframework
+            modules/native-poseidon/ios/native_poseidon.swift

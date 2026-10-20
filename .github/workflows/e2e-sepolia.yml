@@ -1,0 +1,190 @@
+# Real Sepolia shield / withdraw / send through the UI, on every PR push.
+#
+# Parallel groups (fund, then core, payment and fixtures, then one `journey`
+# verdict); the phase rules are in scripts/e2e/ci.ts.
+# A funds the suite and B pays requests. Fixture accounts retain approved notes;
+# the runner seeds missing fixtures and waits for approval before spending.
+# A fresh account shields, ragequits, and returns its remaining gas to A.
+# Required secrets: E2E_ACCOUNT_A_PK, E2E_ACCOUNT_B_PK, EXPO_PUBLIC_ALCHEMY_KEY.
+name: e2e-sepolia
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs: {}
+# One run at a time across the whole repo: the fixed accounts have shared
+# state (their shielded notes and nullifiers), so concurrent runs would spend the
+# same notes and fight each other. Queue, never cancel, so a run always reaches
+# its sweep step.
+concurrency:
+  group: e2e-sepolia-accounts
+  cancel-in-progress: false
+
+# The barrier between groups reads this run's job steps.
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  # A tops up B and the fixtures treasury (derived from A's key) BEFORE the
+  # groups start, so no two runners ever send from the same wallet.
+  fund:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Top up B and the fixtures treasury from A
+        env:
+          E2E_GROUP: fund
+          E2E_ACCOUNT_A_PK: ${{ secrets.E2E_ACCOUNT_A_PK }}
+          E2E_ACCOUNT_B_PK: ${{ secrets.E2E_ACCOUNT_B_PK }}
+          EXPO_PUBLIC_ALCHEMY_KEY: ${{ secrets.EXPO_PUBLIC_ALCHEMY_KEY }}
+        run: bun scripts/e2e/ci.ts
+
+  # One runner per group (see the phase and group comment in scripts/e2e/ci.ts).
+  # ci.ts runs in the background and the steps below hold every group to the
+  # same phase: nobody spends until every group's fixtures are approved, and
+  # core's root-rotating deposits wait until nobody is proving.
+  group:
+    needs: fund
+    name: group (${{ matrix.group }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [core, payment, fixtures]
+    env:
+      E2E_GROUP: ${{ matrix.group }}
+      E2E_PHASE_DIR: /tmp/e2e-phase
+      E2E_LOG: /tmp/ci.log
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Write .env for the web build
+        run: |
+          cat > .env <<EOF
+          EXPO_PUBLIC_TEST_MODE=true
+          # The journey is a STAGING run (dev ASP, Sepolia). Since the prod/staging
+          # switch (2026-09-02) a build without this defaults to prod: no Sepolia,
+          # so "Shield ETH" never broadcast and the smoke checks hit api-v2.
+          EXPO_PUBLIC_APP_ENV=staging
+          TEST_MODE=true
+          EXPO_PUBLIC_ASP_URL=https://api-dev.0xbow.io
+          EXPO_PUBLIC_ALCHEMY_KEY=${{ secrets.EXPO_PUBLIC_ALCHEMY_KEY }}
+          EXPO_PUBLIC_BATCH_WITHDRAWALS=true
+          EOF
+
+      - name: Install the browser
+        run: bunx playwright install --with-deps chromium
+
+      # The privacy gate, against a throwaway local server: no app, no wallet,
+      # no chain, no funds. Placed here because this is the only job with a
+      # browser, and BEFORE the funded journey on purpose - it takes seconds,
+      # and a broken gate should not be discovered after spending Sepolia ETH
+      # on a run whose verdict cannot be trusted.
+      - name: Privacy gate self-check
+        run: |
+          bun scripts/e2e/network-capture-smoke.mjs
+          bun scripts/e2e/privacy-gate-smoke.mjs
+
+      # Started directly rather than through `bun run web`, whose `preweb` drift
+      # guard compares the vendored SDK tarball's filename against the installed
+      # `version` - and bun rewrites a file: tarball's version to 0.0.0, so that
+      # guard cannot pass. The worker builds it would have run are done here.
+      - name: Build the proof workers
+        run: |
+          bun ./scripts/build-snarkjs-worker.mjs
+          bun ./scripts/build-witness-worker.mjs
+
+      # Port 8081 is NOT arbitrary: the relayer's CORS allowlist contains
+      # http://localhost:8081 and nothing else local. On any other port the
+      # browser blocks every quote request, so withdraw and send fail with no
+      # visible error while the request appears to go out.
+      - name: Start the app
+        run: |
+          nohup bunx expo start --web --port 8081 > /tmp/expo.log 2>&1 &
+          for i in $(seq 1 120); do
+            if curl -sf http://localhost:8081/ >/dev/null; then echo "up after ${i}0s"; exit 0; fi
+            sleep 5
+          done
+          echo "dev server never came up"; tail -80 /tmp/expo.log; exit 1
+
+      - name: Start the journeys
+        env:
+          E2E_ACCOUNT_A_PK: ${{ secrets.E2E_ACCOUNT_A_PK }}
+          E2E_ACCOUNT_B_PK: ${{ secrets.E2E_ACCOUNT_B_PK }}
+          EXPO_PUBLIC_ALCHEMY_KEY: ${{ secrets.EXPO_PUBLIC_ALCHEMY_KEY }}
+          PROBE_URL: http://localhost:8081
+        run: |
+          mkdir -p "$E2E_PHASE_DIR"
+          nohup bash -c 'bun scripts/e2e/ci.ts > "$E2E_LOG" 2>&1; echo $? > "$E2E_PHASE_DIR/exit"' >/dev/null 2>&1 &
+
+      # Step names are read by the barrier: keep them in step with group-barrier.ts calls.
+      - name: Seed fixtures
+        run: bun scripts/e2e/group-barrier.ts follow seeded
+
+      - name: Wait until every group's fixtures are approved
+        run: bun scripts/e2e/group-barrier.ts wait "Seed fixtures" go-spend --success
+
+      - name: Spend
+        run: bun scripts/e2e/group-barrier.ts follow spent
+
+      - name: Wait until no group is proving
+        if: matrix.group == 'core'
+        run: bun scripts/e2e/group-barrier.ts wait "Spend" go-after
+
+      - name: Finish
+        run: bun scripts/e2e/group-barrier.ts follow exit
+
+      # A failed step above leaves ci.ts parked: tell it to stop, so it cancels
+      # its parked journeys and returns or prints the fresh key, then wait.
+      - name: Stop and clean up
+        if: failure() || cancelled()
+        run: |
+          # Setup can fail before the journeys ever started: nothing to stop.
+          [ -d "$E2E_PHASE_DIR" ] || exit 0
+          bun scripts/e2e/group-barrier.ts abort
+          timeout 900 bun scripts/e2e/group-barrier.ts follow exit || true
+
+      - name: Screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots-${{ matrix.group }}
+          path: .e2e-shots/*.png
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Metro log
+        if: failure()
+        run: tail -200 /tmp/expo.log || true
+
+  # One verdict under the old check name.
+  journey:
+    needs: [fund, group]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every group passed
+        env:
+          FUND: ${{ needs.fund.result }}
+          GROUPS: ${{ needs.group.result }}
+        run: |
+          echo "fund: $FUND, groups: $GROUPS"
+          test "$FUND" = success && test "$GROUPS" = success

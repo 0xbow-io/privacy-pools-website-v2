@@ -1,0 +1,238 @@
+diff --git a/dist/host.js b/dist/host.js
+index 064f1c3..68f3b63 100644
+--- a/dist/host.js
++++ b/dist/host.js
+@@ -230,10 +230,15 @@ function findHeaderEnd(b) {
+   }
+   return -1;
+ }
+-async function fetchBundleOverKps(addr, path, maxBytes) {
++async function fetchBundleOverKps(addr, path, maxBytes, signal) {
++  signal?.throwIfAborted();
+   const { openStream: openStream2 } = await import("@kpstreams/webrtc-client");
+-  const stream = await openStream2(addr);
++  signal?.throwIfAborted();
++  const stream = await openStream2(addr, { signal });
++  const abort = () => { void stream.close().catch(() => {}); };
++  signal?.addEventListener("abort", abort, { once: true });
+   try {
++    signal?.throwIfAborted();
+     const certhash = addr.slice(addr.lastIndexOf(":") + 1);
+     const advertised = ambientCodings();
+     const writer = stream.writable.getWriter();
+@@ -274,6 +279,7 @@ async function fetchBundleOverKps(addr, path, maxBytes) {
+     }
+     return resp.body;
+   } finally {
++    signal?.removeEventListener("abort", abort);
+     await stream.close().catch(() => {
+     });
+   }
+@@ -342,26 +348,30 @@ async function readBodyCapped(resp, cap) {
+   }
+   return out;
+ }
+-async function fetchAndVerifyBundle(spec, maxBytes = MAX_BUNDLE_BYTES) {
++async function fetchAndVerifyBundle(spec, maxBytes = MAX_BUNDLE_BYTES, signal) {
+   const errors = [];
+   for (const url of spec.resolvers) {
++    signal?.throwIfAborted();
+     let bytes;
+     try {
+       if (/^(https?|blob):/.test(url)) {
+-        const resp = await fetch(url);
++        const resp = await fetch(url, { signal });
++        signal?.throwIfAborted();
+         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+         bytes = await readBodyCapped(resp, maxBytes);
+       } else if (url.startsWith("kps:")) {
+         const { addr, path } = parseKpsResolver(url);
+-        bytes = await fetchBundleOverKps(addr, path, maxBytes);
++        bytes = await fetchBundleOverKps(addr, path, maxBytes, signal);
+       } else {
+         errors.push(`${url}: unrecognized resolver kind (ignored)`);
+         continue;
+       }
+     } catch (e) {
++      signal?.throwIfAborted();
+       errors.push(`${url}: ${e.message}`);
+       continue;
+     }
++    signal?.throwIfAborted();
+     const got = "0x" + toHex(keccak_256(bytes));
+     if (got !== spec.workerHash) {
+       errors.push(`${url}: hash mismatch (got ${got}, want ${spec.workerHash})`);
+@@ -803,6 +813,7 @@ var AnonRpcWorker = class _AnonRpcWorker {
+   // worker's logs does not want them duplicated into a console it is not
+   // looking at, and one that never reads still gets the old behaviour.
+   #logsClaimed = false;
++  #bootAbort = new AbortController();
+   #calls = /* @__PURE__ */ new Map();
+   #nextCallId = 1;
+   #readyResolve;
+@@ -840,6 +851,7 @@ var AnonRpcWorker = class _AnonRpcWorker {
+   #fail(err) {
+     if (this.#failure !== void 0) return;
+     this.#failure = err;
++    this.#bootAbort.abort(err);
+     this.#readyReject(err);
+     for (const rec of this.#calls.values()) {
+       rec.cleanup?.();
+@@ -852,8 +864,11 @@ var AnonRpcWorker = class _AnonRpcWorker {
+   async #boot() {
+     const provider = this.#init.preExisting?.rpcProvider;
+     if (!provider) throw new Error("preExisting.rpcProvider is required to read the specifier");
++    const signal = this.#bootAbort.signal;
+     const spec = await readSpecifier(provider, this.#init.address);
+-    const bundleBytes = await fetchAndVerifyBundle(spec);
++    signal.throwIfAborted();
++    const bundleBytes = await fetchAndVerifyBundle(spec, undefined, signal);
++    signal.throwIfAborted();
+     const channel = new MessageChannel();
+     const rpc = new PortRpc(channel.port1);
+     this.#rpc = rpc;
+@@ -864,7 +879,9 @@ var AnonRpcWorker = class _AnonRpcWorker {
+     if (this.#init.iframeUrl) iframe.src = sameOriginIframeUrl(this.#init.iframeUrl);
+     else iframe.srcdoc = `<!doctype html><meta charset="utf-8"><script>${'"use strict";\n(() => {\n  // src/iframe/iframe-boot.ts\n  (() => {\n    parent.postMessage({ kind: "iframe-ready" }, "*");\n    const onInit = (ev) => {\n      if (ev.source !== parent || ev.data?.kind !== "init") return;\n      removeEventListener("message", onInit);\n      const port = ev.ports[0];\n      const runtimeSource = ev.data.runtimeSource;\n      const bundleBytes = ev.data.bundleBytes;\n      const blob = new Blob([runtimeSource], { type: "text/javascript" });\n      const worker = new Worker(URL.createObjectURL(blob));\n      worker.postMessage({ kind: "init", port, bundleBytes, config: ev.data.config }, [port]);\n      worker.addEventListener("error", (e) => {\n        parent.postMessage({ kind: "worker-error", message: e.message }, "*");\n      });\n    };\n    addEventListener("message", onInit);\n  })();\n})();\n'}<\/script>`;
+     this.#iframe = iframe;
+-    const ready = new Promise((resolve) => {
++    const ready = new Promise((resolve, reject) => {
++      if (signal.aborted) reject(signal.reason);
++      else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+       const onMessage = (ev) => {
+         if (ev.source !== iframe.contentWindow) return;
+         if (ev.data?.kind === "iframe-ready") resolve();
+@@ -877,6 +894,7 @@ var AnonRpcWorker = class _AnonRpcWorker {
+     });
+     document.body.appendChild(iframe);
+     await ready;
++    signal.throwIfAborted();
+     iframe.contentWindow.postMessage(
+       { kind: "init", runtimeSource: '"use strict";\n(() => {\n  // src/protocol-wire.ts\n  var RpcError = class extends Error {\n    code;\n    constructor(e) {\n      super(e.message);\n      this.name = e.name;\n      this.code = e.code;\n    }\n  };\n  function serializeError(err) {\n    if (err instanceof Error) {\n      const code = err.code;\n      return {\n        name: err.name,\n        message: err.message,\n        ...typeof code === "string" ? { code } : {}\n      };\n    }\n    return { name: "Error", message: String(err) };\n  }\n\n  // src/protocol.ts\n  var PortRpc = class {\n    #port;\n    #nextId = 1;\n    #pending = /* @__PURE__ */ new Map();\n    #handlers = /* @__PURE__ */ new Map();\n    #events = /* @__PURE__ */ new Map();\n    // AbortControllers for in-flight inbound requests, keyed by caller-side id.\n    #inbound = /* @__PURE__ */ new Map();\n    constructor(port) {\n      this.#port = port;\n      port.onmessage = (ev) => this.#onMessage(ev.data);\n      port.start?.();\n    }\n    /** Register a handler for an inbound method. */\n    on(method, handler) {\n      this.#handlers.set(method, handler);\n    }\n    /** Register a handler for an inbound fire-and-forget event. */\n    onEvent(topic, handler) {\n      this.#events.set(topic, handler);\n    }\n    /** Fire-and-forget event to the peer. */\n    emit(topic, data, transfer) {\n      this.#post({ t: "evt", topic, data }, transfer);\n    }\n    /** Call a remote method and await its result. */\n    call(method, args, opts) {\n      const id = this.#nextId++;\n      return new Promise((resolve, reject) => {\n        let cleanup;\n        if (opts?.signal) {\n          const signal = opts.signal;\n          if (signal.aborted) {\n            reject(abortError());\n            return;\n          }\n          const onAbort = () => {\n            if (!this.#pending.delete(id)) return;\n            this.#post({ t: "abort", id });\n            reject(abortError());\n          };\n          signal.addEventListener("abort", onAbort);\n          cleanup = () => signal.removeEventListener("abort", onAbort);\n        }\n        this.#pending.set(id, {\n          resolve,\n          reject,\n          cleanup\n        });\n        this.#post({ t: "req", id, method, args }, opts?.transfer);\n      });\n    }\n    #post(msg, transfer) {\n      this.#port.postMessage(msg, transfer ?? []);\n    }\n    async #onMessage(msg) {\n      switch (msg.t) {\n        case "evt": {\n          this.#events.get(msg.topic)?.(msg.data);\n          return;\n        }\n        case "abort": {\n          this.#inbound.get(msg.id)?.abort(abortError());\n          return;\n        }\n        case "res": {\n          const p = this.#pending.get(msg.id);\n          if (!p) return;\n          this.#pending.delete(msg.id);\n          p.cleanup?.();\n          if (msg.ok) p.resolve(msg.value);\n          else p.reject(new RpcError(msg.error));\n          return;\n        }\n        case "req": {\n          const handler = this.#handlers.get(msg.method);\n          if (!handler) {\n            this.#post({\n              t: "res",\n              id: msg.id,\n              ok: false,\n              error: { name: "Error", message: `no handler: ${msg.method}` }\n            });\n            return;\n          }\n          const ac = new AbortController();\n          this.#inbound.set(msg.id, ac);\n          try {\n            const result = await handler(msg.args, { signal: ac.signal });\n            this.#post(\n              { t: "res", id: msg.id, ok: true, value: result.value },\n              result.transfer\n            );\n          } catch (err) {\n            this.#post({\n              t: "res",\n              id: msg.id,\n              ok: false,\n              error: serializeError(err)\n            });\n          } finally {\n            this.#inbound.delete(msg.id);\n          }\n          return;\n        }\n      }\n    }\n  };\n  function abortError() {\n    return new DOMException("The operation was aborted.", "AbortError");\n  }\n\n  // src/host/call-queue.ts\n  var CallQueue = class {\n    #items = [];\n    #waiters = [];\n    /** Resolve with the next item; an abort withdraws this taker (\xA78: it must not consume an item). */\n    take(signal) {\n      const next = this.#items.shift();\n      if (next !== void 0) return Promise.resolve(next);\n      return new Promise((resolve, reject) => {\n        const waiter = {\n          resolve: (item) => {\n            signal?.removeEventListener("abort", onAbort);\n            resolve(item);\n          },\n          reject: (e) => {\n            signal?.removeEventListener("abort", onAbort);\n            reject(e);\n          }\n        };\n        const onAbort = () => {\n          const i = this.#waiters.indexOf(waiter);\n          if (i >= 0) this.#waiters.splice(i, 1);\n          reject(signal?.reason ?? new DOMException("aborted", "AbortError"));\n        };\n        if (signal?.aborted) return onAbort();\n        signal?.addEventListener("abort", onAbort, { once: true });\n        this.#waiters.push(waiter);\n      });\n    }\n    /** Deliver to the oldest pending take(), else queue in arrival order. */\n    push(item) {\n      const waiter = this.#waiters.shift();\n      if (waiter) waiter.resolve(item);\n      else this.#items.push(item);\n    }\n    /** The number of items waiting for a take(). */\n    get size() {\n      return this.#items.length;\n    }\n    /** Reject the oldest pending take(), if any. */\n    rejectNext(err) {\n      this.#waiters.shift()?.reject(err);\n    }\n    /** Withdraw a not-yet-delivered item. Returns false if it was already taken (or never queued). */\n    remove(item) {\n      const i = this.#items.indexOf(item);\n      if (i < 0) return false;\n      this.#items.splice(i, 1);\n      return true;\n    }\n    /** Drop all queued items and reject every pending take(). */\n    rejectAll(err) {\n      this.#items.length = 0;\n      for (const w of this.#waiters.splice(0)) w.reject(err);\n    }\n  };\n\n  // src/worker/anon-rpc-worker-api.ts\n  function makeWorkerApi(rpc, config) {\n    const callAborts = /* @__PURE__ */ new Map();\n    const preAborted = /* @__PURE__ */ new Set();\n    rpc.onEvent("call-abort", ({ callId }) => {\n      const ac = callAborts.get(callId);\n      if (ac) ac.abort(new DOMException("aborted", "AbortError"));\n      else preAborted.add(callId);\n    });\n    const streamClosed = /* @__PURE__ */ new Map();\n    const connClosed = /* @__PURE__ */ new Map();\n    rpc.onEvent("stream.closed", ({ streamId, info }) => {\n      streamClosed.get(streamId)?.(info);\n      streamClosed.delete(streamId);\n    });\n    rpc.onEvent("conn.closed", ({ connId, info }) => {\n      connClosed.get(connId)?.(info);\n      connClosed.delete(connId);\n    });\n    function makeStream(p) {\n      const closed = new Promise((resolve) => streamClosed.set(p.streamId, resolve));\n      return {\n        readable: p.readable,\n        writable: p.writable,\n        closeWrite: () => rpc.call("stream.closeWrite", { streamId: p.streamId }),\n        cancelRead: (reason) => rpc.call("stream.cancelRead", { streamId: p.streamId, reason }),\n        resetWrite: (reason) => rpc.call("stream.resetWrite", { streamId: p.streamId, reason }),\n        close: (reason) => rpc.call("stream.close", { streamId: p.streamId, reason }),\n        closed\n      };\n    }\n    function makeConn(connId, remoteAddress) {\n      const closed = new Promise((resolve) => connClosed.set(connId, resolve));\n      return {\n        remoteAddress,\n        openStream: async (opts) => makeStream(await rpc.call("conn.openStream", { connId }, sigOpt(opts))),\n        acceptStream: async (opts) => makeStream(await rpc.call("conn.acceptStream", { connId }, sigOpt(opts))),\n        close: (reason) => rpc.call("conn.close", { connId, reason }),\n        sendDatagram: (data, opts) => rpc.call("conn.sendDatagram", { connId, data }, sigOpt(opts)),\n        receiveDatagram: (opts) => rpc.call("conn.receiveDatagram", { connId }, sigOpt(opts)),\n        closed\n      };\n    }\n    const kps = {\n      dial: async (addr, opts) => {\n        const { connId, remoteAddress } = await rpc.call("kps.dial", { addr }, sigOpt(opts));\n        return makeConn(connId, remoteAddress);\n      },\n      openStream: async (addr, opts) => makeStream(await rpc.call("kps.openStream", { addr }, sigOpt(opts)))\n    };\n    const storage = {\n      get: (key, opts) => rpc.call("storage.get", { key }, sigOpt(opts)),\n      set: (key, value, opts) => rpc.call("storage.set", { key, value }, sigOpt(opts)),\n      delete: (key, opts) => rpc.call("storage.delete", { key }, sigOpt(opts)),\n      has: (key, opts) => rpc.call("storage.has", { key }, sigOpt(opts)),\n      clear: (opts) => rpc.call("storage.clear", { prefix: opts?.prefix }, sigOpt(opts)),\n      list: (opts) => listKeys(rpc, opts?.prefix, opts?.signal)\n    };\n    const log = {\n      debug: (...args) => rpc.emit("log", { level: "debug", args }),\n      info: (...args) => rpc.emit("log", { level: "info", args }),\n      warn: (...args) => rpc.emit("log", { level: "warn", args }),\n      error: (...args) => rpc.emit("log", { level: "error", args })\n    };\n    const delivered = new CallQueue();\n    function acceptCall(opts) {\n      const signal = opts?.signal;\n      if (signal?.aborted) return Promise.reject(signal.reason ?? new DOMException("aborted", "AbortError"));\n      if (delivered.size === 0) {\n        rpc.call("acceptCall", {}).then(\n          (r) => delivered.push(r),\n          (e) => delivered.rejectNext(e)\n        );\n      }\n      return delivered.take(signal).then((r) => makeFetchCall(rpc, callAborts, preAborted, r.callId, r.url, r.requestInit));\n    }\n    return {\n      signalReady: () => rpc.emit("ready", {}),\n      // Failure finality (\xA77: later signals ignored) is enforced host-side \u2014\n      // #fail is one-shot and resolving an already-rejected ready is a no-op.\n      signalFailed: (reason) => rpc.emit("failed", { reason }),\n      acceptCall,\n      config,\n      kps,\n      storage,\n      log\n    };\n  }\n  function makeFetchCall(rpc, callAborts, preAborted, callId, url, wireInit) {\n    let requestInit;\n    if (wireInit) {\n      const { hasSignal, ...rest } = wireInit;\n      requestInit = rest;\n      if (hasSignal) {\n        const ac = new AbortController();\n        callAborts.set(callId, ac);\n        requestInit = { ...rest, signal: ac.signal };\n        if (preAborted.delete(callId)) ac.abort(new DOMException("aborted", "AbortError"));\n      }\n    }\n    let responded = false;\n    return {\n      kind: "fetch",\n      url,\n      ...requestInit ? { requestInit } : {},\n      respond(response) {\n        if (responded) throw new Error("respond() called more than once");\n        responded = true;\n        Promise.resolve(response).then((r) => {\n          const transfer = r.body instanceof ReadableStream ? [r.body] : r.body instanceof Uint8Array ? [r.body.buffer] : [];\n          return rpc.call("respond", { callId, ok: true, response: r }, { transfer });\n        }).catch(\n          (e) => (\n            // Carry name/code across the boundary (\xA712): host logic may branch\n            // on code, never on message text.\n            rpc.call("respond", { callId, ok: false, error: serializeError(e) })\n          )\n        ).catch(() => {\n        }).finally(() => callAborts.delete(callId));\n      }\n    };\n  }\n  async function* listKeys(rpc, prefix, signal) {\n    const keys = await rpc.call("storage.list", { prefix }, signal ? { signal } : void 0);\n    for (const k of keys) yield k;\n  }\n  function sigOpt(opts) {\n    return opts?.signal ? { signal: opts.signal } : void 0;\n  }\n\n  // src/worker/worker-runtime.ts\n  addEventListener("message", function onInit(ev) {\n    if (ev.data?.kind !== "init") return;\n    removeEventListener("message", onInit);\n    const port = ev.data.port;\n    const bundleBytes = ev.data.bundleBytes;\n    const config = ev.data.config;\n    const rpc = new PortRpc(port);\n    const api = makeWorkerApi(rpc, config);\n    globalThis.anonRpcWorker = api;\n    try {\n      const blob = new Blob([bundleBytes], { type: "text/javascript" });\n      self.importScripts(\n        URL.createObjectURL(blob)\n      );\n    } catch (err) {\n      const message = err?.message ?? String(err);\n      api.log.error("worker bundle failed to load:", message);\n      rpc.emit("boot-error", { message });\n    }\n  });\n})();\n', bundleBytes, config: this.#init.config },
+       "*",
+diff --git a/src/host/AnonRpcWorker.ts b/src/host/AnonRpcWorker.ts
+index 2463114..4e5464a 100644
+--- a/src/host/AnonRpcWorker.ts
++++ b/src/host/AnonRpcWorker.ts
+@@ -73,6 +73,7 @@ export class AnonRpcWorker {
+   // worker's logs does not want them duplicated into a console it is not
+   // looking at, and one that never reads still gets the old behaviour.
+   #logsClaimed = false;
++  #bootAbort = new AbortController();
+   #calls = new Map<number, CallRecord>();
+   #nextCallId = 1;
+   #readyResolve!: () => void;
+@@ -116,6 +117,7 @@ export class AnonRpcWorker {
+   #fail(err: unknown): void {
+     if (this.#failure !== undefined) return;
+     this.#failure = err;
++    this.#bootAbort.abort(err);
+     this.#readyReject(err);
+     for (const rec of this.#calls.values()) {
+       rec.cleanup?.();
+@@ -133,8 +135,11 @@ export class AnonRpcWorker {
+     const provider = this.#init.preExisting?.rpcProvider;
+     if (!provider) throw new Error("preExisting.rpcProvider is required to read the specifier");
+ 
++    const signal = this.#bootAbort.signal;
+     const spec = await readSpecifier(provider, this.#init.address);
+-    const bundleBytes = await fetchAndVerifyBundle(spec);
++    signal.throwIfAborted();
++    const bundleBytes = await fetchAndVerifyBundle(spec, undefined, signal);
++    signal.throwIfAborted();
+ 
+     const channel = new MessageChannel();
+     const rpc = new PortRpc(channel.port1);
+@@ -153,7 +158,9 @@ export class AnonRpcWorker {
+     else iframe.srcdoc = `<!doctype html><meta charset="utf-8"><script>${__IFRAME_BOOT_SRC__}</script>`;
+     this.#iframe = iframe;
+ 
+-    const ready = new Promise<void>((resolve) => {
++    const ready = new Promise<void>((resolve, reject) => {
++      if (signal.aborted) reject(signal.reason);
++      else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+       const onMessage = (ev: MessageEvent) => {
+         if (ev.source !== iframe.contentWindow) return;
+         if (ev.data?.kind === "iframe-ready") resolve();
+@@ -169,6 +176,7 @@ export class AnonRpcWorker {
+     });
+     document.body.appendChild(iframe);
+     await ready;
++    signal.throwIfAborted();
+ 
+     // §7.1: config rides the init message — postMessage structured-clones it,
+     // which is exactly the delivery semantic the spec requires.
+diff --git a/src/host/kps-http.ts b/src/host/kps-http.ts
+index ba576f7..74cb6cd 100644
+--- a/src/host/kps-http.ts
++++ b/src/host/kps-http.ts
+@@ -166,10 +166,16 @@ export async function fetchBundleOverKps(
+   addr: string,
+   path: string,
+   maxBytes: number,
++  signal?: AbortSignal,
+ ): Promise<Uint8Array> {
++  signal?.throwIfAborted();
+   const { openStream } = await import("@kpstreams/webrtc-client");
+-  const stream = await openStream(addr);
++  signal?.throwIfAborted();
++  const stream = await openStream(addr, { signal });
++  const abort = () => { void stream.close().catch(() => {}); };
++  signal?.addEventListener("abort", abort, { once: true });
+   try {
++    signal?.throwIfAborted();
+     const certhash = addr.slice(addr.lastIndexOf(":") + 1);
+     // §4.2: advertise the codings this environment can decode.
+     const advertised = ambientCodings();
+@@ -220,6 +226,7 @@ export async function fetchBundleOverKps(
+     }
+     return resp.body;
+   } finally {
++    signal?.removeEventListener("abort", abort);
+     await stream.close().catch(() => {});
+   }
+ }
+diff --git a/src/host/specifier.ts b/src/host/specifier.ts
+index ea9f759..e18b4c8 100644
+--- a/src/host/specifier.ts
++++ b/src/host/specifier.ts
+@@ -91,9 +91,11 @@ async function readBodyCapped(resp: Response, cap: number): Promise<Uint8Array>
+ export async function fetchAndVerifyBundle(
+   spec: Specifier,
+   maxBytes = MAX_BUNDLE_BYTES,
++  signal?: AbortSignal,
+ ): Promise<Uint8Array> {
+   const errors: string[] = [];
+   for (const url of spec.resolvers) {
++    signal?.throwIfAborted();
+     let bytes: Uint8Array;
+     try {
+       // §4.1 entry kinds. `http:` is accepted alongside `https:` as a
+@@ -103,12 +105,13 @@ export async function fetchAndVerifyBundle(
+       // context that minted it — the worker never sees the URL, and would
+       // not be able to resolve it if it did.
+       if (/^(https?|blob):/.test(url)) {
+-        const resp = await fetch(url);
++        const resp = await fetch(url, { signal });
++        signal?.throwIfAborted();
+         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+         bytes = await readBodyCapped(resp, maxBytes);
+       } else if (url.startsWith("kps:")) {
+         const { addr, path } = parseKpsResolver(url)!;
+-        bytes = await fetchBundleOverKps(addr, path, maxBytes);
++        bytes = await fetchBundleOverKps(addr, path, maxBytes, signal);
+       } else {
+         // §4.1: unrecognized entry kinds MUST be ignored — they never fail
+         // the boot; recorded only for the all-resolvers-failed diagnostic.
+@@ -116,9 +119,11 @@ export async function fetchAndVerifyBundle(
+         continue;
+       }
+     } catch (e) {
++      signal?.throwIfAborted();
+       errors.push(`${url}: ${(e as Error).message}`);
+       continue;
+     }
++    signal?.throwIfAborted();
+     const got = "0x" + toHex(keccak_256(bytes));
+     if (got !== spec.workerHash) {
+       // A resolver served bytes that don't match the pinned hash: reject and

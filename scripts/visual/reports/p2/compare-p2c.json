@@ -1,0 +1,1452 @@
+{
+  "generatedBy": "scripts/visual/compare.ts",
+  "date": "2026-07-23T21:57:54.991Z",
+  "baselineDir": "/tmp/ppv2-nativewind/scripts/visual/baselines",
+  "candidateDir": "/tmp/ppv2-nativewind/scripts/visual/.p2-final3",
+  "fixtureDigest": "5ce760bd52619bb6fadc756085a057d9975130c735985be414e44fb140f1336e",
+  "browser": "chromium-1228",
+  "policy": {
+    "perChannelTolerance": 10,
+    "defaultBudget": 50
+  },
+  "screenshotScope": {
+    "variants": [
+      0,
+      4
+    ],
+    "outOfScopeSurfaceBaselines": 96
+  },
+  "summary": {
+    "baselines": 116,
+    "ok": 102,
+    "failed": 8,
+    "missing": 6,
+    "extras": 0,
+    "byteIdentical": 37,
+    "zeroThresholdedPixels": 86,
+    "worstChangedPixels": 14
+  },
+  "shots": [
+    {
+      "name": "nw-gallery-animreg-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "732aab4eec7df4998c1f03ab71e458daf63f298ba3ea8b8894d5ef997c1ece91",
+      "candidateSha256": "",
+      "changedPixels": -1,
+      "maxChannelDelta": -1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "missing"
+    },
+    {
+      "name": "nw-gallery-fc-animreg-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "12932bffd650e717d94d8c62824b95e761256b1782d0285037a4a5542f2c6bc5",
+      "candidateSha256": "",
+      "changedPixels": -1,
+      "maxChannelDelta": -1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "missing"
+    },
+    {
+      "name": "nw-gallery-fc-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "b61fe2bd3632ab9a79374e52f0864c03bfbeb5da752795fb970665b0fdf0ca5f",
+      "candidateSha256": "",
+      "changedPixels": -1,
+      "maxChannelDelta": -1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "missing"
+    },
+    {
+      "name": "nw-gallery-fc-modal-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "04a5b2e6d3f7fc53f262d4b5b176b5ed460ea45078baeb244d6068c922aeea54",
+      "candidateSha256": "",
+      "changedPixels": -1,
+      "maxChannelDelta": -1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "missing"
+    },
+    {
+      "name": "nw-gallery-main-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "bd4e5d2ff63823d18dc58ad0e553d0c01b61e080d55a907ff1e53acadb4b41d6",
+      "candidateSha256": "",
+      "changedPixels": -1,
+      "maxChannelDelta": -1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "missing"
+    },
+    {
+      "name": "nw-gallery-modal-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "2899ffb2cb7bdf4c07e683aaa7aac47e451b40b0766edab667cec78b760a9af6",
+      "candidateSha256": "",
+      "changedPixels": -1,
+      "maxChannelDelta": -1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "missing"
+    },
+    {
+      "name": "v0-dark-ecosystem-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "2b8ed88edcfdbfd5ffe143e5732cce7edf6eddadf57a8e4d72c77cf7504c6493",
+      "candidateSha256": "1f9a7b9629b96409f5b51926e8bc741e762c8af28694dd01fafd240d506e8b44",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-ecosystem-narrow.png",
+      "byteIdentical": false,
+      "baselineSha256": "9dab00b6179ca354dda2e23481083228f4940a536555f5f28cfc0bbf7a1950cf",
+      "candidateSha256": "f9709b8ea8b9cd54661f02a526004c773be931fdfd6889e789df4bf110435156",
+      "changedPixels": 0,
+      "maxChannelDelta": 2,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-home-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "a3d2e06f594de9b4fedaabb078467201bdaf389066cede2edc7311c40eaeef85",
+      "candidateSha256": "a3d2e06f594de9b4fedaabb078467201bdaf389066cede2edc7311c40eaeef85",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-home-narrow.png",
+      "byteIdentical": false,
+      "baselineSha256": "02e77a4a9e05bb9ee5eee0dbb858547692910b19e0487ffe222fe974aa82f29d",
+      "candidateSha256": "723c4ab3da56170ef631301a4f0b075e327a2c9ed1628975f326859420bfd67e",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-modal-connect-picker-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "10b1c56da059d41ccfe0e09de2f4232e68e5c29f69c92fc286c7f47f21c1ab5e",
+      "candidateSha256": "10b1c56da059d41ccfe0e09de2f4232e68e5c29f69c92fc286c7f47f21c1ab5e",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-modal-deposit-filled-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "a14ba689ba7047e93ede17c7248a3f6bf000c0d918631d40642fa9ffb1b981c4",
+      "candidateSha256": "707d9e3a41882a8cd72dbf9c9e8b561d2cb3f08e60c320fadbd26ab90ac2341e",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-modal-deposit-input-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "a14ba689ba7047e93ede17c7248a3f6bf000c0d918631d40642fa9ffb1b981c4",
+      "candidateSha256": "707d9e3a41882a8cd72dbf9c9e8b561d2cb3f08e60c320fadbd26ab90ac2341e",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-modal-deposit-review-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "a14ba689ba7047e93ede17c7248a3f6bf000c0d918631d40642fa9ffb1b981c4",
+      "candidateSha256": "707d9e3a41882a8cd72dbf9c9e8b561d2cb3f08e60c320fadbd26ab90ac2341e",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-modal-request-filled-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "24171886f81cf3fbae08476c75540b9a9fcbec9457898a53c1d8dc1fe537f490",
+      "candidateSha256": "27307861a0098dfbac69383a289fc1ba3f8fefd5a5590c40e7e8c4f099809e56",
+      "changedPixels": 5,
+      "maxChannelDelta": 40,
+      "changedBBox": {
+        "x0": 842,
+        "y0": 1320,
+        "x1": 845,
+        "y1": 1379
+      },
+      "budget": 50,
+      "budgetSource": "perShot",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-modal-request-input-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "4848328bd0287bdf60f2cc1436ab5447697d7841c9eb4b9199a9edaa3b9feea6",
+      "candidateSha256": "4d687cd142c39108ba50293aa23f68f7513e6a06c14c1d9a1916ec9a8659ed90",
+      "changedPixels": 5,
+      "maxChannelDelta": 40,
+      "changedBBox": {
+        "x0": 842,
+        "y0": 1320,
+        "x1": 845,
+        "y1": 1379
+      },
+      "budget": 50,
+      "budgetSource": "perShot",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-modal-send-filled-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "996a0e5b36a82d454c9101cd9c21ec07276bd8b025093038e23f77be22fabe30",
+      "candidateSha256": "57158ecf4d3ca8871b6e2c931b266d8f25f17e3e0afdd251e54a39b3a92050c3",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-modal-send-input-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "996a0e5b36a82d454c9101cd9c21ec07276bd8b025093038e23f77be22fabe30",
+      "candidateSha256": "57158ecf4d3ca8871b6e2c931b266d8f25f17e3e0afdd251e54a39b3a92050c3",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-modal-swap-filled-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "6e451a1e49a0e1e1077952ea2487886bb1b2ebf1883290052fca0ef9c2b1cbb7",
+      "candidateSha256": "6e451a1e49a0e1e1077952ea2487886bb1b2ebf1883290052fca0ef9c2b1cbb7",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-modal-swap-input-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "6e451a1e49a0e1e1077952ea2487886bb1b2ebf1883290052fca0ef9c2b1cbb7",
+      "candidateSha256": "6e451a1e49a0e1e1077952ea2487886bb1b2ebf1883290052fca0ef9c2b1cbb7",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-modal-unlock-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "7de9535b82008f0a1be9d3f342d0a3c210baba9359a4f6140222bfa43a172d67",
+      "candidateSha256": "dad26850329964d34456f7626bc588f7e6139594125aff768e772ff1975f1e0a",
+      "changedPixels": 5,
+      "maxChannelDelta": 31,
+      "changedBBox": {
+        "x0": 842,
+        "y0": 1320,
+        "x1": 845,
+        "y1": 1379
+      },
+      "budget": 50,
+      "budgetSource": "perShot",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-modal-withdraw-filled-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "6e451a1e49a0e1e1077952ea2487886bb1b2ebf1883290052fca0ef9c2b1cbb7",
+      "candidateSha256": "6e451a1e49a0e1e1077952ea2487886bb1b2ebf1883290052fca0ef9c2b1cbb7",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-modal-withdraw-input-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "6e451a1e49a0e1e1077952ea2487886bb1b2ebf1883290052fca0ef9c2b1cbb7",
+      "candidateSha256": "6e451a1e49a0e1e1077952ea2487886bb1b2ebf1883290052fca0ef9c2b1cbb7",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-modal-withdraw-review-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "6e451a1e49a0e1e1077952ea2487886bb1b2ebf1883290052fca0ef9c2b1cbb7",
+      "candidateSha256": "6e451a1e49a0e1e1077952ea2487886bb1b2ebf1883290052fca0ef9c2b1cbb7",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-payment-requests-widget-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "110c83c5e19b02c9138ba9d5259ad8d7666333900aaaa1611f30abc93f758d2a",
+      "candidateSha256": "110c83c5e19b02c9138ba9d5259ad8d7666333900aaaa1611f30abc93f758d2a",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "perShot",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-payroll-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "bcaf5cfb2c883ccede3b7d562239b1abcdac3397d71c0df73b1c500033369ca4",
+      "candidateSha256": "bcaf5cfb2c883ccede3b7d562239b1abcdac3397d71c0df73b1c500033369ca4",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-payroll-narrow.png",
+      "byteIdentical": false,
+      "baselineSha256": "2b0cc5476cfce524480e24b426d8c32a543a696ae75678655585bd36a8d663b8",
+      "candidateSha256": "ac6dc78a1e75c01816e34acaf067bafca4315fe01e62556f18a1366554067fc7",
+      "changedPixels": 0,
+      "maxChannelDelta": 2,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-pool-detail-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "ac371a62d1c422c00bb05b190d9fd1d084b38a81f244920fb1dd9d5d42444087",
+      "candidateSha256": "ac371a62d1c422c00bb05b190d9fd1d084b38a81f244920fb1dd9d5d42444087",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-pool-detail-narrow.png",
+      "byteIdentical": false,
+      "baselineSha256": "3c27a86193ba46b478cc95136a2aed2fc6955f6eabf23df33cf9599b95459a68",
+      "candidateSha256": "71ce6878e2c673437d2ca14c472e70195f1628728cc2407ed87b94f6b7796626",
+      "changedPixels": 31485,
+      "maxChannelDelta": 219,
+      "changedBBox": {
+        "x0": 20,
+        "y0": 161,
+        "x1": 369,
+        "y1": 802
+      },
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "fail"
+    },
+    {
+      "name": "v0-dark-portfolio-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "0d6d2536266a34c1c9a0df27a8c26d457cf6d63239d0a0f456382e4dbb4e2684",
+      "candidateSha256": "0d6d2536266a34c1c9a0df27a8c26d457cf6d63239d0a0f456382e4dbb4e2684",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-dark-portfolio-narrow.png",
+      "byteIdentical": true,
+      "baselineSha256": "165b5a31ca8f5d746a7ade3b26f8d4c090b02f1716be5de959f7131059eb1040",
+      "candidateSha256": "165b5a31ca8f5d746a7ade3b26f8d4c090b02f1716be5de959f7131059eb1040",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-ecosystem-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "a72fa87755535ea26bdcbeb3d26da25b75745c746258d1662a0c66f1669364a9",
+      "candidateSha256": "7e3986428dcde7c282096bee6f439da15005c8bba0bc0a11e6da6feeea504ad0",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-ecosystem-narrow.png",
+      "byteIdentical": true,
+      "baselineSha256": "c9037616faf0345ba75a63d49e73efd177f6fadb692042ef66c44ac489ce31dc",
+      "candidateSha256": "c9037616faf0345ba75a63d49e73efd177f6fadb692042ef66c44ac489ce31dc",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-home-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "17aa217469e1d3729920578952d26207f97160dde1075da20184d290ffd7332c",
+      "candidateSha256": "17aa217469e1d3729920578952d26207f97160dde1075da20184d290ffd7332c",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-home-narrow.png",
+      "byteIdentical": true,
+      "baselineSha256": "d98daaae6926360e612469d9f3c8c7269560224c7063627ee429c12b245e9744",
+      "candidateSha256": "d98daaae6926360e612469d9f3c8c7269560224c7063627ee429c12b245e9744",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-modal-connect-picker-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "6a651d26d83ea4f36018d894fb5d0574bc42b2913cbef17a11eaa63d0e89d273",
+      "candidateSha256": "6a651d26d83ea4f36018d894fb5d0574bc42b2913cbef17a11eaa63d0e89d273",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-modal-deposit-filled-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "e1237c03924db65d76a60d1d47a8324b9f0d12b50009a275abb863849f2235b4",
+      "candidateSha256": "2e78fcc3b7c96a3b707486503e5c04c4b1f51c59c2a5d6444871a1491dfce0ab",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-modal-deposit-input-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "e1237c03924db65d76a60d1d47a8324b9f0d12b50009a275abb863849f2235b4",
+      "candidateSha256": "2e78fcc3b7c96a3b707486503e5c04c4b1f51c59c2a5d6444871a1491dfce0ab",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-modal-deposit-review-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "e1237c03924db65d76a60d1d47a8324b9f0d12b50009a275abb863849f2235b4",
+      "candidateSha256": "2e78fcc3b7c96a3b707486503e5c04c4b1f51c59c2a5d6444871a1491dfce0ab",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-modal-request-filled-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "0077f8d7604bcb905b696c7431367bb9a4617458f12eafe5d84fb3e7c5c0ab76",
+      "candidateSha256": "56e616a8aab9475a5228099f2fc7caa6edad224f6afc75f6f7c023809982cf7c",
+      "changedPixels": 5,
+      "maxChannelDelta": 47,
+      "changedBBox": {
+        "x0": 842,
+        "y0": 1320,
+        "x1": 845,
+        "y1": 1379
+      },
+      "budget": 50,
+      "budgetSource": "perShot",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-modal-request-input-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "bdfc536261cfaf8a1bcb6d6ece4c7c3328cb1e0c52e5240847f7556b7a60b778",
+      "candidateSha256": "33c8c1468d2b3fb71e500ebce415b15aca763e7a2ee77fefcf167a35f2f2791d",
+      "changedPixels": 5,
+      "maxChannelDelta": 47,
+      "changedBBox": {
+        "x0": 842,
+        "y0": 1320,
+        "x1": 845,
+        "y1": 1379
+      },
+      "budget": 50,
+      "budgetSource": "perShot",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-modal-send-filled-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "fdd8512f6ad470c7ebc4bb57cf1a82f3bc57ee92aedacfe0210cc5953b044f77",
+      "candidateSha256": "fdd8512f6ad470c7ebc4bb57cf1a82f3bc57ee92aedacfe0210cc5953b044f77",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-modal-send-input-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "fdd8512f6ad470c7ebc4bb57cf1a82f3bc57ee92aedacfe0210cc5953b044f77",
+      "candidateSha256": "fdd8512f6ad470c7ebc4bb57cf1a82f3bc57ee92aedacfe0210cc5953b044f77",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-modal-swap-filled-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "17776d389cac7361ba34c382de71143a800d1c84412179c3506c68dc2865cdaf",
+      "candidateSha256": "17776d389cac7361ba34c382de71143a800d1c84412179c3506c68dc2865cdaf",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-modal-swap-input-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "17776d389cac7361ba34c382de71143a800d1c84412179c3506c68dc2865cdaf",
+      "candidateSha256": "17776d389cac7361ba34c382de71143a800d1c84412179c3506c68dc2865cdaf",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-modal-unlock-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "1a6683d726851e8efac52166f246ea6742ac4ab6c24b85711ea9ee98695a3a57",
+      "candidateSha256": "b31f3fd5d4f43cb0e4792ea0646bb6ccac1a7ca41c018fbac4d2581d8b26e241",
+      "changedPixels": 5,
+      "maxChannelDelta": 36,
+      "changedBBox": {
+        "x0": 842,
+        "y0": 1320,
+        "x1": 845,
+        "y1": 1379
+      },
+      "budget": 50,
+      "budgetSource": "perShot",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-modal-withdraw-filled-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "fdd8512f6ad470c7ebc4bb57cf1a82f3bc57ee92aedacfe0210cc5953b044f77",
+      "candidateSha256": "2cdf62fecfd37e8257e89118c3ea8161e51a132fce7a1710c27307f660f5d651",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-modal-withdraw-input-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "fdd8512f6ad470c7ebc4bb57cf1a82f3bc57ee92aedacfe0210cc5953b044f77",
+      "candidateSha256": "2cdf62fecfd37e8257e89118c3ea8161e51a132fce7a1710c27307f660f5d651",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-modal-withdraw-review-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "fdd8512f6ad470c7ebc4bb57cf1a82f3bc57ee92aedacfe0210cc5953b044f77",
+      "candidateSha256": "2cdf62fecfd37e8257e89118c3ea8161e51a132fce7a1710c27307f660f5d651",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-payment-requests-widget-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "b4ae291bb67ca026f5d252065100c6feb02e134ddbe8abd4cd722afa63c55f38",
+      "candidateSha256": "b4ae291bb67ca026f5d252065100c6feb02e134ddbe8abd4cd722afa63c55f38",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-payroll-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "2aa096902f5178000e7509182b418d7348ad689f60ee9b50d91fe6aea97a0c88",
+      "candidateSha256": "2aa096902f5178000e7509182b418d7348ad689f60ee9b50d91fe6aea97a0c88",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-payroll-narrow.png",
+      "byteIdentical": true,
+      "baselineSha256": "a1995798e43106a8deeb57fa32d0db87fe39cfdd921cca60129ad0a475dbbebe",
+      "candidateSha256": "a1995798e43106a8deeb57fa32d0db87fe39cfdd921cca60129ad0a475dbbebe",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-pool-detail-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "7e860f37ed035e2420da56d9cc77071db6b9387a6b35ea2ae855f23a40f981cb",
+      "candidateSha256": "7e860f37ed035e2420da56d9cc77071db6b9387a6b35ea2ae855f23a40f981cb",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-pool-detail-narrow.png",
+      "byteIdentical": false,
+      "baselineSha256": "b99b83a10e04e8866c7978d6ca7ed332ba4a5a7a0a9de8a29918dc9335e7c9f1",
+      "candidateSha256": "8c9468c8121c3a6640875ce2dd00b092c36daa98b431288b86d6125e5686aab6",
+      "changedPixels": 32999,
+      "maxChannelDelta": 255,
+      "changedBBox": {
+        "x0": 20,
+        "y0": 161,
+        "x1": 369,
+        "y1": 802
+      },
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "fail"
+    },
+    {
+      "name": "v0-light-portfolio-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "90e3680f3779f9280ce4ae51a439e12693841c016519b2808158c3c503c56c5e",
+      "candidateSha256": "90e3680f3779f9280ce4ae51a439e12693841c016519b2808158c3c503c56c5e",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v0-light-portfolio-narrow.png",
+      "byteIdentical": true,
+      "baselineSha256": "9de6852b1582f3e680916896390badb7aa349fe0396eac1d1bb707d4756e8278",
+      "candidateSha256": "9de6852b1582f3e680916896390badb7aa349fe0396eac1d1bb707d4756e8278",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-dark-modal-connect-picker-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "b609dfe5f472da4e64e7b8c1c7e47210c599365b725aee128a8f7f3d34b60fd8",
+      "candidateSha256": "1657084bf610fe8be259e1cbc063514a90ee62e01beae8282c87d788efc6e030",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-dark-modal-deposit-filled-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "c90af74297d665df79e17af3b7ec91389281a66676652df119f5a3cad1f77f9b",
+      "candidateSha256": "86209a13ef7b2615b5beaf0c617e88860cf05ff79453a8cc1127d562b12a99c3",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-dark-modal-deposit-input-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "c90af74297d665df79e17af3b7ec91389281a66676652df119f5a3cad1f77f9b",
+      "candidateSha256": "86209a13ef7b2615b5beaf0c617e88860cf05ff79453a8cc1127d562b12a99c3",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-dark-modal-deposit-review-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "c90af74297d665df79e17af3b7ec91389281a66676652df119f5a3cad1f77f9b",
+      "candidateSha256": "86209a13ef7b2615b5beaf0c617e88860cf05ff79453a8cc1127d562b12a99c3",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-dark-modal-request-filled-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "152ec6e44d0642fafa107015878dc645b315fb612822b427adf1a8ddd18dd275",
+      "candidateSha256": "22231da55db7f1d39b39334b71456fd8626f59f8a78234e3adb71ddf0e5ac0ed",
+      "changedPixels": 0,
+      "maxChannelDelta": 3,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-dark-modal-request-input-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "ef5e9f6e2f35097c52cf9ba34332c23df8fcdd94b940dfd874bc4661cfe09a1f",
+      "candidateSha256": "102b1b30a9c7266ab14f0414031b3ef44bf563acf7fc5324eb4d7aec1f19b315",
+      "changedPixels": 0,
+      "maxChannelDelta": 3,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-dark-modal-send-filled-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "b3196de0e5b4a1411b690b623dcae6e1fff7c73002731362f09dae235707ed92",
+      "candidateSha256": "77e1ce18884eec417541eb976ec7035d10c6d5a32c36778ff102c2f15b1068e3",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-dark-modal-send-input-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "b3196de0e5b4a1411b690b623dcae6e1fff7c73002731362f09dae235707ed92",
+      "candidateSha256": "77e1ce18884eec417541eb976ec7035d10c6d5a32c36778ff102c2f15b1068e3",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-dark-modal-swap-filled-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "9d6652f6127253f0cd169791e7aef2ea4075842fc5d1583fe146271f3e738936",
+      "candidateSha256": "75224d7ff811a262193ca0be9f2a66b63ef73ed74b5cb126bbd391747086c98d",
+      "changedPixels": 5,
+      "maxChannelDelta": 46,
+      "changedBBox": {
+        "x0": 842,
+        "y0": 1320,
+        "x1": 845,
+        "y1": 1379
+      },
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-dark-modal-swap-input-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "5e5689fcc37bcc88cbdf3faccf77d56b61629bbd882667ccded5edfe736cfb1e",
+      "candidateSha256": "1e62410e000006fb6459f114b96ddb870b682bd06c57ed82d2615c0ce12f7a82",
+      "changedPixels": 5,
+      "maxChannelDelta": 46,
+      "changedBBox": {
+        "x0": 842,
+        "y0": 1320,
+        "x1": 845,
+        "y1": 1379
+      },
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-dark-modal-unlock-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "39c6b95fec4c1984db88ec1838f3f7101d91dbe13377541b764061b9f2b962bf",
+      "candidateSha256": "55ab56a89d41ca519f0e10ec6e04e9aa742211a0933414256de5f457ffc92904",
+      "changedPixels": 0,
+      "maxChannelDelta": 3,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-dark-modal-withdraw-filled-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "5bbed2c3167fe2b0b4a0746da0f031acea7d5a0290fab0a32c4e36b60c368b1f",
+      "candidateSha256": "c257c3be585fdcce4a22f87220519ddd86d7d6a97594cbdd9e6b5578753ae5d5",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-dark-modal-withdraw-input-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "5bbed2c3167fe2b0b4a0746da0f031acea7d5a0290fab0a32c4e36b60c368b1f",
+      "candidateSha256": "c257c3be585fdcce4a22f87220519ddd86d7d6a97594cbdd9e6b5578753ae5d5",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-dark-modal-withdraw-review-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "5bbed2c3167fe2b0b4a0746da0f031acea7d5a0290fab0a32c4e36b60c368b1f",
+      "candidateSha256": "c257c3be585fdcce4a22f87220519ddd86d7d6a97594cbdd9e6b5578753ae5d5",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-light-modal-connect-picker-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "e1cb10ab4be0bf218d3b7f3dc340299e478fe3db5f45e42b18ee7387d7198623",
+      "candidateSha256": "fa77e3830fd5db729f20bc2ed721bba2db07c868b2823caccf7c84a62c569a8d",
+      "changedPixels": 0,
+      "maxChannelDelta": 2,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-light-modal-deposit-filled-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "c50be165502482566ee219ad59146da40457babf158ce2809c14730f379060c8",
+      "candidateSha256": "10bba7a3dfda4780748e78edd14bac98ac3b7b82e88463da54b59c4fd322edf2",
+      "changedPixels": 0,
+      "maxChannelDelta": 2,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-light-modal-deposit-input-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "c50be165502482566ee219ad59146da40457babf158ce2809c14730f379060c8",
+      "candidateSha256": "10bba7a3dfda4780748e78edd14bac98ac3b7b82e88463da54b59c4fd322edf2",
+      "changedPixels": 0,
+      "maxChannelDelta": 2,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-light-modal-deposit-review-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "c50be165502482566ee219ad59146da40457babf158ce2809c14730f379060c8",
+      "candidateSha256": "10bba7a3dfda4780748e78edd14bac98ac3b7b82e88463da54b59c4fd322edf2",
+      "changedPixels": 0,
+      "maxChannelDelta": 2,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-light-modal-request-filled-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "8e71178eb5de22b844e2980850a5f5049117d40494dfc7e36097b4f1dab98dda",
+      "candidateSha256": "f266e738d2ec75f26b219fee43fce3632b8ba7249a2108091e7eddf237da50b4",
+      "changedPixels": 73,
+      "maxChannelDelta": 11,
+      "changedBBox": {
+        "x0": 480,
+        "y0": 148,
+        "x1": 556,
+        "y1": 149
+      },
+      "budget": 50,
+      "budgetSource": "perShot",
+      "verdict": "fail"
+    },
+    {
+      "name": "v1-light-modal-request-input-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "c178e04df9c3cb44d061e38c0b13da9b6960a7767afe2dbc65b06ef86d1c77ec",
+      "candidateSha256": "48f1fea6edda2911000d30f4bcf79ec1a72b2142a0ab97811e230715cb1ff2c2",
+      "changedPixels": 73,
+      "maxChannelDelta": 11,
+      "changedBBox": {
+        "x0": 480,
+        "y0": 148,
+        "x1": 556,
+        "y1": 149
+      },
+      "budget": 50,
+      "budgetSource": "perShot",
+      "verdict": "fail"
+    },
+    {
+      "name": "v1-light-modal-send-filled-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "cb5edaddeec5148200441966c887ddc2d2edf27161738710863f744a1d2e0f13",
+      "candidateSha256": "7582bc30572dc4e0e7f883fa8e343906618d4045ba233a7a832f17312d154308",
+      "changedPixels": 0,
+      "maxChannelDelta": 2,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-light-modal-send-input-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "cb5edaddeec5148200441966c887ddc2d2edf27161738710863f744a1d2e0f13",
+      "candidateSha256": "7582bc30572dc4e0e7f883fa8e343906618d4045ba233a7a832f17312d154308",
+      "changedPixels": 0,
+      "maxChannelDelta": 2,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-light-modal-swap-filled-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "a1a35e66a2787d9dd7a5add57d9f67fba6fe58bec9498113131b1b1b7b390ac2",
+      "candidateSha256": "77c346f5a8d5aeaca3dcfac4531f133426349258f53a11237e482fdffe72e4b5",
+      "changedPixels": 397,
+      "maxChannelDelta": 64,
+      "changedBBox": {
+        "x0": 770,
+        "y0": 129,
+        "x1": 870,
+        "y1": 1379
+      },
+      "budget": 50,
+      "budgetSource": "perShot",
+      "verdict": "fail"
+    },
+    {
+      "name": "v1-light-modal-swap-input-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "46da2a42b4bec34b2709a649d3a28e870b42a0b7a802e0ee195662adbadf2db4",
+      "candidateSha256": "a30eeb2991245833542fcfdc15935154712edf1765e2e181b29b492740a5f1f3",
+      "changedPixels": 397,
+      "maxChannelDelta": 64,
+      "changedBBox": {
+        "x0": 770,
+        "y0": 129,
+        "x1": 870,
+        "y1": 1379
+      },
+      "budget": 50,
+      "budgetSource": "perShot",
+      "verdict": "fail"
+    },
+    {
+      "name": "v1-light-modal-unlock-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "57ecd1949f6d7778a55bd06fa247daed092e638d1ed83ff6516bf17b46ac64fa",
+      "candidateSha256": "fecc8c66cc451e7593476c3734d5f01a8f74fc9c3bbc49e59c67263cd724d24a",
+      "changedPixels": 5,
+      "maxChannelDelta": 32,
+      "changedBBox": {
+        "x0": 842,
+        "y0": 1320,
+        "x1": 845,
+        "y1": 1379
+      },
+      "budget": 50,
+      "budgetSource": "perShot",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-light-modal-withdraw-filled-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "887c5f8985d6038e481e7a44c81b0bd0d015c543597d98dc6f55062275766eaf",
+      "candidateSha256": "68a3f552f62dc7eeeaed935bf87a62c7d113d7e5810b95bc996b8ce803030896",
+      "changedPixels": 0,
+      "maxChannelDelta": 2,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-light-modal-withdraw-input-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "887c5f8985d6038e481e7a44c81b0bd0d015c543597d98dc6f55062275766eaf",
+      "candidateSha256": "68a3f552f62dc7eeeaed935bf87a62c7d113d7e5810b95bc996b8ce803030896",
+      "changedPixels": 0,
+      "maxChannelDelta": 2,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v1-light-modal-withdraw-review-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "887c5f8985d6038e481e7a44c81b0bd0d015c543597d98dc6f55062275766eaf",
+      "candidateSha256": "68a3f552f62dc7eeeaed935bf87a62c7d113d7e5810b95bc996b8ce803030896",
+      "changedPixels": 0,
+      "maxChannelDelta": 2,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-dark-drawer-activity-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "b528b76ecd3048c8ea72e510782f20d36b7b089a8d9988cc1a3d68dd5da4ef18",
+      "candidateSha256": "1b5b97b453e9bcdbe7c80f34d2fc05f784d1b05349ef9ea35d0ffb61d1701892",
+      "changedPixels": 14,
+      "maxChannelDelta": 41,
+      "changedBBox": {
+        "x0": 1128,
+        "y0": 27,
+        "x1": 1259,
+        "y1": 38
+      },
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-dark-drawer-activity-narrow.png",
+      "byteIdentical": false,
+      "baselineSha256": "e6d1a2ce0c1d15d57a76e35a7575650b5fbf276d701e604ae2f5fb3cde5261da",
+      "candidateSha256": "0adbf563ac17745356fb980ada701c2a5c6703ea81e8873ec35acdd39ec18796",
+      "changedPixels": 12,
+      "maxChannelDelta": 41,
+      "changedBBox": {
+        "x0": 158,
+        "y0": 27,
+        "x1": 289,
+        "y1": 38
+      },
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-dark-drawer-balances-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "ec2da668403be037eb7b183c28e59442e61e1c6fa81b819eecb9d353302e40ef",
+      "candidateSha256": "8ac935a8b40e446fb688c5e04c5707d5e2411a57eda8e52f9edbf982ff0211df",
+      "changedPixels": 0,
+      "maxChannelDelta": 7,
+      "budget": 50,
+      "budgetSource": "perShot",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-dark-drawer-balances-narrow.png",
+      "byteIdentical": false,
+      "baselineSha256": "e6d1a2ce0c1d15d57a76e35a7575650b5fbf276d701e604ae2f5fb3cde5261da",
+      "candidateSha256": "0adbf563ac17745356fb980ada701c2a5c6703ea81e8873ec35acdd39ec18796",
+      "changedPixels": 12,
+      "maxChannelDelta": 41,
+      "changedBBox": {
+        "x0": 158,
+        "y0": 27,
+        "x1": 289,
+        "y1": 38
+      },
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-dark-drawer-pools-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "201a0fda24b74b069f788037759b12ae2db030de141431c94f5ebb8974d32749",
+      "candidateSha256": "1b0a71128cf95dc4c1e96f3db012fa841950e39f82f8b0afa2b36f370f00828b",
+      "changedPixels": 14,
+      "maxChannelDelta": 41,
+      "changedBBox": {
+        "x0": 1128,
+        "y0": 27,
+        "x1": 1259,
+        "y1": 38
+      },
+      "budget": 50,
+      "budgetSource": "perShot",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-dark-drawer-pools-narrow.png",
+      "byteIdentical": false,
+      "baselineSha256": "e6d1a2ce0c1d15d57a76e35a7575650b5fbf276d701e604ae2f5fb3cde5261da",
+      "candidateSha256": "0adbf563ac17745356fb980ada701c2a5c6703ea81e8873ec35acdd39ec18796",
+      "changedPixels": 12,
+      "maxChannelDelta": 41,
+      "changedBBox": {
+        "x0": 158,
+        "y0": 27,
+        "x1": 289,
+        "y1": 38
+      },
+      "budget": 50,
+      "budgetSource": "perShot",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-dark-ecosystem-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "dfc7e7406fbd8e0eb1859060347613429362d5fc50e582f65fe956aba3205124",
+      "candidateSha256": "dfc7e7406fbd8e0eb1859060347613429362d5fc50e582f65fe956aba3205124",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-dark-ecosystem-narrow.png",
+      "byteIdentical": true,
+      "baselineSha256": "9d8cf0d4881c02b8ada57de102a72c6940d526f527f64435e10067c6e2ca372c",
+      "candidateSha256": "9d8cf0d4881c02b8ada57de102a72c6940d526f527f64435e10067c6e2ca372c",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-dark-home-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "946520956cd4e3c272f5dd8e4659fa12411c673c92fcbed6af769a135b1351b5",
+      "candidateSha256": "fb92aa40144763ced78f9f971fc29404b69a159001a56f08ce4e36f1aeb76092",
+      "changedPixels": 0,
+      "maxChannelDelta": 7,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-dark-home-narrow.png",
+      "byteIdentical": false,
+      "baselineSha256": "3daf66edd24d42cbdb372e467f917977ec01c08c27154065e33fa10adf4d7e66",
+      "candidateSha256": "d15ada2a264a4d94f0cd22e86b8d7addde4ea8be564180ee5299ae3af22750c4",
+      "changedPixels": 0,
+      "maxChannelDelta": 8,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-dark-payroll-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "aba8a258161651f678afd932c5329c95fc7e42f5ef547e277643b99be66e0dc5",
+      "candidateSha256": "aba8a258161651f678afd932c5329c95fc7e42f5ef547e277643b99be66e0dc5",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-dark-payroll-narrow.png",
+      "byteIdentical": true,
+      "baselineSha256": "983db48f11eb208c8bfe1340a127b3a32ad1361eaf2c47c073c6aded01715925",
+      "candidateSha256": "983db48f11eb208c8bfe1340a127b3a32ad1361eaf2c47c073c6aded01715925",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-dark-pool-detail-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "3aede1acb8e8ccd5b4104bcb8a02286a88e7a81713bbcb9a4298bd6ca058f9ee",
+      "candidateSha256": "3aede1acb8e8ccd5b4104bcb8a02286a88e7a81713bbcb9a4298bd6ca058f9ee",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-dark-pool-detail-narrow.png",
+      "byteIdentical": false,
+      "baselineSha256": "33bc401cb25852c2b5b7f73cfd03a185493d7c03047b0b542749e1c18ddf18e8",
+      "candidateSha256": "5572afecc8bbf43a089a594804c58a19e39cf9d38565943a5cb738a511654707",
+      "changedPixels": 44245,
+      "maxChannelDelta": 228,
+      "changedBBox": {
+        "x0": 20,
+        "y0": 161,
+        "x1": 369,
+        "y1": 802
+      },
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "fail"
+    },
+    {
+      "name": "v4-dark-portfolio-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "f6929d64bbe8dac695cea02eea53744ba05e699a3dc2957838880b6e7199e751",
+      "candidateSha256": "f6929d64bbe8dac695cea02eea53744ba05e699a3dc2957838880b6e7199e751",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-dark-portfolio-narrow.png",
+      "byteIdentical": true,
+      "baselineSha256": "953feda17cbe1c27d1fc377865fbede55d2da5dd4c0dfd2cd3d39655512e6b23",
+      "candidateSha256": "953feda17cbe1c27d1fc377865fbede55d2da5dd4c0dfd2cd3d39655512e6b23",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-light-drawer-activity-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "2da84302e31487db6c78fddb1a42e6b083f39a18c8cca80a433a409126e40be2",
+      "candidateSha256": "2da84302e31487db6c78fddb1a42e6b083f39a18c8cca80a433a409126e40be2",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 3960,
+      "budgetSource": "perShot",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-light-drawer-activity-narrow.png",
+      "byteIdentical": false,
+      "baselineSha256": "a36e8b2ead5467bf93d555e2920f07de1dc6f2df92c87fb7fe46679dfb00d6ea",
+      "candidateSha256": "41804cf74399735e2457bdfb0730353e970b628b9642299cc68beeb8ca804464",
+      "changedPixels": 12,
+      "maxChannelDelta": 44,
+      "changedBBox": {
+        "x0": 158,
+        "y0": 27,
+        "x1": 289,
+        "y1": 38
+      },
+      "budget": 50,
+      "budgetSource": "perShot",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-light-drawer-balances-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "8962eb8d139cade16b6bf7cc323ac44a46949c676548557a9032053f170964b6",
+      "candidateSha256": "ae30ffeb914212c330eb968ab0a46237113fb4e6b775cb3d351a931eddd46b8e",
+      "changedPixels": 0,
+      "maxChannelDelta": 7,
+      "budget": 50,
+      "budgetSource": "perShot",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-light-drawer-balances-narrow.png",
+      "byteIdentical": false,
+      "baselineSha256": "a36e8b2ead5467bf93d555e2920f07de1dc6f2df92c87fb7fe46679dfb00d6ea",
+      "candidateSha256": "41804cf74399735e2457bdfb0730353e970b628b9642299cc68beeb8ca804464",
+      "changedPixels": 12,
+      "maxChannelDelta": 44,
+      "changedBBox": {
+        "x0": 158,
+        "y0": 27,
+        "x1": 289,
+        "y1": 38
+      },
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-light-drawer-pools-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "ce14fb5f6788a86063c5a0e1f53b5a204427606e1277e9334c4d5cc9c6104a31",
+      "candidateSha256": "8634e7c1c3c3dc16bc1bcb3fe99aba10e61d230d13962a433477c1d781bc0c63",
+      "changedPixels": 0,
+      "maxChannelDelta": 7,
+      "budget": 50,
+      "budgetSource": "perShot",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-light-drawer-pools-narrow.png",
+      "byteIdentical": false,
+      "baselineSha256": "e94c9259afa0cb754482adfb5a2dddcc284b7c7420eb0ed5773d2d58a8d508a6",
+      "candidateSha256": "aec255f8f3ac379f8f694e901305113a24fa53c26a71f2172c92cfea0bdee5ff",
+      "changedPixels": 0,
+      "maxChannelDelta": 7,
+      "budget": 50,
+      "budgetSource": "perShot",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-light-ecosystem-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "01d44e35d2589b889d3ac82242d68e2c9fba2c9c16f199dd319cdc73e21b6ccb",
+      "candidateSha256": "54341db08219de069c1fc2ef0bb96ad786ac62f1a344e45702be92ba39f22afd",
+      "changedPixels": 0,
+      "maxChannelDelta": 6,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-light-ecosystem-narrow.png",
+      "byteIdentical": true,
+      "baselineSha256": "0453cc13134554516b083e8b7c49907b777baaca64257202d378cc2d072d2550",
+      "candidateSha256": "0453cc13134554516b083e8b7c49907b777baaca64257202d378cc2d072d2550",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-light-home-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "8aff70fef275ea64df48c5a47c31cb2a9427dcfd403b94ead191e9434e54bd02",
+      "candidateSha256": "b55a4149017227bb94a5cdd3f43f11b28a408950223d8ba5754a545f45bd8178",
+      "changedPixels": 0,
+      "maxChannelDelta": 7,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-light-home-narrow.png",
+      "byteIdentical": false,
+      "baselineSha256": "fe4be7468ccc8c7259aad7a736935a3b697fbfc8ed33dfd18e75f596d6767924",
+      "candidateSha256": "3f5761890efe23cc8b1681109a36a3f3a69e5720e5dd82b5ec165bbe567911a3",
+      "changedPixels": 0,
+      "maxChannelDelta": 7,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-light-payroll-desktop.png",
+      "byteIdentical": false,
+      "baselineSha256": "d58aa122cafadb691d902813a8b9d52aa0d81df745417fa47ae6710a6c2ef5bb",
+      "candidateSha256": "a740e5ce8e10d8892100382ef8d035523ef7aa1634cce2d009edf5364cd1be4e",
+      "changedPixels": 0,
+      "maxChannelDelta": 2,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-light-payroll-narrow.png",
+      "byteIdentical": false,
+      "baselineSha256": "d2adafabe7432ffee4976957b5d6d712527378a3d936e1e1094bfa1ffc2f6f05",
+      "candidateSha256": "bd84574c5bb39b76a0192acc263b0cf4c2fe62f32fbd4c2b3517c8ec2676244d",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-light-pool-detail-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "721f0cde9054acd8cd90b2f72f8739f5283215384ad6769b8bb17490fb6c227d",
+      "candidateSha256": "721f0cde9054acd8cd90b2f72f8739f5283215384ad6769b8bb17490fb6c227d",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-light-pool-detail-narrow.png",
+      "byteIdentical": false,
+      "baselineSha256": "7b8cf91d3ac29b2568f5e6230dc80f9e67848ed5e35890501c27d39a1e6b9cf8",
+      "candidateSha256": "90d03eb95ba1b435afbd2e8a0abb31371392f62de3f2b20cbc70cf2982f8e91d",
+      "changedPixels": 32715,
+      "maxChannelDelta": 233,
+      "changedBBox": {
+        "x0": 20,
+        "y0": 161,
+        "x1": 369,
+        "y1": 802
+      },
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "fail"
+    },
+    {
+      "name": "v4-light-portfolio-desktop.png",
+      "byteIdentical": true,
+      "baselineSha256": "54bb42a29f072b838c4edabe08cacf2870f0b16f42741200fd4c938ecaa53bf1",
+      "candidateSha256": "54bb42a29f072b838c4edabe08cacf2870f0b16f42741200fd4c938ecaa53bf1",
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    },
+    {
+      "name": "v4-light-portfolio-narrow.png",
+      "byteIdentical": false,
+      "baselineSha256": "ef1b5e3f891bfa1c7b560c44b9651cf4ae0340e95e479afe0b6fe4ff91ed5f93",
+      "candidateSha256": "6e4a5f16799d9491d08da22a1910cf02a6de10080f80a992d6f1d8c50028ebed",
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 50,
+      "budgetSource": "default",
+      "verdict": "ok"
+    }
+  ],
+  "extrasInCandidate": []
+}

@@ -1,0 +1,42 @@
+diff --git a/dist/runtime/native/appearance-observables.js b/dist/runtime/native/appearance-observables.js
+index 2d93872..6198504 100644
+--- a/dist/runtime/native/appearance-observables.js
++++ b/dist/runtime/native/appearance-observables.js
+@@ -23,6 +23,19 @@ exports.colorScheme = {
+         if (process.env.NODE_ENV === "test") {
+             colorSchemeObservable.set(value === "system" ? "light" : value);
+         }
++        else {
++            // PATCH(ppv2, F-C codex finding 1): upstream updates the scheme
++            // observable synchronously ONLY under NODE_ENV === "test" and
++            // relies on the async Appearance change event in production
++            // (Android posts it to the UI thread) — so a stored "dark"
++            // applied at provider startup could resolve `dark:` conditions
++            // as light for the first frames. Set the override synchronously
++            // in every environment; "system" CLEARS it so get() falls back
++            // to the systemColorScheme observable (which the async listener
++            // keeps aligned — it only writes systemColorScheme, so nothing
++            // fights this override).
++            colorSchemeObservable.set(value === "system" ? undefined : value);
++        }
+     },
+     get(effect) {
+         return colorSchemeObservable.get(effect) ?? exports.systemColorScheme.get(effect);
+diff --git a/src/runtime/native/appearance-observables.ts b/src/runtime/native/appearance-observables.ts
+index 9f0c6fe..bfe7248 100644
+--- a/src/runtime/native/appearance-observables.ts
++++ b/src/runtime/native/appearance-observables.ts
+@@ -35,6 +35,13 @@ export const colorScheme = {
+     // Appearance.addChangeListener is not fired in a test environment
+     if (process.env.NODE_ENV === "test") {
+       colorSchemeObservable.set(value === "system" ? "light" : value);
++    } else {
++      // PATCH(ppv2, F-C codex finding 1): keep the override observable
++      // synchronously authoritative in EVERY environment (upstream relies on
++      // the async Appearance event outside tests, which can render stale
++      // first frames). "system" clears the override so get() falls back to
++      // systemColorScheme. Mirrors the dist/ patch — dist is what executes.
++      colorSchemeObservable.set(value === "system" ? undefined : value);
+     }
+   },
+   get(effect?: Effect) {

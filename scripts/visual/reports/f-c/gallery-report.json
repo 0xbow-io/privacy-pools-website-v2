@@ -1,0 +1,337 @@
+{
+  "generatedBy": "scripts/visual/capture-gallery.ts",
+  "date": "2026-07-23T13:52:13.663Z",
+  "commit": "d0c98eb",
+  "baseUrl": "http://127.0.0.1:8082",
+  "scope": "web verified; native unverified (SDK fs/promises native-export blocker)",
+  "pairs": [
+    {
+      "pair": "probe",
+      "ssRect": {
+        "w": 317,
+        "h": 44
+      },
+      "nwRect": {
+        "w": 317,
+        "h": 44
+      },
+      "sizeMatch": true,
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 40,
+      "verdict": "ok"
+    },
+    {
+      "pair": "var",
+      "ssRect": {
+        "w": 96,
+        "h": 32
+      },
+      "nwRect": {
+        "w": 96,
+        "h": 32
+      },
+      "sizeMatch": true,
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 40,
+      "verdict": "ok"
+    },
+    {
+      "pair": "anim",
+      "ssRect": {
+        "w": 160,
+        "h": 24
+      },
+      "nwRect": {
+        "w": 160,
+        "h": 24
+      },
+      "sizeMatch": true,
+      "changedPixels": 0,
+      "maxChannelDelta": 3,
+      "budget": 40,
+      "verdict": "ok"
+    },
+    {
+      "pair": "scroll",
+      "ssRect": {
+        "w": 317,
+        "h": 56
+      },
+      "nwRect": {
+        "w": 317,
+        "h": 56
+      },
+      "sizeMatch": true,
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 40,
+      "verdict": "ok"
+    },
+    {
+      "pair": "overlay",
+      "ssRect": {
+        "w": 317,
+        "h": 56
+      },
+      "nwRect": {
+        "w": 317,
+        "h": 56
+      },
+      "sizeMatch": true,
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 40,
+      "verdict": "ok"
+    },
+    {
+      "pair": "dd",
+      "ssRect": {
+        "w": 317,
+        "h": 83
+      },
+      "nwRect": {
+        "w": 317,
+        "h": 83
+      },
+      "sizeMatch": true,
+      "changedPixels": 0,
+      "maxChannelDelta": 1,
+      "budget": 40,
+      "verdict": "ok"
+    },
+    {
+      "pair": "svg",
+      "ssRect": {
+        "w": 112,
+        "h": 56
+      },
+      "nwRect": {
+        "w": 112,
+        "h": 56
+      },
+      "sizeMatch": true,
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 40,
+      "verdict": "ok"
+    },
+    {
+      "pair": "icon",
+      "ssRect": {
+        "w": 40,
+        "h": 42
+      },
+      "nwRect": {
+        "w": 40,
+        "h": 42
+      },
+      "sizeMatch": true,
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 40,
+      "verdict": "ok"
+    },
+    {
+      "pair": "fixed",
+      "ssRect": {
+        "w": 35,
+        "h": 20
+      },
+      "nwRect": {
+        "w": 35,
+        "h": 20
+      },
+      "sizeMatch": true,
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 40,
+      "verdict": "ok"
+    },
+    {
+      "pair": "float-anchor",
+      "ssRect": {
+        "w": 48,
+        "h": 24
+      },
+      "nwRect": {
+        "w": 48,
+        "h": 24
+      },
+      "sizeMatch": true,
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 40,
+      "verdict": "ok"
+    },
+    {
+      "pair": "float-panel",
+      "ssRect": {
+        "w": 81,
+        "h": 34
+      },
+      "nwRect": {
+        "w": 81,
+        "h": 34
+      },
+      "sizeMatch": true,
+      "changedPixels": 0,
+      "maxChannelDelta": 0,
+      "budget": 40,
+      "verdict": "ok"
+    }
+  ],
+  "animDirectUnregistered": {
+    "backgroundColor": "rgba(0, 0, 0, 0)",
+    "height": "0px",
+    "width": "160px",
+    "borderRadius": "0px",
+    "transform": "matrix(1, 0, 0, 1, 24, 0)",
+    "__rect": "160x0",
+    "expected": "className DROPPED (transparent, 0-height), residual transform survives",
+    "verdict": "ok"
+  },
+  "rawDomBorderProof": {
+    "borderTopWidth": "1px",
+    "borderTopStyle": "solid",
+    "borderTopColor": "rgb(209, 213, 219)",
+    "__rect": "81x34",
+    "expected": "1px solid (preflight OFF, explicit border-solid)",
+    "verdict": "ok"
+  },
+  "dropdownStacking": {
+    "ok": true,
+    "topElement": "DIV",
+    "verdict": "ok"
+  },
+  "dropdownClickAway": {
+    "nw": true,
+    "ss": true,
+    "verdict": "ok"
+  },
+  "modalPortalSwatches": {
+    "changedPixels": 0,
+    "verdict": "ok"
+  },
+  "animDirectRegistered": {
+    "backgroundColor": "rgb(79, 70, 229)",
+    "height": "24px",
+    "width": "24px",
+    "borderRadius": "9999px",
+    "transform": "matrix(1, 0, 0, 1, 24, 0)",
+    "__rect": "24x24",
+    "expected": "className APPLIES (24x24 indigo puck) after startup cssInterop(Animated.View)",
+    "verdict": "ok"
+  },
+  "fcRootClasses": {
+    "classes": "pp-v3",
+    "verdict": "ok"
+  },
+  "fcPageVarSwatches": {
+    "buttonPrimary": "rgb(210, 244, 251)",
+    "background": "rgb(242, 248, 250)",
+    "expected": {
+      "buttonPrimary": "rgb(210, 244, 251)",
+      "background": "rgb(242, 248, 250)"
+    },
+    "verdict": "ok"
+  },
+  "fcAnimDirectUnregistered": {
+    "backgroundColor": "rgba(0, 0, 0, 0)",
+    "height": "0px",
+    "width": "1366px",
+    "transform": "matrix(1, 0, 0, 1, 24, 0)",
+    "__rect": "1366x0",
+    "expected": "DROPPED (transparent, 0-height), residual transform survives",
+    "verdict": "ok"
+  },
+  "fcReanimatedUnregistered": {
+    "backgroundColor": "rgba(0, 0, 0, 0)",
+    "height": "0px",
+    "width": "1366px",
+    "transform": "matrix(1, 0, 0, 1, 24, 0)",
+    "__rect": "1366x0",
+    "expected": "className DROPPED (transparent, 0-height)",
+    "verdict": "ok"
+  },
+  "fcReanimatedTextUnregistered": {
+    "color": "rgb(0, 0, 0)",
+    "fontSize": "14px",
+    "__rect": "1366x15",
+    "expected": "className DROPPED (no emerald color, no 16px size)",
+    "verdict": "ok"
+  },
+  "fcReanimatedScrollUnregistered": {
+    "backgroundColor": "rgba(0, 0, 0, 0)",
+    "__rect": "1366x48",
+    "contentPaddingTop": "0px",
+    "expected": "className + contentContainerClassName DROPPED",
+    "verdict": "ok"
+  },
+  "fcPortalVarSwatch": {
+    "backgroundColor": "rgb(210, 244, 251)",
+    "expected": "rgb(210, 244, 251)",
+    "renderedInBodyPortalOutsideAppRoot": true,
+    "cropDiffVsPageSwatch": 0,
+    "budget": 40,
+    "verdict": "ok"
+  },
+  "fcToggleTiming": {
+    "framesSampled": 40,
+    "mixedFrames": [],
+    "finalFrame": {
+      "label": "scheme:dark",
+      "dark": true,
+      "background": "#131313"
+    },
+    "expected": "zero mixed frames (context label / dark class / --pp-background always agree per frame); final = dark",
+    "note": "rAF-per-frame watcher around a real click — a passive-effect reconcile paints a mixed frame here",
+    "verdict": "ok"
+  },
+  "fcAnimDirectRegistered": {
+    "backgroundColor": "rgb(79, 70, 229)",
+    "height": "24px",
+    "width": "24px",
+    "transform": "matrix(1, 0, 0, 1, 24, 0)",
+    "__rect": "24x24",
+    "expected": "APPLIES (24x24 indigo puck) via the app startup module",
+    "verdict": "ok"
+  },
+  "fcReanimatedRegistered": {
+    "backgroundColor": "rgb(5, 150, 105)",
+    "height": "24px",
+    "width": "24px",
+    "transform": "matrix(1, 0, 0, 1, 24, 0)",
+    "__rect": "24x24",
+    "expected": "APPLIES (24x24 emerald puck) — the app module registers Reanimated.View too",
+    "verdict": "ok"
+  },
+  "fcReanimatedTextRegistered": {
+    "color": "rgb(5, 150, 105)",
+    "fontSize": "16px",
+    "__rect": "1366x18",
+    "expected": "APPLIES (emerald, 16px) — Reanimated.Text registration (hello-wave.tsx is P1)",
+    "verdict": "ok"
+  },
+  "fcReanimatedScrollRegistered": {
+    "backgroundColor": "rgb(5, 150, 105)",
+    "height": "40px",
+    "width": "160px",
+    "__rect": "160x40",
+    "contentPaddingTop": "8px",
+    "expected": "APPLIES (emerald 160x40, contentContainer p-2=8px) — Reanimated.ScrollView + contentContainerClassName remap (parallax-scroll-view.tsx is P1)",
+    "verdict": "ok"
+  },
+  "fcDarkScheme": {
+    "classes": "dark pp-v3",
+    "background": "rgb(19, 19, 19)",
+    "buttonPrimary": "rgb(210, 244, 251)",
+    "expected": {
+      "background": "rgb(19, 19, 19)",
+      "buttonPrimary": "rgb(210, 244, 251)"
+    },
+    "verdict": "ok"
+  },
+  "failures": 0
+}

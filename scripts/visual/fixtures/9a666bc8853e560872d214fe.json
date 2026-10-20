@@ -1,0 +1,8 @@
+{
+ "method": "GET",
+ "url": "https://api-dev.0xbow.io/global/public/statistics",
+ "status": 200,
+ "contentType": "application/json; charset=utf-8",
+ "body": "H4sIAAAAAAACA52SwYrCMBBA/2XONUwmmdjk6v6Bugt7G7TYQrSyiQpK/30p1oW19KC3kDd5DI/cQGJcNfsKwg3yOUIAhKI/rdMWAli26L3SHgqQ8+6jOrapycvmWg2T/y/vj5xD5U2vabPEAadFezpkCHPEJ/Ap8fTQjcGwhyPHpMzfzFeT6+2PXCQ+xFrrMRu5n9ldX1JpFDnoCoiSMtl6qodH5cwrMZgV64kW+p0UzKy0ne5g367gbL9qV8BGNnXV/4qUZX+EAITkZjifEa1IByyDYVUa+obuFz4S3T9BAgAA",
+ "bodyEncoding": "gzip-base64"
+}

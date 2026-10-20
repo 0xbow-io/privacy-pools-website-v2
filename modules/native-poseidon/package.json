@@ -1,0 +1,9 @@
+{
+  "name": "native-poseidon",
+  "version": "0.1.0",
+  "private": true,
+  "description": "circomlib's Poseidon over BN254 (1 to 16 inputs) in Rust, for the ppv2 mobile app",
+  "license": "MIT",
+  "main": "index.ts",
+  "types": "index.ts"
+}

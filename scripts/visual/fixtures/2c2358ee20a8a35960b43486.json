@@ -1,0 +1,8 @@
+{
+ "method": "GET",
+ "url": "https://api-dev.0xbow.io/global/public/token-prices?chainId=11155111",
+ "status": 200,
+ "contentType": "application/json; charset=utf-8",
+ "body": "H4sIAAAAAAACA83OPQvCMBSF4f9y5rTceyFNzaqCzk0XxSHGQEvtB7aLlP53QTcndXI/z+GdMdzqEEfY44xQ+brbX2DBzFozMxSmvoldcW/P/RUWW7eDeplyfC5XkqWGsKiPfFls1m8HKX2j3e/6P9tPCsGHKrq6jePk2wEWQpIlZBIRJ2wpt5rSnMwBywOkSKUOsAEAAA==",
+ "bodyEncoding": "gzip-base64"
+}

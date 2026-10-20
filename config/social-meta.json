@@ -1,0 +1,14 @@
+{
+  "title": "Privacy Pools",
+  "headline": "Privacy Pools",
+  "description": "Shield your assets. Use them privately.",
+  "url": "https://privacypools.com",
+  "twitterSite": "@0xbowio",
+  "images": [
+    {"file": "og-image.png", "width": 1200, "height": 630, "role": "og", "alt": "Privacy Pools. Shield your assets. Use them privately. Swap, earn yield, and send."},
+    {"file": "og-image-square.png", "width": 1200, "height": 1200, "role": "og-square", "alt": "Privacy Pools. Shield your assets. Use them privately. Swap, earn yield, and send."},
+    {"file": "twitter-card.png", "width": 1200, "height": 600, "role": "twitter-large", "alt": "Privacy Pools. Shield your assets. Use them privately. Swap, earn yield, and send."},
+    {"file": "twitter-card-summary.png", "width": 800, "height": 800, "role": "twitter-summary", "alt": "Privacy Pools. Shield your assets. Use them privately. Swap, earn yield, and send."},
+    {"file": "og-image-small.png", "width": 600, "height": 315, "role": "og-small", "alt": "Privacy Pools. Shield your assets. Use them privately. Swap, earn yield, and send."}
+  ]
+}

@@ -1,0 +1,8 @@
+{
+ "method": "GET",
+ "url": "https://api-dev.0xbow.io/11155111/public/assets-stats",
+ "status": 200,
+ "contentType": "application/json; charset=utf-8",
+ "body": "H4sIAAAAAAACA+2XTU/bQBCG/8uew2pmdmc/fENQtZwJPbTqYWMvJGpIImzUVoj/XjkE2ISMRZBKVal7staTecc7T96x71Rq29y1qvp693CpKgU/8yuXGql6mmaLs0ZVChGZEVGNVLfs0vw0r5btrGs/p/ltvmj7ELJEqD3sDelTEHt08LQI4EXsyfJ20akqxpFKdZ1XXW6GlfZGyWK74YXeuo6zxXF/TqUWMaO2T5WWEetz8WCd94FcNN6hiUBqpFZ50cwWV3tqRx2NENDfhRcl70RuKjZ9Od/z4vzX9WQ5V5X6MP6kNnvHTXOT2/bQZl/dLH90U7JTVS1u5/Mn5Y/P+wzluh+VWGHtGzvB6OoJ1H4C2HhrLie1Q3QpAhkfa08mHIpVYA0sMRU2FQkckR/k6DG1BFGRXQCnFxDA2ap7h5oisUwKaDGgvyuiAbtoXJyfnuxj44COvYKNfn+biJRCJnM5QfAxJ48ZErtLGxKlxBgYm2CNaeBgowk6RokIisNEDBvLJrMERJFcAkI2krLqHR6KvO/Dw3gfDwf06008/KnBY4xHZzWLTKC3MXKI9OhcKANi47BnlGLi8BH0BGbWkgI1xgAF1g6l+ePRErONzGjBewRmM4iR0YFljAi2l0gV/ZUBhO81dRBs0M6LRIENgz6DZpCi5/QiQ6WCAA4akZsHAWn+IFgffYhrQ/o/gQ6eQDFGjhrkV93tf9BeQAb5KARkQLY0JEREQnaf4QUiQybwj4+lb5tnblV1JzbZOmIIWuygM8NfKeXvhe6sUwj9sWwih4evHPn0WfsgHjHfj1Sd6mkez65z26Xr1drhyR2BPyIaE1YQKkLtDH9R978BT/wdQzAOAAA=",
+ "bodyEncoding": "gzip-base64"
+}

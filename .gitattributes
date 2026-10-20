@@ -1,0 +1,2 @@
+public/artifacts/**/*.wasm filter=lfs diff=lfs merge=lfs -text
+public/artifacts/**/*.zkey filter=lfs diff=lfs merge=lfs -text

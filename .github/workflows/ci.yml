@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      # Same reason as the e2e workflow: public/artifacts are git-lfs objects and
+      # a default checkout leaves pointer files behind.
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      # expo-env.d.ts is gitignored (.gitignore:10) and Expo regenerates it on
+      # every dev-server start, so it exists on every machine and never in a
+      # clean checkout. Its single `/// <reference types="expo/types" />` is what
+      # types CSS side-effect imports and Expo's web style augmentations, so
+      # without it typecheck fails on `import '../global.css'` and on the
+      # `position: 'fixed'` casts react-native-web needs — three errors nobody
+      # could reproduce locally. Regenerate it the way a dev machine does rather
+      # than committing a file whose own comment says to ignore it.
+      - name: Generate the Expo type shim a dev server would have written
+        run: |
+          printf '%s\n' '/// <reference types="expo/types" />' > expo-env.d.ts
+          cat expo-env.d.ts
+      - run: bun run typecheck
+      # Two suites, two runners — a bare `bun test` sweeps in tests/sui/**, which
+      # is a vitest-only suite: it needs vitest.config.ts's `react-native` alias
+      # (bun loads the real package and chokes on its Flow `import typeof`) and
+      # vitest-only APIs such as vi.advanceTimersByTimeAsync.
+      - run: bun run test # services/** on the bun runner
+      - run: bun run test:sui # tests/sui/** on vitest
+      # pull_request checks build GitHub's merge tree, including Metro's final graph.
+      - run: bun run build:web
+        env:
+          # Metro's optimized graph exceeds the runner's default 2 GiB heap.
+          NODE_OPTIONS: --max-old-space-size=4096
+
+  # The prod-config Shield surface, in a browser, with no wallet and no chain.
+  # Its own job so a slow browser never hides a unit failure, and in ci.yml
+  # rather than e2e-sepolia.yml because that one only runs on pull_request -
+  # this has to guard pushes to main too, which is how both 2026-09-12
+  # regressions reached prod.
+  prod-shield-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bunx playwright install --with-deps chromium
+      # The dev server refuses to start without them, and the page imports them
+      # even though this smoke proves nothing.
+      - name: Build the proving workers
+        run: |
+          bun ./scripts/build-snarkjs-worker.mjs
+          bun ./scripts/build-witness-worker.mjs
+      # The prod deployment table is in code (config/prod-deployments.ts); only
+      # the two master flags come from the env, and staging carries no yield
+      # deployments, so setting them here cannot change the staging world.
+      - name: Start the dev server
+        env:
+          EXPO_PUBLIC_YIELD_ENABLED: 'true'
+          EXPO_PUBLIC_YIELD_WITHDRAW_READY: 'true'
+        run: |
+          nohup bunx expo start --web --port 8081 > /tmp/expo.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null http://localhost:8081/; then echo "dev server listening"; break; fi
+            sleep 5
+          done
+          curl -sf -o /dev/null http://localhost:8081/ || { echo "dev server never came up"; tail -n 40 /tmp/expo.log; exit 1; }
+          # Listening is not ready: Metro compiles the web bundle on the FIRST
+          # request, and that is minutes on a cold runner. Pull it here, with a
+          # budget, so the browser step measures the app and not the bundler.
+          echo "warming the bundle"
+          curl -sf --max-time 900 -o /dev/null "http://localhost:8081/index.bundle?platform=web&dev=true" \
+            || curl -sf --max-time 900 -o /dev/null http://localhost:8081/ \
+            || { echo "bundle never built"; tail -n 60 /tmp/expo.log; exit 1; }
+          echo "bundle warm"
+      - name: Prod-config Shield smoke
+        env:
+          PROBE_URL: http://localhost:8081
+        run: bun scripts/e2e/prod-yield-destination.ts

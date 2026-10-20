@@ -1,0 +1,5 @@
+{
+  "platforms": ["android", "apple"],
+  "android": { "modules": ["io.oxbow.poseidon.NativePoseidonModule"] },
+  "apple": { "modules": ["NativePoseidonModule"] }
+}

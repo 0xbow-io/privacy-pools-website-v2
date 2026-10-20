@@ -1,0 +1,112 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    # `labeled` so adding the label starts a review without a new push.
+    types: [opened, synchronize, ready_for_review, reopened, labeled]
+
+jobs:
+  claude-review:
+    # Opt-in per PR: runs only while the PR carries the `llm-review` label.
+    # A later push to a labelled PR reviews again; removing the label stops it.
+    # On a `labeled` event, only the llm-review label itself triggers a run, so
+    # adding some other label to an already-labelled PR does not re-review it.
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'llm-review')
+      && (github.event.action != 'labeled' || github.event.label.name == 'llm-review')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # Only the FIRST review on a PR is adversarial. Every later push gets a
+      # narrow follow-up that checks whether a real P1 is still open, instead
+      # of a fresh hunt that finds a narrower edge case each round and never
+      # converges (#127 took six full rounds, 2026-09-24).
+      - name: Pick the review mode
+        id: mode
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          prior=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq '[.[] | select(.user.login == "claude[bot]")] | length' | awk '{s+=$1} END {print s+0}')
+          if [ "$prior" -eq 0 ]; then mode=first; else mode=followup; fi
+          echo "earlier Claude reviews on this PR: $prior, mode: $mode"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # The review posts ONE comment on the PR.
+          #
+          # The previous setup allowed only the inline-comment tool, so the
+          # review could not read the diff: every run hit its first read as a
+          # permission denial, found nothing, and exited green with no output
+          # (1 to 32 denials on every run checked, 2026-09-23). Reading the PR
+          # and the checkout is what a review needs, so those are allowed, and
+          # the only write is the one comment.
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+            REVIEW MODE: ${{ steps.mode.outputs.mode }}
+
+            Follow ONLY the section for the review mode above.
+
+            ## If REVIEW MODE is first
+
+            Review this pull request for real defects: logic errors, broken
+            edge cases, wrong units or decimals on amounts, error handling that
+            hides a failure, and changes that contradict the rules in CLAUDE.md
+            and AGENTS.md. Skip style, naming and formatting.
+
+            Read the change with `gh pr view` and `gh pr diff`, and read the
+            surrounding code in the checkout before deciding anything is a
+            defect. Only report what you have confirmed in the code.
+
+            List each finding as file:line, what is wrong, and what input makes
+            it fail, most severe first, each marked P1, P2 or P3. If you found
+            nothing, say so in one line.
+
+            ## If REVIEW MODE is followup
+
+            This PR was already reviewed, and the author pushed changes since.
+            This is NOT a fresh review. Do not hunt for new edge cases.
+
+            1. Read the earlier review comments with
+               `gh pr view ${{ github.event.pull_request.number }} --comments`.
+            2. Read the current change with `gh pr diff`, and the checkout.
+            3. Report only a P1 that is still present in the current code: an
+               earlier finding the fix did not actually address, or a defect the
+               new changes introduced. P1 means one of: funds lost or sent to the
+               wrong place, a user-facing flow that breaks for normal users, a
+               privacy or security regression, or a crash. Anything less (a rare
+               corner case, a test gap, hardening, style) is not a P1 and is not
+               reported in this mode.
+
+            If no P1 remains, the whole comment is one line: "No P1 remaining."
+            Otherwise start with "P1 still open:" and give file:line, what is
+            wrong, and what input makes it fail.
+
+            ## Either mode
+
+            When you are done, post exactly one comment on the PR with
+            `gh pr comment ${{ github.event.pull_request.number }} --body-file <file>`.
+            Keep it short. No em dashes.
+          # `opus` is the CLI alias for the latest Opus, so a new release is
+          # picked up without editing this file. It costs more per run than the
+          # action's Sonnet default, which the opt-in label above keeps bounded.
+          claude_args: >-
+            --model opus
+            --allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Read,Grep,Glob,Write"

@@ -1,0 +1,98 @@
+# A real cross-chain private swap through the UI, run by hand: shielded ETH
+# on Optimism into a shielded USDC note on Base (E2E_DEST_CHAIN=1 for Ethereum), on the STAGING deployments.
+#
+# It waits for the destination and fails if the bridge paid the fallback address
+# instead of depositing, which is the failure a source-leg check cannot see.
+# Runs from account A (the journey's funder) with ETH on OP; see
+# scripts/e2e/crosschain-swap.ts for amounts and the funds check.
+# Required secrets: E2E_ACCOUNT_A_PK, EXPO_PUBLIC_ALCHEMY_KEY.
+name: e2e-crosschain
+
+#
+# It spends REAL mainnet funds from E2E_ACCOUNT_A_PK (a 0.001 ETH swap on OP, and
+# sometimes a shield and a bridge), so it never runs on its own: only by hand,
+# `gh workflow run e2e-crosschain.yml --ref <branch>` (review of #133). Running
+# it on pull_request let anyone able to push a branch run changed script code
+# with that key.
+on:
+  workflow_dispatch:
+
+# One run at a time: every run spends account A's shielded notes on OP, so two
+# at once would select the same note. Separate from the Sepolia journey, whose
+# notes are on another chain. Queue, never cancel, so a submitted swap is
+# always followed to its verdict.
+concurrency:
+  group: e2e-crosschain-accounts
+  cancel-in-progress: false
+
+jobs:
+  swap:
+    runs-on: ubuntu-latest
+    # Above the script's worst case end to end, so the script's own timeouts
+    # report the failure, not GitHub: gas bridge 20 + shield 5 + approval 45 +
+    # review 3 + submit 10 + delivery 30 = 113 min, plus build and setup.
+    timeout-minutes: 150
+    steps:
+      # lfs: true is load-bearing, as in e2e-sepolia.yml: without it the
+      # circuit artifacts are pointer files and every proof fails.
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Write .env for the web build
+        run: |
+          cat > .env <<EOF
+          EXPO_PUBLIC_TEST_MODE=true
+          # Staging carries the OP and mainnet deployments this run swaps between.
+          EXPO_PUBLIC_APP_ENV=staging
+          TEST_MODE=true
+          EXPO_PUBLIC_ASP_URL=https://api-dev.0xbow.io
+          EXPO_PUBLIC_ALCHEMY_KEY=${{ secrets.EXPO_PUBLIC_ALCHEMY_KEY }}
+          # Test only: route this run's cross-chain quotes through Across.
+          EXPO_PUBLIC_LIFI_ALLOW_BRIDGES=across
+          EOF
+
+      - name: Install the browser
+        run: bunx playwright install --with-deps chromium
+
+      - name: Build the proof workers
+        run: |
+          bun ./scripts/build-snarkjs-worker.mjs
+          bun ./scripts/build-witness-worker.mjs
+
+      # Port 8081 is the only local origin the relayer's CORS allows.
+      - name: Start the app
+        run: |
+          nohup bunx expo start --web --port 8081 > /tmp/expo.log 2>&1 &
+          for i in $(seq 1 120); do
+            if curl -sf http://localhost:8081/ >/dev/null; then echo "up after ${i}0s"; exit 0; fi
+            sleep 5
+          done
+          echo "dev server never came up"; tail -80 /tmp/expo.log; exit 1
+
+      - name: Swap shielded ETH on OP into shielded USDC on Base
+        env:
+          E2E_PK: ${{ secrets.E2E_ACCOUNT_A_PK }}
+          EXPO_PUBLIC_ALCHEMY_KEY: ${{ secrets.EXPO_PUBLIC_ALCHEMY_KEY }}
+          PROBE_URL: http://localhost:8081
+        run: bun scripts/e2e/crosschain-swap.ts
+
+      - name: Screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-crosschain-screenshots
+          path: .e2e-shots/*.png
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Metro log
+        if: failure()
+        run: tail -200 /tmp/expo.log || true

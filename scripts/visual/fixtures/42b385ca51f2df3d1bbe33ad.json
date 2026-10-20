@@ -1,0 +1,8 @@
+{
+ "method": "POST",
+ "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+ "requestBody": "{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"eth_blockNumber\"}",
+ "status": 200,
+ "contentType": "application/json",
+ "body": "eyJqc29ucnBjIjoiMi4wIiwiaWQiOjE0LCJyZXN1bHQiOiIweGFjZGVjNSJ9"
+}

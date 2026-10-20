@@ -1,0 +1,461 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* @generated theme-vars start — bun scripts/generate-theme-vars.ts; DO NOT EDIT this region by hand */
+/*
+ * Per-variant token vars. The scheme authority (components/theme-provider.tsx
+ * + the app/+html.tsx pre-paint bootstrap) puts exactly one `pp-v{N}` class
+ * (plus `dark` when applicable) on <html>; RN-Web Modals portal to
+ * document.body, which is why the classes live on the root element.
+ * Base block = scheme-invariant vars + light colors; the .dark block only
+ * carries values that differ from light (the base still applies to the
+ * same element, so identical values are inherited, not repeated).
+ */
+.pp-v1 {
+  --pp-font-bold: Geist_700Bold;
+  --pp-fontw-bold: normal;
+  --pp-font-medium: Geist_500Medium;
+  --pp-fontw-medium: normal;
+  --pp-font-mono: Geist_500Medium;
+  --pp-fontw-mono: normal;
+  --pp-font-regular: Geist_400Regular;
+  --pp-fontw-regular: normal;
+  --pp-font-sans: Geist_400Regular;
+  --pp-fontw-sans: normal;
+  --pp-font-sans-bold: Geist_700Bold;
+  --pp-fontw-sans-bold: normal;
+  --pp-font-sans-medium: Geist_500Medium;
+  --pp-fontw-sans-medium: normal;
+  --pp-font-sans-semi-bold: Geist_600SemiBold;
+  --pp-fontw-sans-semi-bold: normal;
+  --pp-font-semi-bold: Geist_600SemiBold;
+  --pp-fontw-semi-bold: normal;
+  --pp-radius-card: 24px;
+  --pp-radius-control: 12px;
+  --pp-radius-inner: 16px;
+  --pp-radius-pill: 999px;
+  --pp-cr-6-4: 6px;
+  --pp-cr-8-4: 8px;
+  --pp-cr-12-4: 12px;
+  --pp-cr-14-0: 14px;
+  --pp-cr-14-4: 14px;
+  --pp-cr-16-4: 16px;
+  --pp-cr-20-4: 20px;
+  --pp-cr-999-4: 999px;
+  --pp-accent: #E8A33D;
+  --pp-accent-soft: #FAEDD7;
+  --pp-background: #FAF7F1;
+  --pp-background-secondary: #F1EDE4;
+  --pp-border: #E5DFD2;
+  --pp-border-light: #EEE9DE;
+  --pp-button-primary: #19B091;
+  --pp-button-primary-pressed: #13937A;
+  --pp-button-primary-text: #0C1F19;
+  --pp-card-background: #FFFFFF;
+  --pp-danger: #B3402F;
+  --pp-danger-bg: #F9E7E2;
+  --pp-icon: #6E685D;
+  --pp-menu-background: #FFFFFF;
+  --pp-overlay: rgba(28, 26, 22, 0.45);
+  --pp-primary: #0E6B5C;
+  --pp-primary-pressed: #0A5447;
+  --pp-primary-soft: #E3F0EB;
+  --pp-success: #1E7F4F;
+  --pp-success-bg: #E2F2E7;
+  --pp-surface-raised: #FFFDF9;
+  --pp-tab-icon-default: #8E887C;
+  --pp-tab-icon-selected: #0E6B5C;
+  --pp-text: #1C1A16;
+  --pp-text-light: #6E685D;
+  --pp-text-muted: #8E887C;
+  --pp-text-secondary: #57534B;
+  --pp-tint: #0E6B5C;
+  --pp-warning: #A8650E;
+  --pp-warning-bg: #FAEDD7;
+  --pp-hue-dai-fg: #C8901A;
+  --pp-hue-dai-bg: rgba(245, 172, 55, 0.14);
+  --pp-hue-eth-fg: #4E6FB0;
+  --pp-hue-eth-bg: rgba(98, 126, 234, 0.12);
+  --pp-hue-usdc-fg: #2775CA;
+  --pp-hue-usdc-bg: rgba(39, 117, 202, 0.12);
+  --pp-hue-usdt-fg: #26A17B;
+  --pp-hue-usdt-bg: rgba(38, 161, 123, 0.12);
+  --pp-glow: #0E6B5C;
+}
+.pp-v1.dark {
+  --pp-accent-soft: #33270F;
+  --pp-background: #16140F;
+  --pp-background-secondary: #221F18;
+  --pp-border: #2E2A21;
+  --pp-border-light: #262218;
+  --pp-card-background: #1E1B14;
+  --pp-danger: #E06A52;
+  --pp-danger-bg: #371E17;
+  --pp-icon: #B5AFA3;
+  --pp-menu-background: #28241B;
+  --pp-overlay: rgba(8, 7, 5, 0.6);
+  --pp-primary: #19B091;
+  --pp-primary-pressed: #13937A;
+  --pp-primary-soft: #15302A;
+  --pp-success: #3FBF7F;
+  --pp-success-bg: #15302A;
+  --pp-surface-raised: #262218;
+  --pp-tab-icon-default: #857F73;
+  --pp-tab-icon-selected: #19B091;
+  --pp-text: #F0EDE6;
+  --pp-text-light: #A39D90;
+  --pp-text-muted: #857F73;
+  --pp-text-secondary: #B5AFA3;
+  --pp-tint: #19B091;
+  --pp-warning: #E8A33D;
+  --pp-warning-bg: #33270F;
+  --pp-glow: #19B091;
+}
+.pp-v2 {
+  --pp-font-bold: Geist_700Bold;
+  --pp-fontw-bold: normal;
+  --pp-font-medium: Geist_500Medium;
+  --pp-fontw-medium: normal;
+  --pp-font-mono: Geist_500Medium;
+  --pp-fontw-mono: normal;
+  --pp-font-regular: Geist_400Regular;
+  --pp-fontw-regular: normal;
+  --pp-font-sans: Geist_400Regular;
+  --pp-fontw-sans: normal;
+  --pp-font-sans-bold: Geist_700Bold;
+  --pp-fontw-sans-bold: normal;
+  --pp-font-sans-medium: Geist_500Medium;
+  --pp-fontw-sans-medium: normal;
+  --pp-font-sans-semi-bold: Geist_600SemiBold;
+  --pp-fontw-sans-semi-bold: normal;
+  --pp-font-semi-bold: Geist_600SemiBold;
+  --pp-fontw-semi-bold: normal;
+  --pp-radius-card: 24px;
+  --pp-radius-control: 12px;
+  --pp-radius-inner: 16px;
+  --pp-radius-pill: 999px;
+  --pp-cr-6-4: 6px;
+  --pp-cr-8-4: 8px;
+  --pp-cr-12-4: 12px;
+  --pp-cr-14-0: 14px;
+  --pp-cr-14-4: 14px;
+  --pp-cr-16-4: 16px;
+  --pp-cr-20-4: 20px;
+  --pp-cr-999-4: 999px;
+  --pp-accent: #5700C9;
+  --pp-accent-soft: #EDE2FF;
+  --pp-background: #F4F8F9;
+  --pp-background-secondary: #E9EFF0;
+  --pp-border: #DCE4E6;
+  --pp-border-light: #E8EEEF;
+  --pp-button-primary: #00daf8;
+  --pp-button-primary-pressed: #00B7D0;
+  --pp-button-primary-text: #001f25;
+  --pp-card-background: #FFFFFF;
+  --pp-danger: #BA1A1A;
+  --pp-danger-bg: #FFDAD6;
+  --pp-icon: #56605F;
+  --pp-menu-background: #FFFFFF;
+  --pp-overlay: rgba(13, 17, 18, 0.45);
+  --pp-primary: #006877;
+  --pp-primary-pressed: #00525E;
+  --pp-primary-soft: #D6F6FF;
+  --pp-success: #007D8C;
+  --pp-success-bg: #D6F6FF;
+  --pp-surface-raised: #FDFEFE;
+  --pp-tab-icon-default: #6F797B;
+  --pp-tab-icon-selected: #006877;
+  --pp-text: #171C1D;
+  --pp-text-light: #56605F;
+  --pp-text-muted: #6F797B;
+  --pp-text-secondary: #3F484A;
+  --pp-tint: #006877;
+  --pp-warning: #A8650E;
+  --pp-warning-bg: #FAEDD7;
+  --pp-hue-dai-fg: #F5C36B;
+  --pp-hue-dai-bg: rgba(245, 172, 55, 0.18);
+  --pp-hue-eth-fg: #d1bcff;
+  --pp-hue-eth-bg: rgba(112, 0, 255, 0.18);
+  --pp-hue-usdc-fg: #6FB3F2;
+  --pp-hue-usdc-bg: rgba(39, 117, 202, 0.18);
+  --pp-hue-usdt-fg: #4FD1A5;
+  --pp-hue-usdt-bg: rgba(38, 161, 123, 0.18);
+  --pp-glow: #006877;
+}
+.pp-v2.dark {
+  --pp-accent: #d1bcff;
+  --pp-accent-soft: rgba(112, 0, 255, 0.15);
+  --pp-background: #131313;
+  --pp-background-secondary: #1C1B1B;
+  --pp-border: rgba(255, 255, 255, 0.08);
+  --pp-border-light: rgba(255, 255, 255, 0.05);
+  --pp-card-background: #201F1F;
+  --pp-danger: #FFB4AB;
+  --pp-danger-bg: rgba(147, 0, 10, 0.30);
+  --pp-icon: #BAC9CD;
+  --pp-menu-background: #2A2929;
+  --pp-overlay: rgba(5, 5, 5, 0.70);
+  --pp-primary: #00daf8;
+  --pp-primary-pressed: #00B7D0;
+  --pp-primary-soft: rgba(0, 218, 248, 0.10);
+  --pp-success: #00e0ff;
+  --pp-success-bg: rgba(0, 224, 255, 0.10);
+  --pp-surface-raised: #2A2A2A;
+  --pp-tab-icon-default: #859397;
+  --pp-tab-icon-selected: #00daf8;
+  --pp-text: #E5E2E1;
+  --pp-text-light: #A6B2B5;
+  --pp-text-muted: #859397;
+  --pp-text-secondary: #BAC9CD;
+  --pp-tint: #00daf8;
+  --pp-warning: #E8A33D;
+  --pp-warning-bg: rgba(232, 163, 61, 0.14);
+  --pp-glow: #00daf8;
+}
+.pp-v3 {
+  --pp-font-bold: Geist_700Bold;
+  --pp-fontw-bold: normal;
+  --pp-font-medium: Geist_500Medium;
+  --pp-fontw-medium: normal;
+  --pp-font-mono: Geist_500Medium;
+  --pp-fontw-mono: normal;
+  --pp-font-regular: Geist_400Regular;
+  --pp-fontw-regular: normal;
+  --pp-font-sans: Geist_400Regular;
+  --pp-fontw-sans: normal;
+  --pp-font-sans-bold: Geist_700Bold;
+  --pp-fontw-sans-bold: normal;
+  --pp-font-sans-medium: Geist_500Medium;
+  --pp-fontw-sans-medium: normal;
+  --pp-font-sans-semi-bold: Geist_600SemiBold;
+  --pp-fontw-sans-semi-bold: normal;
+  --pp-font-semi-bold: Geist_600SemiBold;
+  --pp-fontw-semi-bold: normal;
+  --pp-radius-card: 24px;
+  --pp-radius-control: 12px;
+  --pp-radius-inner: 16px;
+  --pp-radius-pill: 999px;
+  --pp-cr-6-4: 6px;
+  --pp-cr-8-4: 8px;
+  --pp-cr-12-4: 12px;
+  --pp-cr-14-0: 14px;
+  --pp-cr-14-4: 14px;
+  --pp-cr-16-4: 16px;
+  --pp-cr-20-4: 20px;
+  --pp-cr-999-4: 999px;
+  --pp-accent: #5700C9;
+  --pp-accent-soft: #EFE6FF;
+  --pp-background: #F2F8FA;
+  --pp-background-secondary: #E4EEF1;
+  --pp-border: #D8E5E8;
+  --pp-border-light: #E6EFF1;
+  --pp-button-primary: #D2F4FB;
+  --pp-button-primary-pressed: #A5EEFF;
+  --pp-button-primary-text: #001f25;
+  --pp-card-background: #FFFFFF;
+  --pp-danger: #BA1A1A;
+  --pp-danger-bg: #FFDAD6;
+  --pp-icon: #526164;
+  --pp-menu-background: #FFFFFF;
+  --pp-overlay: rgba(9, 14, 15, 0.45);
+  --pp-primary: #006E80;
+  --pp-primary-pressed: #005662;
+  --pp-primary-soft: rgba(0, 110, 128, 0.12);
+  --pp-success: #006B78;
+  --pp-success-bg: rgba(0, 125, 140, 0.10);
+  --pp-surface-raised: #FBFEFF;
+  --pp-tab-icon-default: #69787C;
+  --pp-tab-icon-selected: #006E80;
+  --pp-text: #101718;
+  --pp-text-light: #526164;
+  --pp-text-muted: #69787C;
+  --pp-text-secondary: #3D4A4D;
+  --pp-tint: #006E80;
+  --pp-warning: #A8650E;
+  --pp-warning-bg: #FAEDD7;
+  --pp-hue-dai-fg: #9A6A0B;
+  --pp-hue-dai-bg: rgba(245, 172, 55, 0.16);
+  --pp-hue-eth-fg: #5700C9;
+  --pp-hue-eth-bg: rgba(112, 0, 255, 0.10);
+  --pp-hue-usdc-fg: #2775CA;
+  --pp-hue-usdc-bg: rgba(39, 117, 202, 0.10);
+  --pp-hue-usdt-fg: #1B7A5E;
+  --pp-hue-usdt-bg: rgba(38, 161, 123, 0.12);
+  --pp-glow: #006877;
+}
+.pp-v3.dark {
+  --pp-accent: #d1bcff;
+  --pp-accent-soft: rgba(112, 0, 255, 0.15);
+  --pp-background: #131313;
+  --pp-background-secondary: #1C1B1B;
+  --pp-border: rgba(255, 255, 255, 0.08);
+  --pp-border-light: rgba(255, 255, 255, 0.05);
+  --pp-card-background: #201F1F;
+  --pp-danger: #FFB4AB;
+  --pp-danger-bg: rgba(147, 0, 10, 0.30);
+  --pp-icon: #BAC9CD;
+  --pp-menu-background: #2A2929;
+  --pp-overlay: rgba(5, 5, 5, 0.70);
+  --pp-primary: #00daf8;
+  --pp-primary-pressed: #00B7D0;
+  --pp-primary-soft: rgba(0, 218, 248, 0.10);
+  --pp-success: #00e0ff;
+  --pp-success-bg: rgba(0, 224, 255, 0.10);
+  --pp-surface-raised: #2A2A2A;
+  --pp-tab-icon-default: #859397;
+  --pp-tab-icon-selected: #00daf8;
+  --pp-text: #E5E2E1;
+  --pp-text-light: #A6B2B5;
+  --pp-text-muted: #859397;
+  --pp-text-secondary: #BAC9CD;
+  --pp-tint: #00daf8;
+  --pp-warning: #E8A33D;
+  --pp-warning-bg: rgba(232, 163, 61, 0.14);
+  --pp-hue-dai-fg: #F5C36B;
+  --pp-hue-dai-bg: rgba(245, 172, 55, 0.18);
+  --pp-hue-eth-fg: #d1bcff;
+  --pp-hue-eth-bg: rgba(112, 0, 255, 0.18);
+  --pp-hue-usdc-fg: #6FB3F2;
+  --pp-hue-usdc-bg: rgba(39, 117, 202, 0.18);
+  --pp-hue-usdt-fg: #4FD1A5;
+  --pp-hue-usdt-bg: rgba(38, 161, 123, 0.18);
+  --pp-glow: #00daf8;
+}
+.pp-v4 {
+  --pp-font-bold: Geist_700Bold;
+  --pp-fontw-bold: normal;
+  --pp-font-medium: Geist_500Medium;
+  --pp-fontw-medium: normal;
+  --pp-font-mono: Geist_500Medium;
+  --pp-fontw-mono: normal;
+  --pp-font-regular: Geist_400Regular;
+  --pp-fontw-regular: normal;
+  --pp-font-sans: Geist_400Regular;
+  --pp-fontw-sans: normal;
+  --pp-font-sans-bold: Geist_700Bold;
+  --pp-fontw-sans-bold: normal;
+  --pp-font-sans-medium: Geist_500Medium;
+  --pp-fontw-sans-medium: normal;
+  --pp-font-sans-semi-bold: Geist_600SemiBold;
+  --pp-fontw-sans-semi-bold: normal;
+  --pp-font-semi-bold: Geist_600SemiBold;
+  --pp-fontw-semi-bold: normal;
+  --pp-radius-card: 24px;
+  --pp-radius-control: 12px;
+  --pp-radius-inner: 16px;
+  --pp-radius-pill: 999px;
+  --pp-cr-6-4: 6px;
+  --pp-cr-8-4: 8px;
+  --pp-cr-12-4: 12px;
+  --pp-cr-14-0: 14px;
+  --pp-cr-14-4: 14px;
+  --pp-cr-16-4: 16px;
+  --pp-cr-20-4: 20px;
+  --pp-cr-999-4: 999px;
+  --pp-accent: #8A7B63;
+  --pp-accent-soft: rgba(138, 123, 99, 0.10);
+  --pp-background: #FAFAF9;
+  --pp-background-secondary: #F0F0EF;
+  --pp-border: #E4E4E2;
+  --pp-border-light: #EEEEEC;
+  --pp-button-primary: #161616;
+  --pp-button-primary-pressed: #383838;
+  --pp-button-primary-text: #FFFFFF;
+  --pp-card-background: #FFFFFF;
+  --pp-danger: #B3402F;
+  --pp-danger-bg: #F9E7E2;
+  --pp-icon: #6E6E6E;
+  --pp-menu-background: #FFFFFF;
+  --pp-overlay: rgba(20, 20, 20, 0.40);
+  --pp-primary: #161616;
+  --pp-primary-pressed: #000000;
+  --pp-primary-soft: rgba(0, 0, 0, 0.05);
+  --pp-success: #006877;
+  --pp-success-bg: rgba(0, 218, 248, 0.12);
+  --pp-surface-raised: #FCFCFB;
+  --pp-tab-icon-default: #8A8A8A;
+  --pp-tab-icon-selected: #161616;
+  --pp-text: #161616;
+  --pp-text-light: #6E6E6E;
+  --pp-text-muted: #8A8A8A;
+  --pp-text-secondary: #4A4A4A;
+  --pp-tint: #161616;
+  --pp-warning: #9A6A0B;
+  --pp-warning-bg: #F7EFDD;
+  --pp-hue-dai-fg: #8A6D2F;
+  --pp-hue-dai-bg: rgba(138, 109, 47, 0.10);
+  --pp-hue-eth-fg: #5A6B8C;
+  --pp-hue-eth-bg: rgba(90, 107, 140, 0.08);
+  --pp-hue-usdc-fg: #3A6EA5;
+  --pp-hue-usdc-bg: rgba(58, 110, 165, 0.08);
+  --pp-hue-usdt-fg: #2E7D5B;
+  --pp-hue-usdt-bg: rgba(46, 125, 91, 0.08);
+  --pp-glow: #9A9A96;
+}
+.pp-v4.dark {
+  --pp-accent: #D8CFC0;
+  --pp-accent-soft: rgba(216, 207, 192, 0.12);
+  --pp-background: #0E0E0E;
+  --pp-background-secondary: #161616;
+  --pp-border: rgba(255, 255, 255, 0.07);
+  --pp-border-light: rgba(255, 255, 255, 0.04);
+  --pp-button-primary: #F2F2F2;
+  --pp-button-primary-pressed: #D9D9D9;
+  --pp-button-primary-text: #111111;
+  --pp-card-background: #202020;
+  --pp-danger: #E08D85;
+  --pp-danger-bg: rgba(224, 141, 133, 0.12);
+  --pp-icon: #B3B3B3;
+  --pp-menu-background: #2A2A2A;
+  --pp-overlay: rgba(0, 0, 0, 0.70);
+  --pp-primary: #EDEDED;
+  --pp-primary-pressed: #CFCFCF;
+  --pp-primary-soft: rgba(255, 255, 255, 0.08);
+  --pp-success: #7BE8FA;
+  --pp-success-bg: rgba(0, 218, 248, 0.16);
+  --pp-surface-raised: #222222;
+  --pp-tab-icon-default: #7A7A7A;
+  --pp-tab-icon-selected: #EDEDED;
+  --pp-text: #F2F2F2;
+  --pp-text-light: #999999;
+  --pp-text-muted: #7A7A7A;
+  --pp-text-secondary: #B3B3B3;
+  --pp-tint: #EDEDED;
+  --pp-warning: #D9B36A;
+  --pp-warning-bg: rgba(217, 179, 106, 0.12);
+  --pp-hue-dai-fg: #D5BE93;
+  --pp-hue-dai-bg: rgba(220, 180, 110, 0.10);
+  --pp-hue-eth-fg: #A9B4C9;
+  --pp-hue-eth-bg: rgba(140, 160, 200, 0.12);
+  --pp-hue-usdc-fg: #9FBEDD;
+  --pp-hue-usdc-bg: rgba(100, 150, 200, 0.10);
+  --pp-hue-usdt-fg: #9CCDB9;
+  --pp-hue-usdt-bg: rgba(80, 170, 140, 0.10);
+  --pp-glow: #FFFFFF;
+}
+
+/*
+ * font-pp-* weight channel (IBM Plex Mono removal): the system stack has
+ * no baked weight the way the retired per-weight faces did, so each alias
+ * utility also carries its weight var. This CANNOT ride the Tailwind
+ * fontFamily tuple: Tailwind 3.4 silently drops every second-element key
+ * except fontFeatureSettings/fontVariationSettings (GLM review, critical
+ * finding). The var fallback is the reference variant's weight, for
+ * contexts where the variant vars are not applied (native pre-P1).
+ * NOTE: these rules are emitted AFTER the core utilities, so on an
+ * element combining font-pp-* with a core weight utility (font-bold)
+ * the alias weight wins; no such combination exists in the app today.
+ */
+@layer utilities {
+  .font-pp-bold { font-weight: var(--pp-fontw-bold, normal); }
+  .font-pp-medium { font-weight: var(--pp-fontw-medium, normal); }
+  .font-pp-mono { font-weight: var(--pp-fontw-mono, normal); }
+  .font-pp-regular { font-weight: var(--pp-fontw-regular, normal); }
+  .font-pp-sans { font-weight: var(--pp-fontw-sans, normal); }
+  .font-pp-sans-bold { font-weight: var(--pp-fontw-sans-bold, normal); }
+  .font-pp-sans-medium { font-weight: var(--pp-fontw-sans-medium, normal); }
+  .font-pp-sans-semi-bold { font-weight: var(--pp-fontw-sans-semi-bold, normal); }
+  .font-pp-semi-bold { font-weight: var(--pp-fontw-semi-bold, normal); }
+}
+/* @generated theme-vars end */

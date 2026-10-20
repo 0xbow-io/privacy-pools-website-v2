@@ -1,0 +1,949 @@
+{
+  "version": 1,
+  "plan": "workflows/plans/nativewind-port.md (rev. 2)",
+  "auditTool": "scripts/audit-nativewind.ts",
+  "auditToolVersion": 2,
+  "description": "Ownership manifest for the NativeWind port: every file the audit tool flags as carrying a styling signal (StyleSheet usage, style sinks, visual color props, or raw color literals in static styles) is assigned to exactly one migration phase. scripts/nativewind-manifest.test.ts asserts this list stays complete against the live audit output.",
+  "groundTruth": {
+    "filesWithStyleSheetCreate": 0,
+    "filesWithAnyStylingSignal": 131,
+    "portedFiles": 144,
+    "note": "LIVE COUNTERS — updated by every porting commit (scripts/nativewind-manifest.test.ts pins the audit to this snapshot). Pre-port baseline: 90 files call StyleSheet.create (the plan's ground truth; liquid-light + vault-backdrop reference StyleSheet.absoluteFill only) and 110 files carry any styling signal, including SVG/icon color-prop-only files and spread-only forwarded-style contracts (haptic-tab, external-link — flagged via the audit's jsx-spread sink). Files gain \"ported\": true as their phase lands; a ported file may drop out of the styled set entirely."
+  },
+  "outOfScope": [
+    {
+      "path": "components/sdk-provider.tsx",
+      "reason": "No styles — verified by the audit tool (zero StyleSheet refs, zero style sinks, zero color props). Out of styling scope per plan."
+    }
+  ],
+  "phases": {
+    "F-C": "Theme foundation — components whose palette literals fold into the pure token source (theme-data.ts).",
+    "P1": "Shared primitives — components/ui/* plus small shared pieces; caller-last legacy style contracts retained.",
+    "P2": "Vertical surface slices — dependency-complete: classic-pools → vault-home → portfolio → ecosystem-payroll → app-routes.",
+    "P3": "Modal subwaves — subwave 1 = simple providers; subwaves 2-7 = money providers one rendered state at a time, in plan order deposit → transfer → withdraw → swap → ragequit → payment-request."
+  },
+  "counts": {
+    "F-C/theme-infra": 2,
+    "P1/shared-primitives": 54,
+    "P2/app-routes": 27,
+    "P2/classic-pools": 14,
+    "P2/ecosystem-payroll": 9,
+    "P2/portfolio": 7,
+    "P2/vault-home": 15,
+    "P3/subwave-1": 12,
+    "P3/subwave-2": 1,
+    "P3/subwave-3": 1,
+    "P3/subwave-4": 1,
+    "P3/subwave-5": 1,
+    "P3/subwave-6": 1,
+    "P3/subwave-7": 1
+  },
+  "files": [
+    {
+      "path": "app/_layout.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "app/(tabs)/_layout.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "app/(tabs)/ecosystem.tsx",
+      "phase": "P2",
+      "slice": "ecosystem-payroll",
+      "ported": true
+    },
+    {
+      "path": "app/explore/[section].tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "app/import-note/[encoded].tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "app/modal.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "app/passkey-spike.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "app/pay/[encoded].tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "app/receive/[encoded].tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "app/transactions.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "app/wallet-receive.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "app/wallet-settings.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "components/account-key-export-modal.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "components/account-key-to-mobile-modal.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "components/mobile-account-keys-provider.native.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "components/passkey-sign-in-panel.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "components/account-key-sign-in.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "components/account-recovery-modal-provider.tsx",
+      "phase": "P3",
+      "subwave": 1,
+      "ported": true
+    },
+    {
+      "path": "components/accounting-modal-provider.tsx",
+      "phase": "P3",
+      "subwave": 1,
+      "ported": true
+    },
+    {
+      "path": "components/viewing-key-modal-provider.tsx",
+      "phase": "P3",
+      "subwave": 1,
+      "ported": true
+    },
+    {
+      "path": "components/audit-export-modal-provider.tsx",
+      "phase": "P3",
+      "subwave": 1,
+      "ported": true
+    },
+    {
+      "path": "components/custom-rpc-modal-provider.tsx",
+      "phase": "P3",
+      "subwave": 1,
+      "ported": true
+    },
+    {
+      "path": "components/audit-verify-view.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "components/chain-selector.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/debug-provider.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/deposit-modal-provider.tsx",
+      "phase": "P3",
+      "subwave": 2,
+      "money": "deposit",
+      "ported": true
+    },
+    {
+      "path": "components/external-link.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/global-sheets.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/haptic-tab.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "components/hello-wave.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/home/action-hub.tsx",
+      "phase": "P2",
+      "slice": "vault-home",
+      "ported": true
+    },
+    {
+      "path": "components/home/shield-yield-summary.tsx",
+      "phase": "P2",
+      "slice": "vault-home",
+      "ported": true
+    },
+    {
+      "path": "components/home/activity-drawer.tsx",
+      "phase": "P2",
+      "slice": "vault-home",
+      "ported": true
+    },
+    {
+      "path": "components/home/explore-panel.tsx",
+      "phase": "P2",
+      "slice": "vault-home",
+      "ported": true
+    },
+    {
+      "path": "components/home/explore-tab-bar.tsx",
+      "phase": "P2",
+      "slice": "vault-home",
+      "ported": true
+    },
+    {
+      "path": "components/home/front-page.tsx",
+      "phase": "P2",
+      "slice": "vault-home",
+      "ported": true
+    },
+    {
+      "path": "components/home/hero-heading.tsx",
+      "phase": "P2",
+      "slice": "vault-home",
+      "ported": true
+    },
+    {
+      "path": "components/home/landing-illustrations.tsx",
+      "phase": "P2",
+      "slice": "vault-home",
+      "ported": true
+    },
+    {
+      "path": "components/home/home-pools.tsx",
+      "phase": "P2",
+      "slice": "vault-home",
+      "ported": true
+    },
+    {
+      "path": "components/home/home-screen.tsx",
+      "phase": "P2",
+      "slice": "vault-home",
+      "ported": true
+    },
+    {
+      "path": "components/home/latest-activity.tsx",
+      "phase": "P2",
+      "slice": "vault-home",
+      "ported": true
+    },
+    {
+      "path": "components/home/liquid-light.tsx",
+      "phase": "F-C",
+      "slice": "theme-infra"
+    },
+    {
+      "path": "components/home/stat-band.tsx",
+      "phase": "P2",
+      "slice": "vault-home",
+      "ported": true
+    },
+    {
+      "path": "components/home/vault-backdrop.tsx",
+      "phase": "F-C",
+      "slice": "theme-infra"
+    },
+    {
+      "path": "components/import-note-modal-provider.tsx",
+      "phase": "P3",
+      "subwave": 1,
+      "ported": true
+    },
+    {
+      "path": "components/keystore-registration-modal-provider.tsx",
+      "phase": "P3",
+      "subwave": 1,
+      "ported": true
+    },
+    {
+      "path": "components/legal/legal-document-view.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "components/mobile-more-drawer.tsx",
+      "phase": "P2",
+      "slice": "vault-home",
+      "ported": true
+    },
+    {
+      "path": "components/home/registration-status-card.tsx",
+      "phase": "P2",
+      "slice": "vault-home",
+      "ported": true
+    },
+    {
+      "path": "components/home/finish-setup-banner.tsx",
+      "phase": "P2",
+      "slice": "vault-home",
+      "ported": true
+    },
+    {
+      "path": "components/newsletter-modal.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "components/op-shell.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/origin-proof-modal-provider.tsx",
+      "phase": "P3",
+      "subwave": 1,
+      "ported": true
+    },
+    {
+      "path": "components/parallax-scroll-view.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/payment-request-backup-modal-provider.tsx",
+      "phase": "P3",
+      "subwave": 1,
+      "ported": true
+    },
+    {
+      "path": "components/payment-request-modal-provider.tsx",
+      "phase": "P3",
+      "subwave": 7,
+      "money": "payment-request",
+      "ported": true
+    },
+    {
+      "path": "components/payment-requests-card.tsx",
+      "phase": "P2",
+      "slice": "classic-pools",
+      "ported": true
+    },
+    {
+      "path": "components/payment-requests-modal-provider.tsx",
+      "phase": "P3",
+      "subwave": 1,
+      "ported": true
+    },
+    {
+      "path": "components/payroll/dashboard.tsx",
+      "phase": "P2",
+      "slice": "ecosystem-payroll",
+      "ported": true
+    },
+    {
+      "path": "components/payroll/employee-form-modal.tsx",
+      "phase": "P2",
+      "slice": "ecosystem-payroll",
+      "ported": true
+    },
+    {
+      "path": "components/payroll/employees.tsx",
+      "phase": "P2",
+      "slice": "ecosystem-payroll",
+      "ported": true
+    },
+    {
+      "path": "components/payroll/history.tsx",
+      "phase": "P2",
+      "slice": "ecosystem-payroll",
+      "ported": true
+    },
+    {
+      "path": "components/payroll/payroll-shell.tsx",
+      "phase": "P2",
+      "slice": "ecosystem-payroll",
+      "ported": true
+    },
+    {
+      "path": "components/payroll/run.tsx",
+      "phase": "P2",
+      "slice": "ecosystem-payroll",
+      "ported": true
+    },
+    {
+      "path": "components/payroll/settings.tsx",
+      "phase": "P2",
+      "slice": "ecosystem-payroll",
+      "ported": true
+    },
+    {
+      "path": "components/payroll/ui.tsx",
+      "phase": "P2",
+      "slice": "ecosystem-payroll",
+      "ported": true
+    },
+    {
+      "path": "components/pools/blockchain-filter.tsx",
+      "phase": "P2",
+      "slice": "classic-pools",
+      "ported": true
+    },
+    {
+      "path": "components/pools/chain-selector.tsx",
+      "phase": "P2",
+      "slice": "classic-pools",
+      "ported": true
+    },
+    {
+      "path": "components/pools/my-privacy-pools.tsx",
+      "phase": "P2",
+      "slice": "classic-pools",
+      "ported": true
+    },
+    {
+      "path": "components/pools/pool-action-panel.tsx",
+      "phase": "P2",
+      "slice": "classic-pools",
+      "ported": true
+    },
+    {
+      "path": "components/pools/pool-page-accounts-grid.tsx",
+      "phase": "P2",
+      "slice": "classic-pools",
+      "ported": true
+    },
+    {
+      "path": "components/pools/pool-page-content.tsx",
+      "phase": "P2",
+      "slice": "classic-pools",
+      "ported": true
+    },
+    {
+      "path": "components/pools/pool-page-header.tsx",
+      "phase": "P2",
+      "slice": "classic-pools",
+      "ported": true
+    },
+    {
+      "path": "components/pools/pool-page-shared.tsx",
+      "phase": "P2",
+      "slice": "classic-pools",
+      "ported": true
+    },
+    {
+      "path": "components/pools/pool-page-stats-card.tsx",
+      "phase": "P2",
+      "slice": "classic-pools",
+      "ported": true
+    },
+    {
+      "path": "components/pools/pool-page-transactions-table.tsx",
+      "phase": "P2",
+      "slice": "classic-pools",
+      "ported": true
+    },
+    {
+      "path": "components/pools/transaction-row-menu.tsx",
+      "phase": "P2",
+      "slice": "classic-pools",
+      "ported": true
+    },
+    {
+      "path": "components/pools/transaction-row-menu.web.tsx",
+      "phase": "P2",
+      "slice": "classic-pools",
+      "ported": true
+    },
+    {
+      "path": "components/pools/transactions.tsx",
+      "phase": "P2",
+      "slice": "classic-pools",
+      "ported": true
+    },
+    {
+      "path": "components/portfolio/all-positions.tsx",
+      "phase": "P2",
+      "slice": "portfolio",
+      "ported": true
+    },
+    {
+      "path": "components/portfolio/portfolio-net-value.tsx",
+      "phase": "P2",
+      "slice": "portfolio",
+      "ported": true
+    },
+    {
+      "path": "components/portfolio/portfolio-page-content.tsx",
+      "phase": "P2",
+      "slice": "portfolio",
+      "ported": true
+    },
+    {
+      "path": "components/portfolio/portfolio-stats.tsx",
+      "phase": "P2",
+      "slice": "portfolio",
+      "ported": true
+    },
+    {
+      "path": "components/ragequit-modal-provider.tsx",
+      "phase": "P3",
+      "subwave": 6,
+      "money": "ragequit",
+      "ported": true
+    },
+    {
+      "path": "components/seed-derivation-modal-provider.tsx",
+      "phase": "P3",
+      "subwave": 1,
+      "ported": true
+    },
+    {
+      "path": "components/smart-wallet/onboarding-overlay.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "components/stats/stats-asset-cards.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "components/stats/stats-summary.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "components/swap-modal-provider.tsx",
+      "phase": "P3",
+      "subwave": 5,
+      "money": "swap",
+      "ported": true
+    },
+    {
+      "path": "components/themed-text.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/themed-view.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/toast-provider.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/transfer-modal-provider.tsx",
+      "phase": "P3",
+      "subwave": 3,
+      "money": "transfer",
+      "ported": true
+    },
+    {
+      "path": "components/ui/bottom-sheet.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/card.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/chain-logo.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/chart-grid.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/chart-line-active.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/chart-line.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/citrea-icon.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/bnb-icon.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/collapsible.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/copy-address.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/dashed-ellipse.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/empty-state.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/ethereum-icon.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/flow-progress.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/link-leave-confirm.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/footer.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/header.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/icon-symbol.ios.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/icon-symbol.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/logo.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/version-switch.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/hover-hint.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/explorer-privacy-hint.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/fee-warning.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/yield/yield-position-hint.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/modal-icons.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/notification-center.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/pair-arrow.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/privacy-score.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/skeleton.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/sui-connect-button.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/sui-icon.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/sui-token-mark.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/swap-pair-card.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/token-icons.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/token-network-icon.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/token-network-selector.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/token-select-sheet.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/wallet-connect-modal-provider.tsx",
+      "phase": "P3",
+      "subwave": 1,
+      "ported": true
+    },
+    {
+      "path": "components/withdraw-modal-provider.tsx",
+      "phase": "P3",
+      "subwave": 4,
+      "money": "withdraw",
+      "ported": true
+    },
+    {
+      "path": "components/yield/full-withdrawal-guard.tsx",
+      "phase": "P2",
+      "slice": "portfolio",
+      "ported": true
+    },
+    {
+      "path": "components/yield/yield-block.tsx",
+      "phase": "P2",
+      "slice": "portfolio",
+      "ported": true
+    },
+    {
+      "path": "components/yield/yield-positions-card.tsx",
+      "phase": "P2",
+      "slice": "portfolio",
+      "ported": true
+    },
+    {
+      "path": "hooks/use-sheet-drag.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/stellar-wallet-option.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/stellar-icon.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/stellar-pay-request.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/card/origami-card.native.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "components/card/card-screen.native.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "components/ui/modal.native.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "components/native-theme-root.native.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "components/consolidation-shell.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/consolidation-panel.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    }
+  ],
+  "evidenceFixtures": [
+    {
+      "path": "scripts/visual/gallery-app/_layout.tsx",
+      "owner": "F-B",
+      "reason": "Harness router-root layout for the NativeWind compatibility gallery; hosts the GALLERY-02 startup cssInterop(Animated.View) registration probe (?animReg=1).",
+      "lifecycle": "Lives for the duration of the port as visual-harness ground truth; retire together with the gallery after P5 sign-off or fold into permanent QA tooling."
+    },
+    {
+      "path": "scripts/visual/gallery-app/index.tsx",
+      "owner": "F-B",
+      "reason": "The compatibility gallery: equivalence cells render every risky styling pattern twice (StyleSheet vs className) so the harness can diff the idioms; its StyleSheet halves are the fixture, not migration debt.",
+      "lifecycle": "Lives for the duration of the port as visual-harness ground truth; retire together with the gallery after P5 sign-off or fold into permanent QA tooling."
+    },
+    {
+      "path": "scripts/visual/gallery-src/floating-probe.tsx",
+      "owner": "F-B",
+      "reason": "Native no-op half of the platform-split Floating UI specimen (Floating UI is DOM-only).",
+      "lifecycle": "Tied to gallery-app/index.tsx."
+    },
+    {
+      "path": "scripts/visual/gallery-src/floating-probe.web.tsx",
+      "owner": "F-B",
+      "reason": "Web half of the platform-split Floating UI specimen; also the CONFIG-02 web proof that raw-DOM border-* + border-solid renders with preflight OFF.",
+      "lifecycle": "Tied to gallery-app/index.tsx."
+    }
+  ]
+}

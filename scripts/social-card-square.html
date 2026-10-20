@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+{{fonts}}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: Geist, sans-serif; -webkit-font-smoothing: antialiased; }
+article { position: relative; width: 1200px; height: 1200px; overflow: hidden; padding: 88px; display: flex; flex-direction: column; background: #fff; color: #161616; }
+h1, p { margin: 0; }
+.copy { width: 100%; }
+h1 { font-size: 152px; font-weight: 500; line-height: 1.08; letter-spacing: -5px; white-space: nowrap; }
+.sub { margin-top: 32px; font-size: 72px; line-height: 1.2; letter-spacing: -1.6px; color: #454545; white-space: nowrap; }
+.actions { margin-top: auto; display: flex; flex-direction: column; gap: 18px; }
+.action { height: 176px; padding: 32px; display: flex; align-items: center; justify-content: space-between; gap: 24px; border-radius: 28px; font-size: 64px; font-weight: 500; letter-spacing: -1.6px; }
+.swap { background: #e4edff; color: #205bea; }
+.yield { background: #def3e9; color: #19865e; }
+.send { background: #ece3ff; color: #8050d4; }
+.action svg { width: 80px; height: 80px; flex: none; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+</style>
+</head>
+<body>
+<article>
+  <div class="copy">
+    <h1>{{headline}}</h1>
+    <p class="sub">{{support}}</p>
+  </div>
+  <div class="actions">
+    <div class="action swap">
+      <span>Swapping.</span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16m-5-5 5 5-5 5M20 17H4m5-5-5 5 5 5"/></svg>
+    </div>
+    <div class="action yield">
+      <span>Earning yield.</span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 18 6-6 4 4 8-10M14 6h7v7"/></svg>
+    </div>
+    <div class="action send">
+      <span>Sending.</span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 18-7-7 18-3-8-8-3Zm8 3L21 3"/></svg>
+    </div>
+  </div>
+</article>
+</body>
+</html>

@@ -1,0 +1,98 @@
+{
+  "generatedBy": "scripts/visual/perf-baseline.ts",
+  "commit": "5311462",
+  "date": "2026-07-22",
+  "web": {
+    "js": {
+      "files": 14,
+      "totalBytes": 19676508,
+      "totalGzipBytes": 6549089
+    },
+    "css": {
+      "files": 0,
+      "totalBytes": 0,
+      "totalGzipBytes": 0
+    },
+    "largestAssets": [
+      {
+        "file": "_expo/static/js/web/index-532b339d87f811aa20f1bcb98740dc25.js",
+        "bytes": 12643295,
+        "gzipBytes": 4108001
+      },
+      {
+        "file": "witness-worker.js",
+        "bytes": 3428877,
+        "gzipBytes": 1507177
+      },
+      {
+        "file": "_expo/static/js/web/index-872f9d3fb8d3456d17d9588af93fa42c.js",
+        "bytes": 1281828,
+        "gzipBytes": 376175
+      },
+      {
+        "file": "_expo/static/js/web/index-4890ec760db49413c38d7f657b9e9154.js",
+        "bytes": 1166148,
+        "gzipBytes": 323412
+      },
+      {
+        "file": "snarkjs-worker.js",
+        "bytes": 591816,
+        "gzipBytes": 88516
+      },
+      {
+        "file": "_expo/static/js/web/index-b8f1f58507484456e76e1a982ec7307c.js",
+        "bytes": 492051,
+        "gzipBytes": 125722
+      },
+      {
+        "file": "_expo/static/js/web/__common-20d38174f772310748580090123ae994.js",
+        "bytes": 42748,
+        "gzipBytes": 9993
+      },
+      {
+        "file": "_expo/static/js/web/index-72f884b3b5bcd07bbfd7da97dbe0138d.js",
+        "bytes": 16251,
+        "gzipBytes": 3966
+      },
+      {
+        "file": "_expo/static/js/web/__expo-metro-runtime-1f8f5d3ca6b7f58204d51e14506d73fb.js",
+        "bytes": 3810,
+        "gzipBytes": 1575
+      },
+      {
+        "file": "_expo/static/js/web/liquid-light-4a5bac4bc38af8f66768c605d994a6ba.js",
+        "bytes": 3147,
+        "gzipBytes": 1523
+      }
+    ],
+    "envInlining": {
+      "yieldEnabledNameAbsent": true,
+      "aspUrlNameAbsent": true
+    }
+  },
+  "ios": {
+    "failed": "Command failed: /tmp/ppv2-nativewind/node_modules/.bin/expo export -p ios --output-dir /tmp/ppv2-nativewind/.perf-export-ios\nError: Unable to resolve module fs/promises from /tmp/ppv2-nativewind/node_modules/@privacy-pools-v2/sdk/dist/index.js: fs/promises could not be found within the project or in these directories:\n  node_modules\n  node_modules\n\u001b[0m \u001b[90m  8 |\u001b[39m \u001b[36mimport\u001b[39m { \u001b[33mLeanIMT\u001b[39m } \u001b[36mfrom\u001b[39m \u001b[32m'@zk-kit/lean-imt'\u001b[39m\u001b[33m;\u001b[39m\n \u001b[90m  9 |\u001b[39m \u001b[36mimport\u001b[39m { buildPoseidon } \u001b[36mfrom\u001b[39m \u001b[32m'circomlibjs'\u001b[39m\u001b[33m;\u001b[39m\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 10 |\u001b[39m \u001b[36mimport\u001b[39m { readFile\u001b[33m,\u001b[39m mkdir\u001b[33m,\u001b[39m writeFile\u001b[33m,\u001b[39m rename } \u001b[36mfrom\u001b[39m \u001b[32m'fs/promises'\u001b[39m\u001b[33m;\u001b[39m\n \u001b[90m    |\u001b[39m                                                     \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 11 |\u001b[39m \u001b[36mimport\u001b[39m { join\u001b[33m,\u001b[39m dirname } \u001b[36mfrom\u001b[39m \u001b[32m'path'\u001b[39m\u001b[33m;\u001b[39m\n \u001b[90m 12 |\u001b[39m \u001b[36mimport\u001b[39m z7\u001b[33m,\u001b[39m { z } \u001b[36mfrom\u001b[39m \u001b[32m'zod'\u001b[39m\u001b[33m;\u001b[39m\n \u001b[90m 13 |\u001b[39m \u001b[36mimport\u001b[39m { createClient\u001b[33m,\u001b[39m getContractCallsQuote\u001b[33m,\u001b[39m getQuote } \u001b[36mfrom\u001b[39m \u001b[32m'@lifi/sdk'\u001b[39m\u001b[33m;\u001b[39m\u001b[0m\n\nImport stack:"
+  },
+  "android": {
+    "failed": "Command failed: /tmp/ppv2-nativewind/node_modules/.bin/expo export -p android --output-dir /tmp/ppv2-nativewind/.perf-export-android\nError: Unable to resolve module fs/promises from /tmp/ppv2-nativewind/node_modules/@privacy-pools-v2/sdk/dist/index.js: fs/promises could not be found within the project or in these directories:\n  node_modules\n  node_modules\n\u001b[0m \u001b[90m  8 |\u001b[39m \u001b[36mimport\u001b[39m { \u001b[33mLeanIMT\u001b[39m } \u001b[36mfrom\u001b[39m \u001b[32m'@zk-kit/lean-imt'\u001b[39m\u001b[33m;\u001b[39m\n \u001b[90m  9 |\u001b[39m \u001b[36mimport\u001b[39m { buildPoseidon } \u001b[36mfrom\u001b[39m \u001b[32m'circomlibjs'\u001b[39m\u001b[33m;\u001b[39m\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 10 |\u001b[39m \u001b[36mimport\u001b[39m { readFile\u001b[33m,\u001b[39m mkdir\u001b[33m,\u001b[39m writeFile\u001b[33m,\u001b[39m rename } \u001b[36mfrom\u001b[39m \u001b[32m'fs/promises'\u001b[39m\u001b[33m;\u001b[39m\n \u001b[90m    |\u001b[39m                                                     \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 11 |\u001b[39m \u001b[36mimport\u001b[39m { join\u001b[33m,\u001b[39m dirname } \u001b[36mfrom\u001b[39m \u001b[32m'path'\u001b[39m\u001b[33m;\u001b[39m\n \u001b[90m 12 |\u001b[39m \u001b[36mimport\u001b[39m z7\u001b[33m,\u001b[39m { z } \u001b[36mfrom\u001b[39m \u001b[32m'zod'\u001b[39m\u001b[33m;\u001b[39m\n \u001b[90m 13 |\u001b[39m \u001b[36mimport\u001b[39m { createClient\u001b[33m,\u001b[39m getContractCallsQuote\u001b[33m,\u001b[39m getQuote } \u001b[36mfrom\u001b[39m \u001b[32m'@lifi/sdk'\u001b[39m\u001b[33m;\u001b[39m\u001b[0m\n\nImpor"
+  },
+  "latency": {
+    "protocol": "dev server 8081, fixture replay, frozen clock; startup = nav→app-ready marker; modal = Connect-Wallet click → picker text",
+    "startupMsRuns": [
+      1991,
+      1917,
+      1821,
+      1750,
+      1679
+    ],
+    "startupMsMedian": 1821,
+    "modalOpenMsRuns": [
+      519,
+      454,
+      434,
+      337,
+      354
+    ],
+    "modalOpenMsMedian": 434
+  }
+}

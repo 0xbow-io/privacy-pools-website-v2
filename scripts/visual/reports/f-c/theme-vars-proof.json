@@ -1,0 +1,91 @@
+{
+  "generatedBy": "scripts/visual/verify-theme-vars.ts",
+  "date": "2026-07-23T14:21:29.679Z",
+  "commit": "d0c98eb",
+  "baseUrl": "http://127.0.0.1:8081",
+  "surface": "/portfolio (unported)",
+  "policy": "ALL generated --pp-* vars asserted per set (not a sample); colors compared canonically (lightningcss minifies literals — identical channels, alpha within 1/255), fonts/lengths literally",
+  "failures": 0,
+  "sets": [
+    {
+      "set": "v0-light",
+      "rootClasses": "pp-v0",
+      "classesOk": true,
+      "varsChecked": 59,
+      "mismatches": [],
+      "verdict": "ok"
+    },
+    {
+      "set": "v0-dark",
+      "rootClasses": "pp-v0 dark",
+      "classesOk": true,
+      "varsChecked": 59,
+      "mismatches": [],
+      "verdict": "ok"
+    },
+    {
+      "set": "v1-light",
+      "rootClasses": "pp-v1",
+      "classesOk": true,
+      "varsChecked": 59,
+      "mismatches": [],
+      "verdict": "ok"
+    },
+    {
+      "set": "v1-dark",
+      "rootClasses": "pp-v1 dark",
+      "classesOk": true,
+      "varsChecked": 59,
+      "mismatches": [],
+      "verdict": "ok"
+    },
+    {
+      "set": "v2-light",
+      "rootClasses": "pp-v2",
+      "classesOk": true,
+      "varsChecked": 59,
+      "mismatches": [],
+      "verdict": "ok"
+    },
+    {
+      "set": "v2-dark",
+      "rootClasses": "pp-v2 dark",
+      "classesOk": true,
+      "varsChecked": 59,
+      "mismatches": [],
+      "verdict": "ok"
+    },
+    {
+      "set": "v3-light",
+      "rootClasses": "pp-v3",
+      "classesOk": true,
+      "varsChecked": 59,
+      "mismatches": [],
+      "verdict": "ok"
+    },
+    {
+      "set": "v3-dark",
+      "rootClasses": "pp-v3 dark",
+      "classesOk": true,
+      "varsChecked": 59,
+      "mismatches": [],
+      "verdict": "ok"
+    },
+    {
+      "set": "v4-light",
+      "rootClasses": "pp-v4",
+      "classesOk": true,
+      "varsChecked": 59,
+      "mismatches": [],
+      "verdict": "ok"
+    },
+    {
+      "set": "v4-dark",
+      "rootClasses": "pp-v4 dark",
+      "classesOk": true,
+      "varsChecked": 59,
+      "mismatches": [],
+      "verdict": "ok"
+    }
+  ]
+}

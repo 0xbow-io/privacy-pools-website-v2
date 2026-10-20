@@ -1,0 +1,611 @@
+[
+ {
+  "key": "bdb20d3db36b939a7f0d0a1a",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/assets-stats",
+  "status": 200,
+  "bytes": 3632
+ },
+ {
+  "key": "57f6b7b686236200f7662262",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/deposits-larger-than?amount=10000000000000000",
+  "status": 200,
+  "bytes": 177
+ },
+ {
+  "key": "1803d26150db1b950287e67d",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/event-snapshot/payload?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a",
+  "status": 200,
+  "bytes": 1049250
+ },
+ {
+  "key": "668927912e745d71f32c107c",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329095",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "906ba4b61b38312f21d186fc",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329101",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "50707cb640d583c7e21f9895",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329119",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "d6533b59f6a8aad190047864",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329123",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "ed575661f657057abab93741",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329128",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "1bea687d2b897ba474b46b51",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329132",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "45159f0e05b64b29f494e697",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329146",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "fa40327ccc931d88079c0951",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329151",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "f0c5c634ba1747bb281e7fb6",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329155",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "2d963fc95518db3c591a33c3",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329159",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "52ee5e74da845382673cb6e8",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329163",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "7b91269975785d7cbc882b59",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329168",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "8ed2e0638eb33fd35efd65a1",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329172",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "85514b3d49c976c597c166f8",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329176",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "e01a1ef8d2198b56edfcaeea",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329181",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "3d4c438d1916a4f1b3657d75",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329185",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "15575f39f075ab0dfe12309d",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329190",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "65215d4ae4693376c59a1fe1",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329195",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "c67fd20db09426e6c2cd7ee9",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329199",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "7dcc811abee75b26c0302a19",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329203",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "b1e2017cd1715d128bdb96f9",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329210",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "d97b784c463b27eb22539bf8",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329214",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "5cd9b934e576887c78dd9d72",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329218",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "f9e91ab82403120605aa3d82",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/11155111/public/note-events?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a&since=10932483&until=11329221",
+  "status": 200,
+  "bytes": 482037
+ },
+ {
+  "key": "39a6027dbcb6f65acc8b5804",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/association-set/leaves?chainId=11155111&entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a",
+  "status": 200,
+  "bytes": 196635
+ },
+ {
+  "key": "a2cd8a88cbb36d97752b73ff",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/global/public/entrypoints",
+  "status": 200,
+  "bytes": 619
+ },
+ {
+  "key": "3028e4cbba2bf85cd4460ec1",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/global/public/events?perPage=100&chainId=11155111&address=0xd3f927692168c7912189d95B1fB073eB0394dB15&includeRagequit=true&entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a",
+  "status": 200,
+  "bytes": 1265
+ },
+ {
+  "key": "77484174e4b84909658d3fce",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/global/public/events?perPage=50&chainId=11155111&includeRagequit=true",
+  "status": 200,
+  "bytes": 29011
+ },
+ {
+  "key": "9a666bc8853e560872d214fe",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/global/public/statistics",
+  "status": 200,
+  "bytes": 577
+ },
+ {
+  "key": "19862f06d623e5968678c52e",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/global/public/token-prices",
+  "status": 200,
+  "bytes": 498
+ },
+ {
+  "key": "2c2358ee20a8a35960b43486",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/global/public/token-prices?chainId=11155111",
+  "status": 200,
+  "bytes": 432
+ },
+ {
+  "key": "a4823975e9cf492edabadec8",
+  "method": "GET",
+  "url": "https://api-dev.0xbow.io/labels/17549916362570153262362569800166128954239041070675203468413831396475892840871/status?entrypoint=0xeb3e3961008952348445513e418ad6f43c23ca9a",
+  "status": 200,
+  "bytes": 47
+ },
+ {
+  "key": "cea79220938d93d230337daf",
+  "method": "GET",
+  "url": "https://api.g.alchemy.com/prices/v1/ALCHEMY_KEY_REDACTED/tokens/by-symbol?symbols=ETH&symbols=USDC&symbols=USDT&symbols=SUI",
+  "status": 200,
+  "bytes": 440
+ },
+ {
+  "key": "0141c2c050730d125f2c1fa9",
+  "method": "POST",
+  "url": "https://eth-mainnet.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 294
+ },
+ {
+  "key": "0a498cbfb9f20f774fed5721",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "0b038fbf274557ea50bf187a",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "0cd578b988b7ae5a6db77fdb",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 103
+ },
+ {
+  "key": "175250fc43fe315ce12f95af",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "178555ad51a10c2e24bb0782",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "1a44ecfb5793f6841bfe78b2",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "1da951211692db907316415e",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 104
+ },
+ {
+  "key": "2a2d18779fd5cd8179cce65b",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 103
+ },
+ {
+  "key": "2ea7ac848ba3d0f7eb5e485d",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "30886f0b568bce76fa168a44",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "31ed1265c1dbb7f3388db5fe",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "42b385ca51f2df3d1bbe33ad",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 45
+ },
+ {
+  "key": "44bf8d7aea7b5767d74c55be",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "4996714c4d30313e65ddca9c",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "55d145439162a246336ffdab",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "57c4cba33d01b27ba1cc0751",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "5b68db31183ce87b82ab37b9",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 486
+ },
+ {
+  "key": "5b71767344b53d2b29fb820d",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "6458061e28cb671f398d6f6c",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 102
+ },
+ {
+  "key": "67325a3a32223f5606ffefff",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "68a6e09b474122a2bf8ea7df",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 103
+ },
+ {
+  "key": "6b8ab6ee9f24dbe0439fd90c",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "7651a0d07c353eab96581f95",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "791e09a47ef9e6478f7564c1",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "7cd891040e826714aa5bd8e1",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 1446
+ },
+ {
+  "key": "7f5eb40042f2542d8d606f42",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 15523
+ },
+ {
+  "key": "80914250279eb2c2dc987a2d",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "85ed813c6b500c058fb4b081",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "863365d30d6a54d16322cbef",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "86d1b9bf967cc98c6c0ad52b",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "8aa2fc980dbb8de3374edc2d",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "94e1303772c40c8c46ad7693",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 103
+ },
+ {
+  "key": "a91dd9391d264f89e32573a8",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "b198fc9bdfa6164025a58f9e",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 102
+ },
+ {
+  "key": "bcc129320cff1a30f3d3ca7b",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "c136fb58589299453bc2bb6d",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "c500f7e383ba9911f3e26936",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "c86740c79c50e7a9b3ea11af",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "d01bf70047a2f9c08af546a8",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "d6fb02aae18a8c5b011d6a53",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "d9d795d121e42f33f4cdf31b",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "e0d1b40602f2e1dff8057456",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "e172073b622e211baf3f22bb",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "e5512384337a369ec7801045",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "e67c02cc9eaa4b7347e0a7e0",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "ea36cdda28976d1a3cb78a48",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 103
+ },
+ {
+  "key": "eeda148297c4568db8d69bf2",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "f4a797af730f94e94ec05a07",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 37
+ },
+ {
+  "key": "f7d1cb92731e2916da62c462",
+  "method": "POST",
+  "url": "https://eth-sepolia.g.alchemy.com/v2/ALCHEMY_KEY_REDACTED",
+  "status": 200,
+  "bytes": 44
+ },
+ {
+  "key": "cff357b85fe0e3dd4e99ab95",
+  "method": "GET",
+  "url": "https://registry.npmjs.org/@lifi/sdk/latest",
+  "status": 200,
+  "bytes": 2057
+ }
+]

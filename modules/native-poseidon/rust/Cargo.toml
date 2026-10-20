@@ -1,0 +1,44 @@
+[package]
+name = "native-poseidon"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+description = "circomlib's Poseidon over BN254 (1 to 16 inputs), for the ppv2 mobile app on Android and iOS"
+publish = false
+
+[lib]
+name = "native_poseidon"
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+# arkworks' BN254 scalar field (Montgomery arithmetic, the same field crate
+# light-poseidon builds on). The Poseidon rounds and constants are circomlibjs's
+# own (src/constants.bin, generated from poseidon_constants_opt.json).
+ark-bn254 = { version = "=0.5.0", default-features = false, features = ["scalar_field"] }
+ark-ff = { version = "=0.5.0", default-features = false }
+uniffi = { version = "=0.29.5" }
+thiserror = "=2.0.17"
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+bindgen = ["uniffi/cli"]
+
+[dev-dependencies]
+serde_json = "=1.0.145"
+# An independent circom-compatible implementation (arities 1 to 12 only),
+# checked against ours in tests/vectors.rs.
+light-poseidon = "=0.4.0"
+
+[profile.release]
+lto = true
+codegen-units = 1
+# Not "z" (the anon-rpc harness's size profile): field arithmetic is the whole
+# workload, "z" made it 1.7x slower, and 3 costs 14 KB on arm64. 770 KB of
+# the library is circomlib's constants, which no profile shrinks.
+opt-level = 3
+strip = true

@@ -1,0 +1,8 @@
+{
+ "method": "GET",
+ "url": "https://api-dev.0xbow.io/global/public/entrypoints",
+ "status": 200,
+ "contentType": "application/json; charset=utf-8",
+ "body": "H4sIAAAAAAACA43Pu26UQQwF4HeZeoNsj8ce/yUdfUQBopjx2ErE3pQsEijad0ckDWEbOp8j2fr8Us6n0/65bF9fXqdPq2wFy674w3g8viXE1hD/lHG8PP06nx6Pl7IV+FnRMJbgdBMU0azSBcBHImtC98xBrVnZvd7+PH7s3xZ5hUck9TaIfUAzs67Qu3q3BkxacanPsiv5dDp83J/8e9kQTFCVrru/rPyf1pg1qgkCdGtUuTO3hjUY+1iSXJ2qDxs3VrBpvCqSAhpZ16ZDPGKqIRoR9JbqgDdW4975nbW9twLdMrv77BBJSSM1kgKRUaTrWGuKzLp4pKMFSCrkglUjG8Y0R8y84de5mhrnmI3Ju62qwwd2MU4Uk0qCE1qGk2AuMHdyZuE1YkTqP29pJ6uAFVHl+m1XfPhD3D8e4vkyDueyFQKSO9A7bPegG8MG+kGpfynX3zAGiVJrAgAA",
+ "bodyEncoding": "gzip-base64"
+}

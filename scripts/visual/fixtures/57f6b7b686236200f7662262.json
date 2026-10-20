@@ -1,0 +1,8 @@
+{
+ "method": "GET",
+ "url": "https://api-dev.0xbow.io/11155111/public/deposits-larger-than?amount=10000000000000000",
+ "status": 200,
+ "contentType": "application/json; charset=utf-8",
+ "body": "H4sIAAAAAAACA42NwQrCMBBE/2XOi7SCluZW8Ee2MpRgTGp3I4L47xIvgiff8c2DeYIpLnFOPHEtFt0QhoPAi2v6qnEUrNzOzK4LW7IbjgK9lpodAX33AwRqxrZ1D/4JBJvmC0K/F9Qcb5XT58GmudzZ/OsNEpgsWLEAAAA=",
+ "bodyEncoding": "gzip-base64"
+}

@@ -1,0 +1,135 @@
+{
+  "generatedBy": "scripts/visual/perf-baseline.ts",
+  "commit": "b8a16ad+fixround",
+  "date": "2026-07-23",
+  "web": {
+    "js": {
+      "files": 14,
+      "totalBytes": 19693707,
+      "totalGzipBytes": 6550728
+    },
+    "css": {
+      "files": 1,
+      "totalBytes": 6202,
+      "totalGzipBytes": 1199,
+      "ruleCount": 50,
+      "distinctClassSelectors": 37
+    },
+    "largestAssets": [
+      {
+        "file": "_expo/static/js/web/index-a539af2dd59f82e940dfa66e29f8f20d.js",
+        "bytes": 12660490,
+        "gzipBytes": 4109613
+      },
+      {
+        "file": "witness-worker.js",
+        "bytes": 3428877,
+        "gzipBytes": 1507177
+      },
+      {
+        "file": "_expo/static/js/web/index-98012275a4adf04dbe314edbbf5ea583.js",
+        "bytes": 1281829,
+        "gzipBytes": 376177
+      },
+      {
+        "file": "_expo/static/js/web/index-75996bd962b8c6a7d89ca880fc1c864e.js",
+        "bytes": 1166149,
+        "gzipBytes": 323437
+      },
+      {
+        "file": "snarkjs-worker.js",
+        "bytes": 591816,
+        "gzipBytes": 88516
+      },
+      {
+        "file": "_expo/static/js/web/index-3f399a4e2354b1e635cb147df48e8d69.js",
+        "bytes": 492051,
+        "gzipBytes": 125718
+      },
+      {
+        "file": "_expo/static/js/web/__common-ff5a1b9543d08ae0ff0bd89b9bae2917.js",
+        "bytes": 42748,
+        "gzipBytes": 9995
+      },
+      {
+        "file": "_expo/static/js/web/index-0b9c647ac409fc68ccec361de2eb0bb1.js",
+        "bytes": 16251,
+        "gzipBytes": 3970
+      },
+      {
+        "file": "_expo/static/css/web-77fd6778ab81d825a3f48a5ac9a9fe16.css",
+        "bytes": 6202,
+        "gzipBytes": 1199
+      },
+      {
+        "file": "_expo/static/js/web/__expo-metro-runtime-1f8f5d3ca6b7f58204d51e14506d73fb.js",
+        "bytes": 3810,
+        "gzipBytes": 1575
+      }
+    ],
+    "envInlining": {
+      "yieldEnabledNameAbsent": true,
+      "aspUrlNameAbsent": true
+    },
+    "prodCssAssertions": {
+      "preflightAbsent": true,
+      "gallerySelectorsAbsent": true
+    },
+    "prodGalleryAssertions": {
+      "galleryMarkerAbsent": true,
+      "galleryRouteAbsent": true
+    }
+  },
+  "ios": {
+    "failed": "Command failed: /tmp/ppv2-nativewind/node_modules/.bin/expo export -p ios --output-dir /tmp/ppv2-nativewind/.perf-export-ios\nError: Unable to resolve module fs/promises from /tmp/ppv2-nativewind/node_modules/@privacy-pools-v2/sdk/dist/index.js: fs/promises could not be found within the project or in these directories:\n  node_modules\n  node_modules\n\u001b[0m \u001b[90m  8 |\u001b[39m \u001b[36mimport\u001b[39m { \u001b[33mLeanIMT\u001b[39m } \u001b[36mfrom\u001b[39m \u001b[32m'@zk-kit/lean-imt'\u001b[39m\u001b[33m;\u001b[39m\n \u001b[90m  9 |\u001b[39m \u001b[36mimport\u001b[39m { buildPoseidon } \u001b[36mfrom\u001b[39m \u001b[32m'circomlibjs'\u001b[39m\u001b[33m;\u001b[39m\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 10 |\u001b[39m \u001b[36mimport\u001b[39m { readFile\u001b[33m,\u001b[39m mkdir\u001b[33m,\u001b[39m writeFile\u001b[33m,\u001b[39m rename } \u001b[36mfrom\u001b[39m \u001b[32m'fs/promises'\u001b[39m\u001b[33m;\u001b[39m\n \u001b[90m    |\u001b[39m                                                     \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 11 |\u001b[39m \u001b[36mimport\u001b[39m { join\u001b[33m,\u001b[39m dirname } \u001b[36mfrom\u001b[39m \u001b[32m'path'\u001b[39m\u001b[33m;\u001b[39m\n \u001b[90m 12 |\u001b[39m \u001b[36mimport\u001b[39m z7\u001b[33m,\u001b[39m { z } \u001b[36mfrom\u001b[39m \u001b[32m'zod'\u001b[39m\u001b[33m;\u001b[39m\n \u001b[90m 13 |\u001b[39m \u001b[36mimport\u001b[39m { createClient\u001b[33m,\u001b[39m getContractCallsQuote\u001b[33m,\u001b[39m getQuote } \u001b[36mfrom\u001b[39m \u001b[32m'@lifi/sdk'\u001b[39m\u001b[33m;\u001b[39m\u001b[0m\n\nImport stack:"
+  },
+  "android": {
+    "failed": "Command failed: /tmp/ppv2-nativewind/node_modules/.bin/expo export -p android --output-dir /tmp/ppv2-nativewind/.perf-export-android\nError: Unable to resolve module fs/promises from /tmp/ppv2-nativewind/node_modules/@privacy-pools-v2/sdk/dist/index.js: fs/promises could not be found within the project or in these directories:\n  node_modules\n  node_modules\n\u001b[0m \u001b[90m  8 |\u001b[39m \u001b[36mimport\u001b[39m { \u001b[33mLeanIMT\u001b[39m } \u001b[36mfrom\u001b[39m \u001b[32m'@zk-kit/lean-imt'\u001b[39m\u001b[33m;\u001b[39m\n \u001b[90m  9 |\u001b[39m \u001b[36mimport\u001b[39m { buildPoseidon } \u001b[36mfrom\u001b[39m \u001b[32m'circomlibjs'\u001b[39m\u001b[33m;\u001b[39m\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 10 |\u001b[39m \u001b[36mimport\u001b[39m { readFile\u001b[33m,\u001b[39m mkdir\u001b[33m,\u001b[39m writeFile\u001b[33m,\u001b[39m rename } \u001b[36mfrom\u001b[39m \u001b[32m'fs/promises'\u001b[39m\u001b[33m;\u001b[39m\n \u001b[90m    |\u001b[39m                                                     \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 11 |\u001b[39m \u001b[36mimport\u001b[39m { join\u001b[33m,\u001b[39m dirname } \u001b[36mfrom\u001b[39m \u001b[32m'path'\u001b[39m\u001b[33m;\u001b[39m\n \u001b[90m 12 |\u001b[39m \u001b[36mimport\u001b[39m z7\u001b[33m,\u001b[39m { z } \u001b[36mfrom\u001b[39m \u001b[32m'zod'\u001b[39m\u001b[33m;\u001b[39m\n \u001b[90m 13 |\u001b[39m \u001b[36mimport\u001b[39m { createClient\u001b[33m,\u001b[39m getContractCallsQuote\u001b[33m,\u001b[39m getQuote } \u001b[36mfrom\u001b[39m \u001b[32m'@lifi/sdk'\u001b[39m\u001b[33m;\u001b[39m\u001b[0m\n\nImpor"
+  },
+  "prodLatency": {
+    "protocol": "production export served statically on 127.0.0.1:18084; fixture replay + frozen clock; cold = fresh context nav→app-ready; warm = second nav same context; modal = Connect-Wallet click → picker text. PRODUCT metric (css-interop render work is production runtime).",
+    "coldMsRuns": [
+      909,
+      879,
+      947,
+      971,
+      1009
+    ],
+    "coldMsMedian": 947,
+    "warmMsRuns": [
+      512,
+      504,
+      558,
+      539,
+      573
+    ],
+    "warmMsMedian": 539,
+    "modalOpenMsRuns": [
+      304,
+      329,
+      330,
+      354,
+      365
+    ],
+    "modalOpenMsMedian": 330
+  },
+  "devLatency": {
+    "protocol": "dev server 8081, fixture replay, frozen clock; startup = nav→app-ready marker; modal = Connect-Wallet click → picker text. DX metric — do NOT compare against product budgets.",
+    "startupMsRuns": [
+      1952,
+      1885,
+      1930,
+      1922,
+      1907
+    ],
+    "startupMsMedian": 1922,
+    "modalOpenMsRuns": [
+      556,
+      538,
+      505,
+      498,
+      505
+    ],
+    "modalOpenMsMedian": 505
+  }
+}

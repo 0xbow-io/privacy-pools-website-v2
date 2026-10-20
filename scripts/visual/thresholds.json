@@ -1,0 +1,209 @@
+{
+  "generatedBy": "scripts/visual/calibrate.ts",
+  "calibratedAt": "2026-07-22",
+  "runs": 3,
+  "shots": 148,
+  "pairsMeasured": 296,
+  "measured": {
+    "maxChannelDeltaObserved": 194,
+    "maxChangedPixelsAtZeroTolerance": 1516,
+    "maxChangedPixelsAtChosenTolerance": 1328,
+    "noisyShotsAtChosenTolerance": [
+      {
+        "name": "v3-dark-drawer-activity-desktop.png",
+        "changed": 1328
+      },
+      {
+        "name": "v3-light-drawer-activity-desktop.png",
+        "changed": 1315
+      },
+      {
+        "name": "v1-light-drawer-pools-desktop.png",
+        "changed": 14
+      },
+      {
+        "name": "v2-dark-drawer-activity-desktop.png",
+        "changed": 14
+      },
+      {
+        "name": "v2-dark-drawer-balances-desktop.png",
+        "changed": 14
+      },
+      {
+        "name": "v2-dark-drawer-pools-desktop.png",
+        "changed": 14
+      },
+      {
+        "name": "v2-light-drawer-activity-desktop.png",
+        "changed": 14
+      },
+      {
+        "name": "v2-light-drawer-balances-desktop.png",
+        "changed": 14
+      },
+      {
+        "name": "v2-light-drawer-pools-desktop.png",
+        "changed": 14
+      },
+      {
+        "name": "v3-dark-drawer-balances-desktop.png",
+        "changed": 14
+      },
+      {
+        "name": "v3-dark-drawer-pools-desktop.png",
+        "changed": 14
+      },
+      {
+        "name": "v4-dark-drawer-balances-desktop.png",
+        "changed": 14
+      },
+      {
+        "name": "v4-dark-drawer-pools-desktop.png",
+        "changed": 14
+      },
+      {
+        "name": "v4-light-drawer-activity-desktop.png",
+        "changed": 14
+      },
+      {
+        "name": "v4-light-drawer-balances-desktop.png",
+        "changed": 14
+      },
+      {
+        "name": "v4-light-drawer-pools-desktop.png",
+        "changed": 14
+      },
+      {
+        "name": "v1-light-drawer-activity-narrow.png",
+        "changed": 12
+      },
+      {
+        "name": "v2-dark-drawer-pools-narrow.png",
+        "changed": 12
+      },
+      {
+        "name": "v2-light-drawer-activity-narrow.png",
+        "changed": 12
+      },
+      {
+        "name": "v2-light-drawer-balances-narrow.png",
+        "changed": 12
+      },
+      {
+        "name": "v2-light-drawer-pools-narrow.png",
+        "changed": 12
+      },
+      {
+        "name": "v3-dark-drawer-activity-narrow.png",
+        "changed": 12
+      },
+      {
+        "name": "v3-dark-drawer-pools-narrow.png",
+        "changed": 12
+      },
+      {
+        "name": "v4-dark-drawer-pools-narrow.png",
+        "changed": 12
+      },
+      {
+        "name": "v4-light-drawer-activity-narrow.png",
+        "changed": 12
+      },
+      {
+        "name": "v4-light-drawer-pools-narrow.png",
+        "changed": 12
+      },
+      {
+        "name": "v1-dark-drawer-activity-desktop.png",
+        "changed": 9
+      }
+    ]
+  },
+  "policy": {
+    "perChannelTolerance": 10,
+    "defaultBudget": 50,
+    "note": "A pixel differs when any RGBA channel deviates by more than perChannelTolerance; a shot fails when more than its perShot budget (fallback defaultBudget=50) pixels differ. Budgets = measured repeat-capture noise × 3, floor 50 — per shot, never a global worst case."
+  },
+  "perShot": {
+    "v0-dark-modal-request-filled-desktop.png": 50,
+    "v0-dark-modal-request-input-desktop.png": 50,
+    "v0-dark-modal-unlock-desktop.png": 50,
+    "v0-dark-payment-requests-widget-desktop.png": 50,
+    "v0-light-modal-request-filled-desktop.png": 50,
+    "v0-light-modal-request-input-desktop.png": 50,
+    "v0-light-modal-unlock-desktop.png": 50,
+    "v1-dark-drawer-activity-desktop.png": 50,
+    "v1-light-drawer-activity-narrow.png": 50,
+    "v1-light-drawer-pools-desktop.png": 50,
+    "v1-light-modal-request-filled-desktop.png": 50,
+    "v1-light-modal-request-input-desktop.png": 50,
+    "v1-light-modal-swap-filled-desktop.png": 50,
+    "v1-light-modal-swap-input-desktop.png": 50,
+    "v1-light-modal-unlock-desktop.png": 50,
+    "v2-dark-drawer-activity-desktop.png": 50,
+    "v2-dark-drawer-balances-desktop.png": 50,
+    "v2-dark-drawer-pools-desktop.png": 50,
+    "v2-dark-drawer-pools-narrow.png": 50,
+    "v2-light-drawer-activity-desktop.png": 50,
+    "v2-light-drawer-activity-narrow.png": 50,
+    "v2-light-drawer-balances-desktop.png": 50,
+    "v2-light-drawer-balances-narrow.png": 50,
+    "v2-light-drawer-pools-desktop.png": 50,
+    "v2-light-drawer-pools-narrow.png": 50,
+    "v3-dark-drawer-activity-desktop.png": 3984,
+    "v3-dark-drawer-activity-narrow.png": 50,
+    "v3-dark-drawer-balances-desktop.png": 50,
+    "v3-dark-drawer-pools-desktop.png": 50,
+    "v3-dark-drawer-pools-narrow.png": 50,
+    "v3-light-drawer-activity-desktop.png": 3945,
+    "v4-dark-drawer-balances-desktop.png": 50,
+    "v4-dark-drawer-pools-desktop.png": 50,
+    "v4-dark-drawer-pools-narrow.png": 50,
+    "v4-light-drawer-activity-desktop.png": 3960,
+    "v4-light-drawer-activity-narrow.png": 50,
+    "v4-light-drawer-balances-desktop.png": 50,
+    "v4-light-drawer-pools-desktop.png": 50,
+    "v4-light-drawer-pools-narrow.png": 50
+  },
+  "perShotSources": {
+    "v0-dark-modal-request-filled-desktop.png": "repeat pair baselines vs m2",
+    "v0-dark-modal-request-input-desktop.png": "repeat pair baselines vs m2",
+    "v0-dark-modal-unlock-desktop.png": "repeat pair m2 vs m3",
+    "v0-dark-payment-requests-widget-desktop.png": "repeat pair m2 vs m3",
+    "v0-light-modal-request-filled-desktop.png": "repeat pair baselines vs m2",
+    "v0-light-modal-request-input-desktop.png": "repeat pair baselines vs m2",
+    "v0-light-modal-unlock-desktop.png": "repeat pair baselines vs m2",
+    "v1-dark-drawer-activity-desktop.png": "F-A surface calibration (3 runs)",
+    "v1-light-drawer-activity-narrow.png": "F-A surface calibration (3 runs)",
+    "v1-light-drawer-pools-desktop.png": "F-A surface calibration (3 runs)",
+    "v1-light-modal-request-filled-desktop.png": "repeat pair baselines vs m2",
+    "v1-light-modal-request-input-desktop.png": "repeat pair baselines vs m2",
+    "v1-light-modal-swap-filled-desktop.png": "repeat pair m2 vs m3",
+    "v1-light-modal-swap-input-desktop.png": "repeat pair m2 vs m3",
+    "v1-light-modal-unlock-desktop.png": "repeat pair baselines vs m2",
+    "v2-dark-drawer-activity-desktop.png": "F-A surface calibration (3 runs)",
+    "v2-dark-drawer-balances-desktop.png": "F-A surface calibration (3 runs)",
+    "v2-dark-drawer-pools-desktop.png": "F-A surface calibration (3 runs)",
+    "v2-dark-drawer-pools-narrow.png": "F-A surface calibration (3 runs)",
+    "v2-light-drawer-activity-desktop.png": "F-A surface calibration (3 runs)",
+    "v2-light-drawer-activity-narrow.png": "F-A surface calibration (3 runs)",
+    "v2-light-drawer-balances-desktop.png": "F-A surface calibration (3 runs)",
+    "v2-light-drawer-balances-narrow.png": "F-A surface calibration (3 runs)",
+    "v2-light-drawer-pools-desktop.png": "F-A surface calibration (3 runs)",
+    "v2-light-drawer-pools-narrow.png": "F-A surface calibration (3 runs)",
+    "v3-dark-drawer-activity-desktop.png": "F-A surface calibration (3 runs)",
+    "v3-dark-drawer-activity-narrow.png": "F-A surface calibration (3 runs)",
+    "v3-dark-drawer-balances-desktop.png": "F-A surface calibration (3 runs)",
+    "v3-dark-drawer-pools-desktop.png": "F-A surface calibration (3 runs)",
+    "v3-dark-drawer-pools-narrow.png": "F-A surface calibration (3 runs)",
+    "v3-light-drawer-activity-desktop.png": "F-A surface calibration (3 runs)",
+    "v4-dark-drawer-balances-desktop.png": "F-A surface calibration (3 runs)",
+    "v4-dark-drawer-pools-desktop.png": "F-A surface calibration (3 runs)",
+    "v4-dark-drawer-pools-narrow.png": "F-A surface calibration (3 runs)",
+    "v4-light-drawer-activity-desktop.png": "repeat pair candidate vs da1",
+    "v4-light-drawer-activity-narrow.png": "F-A surface calibration (3 runs)",
+    "v4-light-drawer-balances-desktop.png": "F-A surface calibration (3 runs)",
+    "v4-light-drawer-pools-desktop.png": "F-A surface calibration (3 runs)",
+    "v4-light-drawer-pools-narrow.png": "F-A surface calibration (3 runs)"
+  }
+}
