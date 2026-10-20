@@ -5,6 +5,7 @@ import { SuiIcon } from './sui-icon';
 import { StellarIcon } from './stellar-icon';
 import { CitreaIcon } from './citrea-icon';
 import { BnbIcon } from './bnb-icon';
+import { ArbitrumIcon } from './arbitrum-icon';
 
 export type ChainLogoChain = 'ethereum' | 'sepolia' | 'sui-testnet' | 'stellar-testnet' | 'optimism' | 'citrea' | 'bnb' | 'base' | 'arbitrum' | 'robinhood';
 
@@ -110,8 +111,9 @@ export function ChainLogo({ chain, size = 18, testnetLabel = true }: ChainLogoPr
           ...(isBnb ? { backgroundColor: '#F0B90B' } : {}),
           // Base blue, runtime style for the same reason.
           ...(isBase ? { backgroundColor: '#0052FF' } : {}),
-          // Arbitrum navy and Robinhood near-black, runtime style for the same reason.
-          ...(isArbitrum ? { backgroundColor: '#213147' } : {}),
+          // The Arbitrum logo is its own navy hexagon, so the chip goes clear
+          // behind it. Robinhood near-black, runtime style for the same reason.
+          ...(isArbitrum ? { backgroundColor: 'transparent' } : {}),
           ...(isRobinhood ? { backgroundColor: '#0F0F0F' } : {}),
           // Stellar's mark is black-on-white in its own brand; a near-black
           // chip keeps the white mark legible in both themes.
@@ -137,20 +139,23 @@ export function ChainLogo({ chain, size = 18, testnetLabel = true }: ChainLogoPr
           <BnbIcon width={size * 0.72} height={size * 0.72} color="#FFFFFF" />
         ) : isStellar ? (
           <StellarIcon width={size * 0.6} height={size * 0.51} color="#FFFFFF" />
-        ) : isArbitrum || isRobinhood ? (
-          // Text marks, like OP: legible at chip sizes without new SVG assets.
+        ) : isArbitrum ? (
+          // Official Arbitrum One logo (arbiscan.io/brandassets), full colour.
+          <ArbitrumIcon width={size} height={size} />
+        ) : isRobinhood ? (
+          // Text mark, like OP: legible at chip sizes without a new SVG asset.
           <Text
             numberOfLines={1}
             className="font-pp-medium"
             // nw-keep(svg-or-canvas): glyph type scales with the size prop; brand
             // colour rides a runtime style (see the chip background above)
             style={{
-              fontSize: Math.max(5, Math.round(size * (isArbitrum ? 0.32 : 0.4))),
+              fontSize: Math.max(5, Math.round(size * 0.4)),
               lineHeight: size,
-              color: isArbitrum ? '#28A0F0' : '#CCFF00',
+              color: '#CCFF00',
             }}
           >
-            {isArbitrum ? 'ARB' : 'RH'}
+            RH
           </Text>
         ) : isBase ? (
           // The Base mark is a white square on the brand blue.
