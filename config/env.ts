@@ -366,7 +366,7 @@ export const LEGACY_CONFIG = readLegacyConfig();
  * The override still exists so a fork can point at its own project, and
  * `EXPO_PUBLIC_SENTRY_DSN=off` (or any non-URL value) turns reporting off.
  *
- * WHAT is reported is decided in services/telemetry-event.ts, not here.
+ * WHAT is reported is decided in services/error-reports-event.ts, not here.
  */
 const DEFAULT_SENTRY_DSN =
   'https://726f836298b9ca112faf0ef1df603d91@o4509437312958464.ingest.us.sentry.io/4512068713840640';

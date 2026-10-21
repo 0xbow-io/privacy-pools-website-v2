@@ -5,13 +5,13 @@
  * reached Sentry. Both halves of that were true by construction: nothing in the
  * app caught a render error, so React unmounted the tree and left an empty
  * body, and this app only ever reports events it CONSTRUCTS from a fixed union
- * (services/telemetry-event.ts), so an uncaught React error was never going to
+ * (services/error-reports-event.ts), so an uncaught React error was never going to
  * appear there on its own.
  *
  * WHAT IT DOES NOT DO, and must not.
  *
  * It does not send the error. Not the message, not the stack, not the component
- * trace. The whole telemetry design is that callers name a message from a fixed
+ * trace. The whole error reporting design is that callers name a message from a fixed
  * list and pass booleans, with "deliberately no parameter that could carry" a
  * note. A render error is the WORST case for that rule, not an exception to it:
  * the message is whatever some library interpolated, and on this app that can
@@ -20,7 +20,7 @@
  *
  * On STAGING, where `diagnosticsAllowed` is already true because the session is
  * pointed at test contracts, the error text rides along in the diagnostic block
- * the telemetry module already gates. That is where the stack a developer wants
+ * the error reporting module already gates. That is where the stack a developer wants
  * actually comes from, and it costs nothing in production because the gate is
  * applied in the constructor rather than here.
  *
@@ -31,7 +31,7 @@
 import React from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
 
-import { reportTelemetry } from '@/services/telemetry';
+import { reportErrorReport } from '@/services/error-reports';
 
 type Props = { children: React.ReactNode };
 type State = { crashed: boolean };
@@ -86,7 +86,7 @@ export class AppErrorBoundary extends React.Component<Props, State> {
     // never leaves the machine.
     console.error('[AppErrorBoundary] render crashed', error, info?.componentStack);
     try {
-      reportTelemetry('client-failed', {}, {
+      reportErrorReport('client-failed', {}, {
         stage: 'render',
         // Staging, or a session with debug mode on: `diagnosticsAllowed` drops
         // the whole block anywhere else, in the constructor, so this line

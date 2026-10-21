@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { conversionTargetRefusal, targetAcceptsConversion as conversionRule } from '../entrypoint-only-route';
-import { privateTelemetryEvent } from '../telemetry-event';
+import { privateErrorReportEvent } from '../error-reports-event';
 import { applyCustomRpcMany, CUSTOM_RPC_STORAGE_KEY } from '../../config/custom-rpc';
 
 // Registry-free stand-ins for config/intent-targets, same signatures.
@@ -145,7 +145,7 @@ test('inline shielding refuses unavailable cross-chain routes and closed convers
   ]) {
     const errors: string[] = [];
     const run = evaluate(`return (options) => { ${code}; return 'primed'; };`, {
-      blockMockFlow: () => false, isSui: false, isStellar: false, ensureConnected: () => true, keysReadyRef: { current: true }, chainId: 11155111,
+      blockMockFlow: () => false, isSui: false, isStellar: false, ensureConnected: () => true, keysReadyRef: { current: true }, depositErrorReportRef: { current: { phase: 'unknown' } }, chainId: 11155111,
       cancelPendingRelaunch: () => {},
       keyOwnedDeposit: false, crossChainSwapDepositSupported: () => routable,
       swapDepositEnabledForChain: () => payEnabled, availableTokens: [{ address: 'source-usdc' }],
@@ -182,9 +182,9 @@ test('RPC persistence changes fail visibly when the old persistent copy cannot b
   }
 });
 
-test('telemetry message names cannot resolve inherited object properties', () => {
+test('error report message names cannot resolve inherited object properties', () => {
   for (const message of ['constructor', 'toString', '__proto__']) {
-    expect(privateTelemetryEvent({ contexts: { telemetry: { message } } })?.message).toBe('Client operation failed');
+    expect(privateErrorReportEvent({ contexts: { errorReport: { message } } })?.message).toBe('Client operation failed');
   }
 });
 

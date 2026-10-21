@@ -9,12 +9,12 @@
  *
  * Follow-up: patcito/0xbow-remote#24.
  */
-import type { TelemetryMeta } from '@/services/telemetry-event';
+import type { ErrorReportMeta } from '@/services/error-reports-event';
 
-export function initSentry(_dsn: string, _meta: TelemetryMeta): boolean {
+export function initSentry(_dsn: string, _meta: ErrorReportMeta): boolean {
   return false;
 }
 
-export function sendTelemetryEvent(_telemetry: Record<string, unknown>): void {
+export function sendErrorReportEvent(_errorReport: Record<string, unknown>, _error?: unknown): void {
   /* no reporter on native */
 }

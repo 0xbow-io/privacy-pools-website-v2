@@ -273,7 +273,7 @@ export interface RpcFallback {
 
 export interface LookupResult {
   viewingKey: PublicKey | null;
-  /** Where the answer came from, useful for telemetry/UI. */
+  /** Where the answer came from, useful for error reporting/UI. */
   source: 'cache' | 'rpc';
   /** True when the ASP endpoint is responding. False after a 404. */
   aspAvailable: boolean;

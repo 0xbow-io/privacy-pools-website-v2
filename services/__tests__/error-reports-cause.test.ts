@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import { classifyFailure } from '../telemetry-cause';
-import { ALLOWED_FLAGS } from '../telemetry-event';
+import { classifyFailure } from '../error-reports-cause';
+import { ALLOWED_FLAGS } from '../error-reports-event';
 
 /**
  * The classifier turns error text into at most one boolean. Two properties

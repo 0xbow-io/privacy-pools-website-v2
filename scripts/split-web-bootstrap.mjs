@@ -4,9 +4,50 @@
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { decode, encode } from '@jridgewell/sourcemap-codec';
 import ts from 'typescript';
+
+const SOURCE_MAP_COMMENT = /\n?\/\/# sourceMappingURL=[^\n]*\s*$/;
+
+/**
+ * The source map of each part, cut out of the bundle's own map.
+ *
+ * The parts are contiguous slices of the bundle, so a part's mappings are the
+ * bundle's mappings from its first line on, shifted up, with the first line's
+ * columns shifted left. Without this a production frame in a part names a
+ * file Sentry has no map for, and the stack is unreadable.
+ */
+export function splitSourceMap(source, map, chunks) {
+  const lines = decode(map.mappings);
+  const maps = [];
+  let offset = 0;
+  for (const chunk of chunks) {
+    const before = source.slice(0, offset);
+    const startLine = before.split('\n').length - 1;
+    const startCol = offset - (before.lastIndexOf('\n') + 1);
+    const lineCount = chunk.split('\n').length;
+    const lastLen = chunk.length - (chunk.lastIndexOf('\n') + 1);
+    const part = [];
+    for (let i = 0; i < lineCount; i++) {
+      let segments = lines[startLine + i] ?? [];
+      if (i === lineCount - 1) {
+        const end = i === 0 ? startCol + lastLen : lastLen;
+        segments = segments.filter((seg) => seg[0] < end);
+      }
+      if (i === 0) {
+        segments = segments.filter((seg) => seg[0] >= startCol).map((seg) => [seg[0] - startCol, ...seg.slice(1)]);
+      }
+      part.push(segments);
+    }
+    const { debugId: _debugId, debug_id: _debug_id, file: _file, ...rest } = map;
+    maps.push({ ...rest, mappings: encode(part) });
+    offset += chunk.length;
+  }
+  return maps;
+}
 
 export function splitModuleRegistrations(source, maxBytes = 256 * 1024) {
   if (Buffer.byteLength(source) <= maxBytes) return [source];
@@ -68,13 +109,24 @@ export async function splitWebBootstrap(dist) {
       throw new Error('Expected a deferred classic script for the Metro bootstrap bundle');
     }
     const file = resolve(dist, `.${url}`);
-    const chunks = splitModuleRegistrations(await readFile(file, 'utf8'));
+    const source = (await readFile(file, 'utf8')).replace(SOURCE_MAP_COMMENT, '');
+    const chunks = splitModuleRegistrations(source);
     if (chunks.length === 1) continue;
+    // Present only when the export ran with --source-maps (scripts/sentry-sourcemaps.mjs).
+    const mapFile = `${file}.map`;
+    const maps = existsSync(mapFile)
+      ? splitSourceMap(source, JSON.parse(await readFile(mapFile, 'utf8')), chunks)
+      : null;
     const tags = [];
-    for (const chunk of chunks) {
+    for (const [i, chunk] of chunks.entries()) {
       const hash = createHash('sha256').update(chunk).digest('hex').slice(0, 24);
       const name = `bootstrap-part-${hash}.js`;
-      await writeFile(resolve(dirname(file), name), chunk);
+      if (maps) {
+        await writeFile(resolve(dirname(file), `${name}.map`), JSON.stringify({ ...maps[i], file: name }));
+        await writeFile(resolve(dirname(file), name), `${chunk}\n//# sourceMappingURL=${name}.map\n`);
+      } else {
+        await writeFile(resolve(dirname(file), name), chunk);
+      }
       tags.push(tag.replace(url, `${url.slice(0, url.lastIndexOf('/') + 1)}${name}`));
     }
     html = html.replace(tag, tags.join('\n'));
