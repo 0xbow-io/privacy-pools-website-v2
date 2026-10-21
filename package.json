@@ -1,7 +1,7 @@
 {
   "name": "privacy-pools",
   "main": "./index.js",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "scripts": {
     "build:web": "bun run build:worker && EXPO_UNSTABLE_METRO_OPTIMIZE_GRAPH=1 EXPO_UNSTABLE_TREE_SHAKING=1 expo export -p web --source-maps &&bun scripts/inject-social-meta.mjs && bun scripts/preload-web-fonts.mjs && bun scripts/split-web-bootstrap.mjs && bun scripts/render-landing-document.tsx && bun scripts/sentry-sourcemaps.mjs",
     "build:worker": "bun ./scripts/check-pinned-deps.mjs && bun ./scripts/build-snarkjs-worker.mjs && bun ./scripts/build-witness-worker.mjs",

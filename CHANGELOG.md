@@ -1,6 +1,16 @@
 # Changelog
 
 All notable changes to the Privacy Pools v2 web app are documented in this file.
+## [1.1.0] - 2026-10-21
+
+### Added
+- Optional anonymous error reports with stage, reason and scrubbed stacks.
+
+### Fixed
+- Share pool balances show the underlying asset they are worth, so ppETH no longer looks like a smaller balance.
+- Show more and the end of every list stay clear of the bottom tab bar on mobile.
+- A multi-part withdrawal that fails after part of it was sent is reported as sent.
+- The official Arbitrum One logo.
 
 ## [1.0.0] - 2026-10-20
 
