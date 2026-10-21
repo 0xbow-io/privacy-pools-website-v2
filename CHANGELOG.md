@@ -1,6 +1,7 @@
 # Changelog
 
 All notable changes to the Privacy Pools v2 web app are documented in this file.
+
 ## [1.1.0] - 2026-10-21
 
 ### Added
