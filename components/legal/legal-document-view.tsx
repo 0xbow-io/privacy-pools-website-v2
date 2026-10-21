@@ -1,3 +1,4 @@
+import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { Linking, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -90,6 +91,7 @@ function Block({ block, letterIndex }: { block: LegalBlock; letterIndex: number 
 // because the root Stack draws no header and these routes sit outside (tabs).
 // The Stack contentStyle owns the top inset, so no SafeAreaView here.
 export function LegalDocumentView({ doc }: { doc: LegalDocument }) {
+  const tabClearance = useTabBarClearance();
   const router = useRouter();
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
@@ -102,7 +104,10 @@ export function LegalDocumentView({ doc }: { doc: LegalDocument }) {
     <View className="flex-1 bg-background">
       <Stack.Screen options={{ title: doc.title }} />
       <Header />
-      <ScrollView className="flex-1" contentContainerClassName="grow pb-[48px]">
+      <ScrollView className="flex-1" contentContainerClassName="grow"
+        // nw-keep(measured-or-inset): clearance for the floating bottom bar
+        contentContainerStyle={{ paddingBottom: 48 + tabClearance }}
+      >
         <View className="w-full max-w-[760px] grow gap-[12px] self-center px-[18px] pt-[22px]">
           <Pressable
             onPress={goBack}

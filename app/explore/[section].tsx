@@ -4,9 +4,9 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/theme';
+import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/components/theme-provider';
 import { PanelHeading, PanelSections, PANEL_PARAMS } from '@/components/home/explore-panel';
-import { EXPLORE_TAB_BAR_CLEARANCE } from '@/components/home/explore-tab-bar';
 import { Header } from '@/components/ui/header';
 import { effectiveSafeAreaInset, explorePageUsesAppHeader } from '@/services/header-nav';
 
@@ -19,12 +19,13 @@ import { effectiveSafeAreaInset, explorePageUsesAppHeader } from '@/services/hea
  * (`/?panel=…`) stays for desktop and deep links. Content is the exact same
  * `PanelSections` the drawers render; only the shell differs. The bottom bar
  * stays mounted over these pages (they are peers in the bar's navigation),
- * which is why the scroll content reserves EXPLORE_TAB_BAR_CLEARANCE.
+ * which is why the scroll content reserves useTabBarClearance().
  */
 export default function ExploreSectionRoute() {
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const router = useRouter();
+  const tabClearance = useTabBarClearance();
   const rawInsets = useSafeAreaInsets();
   // DEV-553: web never pads for a reported system-bar inset (see effectiveSafeAreaInset).
   const insets = { top: effectiveSafeAreaInset(Platform.OS, rawInsets.top), bottom: effectiveSafeAreaInset(Platform.OS, rawInsets.bottom) };
@@ -61,7 +62,7 @@ export default function ExploreSectionRoute() {
           className="flex-1"
           contentContainerClassName="px-[16px] pt-[79px]"
           // nw-keep(measured-or-inset): clearance for the floating bottom bar
-          contentContainerStyle={{ paddingBottom: EXPLORE_TAB_BAR_CLEARANCE + insets.bottom }}
+          contentContainerStyle={{ paddingBottom: Math.max(tabClearance, 24) }}
         >
           <PanelSections section={section} onClose={goBack} />
         </ScrollView>
@@ -94,7 +95,7 @@ export default function ExploreSectionRoute() {
           className="flex-1"
           contentContainerClassName="px-[16px] pt-[4px]"
           // nw-keep(measured-or-inset): clearance for the floating bottom bar
-          contentContainerStyle={{ paddingBottom: EXPLORE_TAB_BAR_CLEARANCE + insets.bottom }}
+          contentContainerStyle={{ paddingBottom: Math.max(tabClearance, 24) }}
         >
           <PanelSections section={section} onClose={goBack} />
         </ScrollView>

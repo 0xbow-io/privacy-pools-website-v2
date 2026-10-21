@@ -1,3 +1,4 @@
+import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { poolVisible } from '@/services/pool-visibility-rule';
 import { isSupersededLegacyPool, poolDisplayLabel, poolSymbolFromRoute } from '@/config/pool-paths';
 import { Fragment, useState, useMemo, useEffect, useRef, useCallback } from 'react';
@@ -91,6 +92,7 @@ const SUPPORTED_CHAIN_OPTIONS = CHAIN_OPTIONS.filter(
 );
 
 export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string } = {}) {
+  const tabClearance = useTabBarClearance();
   const focused = useIsFocused();
   const { width } = useWindowDimensions();
   const { address, isConnected, status: walletStatus } = useAccount();
@@ -669,7 +671,9 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
       <Header />
       <ScrollView
         className="flex-1"
-        contentContainerClassName="grow overflow-visible p-[20px]"
+        contentContainerClassName="grow overflow-visible px-[20px] pt-[20px]"
+        // nw-keep(measured-or-inset): clearance for the floating bottom bar
+        contentContainerStyle={{ paddingBottom: 20 + tabClearance }}
       >
         <View
           // row-reverse while split: the shield widget keeps its place in DOM
