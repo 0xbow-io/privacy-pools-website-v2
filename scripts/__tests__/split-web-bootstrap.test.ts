@@ -77,3 +77,17 @@ test('splits the synchronous entry in HTML and remains idempotent', async () => 
     await rm(dist, { recursive: true, force: true });
   }
 });
+
+test('each part gets the slice of the bundle source map that covers it', async () => {
+  const { splitSourceMap } = await import('../split-web-bootstrap.mjs');
+  const { decode } = await import('@jridgewell/sourcemap-codec');
+  const source = 'aa\nbbXcc\ndd';
+  // One segment at every character: [genCol, src 0, line, col]
+  const lines = source.split('\n').map((line, l) => [...line].map((_, c) => [c, 0, l, c]));
+  const { encode } = await import('@jridgewell/sourcemap-codec');
+  const map = { version: 3, sources: ['a.ts'], names: [], mappings: encode(lines as never), debugId: 'x' };
+  const parts = splitSourceMap(source, map, ['aa\nbb', 'Xcc\ndd']);
+  expect(decode(parts[0].mappings)).toEqual([[[0, 0, 0, 0], [1, 0, 0, 1]], [[0, 0, 1, 0], [1, 0, 1, 1]]]);
+  expect(decode(parts[1].mappings)).toEqual([[[0, 0, 1, 2], [1, 0, 1, 3], [2, 0, 1, 4]], [[0, 0, 2, 0], [1, 0, 2, 1]]]);
+  expect(parts[0].debugId).toBeUndefined();
+});

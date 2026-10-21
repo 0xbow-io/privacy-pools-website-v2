@@ -3,7 +3,7 @@
  *
  * The reporter has been able to say that a deposit failed since 2026-09-15,
  * and has never been able to say why: the three providers pass only
- * `testMode`, and services/telemetry-event.ts throws the original error away
+ * `testMode`, and services/error-reports-event.ts throws the original error away
  * by design. Six deposit failures arrived over one morning and not one of them
  * was diagnosable (2026-09-16).
  *
@@ -19,10 +19,10 @@
  * and a quote - so they separate nothing - and they describe the user's
  * transaction rather than the fault. These flags describe the fault.
  *
- * Pure and dependency-free, like services/telemetry-event.ts, so the
+ * Pure and dependency-free, like services/error-reports-event.ts, so the
  * classification can be tested without a Sentry runtime or a provider tree.
  */
-import type { TelemetryFlags } from '@/services/telemetry-event';
+import type { ErrorReportFlags } from '@/services/error-reports-event';
 
 /**
  * Patterns are matched against the app's own error text and the underlying
@@ -30,7 +30,7 @@ import type { TelemetryFlags } from '@/services/telemetry-event';
  * because a single failure legitimately answers to more than one of these
  * ("user rejected" often also mentions the relayer that was about to be used).
  */
-const CLASSIFIERS: ReadonlyArray<readonly [keyof TelemetryFlags, RegExp]> = [
+const CLASSIFIERS: ReadonlyArray<readonly [keyof ErrorReportFlags, RegExp]> = [
   // A dismissed wallet prompt. By far the most common "failure" that is not
   // one, and the first thing worth ruling out.
   ['isUserRejected', /\buser (?:rejected|denied|cancell?ed)\b|transaction was rejected/i],
@@ -75,7 +75,7 @@ function causeText(cause: unknown): string {
  * When nothing matches, no flag is set: an absent bit honestly says "we could
  * not tell", where a false one would claim we had ruled it out.
  */
-export function classifyFailure(message: string | null, cause?: unknown): TelemetryFlags {
+export function classifyFailure(message: string | null, cause?: unknown): ErrorReportFlags {
   const text = `${message ?? ''}\n${causeText(cause)}`;
   if (!text.trim()) return {};
   for (const [flag, pattern] of CLASSIFIERS) {

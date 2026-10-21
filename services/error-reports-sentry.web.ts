@@ -14,7 +14,7 @@
  *    referrer, user agent), linked errors, session tracking. Only events this
  *    app hands over deliberately exist at all.
  * 2. Nothing crosses over. `beforeSend` replaces whatever it was given with an
- *    event CONSTRUCTED from an allowlist (services/telemetry-event.ts). Even a
+ *    event CONSTRUCTED from an allowlist (services/error-reports-event.ts). Even a
  *    caller that passes a raw SDK error, and even a future Sentry version that
  *    starts attaching something new, cannot get a value out through it.
  *
@@ -27,14 +27,14 @@
  */
 
 import {
-  privateTelemetryEvent,
+  privateErrorReportEvent,
   type IncomingEvent,
-  type TelemetryMeta,
-} from '@/services/telemetry-event';
+  type ErrorReportMeta,
+} from '@/services/error-reports-event';
 
 let client: Promise<typeof import('@sentry/react')> | undefined;
 
-export function initSentry(dsn: string, meta: TelemetryMeta): boolean {
+export function initSentry(dsn: string, meta: ErrorReportMeta): boolean {
   if (client) return true;
   client = import('@sentry/react').then((Sentry) => {
     Sentry.init({
@@ -60,8 +60,8 @@ export function initSentry(dsn: string, meta: TelemetryMeta): boolean {
       // NOT the one Sentry handed over and does not claim to be. It is a new
       // object built from an allowlist, and Sentry's ErrorEvent type describes
       // the input, not the output.
-      beforeSend: (event) =>
-        privateTelemetryEvent(event as unknown as IncomingEvent, meta) as unknown as typeof event | null,
+      beforeSend: (event, hint) =>
+        privateErrorReportEvent(event as unknown as IncomingEvent, meta, hint?.originalException) as unknown as typeof event | null,
     });
     return Sentry;
   });
@@ -73,15 +73,18 @@ export function initSentry(dsn: string, meta: TelemetryMeta): boolean {
 /**
  * Hand one report to the client.
  *
- * The payload goes in `contexts.telemetry` because that is where
- * `privateTelemetryEvent` reads its allowlist from. Anything else put on the
+ * The payload goes in `contexts.errorReport` because that is where
+ * `privateErrorReportEvent` reads its allowlist from. Anything else put on the
  * event - here, on the scope, or by Sentry itself - is discarded before the
  * event leaves.
  */
-export function sendTelemetryEvent(telemetry: Record<string, unknown>): void {
+export function sendErrorReportEvent(errorReport: Record<string, unknown>, error?: unknown): void {
   // Promise callbacks retain startup reports while the client downloads.
   // With no configured client, reporting remains a no-op.
   void client?.then((Sentry) => {
-    Sentry.captureEvent({ contexts: { telemetry } });
+    // The error rides in the HINT, which Sentry hands to beforeSend without
+    // normalising or attaching it. beforeSend reads its class and stack
+    // through the filters in services/error-reports-failure.ts and nothing else.
+    Sentry.captureEvent({ contexts: { errorReport } }, error === undefined ? undefined : { originalException: error });
   }).catch(() => {});
 }

@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { conversionTargetRefusal, targetAcceptsConversion as conversionRule } from '../entrypoint-only-route';
-import { privateTelemetryEvent } from '../telemetry-event';
+import { privateErrorReportEvent } from '../error-reports-event';
 import { applyCustomRpcMany, CUSTOM_RPC_STORAGE_KEY } from '../../config/custom-rpc';
 
 // Registry-free stand-ins for config/intent-targets, same signatures.
@@ -182,9 +182,9 @@ test('RPC persistence changes fail visibly when the old persistent copy cannot b
   }
 });
 
-test('telemetry message names cannot resolve inherited object properties', () => {
+test('error report message names cannot resolve inherited object properties', () => {
   for (const message of ['constructor', 'toString', '__proto__']) {
-    expect(privateTelemetryEvent({ contexts: { telemetry: { message } } })?.message).toBe('Client operation failed');
+    expect(privateErrorReportEvent({ contexts: { errorReport: { message } } })?.message).toBe('Client operation failed');
   }
 });
 

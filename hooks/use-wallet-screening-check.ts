@@ -38,7 +38,7 @@ export function useWalletScreeningCheck(): { run: () => void; running: boolean }
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
         // Closing the wallet prompt is the user's answer, not a failure. Same
-        // pattern as isUserRejected in services/telemetry-cause.ts.
+        // pattern as isUserRejected in services/error-reports-cause.ts.
         if (/\buser (?:rejected|denied|cancell?ed)\b|transaction was rejected/i.test(message)) return;
         toast({ title: 'Wallet check failed', description: 'Try again in a moment.', variant: 'destructive' });
       })

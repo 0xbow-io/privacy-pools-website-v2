@@ -11,8 +11,9 @@ import { KeySourceChangedError } from '@/components/sdk-provider';
 import { normalizeHex, truncateAddress } from '@/services/hex-format';
 import { FlowProgress } from '@/components/ui/flow-progress';
 import { staleBundleMessage } from '@/services/stale-bundle';
-import { reportTelemetry } from '@/services/telemetry';
-import { classifyFailure } from '@/services/telemetry-cause';
+import { reportErrorReport } from '@/services/error-reports';
+import { classifyFailure } from '@/services/error-reports-cause';
+import type { ErrorReportStage } from '@/services/error-reports-failure';
 import {
   DEFAULT_DUST_THRESHOLD,
   DUST_THRESHOLD,
@@ -712,6 +713,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // that order without moving either. Kept current by a plain assignment
   // during render, next to the state itself.
   const diagnosticTokenRef = useRef('ETH');
+  // The stage the running withdrawal last entered, for the failure report.
+  const withdrawPhaseRef = useRef<ErrorReportStage>('unknown');
   const reportWithdrawError = useCallback((rawMsg: string | null, cause?: unknown, stage?: string) => {
     // An ASP throttle (or our own backoff refusing to send while one lasts)
     // reads as such, with the wait, whatever stage it surfaced in.
@@ -723,15 +726,22 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     // The reporter is told THAT a withdrawal failed and WHAT KIND of failure
     // it was, never `msg` itself: these strings quote amounts, tokens,
     // addresses and relayer responses. The values below ride in a separate bag
-    // that only a staging build sends - services/telemetry.ts decides.
+    // that only a staging build sends - services/error-reports.ts decides.
     if (msg) {
-      reportTelemetry('withdraw-failed', { testMode: TEST_MODE === true, ...classifyFailure(msg, cause) }, {
+      reportErrorReport('withdraw-failed', { testMode: TEST_MODE === true, ...classifyFailure(msg, cause) }, {
         ...(stage ? { stage } : {}),
         detail: cause instanceof Error ? `${cause.name}: ${cause.message}` : msg,
         ...(connectedAddress ? { address: connectedAddress } : {}),
         ...(amount ? { amount } : {}),
         asset: diagnosticTokenRef.current,
         chainId,
+      }, undefined, {
+        stage,
+        phase: withdrawPhaseRef.current,
+        error: cause,
+        chainId,
+        asset: diagnosticTokenRef.current,
+        isYield: isShareSymbol(diagnosticTokenRef.current),
       });
     }
   }, [errorToast, connectedAddress, amount, chainId]);
@@ -2130,6 +2140,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   }, [chainId, withdrawalProcessorAddress, publicClient, log]);
 
   const handleReviewWithdrawal = useCallback(async () => {
+    withdrawPhaseRef.current = 'validate';
     // Locked wallet session: the press IS the request to sign in. Prompt for the
     // one-time signature and stop here; the balance and the form's validation
     // only mean anything once the notes can be decrypted, so there is nothing to
@@ -2424,6 +2435,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         // RelaySwaps contract — never the transfer-signer default and never
         // the PrivacyPoolRelay withdrawal contract (either produces
         // PoolVault_ProofContextMismatch after full proving).
+        withdrawPhaseRef.current = 'quote';
         const { createRelayerInteractor } = await import('@/services/sdk-runtime');
         const relayerInteractor = createRelayerInteractor(chainId, swapProcessor);
         const relayers = await relayerInteractor.getRelayers();
@@ -2805,6 +2817,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     setTxHash(null);
     setTxChainId(null);
     submittedRef.current = false;
+    withdrawPhaseRef.current = 'proof';
     setLoadingMessage('Preparing withdrawal proof...');
 
     // === Stellar path ===
@@ -2852,6 +2865,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     // amount (single lineage), build a change note back to self, then submit
     // RELAYED (gas-abstracted, when a relayer URL is configured) or DIRECT.
     if (reviewContext?.mode === 'sui') {
+      withdrawPhaseRef.current = 'proof';
       setLoadingMessage('Reconstructing Merkle proofs + proving...');
       try {
         // Select active Sui notes covering the gross withdrawal amount from
@@ -2889,6 +2903,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         if (SUI_TESTNET_RELAYER_URL && suiRecipient) {
           if (!isSameOperation()) { log('warn', 'Withdraw', 'Stale run aborted before Sui relay'); return; }
           submittedRef.current = true;
+          // Relayed: from here on a failure report would time an on-chain spend.
+          withdrawPhaseRef.current = 'submit';
           const relayed = await suiSession.relayedWithdraw({
             shouldContinue: isSameOperation,
             inputNotes: chosen,
@@ -2969,6 +2985,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       let activePrepared = snap.prepared;
       if (!hasUsableCommitmentLifetime(getPreparedQuoteExpiration(snap.prepared), Date.now())) {
         try {
+          withdrawPhaseRef.current = 'quote';
           setLoadingMessage('Refreshing relayer quote...');
           const { createRelayerInteractor } = await import('@/services/sdk-runtime');
           // The re-quote binds a fresh commitment to the processor too.
@@ -3059,6 +3076,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           // different one than Review showed would (rightly) be refused.
           ...(snap.fallbackAddress ? { fallbackAddress: snap.fallbackAddress } : {}),
         });
+        withdrawPhaseRef.current = 'proof';
         setLoadingMessage('Generating ZK proof & relaying...');
         log('info', 'Withdraw', 'Submitting withdraw-and-swap', {
           inputs: relayParams.inputCommitments.length,
@@ -3068,10 +3086,12 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         if (!isSameOperation()) { log('warn', 'Withdraw', 'Stale run aborted before swap-exit relay'); return; }
         submittedRef.current = true;
         const stopHearingSwapExitRelay = onRelayedTxHash((relayedHash, method) => {
-          if (method === 'relayWithdrawAndSwap') heardSwapExitRelay.hash = relayedHash;
+          if (method === 'relayWithdrawAndSwap') { heardSwapExitRelay.hash = relayedHash; withdrawPhaseRef.current = 'confirm'; }
         });
         let receipt: TxReceiptLike;
         try {
+          // Relayed: from here on a failure report would time an on-chain spend.
+          withdrawPhaseRef.current = 'submit';
           receipt = await (session as PoolSession).relayWithdrawAndSwap(relayParams);
         } finally {
           stopHearingSwapExitRelay();
@@ -3239,7 +3259,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     // is not missed.
     const settleWatch = createPendingRelaySettleWatch();
     const stopHearingWithdrawRelay = onRelayedTxHash((hash, method) => {
-      if (method && WITHDRAW_RELAY_METHOD.test(method) && isSameOperation()) settleWatch.hear(hash);
+      if (method && WITHDRAW_RELAY_METHOD.test(method) && isSameOperation()) { withdrawPhaseRef.current = 'confirm'; settleWatch.hear(hash); }
     });
     try {
       const session = sdkReady && poolSession
@@ -3725,6 +3745,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
               // updates (inputs SPENT + change notes) ONLY when status is truthy.
               let batchReceipt: { status?: boolean; txHash?: `0x${string}` } | `0x${string}`;
               try {
+                // Relayed: from here on a failure report would time an on-chain spend.
+                withdrawPhaseRef.current = 'submit';
                 batchReceipt = await prepared.session.relayBatchWithdraw(prepared);
               } catch (relayErr) {
                 stage = classifyBatchRelayError(relayErr instanceof Error ? relayErr.message : String(relayErr));
@@ -4021,6 +4043,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         // satisfies the assertion by construction, and the note selection above
         // covers amountWei + reviewedFee + allowance >= amountSent.
         const reviewedFeeWei = BigInt(activeFeeCommitment.feeAmount);
+        withdrawPhaseRef.current = 'quote';
         setLoadingMessage('Confirming the relayer quote...');
         const claimQuote = await getQuote(
           chainId,
@@ -4058,6 +4081,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           throw new Error('The relayer quote does not match the requested withdrawal. Nothing was sent. Please try again.');
         }
         const claimNetWei = amountWei;
+        withdrawPhaseRef.current = 'proof';
         setLoadingMessage('Generating ZK proof...');
         log('info', 'Withdraw', 'Submitting cold-start register-and-withdraw', {
           reason: coldStartClaim.reason,
@@ -4136,6 +4160,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         // the flag (prepareYieldWithdrawRelay `extraGas`). Before that the SDK
         // asserted nativeGas === 0 here and refused every topped-up quote.
         if (yieldNs && yieldDeployment && !swapSnapshot) {
+          withdrawPhaseRef.current = 'quote';
           setLoadingMessage('Quoting the redemption…');
           const { createRelayerInteractor } = await import('@/services/sdk-runtime');
           const routerRelayer = createRelayerInteractor(chainId, yieldDeployment.ppRouter as `0x${string}`);
@@ -4169,6 +4194,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
             throw new Error(`No relayer is serving ${displayTokenSymbol(selectedToken)} redemptions right now. Nothing was sent. Try again later.`);
           }
           if (plan && relayerInfo) {
+            withdrawPhaseRef.current = 'proof';
             setLoadingMessage('Generating ZK proof...');
             log('info', 'Withdraw', 'step 4/6 calling prepareYieldWithdrawRelay', {
               inputCount: inputCommitments.length,
@@ -4186,6 +4212,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
               // routing whose nativeGas presence disagrees with this flag.
               extraGas: gasTokenChecked,
             });
+            withdrawPhaseRef.current = 'submit';
             setLoadingMessage('Submitting to the relayer…');
             // From here there is NO fallback to the share payout: the relayer
             // wraps write failures in the same HTTP 400 as refusals, so an error
@@ -4193,6 +4220,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
             // A throw lands in the common catch as a failed/unknown withdrawal,
             // exactly like the ordinary path's relay.
             submittedRef.current = true;
+            // Relayed: from here on a failure report would time an on-chain spend.
+            withdrawPhaseRef.current = 'submit';
             const redeemTxHash = await routerRelayer.relayWithdrawal(
               relayerInfo,
               prepared.relayParams as Parameters<typeof routerRelayer.relayWithdrawal>[1],
@@ -4214,6 +4243,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           }
         }
         if (!yieldRedeemed) {
+        withdrawPhaseRef.current = 'proof';
         setLoadingMessage('Generating ZK proof and submitting via relayer...');
         // The ASP root the proof will be built against comes from the SDK's own
         // association-set fetch, not from this app, so log what the ASP is
@@ -4275,6 +4305,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         // withdrawal complete while the modal read "Withdrawal Failed".
         const relayOnce = async (option: RelayerOption) => {
           submittedRef.current = true;
+          // Relayed: from here on a failure report would time an on-chain spend.
+          withdrawPhaseRef.current = 'submit';
           log('info', 'Withdraw', 'step 5/6 proving and submitting to the relayer', {
             relayer: option.selectedQuote.relayerInfo.name,
             processor: option.selectedQuote.relayerInfo.processorAddress,
@@ -4283,7 +4315,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           // timeout, so the hash is the one heard as the relayer returned it.
           const heard: { hash: string | null } = { hash: null };
           const stopHearing = onRelayedTxHash((hash, method) => {
-            if (method && WITHDRAW_RELAY_METHOD.test(method)) heard.hash = hash;
+            if (method && WITHDRAW_RELAY_METHOD.test(method)) { heard.hash = hash; withdrawPhaseRef.current = 'confirm'; }
           });
           try {
             return await session.relayWithdraw(option);
@@ -4299,6 +4331,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
             stopHearing();
           }
         };
+        // The fresh quote is fetched and checked first; relayOnce moves to submit.
+        withdrawPhaseRef.current = 'quote';
         const outcome = await relayWithdrawalWithFreshQuote({
           prepareOption: prepareRelayerOption,
           reviewedFee: BigInt(activeFeeCommitment.feeAmount),

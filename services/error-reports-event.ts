@@ -20,6 +20,18 @@
  * Pure and dependency-free so it can be tested without a Sentry runtime.
  */
 
+import {
+  classifyReason,
+  exceptionType,
+  parseStackFrames,
+  safeAssetSymbol,
+  safeChainId,
+  safeConnector,
+  safeStage,
+  safeWalletKind,
+  type ErrorReportFrame,
+} from '@/services/error-reports-failure';
+
 /** The minimum shape this module needs. Deliberately not Sentry's type. */
 export type IncomingEvent = {
   contexts?: Record<string, Record<string, unknown> | undefined>;
@@ -41,7 +53,38 @@ export type OutgoingEvent = {
     diagnostic?: Record<string, string>;
     code?: Record<string, string>;
   };
+  /**
+   * Low-cardinality labels for a flow failure, all enums or values from our
+   * own configuration. See services/error-reports-failure.ts.
+   */
+  tags?: Partial<Record<(typeof FAILURE_TAG_KEYS)[number], string>>;
+  /** The exception TYPE and scrubbed frames. Never a message, never variables. */
+  exception?: {
+    values: Array<{
+      type: string;
+      stacktrace?: { frames: ErrorReportFrame[] };
+    }>;
+  };
+  /**
+   * Which uploaded source map belongs to which frame file, so Sentry can
+   * resolve the frames above. Only files those frames already name, and only a
+   * build-wide uuid per file (scripts/sentry-sourcemaps.mjs injects it).
+   */
+  debug_meta?: { images: DebugImage[] };
 };
+
+export type DebugImage = { type: 'sourcemap'; code_file: string; debug_id: string };
+
+/** Every tag key a failure report may carry. */
+export const FAILURE_TAG_KEYS = Object.freeze([
+  'stage',
+  'reason',
+  'chainId',
+  'asset',
+  'isYield',
+  'walletKind',
+  'connector',
+] as const);
 
 /**
  * Build-level labels, supplied by us rather than read off the event.
@@ -58,10 +101,27 @@ export type OutgoingEvent = {
  * 2026-09-22: debug mode sends everything, in prod too). A thunk that throws
  * is treated as false, like an absent field.
  */
-export type TelemetryMeta = {
+export type ErrorReportMeta = {
   environment?: string;
   release?: string;
   diagnosticsAllowed?: boolean | (() => boolean);
+  /**
+   * The user's "Send anonymous error reports" switch, read per event. False,
+   * or a thunk that throws, drops the event entirely. Absent means on.
+   */
+  enabled?: () => boolean;
+  /** The app's configured chain ids. A chain id outside it is dropped. */
+  knownChainIds?: readonly number[];
+  /** The configured token symbols. Any other symbol is reported as `other`. */
+  knownAssetSymbols?: readonly string[];
+  /**
+   * The debug id registry `sentry-cli sourcemaps inject` leaves on
+   * `globalThis._sentryDebugIds` (an Error stack mapped to a uuid). A thunk,
+   * read per event, because lazy chunks register as they load.
+   */
+  debugIds?: () => unknown;
+  /** The app's origin. Only frames in this build's chunks on it are kept. */
+  origin?: string;
 };
 
 /**
@@ -83,7 +143,7 @@ export const ALLOWED_FLAGS = Object.freeze([
   'isSwap',
   'isBatch',
   'testMode',
-  // Failure CLASS, set by services/telemetry-cause.ts. At most one is ever
+  // Failure CLASS, set by services/error-reports-cause.ts. At most one is ever
   // true. These say what went wrong; the ten above say what the flow had.
   'isUserRejected',
   'isQuoteExpired',
@@ -109,7 +169,7 @@ export const ALLOWED_FLAGS = Object.freeze([
  * a staging tester is a member of the team exercising test funds, not a user.
  *
  * What makes it safe is the GATE, not the list: `meta.diagnosticsAllowed`,
- * computed in services/telemetry.ts, which explains what it trades.
+ * computed in services/error-reports.ts, which explains what it trades.
  *
  * NAME THESE CAREFULLY. `asset` was called `token` for its first two hours and
  * arrived at Sentry as the literal string "[Filtered]": server-side scrubbing
@@ -171,7 +231,7 @@ const CODE_VALUE_MAX = 64;
  * relayer's rejection text, which quotes the amount, goes with it. Callers
  * pick a member of this union instead.
  */
-export const TELEMETRY_MESSAGES = {
+export const ERROR_REPORT_MESSAGES = {
   'deposit-failed': 'Deposit operation failed',
   'withdraw-failed': 'Withdrawal operation failed',
   'transfer-failed': 'Transfer operation failed',
@@ -182,10 +242,10 @@ export const TELEMETRY_MESSAGES = {
   'client-failed': 'Client operation failed',
 } as const;
 
-export type TelemetryMessageKey = keyof typeof TELEMETRY_MESSAGES;
+export type ErrorReportMessageKey = keyof typeof ERROR_REPORT_MESSAGES;
 
-export function isTelemetryMessageKey(value: unknown): value is TelemetryMessageKey {
-  return typeof value === 'string' && Object.hasOwn(TELEMETRY_MESSAGES, value);
+export function isErrorReportMessageKey(value: unknown): value is ErrorReportMessageKey {
+  return typeof value === 'string' && Object.hasOwn(ERROR_REPORT_MESSAGES, value);
 }
 
 /**
@@ -219,12 +279,24 @@ function safeLabel(value: unknown): string | undefined {
  * missing error report costs us a debugging hint, and a leaking one costs a
  * user their privacy.
  */
-export function privateTelemetryEvent(
+export function privateErrorReportEvent(
   event: IncomingEvent | null | undefined,
-  meta: TelemetryMeta = {},
+  meta: ErrorReportMeta = {},
+  /**
+   * The error behind a flow failure, from Sentry's event hint. Read for its
+   * CLASS and its stack frames only, each through a filter, and never copied.
+   */
+  originalException?: unknown,
 ): OutgoingEvent | null {
   if (!event) return null;
-  const context = event.contexts?.telemetry;
+  if (meta.enabled) {
+    try {
+      if (!meta.enabled()) return null;
+    } catch {
+      return null;
+    }
+  }
+  const context = event.contexts?.errorReport;
 
   const flags: Record<string, boolean> = {};
   for (const key of ALLOWED_FLAGS) {
@@ -234,9 +306,9 @@ export function privateTelemetryEvent(
   }
 
   const key = context?.message;
-  const message = isTelemetryMessageKey(key)
-    ? TELEMETRY_MESSAGES[key]
-    : TELEMETRY_MESSAGES['client-failed'];
+  const message = isErrorReportMessageKey(key)
+    ? ERROR_REPORT_MESSAGES[key]
+    : ERROR_REPORT_MESSAGES['client-failed'];
 
   // The egress policy's refusal reason names a ROUTE and a KEY and never a
   // value - that is a documented property of services/egress-policy.ts, and
@@ -261,17 +333,50 @@ export function privateTelemetryEvent(
   // for staging, so that second half silently disabled the feature exactly
   // where it was wanted. The environment is the signal that means something -
   // it says whether the funds are real - and it is computed in
-  // services/telemetry.ts, which explains the trade this accepts.
+  // services/error-reports.ts, which explains the trade this accepts.
   const diagnostic = diagnosticsAllowed(meta) ? diagnosticFields(context?.diagnostic) : undefined;
 
   // Identifiers, in every environment. Ungated because nothing that passes the
   // filter is derived from this user.
   const code = codeIdentifiers(context?.code);
 
+  // Stage, reason and context: present only when the call site described a
+  // flow failure. Every value is an enum member or from our own config.
+  const tags = failureTags(context?.failure, meta, originalException);
+  const exception = originalException !== undefined && tags ? exceptionOf(originalException, meta.origin) : undefined;
+  const debugMeta = exception ? debugMetaOf(exception, meta.debugIds, meta.origin) : undefined;
+
   const eventId = safeEventId(event.event_id);
   const timestamp = safeTimestamp(event.timestamp);
   const environment = safeLabel(meta.environment);
   const release = safeLabel(meta.release);
+
+  // A RELAYED SPEND (withdraw, send, swap-out, ragequit, batch), Pat
+  // 2026-10-20. The user's wallet is not involved, so walletKind and connector
+  // never travel. Before the relayer accepts the transaction (including a
+  // relay request it REJECTED) nothing on-chain exists to match, so the rest
+  // of the event is normal. Once it accepted (stage confirm, or the chain
+  // reverted it) the report could be lined up with an on-chain spend, so it
+  // carries only stage, reason, exception type and frames: no chain, asset,
+  // yield flag, flags, diagnostic or code bag.
+  if (tags && isRelayedSpend(key)) {
+    delete tags.walletKind;
+    delete tags.connector;
+    if (mayHaveBroadcast(tags, originalException)) {
+      return {
+        ...(eventId ? { event_id: eventId } : {}),
+        ...(timestamp ? { timestamp } : {}),
+        platform: 'javascript',
+        ...(environment ? { environment } : {}),
+        ...(release ? { release } : {}),
+        level: 'error',
+        message,
+        tags: { stage: tags.stage, reason: tags.reason },
+        ...(exception ? { exception } : {}),
+        ...(debugMeta ? { debug_meta: debugMeta } : {}),
+      };
+    }
+  }
 
   return {
     ...(eventId ? { event_id: eventId } : {}),
@@ -287,7 +392,134 @@ export function privateTelemetryEvent(
       ...(diagnostic ? { diagnostic } : {}),
       ...(code ? { code } : {}),
     },
+    ...(tags ? { tags } : {}),
+    ...(exception ? { exception } : {}),
+    ...(debugMeta ? { debug_meta: debugMeta } : {}),
   };
+}
+
+/** Flows whose spend goes through the relayer. */
+export const RELAYED_SPEND_MESSAGES: readonly ErrorReportMessageKey[] = Object.freeze([
+  'withdraw-failed',
+  'transfer-failed',
+  'swap-failed',
+  'ragequit-failed',
+]);
+
+/**
+ * Stages that end before anything is sent for broadcast. A relayed spend that
+ * failed in one of these has nothing on-chain to be matched against.
+ */
+const PRE_SEND_STAGES: ReadonlySet<string> = new Set([
+  'wallet-connect', 'validate', 'approve', 'relayer-check', 'recipient-check', 'quote', 'proof',
+]);
+
+/** An HTTP 4xx (not 408) anywhere in the cause chain: the relayer refused it. */
+function explicitRejection(error: unknown): boolean {
+  let node: unknown = error;
+  for (let depth = 0; depth < 8 && node && typeof node === 'object'; depth += 1) {
+    const status = (node as { status?: unknown }).status;
+    if (typeof status === 'number' && status >= 400 && status < 500 && status !== 408) return true;
+    node = (node as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/**
+ * Whether a relayed spend may have reached the chain. True unless it clearly
+ * failed before sending: a pre-send stage, or a submit the relayer explicitly
+ * refused. A partial batch, a timeout or network error after the request was
+ * sent, an unknown stage, a confirm or a revert all count as broadcast.
+ */
+function mayHaveBroadcast(tags: NonNullable<OutgoingEvent['tags']>, error: unknown): boolean {
+  if (tags.reason === 'revert') return true;
+  if (tags.stage && PRE_SEND_STAGES.has(tags.stage)) return false;
+  if (tags.stage === 'submit' && explicitRejection(error)) return false;
+  return true;
+}
+
+function isRelayedSpend(key: unknown): boolean {
+  return isErrorReportMessageKey(key) && RELAYED_SPEND_MESSAGES.includes(key);
+}
+
+/**
+ * The failure tags, rebuilt field by field. `failure` is what the reporter put
+ * in the error reporting context. It has no `reason` field: the reason is computed
+ * here from the error's class, so a caller cannot choose the string.
+ */
+function failureTags(
+  failure: unknown,
+  meta: ErrorReportMeta,
+  error: unknown,
+): OutgoingEvent['tags'] | undefined {
+  if (!failure || typeof failure !== 'object') return undefined;
+  const source = failure as Record<string, unknown>;
+  const tags: NonNullable<OutgoingEvent['tags']> = {
+    stage: safeStage(source.stage) ?? 'unknown',
+    reason: error === undefined ? 'unknown' : classifyReason(error),
+    walletKind: safeWalletKind(source.walletKind),
+    connector: safeConnector(source.connector),
+  };
+  const chainId = safeChainId(source.chainId, meta.knownChainIds);
+  if (chainId !== undefined) tags.chainId = String(chainId);
+  const asset = safeAssetSymbol(source.asset, meta.knownAssetSymbols);
+  if (asset !== undefined) tags.asset = asset;
+  if (typeof source.isYield === 'boolean') tags.isYield = source.isYield ? 'true' : 'false';
+  return tags;
+}
+
+/** The exception TYPE and its frames. Deliberately no `value`: that is the message. */
+function exceptionOf(error: unknown, origin: string | undefined): OutgoingEvent['exception'] {
+  const frames = error && typeof error === 'object'
+    ? parseStackFrames((error as { stack?: unknown }).stack, { message: (error as { message?: unknown }).message, origin })
+    : [];
+  return {
+    values: [{
+      type: exceptionType(error),
+      ...(frames.length > 0 ? { stacktrace: { frames } } : {}),
+    }],
+  };
+}
+
+const DEBUG_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * `debug_meta.images` for the files the frames name, rebuilt from the
+ * registry. Each registry key is a stack captured inside one bundle, so its
+ * innermost frame is that bundle; it goes through the same path filter as the
+ * event's frames, so `code_file` is a bare path with no origin or query and is
+ * only kept when a frame already names it. The id must be a lowercase uuid.
+ */
+export function debugMetaOf(
+  exception: NonNullable<OutgoingEvent['exception']>,
+  registry: ErrorReportMeta['debugIds'],
+  origin: string | undefined,
+): OutgoingEvent['debug_meta'] | undefined {
+  const files = new Set<string>();
+  for (const value of exception.values) {
+    for (const frame of value.stacktrace?.frames ?? []) {
+      if (frame.abs_path.startsWith('/')) files.add(frame.abs_path);
+    }
+  }
+  if (files.size === 0 || typeof registry !== 'function') return undefined;
+  let ids: unknown;
+  try {
+    ids = registry();
+  } catch {
+    return undefined;
+  }
+  if (!ids || typeof ids !== 'object') return undefined;
+  const images = new Map<string, DebugImage>();
+  for (const [stack, id] of Object.entries(ids as Record<string, unknown>)) {
+    if (typeof id !== 'string') continue;
+    const debugId = id.toLowerCase();
+    if (!DEBUG_ID.test(debugId)) continue;
+    const frames = parseStackFrames(stack, { origin });
+    const codeFile = frames[frames.length - 1]?.abs_path;
+    if (!codeFile || !files.has(codeFile) || images.has(codeFile)) continue;
+    images.set(codeFile, { type: 'sourcemap', code_file: codeFile, debug_id: debugId });
+  }
+  return images.size > 0 ? { images: [...images.values()] } : undefined;
 }
 
 /**
@@ -298,7 +530,7 @@ export function privateTelemetryEvent(
  * a blocked `localStorage` does, is false: the private behaviour is the one
  * that survives an error.
  */
-function diagnosticsAllowed(meta: TelemetryMeta): boolean {
+function diagnosticsAllowed(meta: ErrorReportMeta): boolean {
   const gate = meta.diagnosticsAllowed;
   if (typeof gate === 'function') {
     try {
@@ -358,5 +590,5 @@ function diagnosticFields(value: unknown): Record<string, string> | undefined {
  * gate; this exists so a typo is a compile error rather than a silently
  * dropped field.
  */
-export type TelemetryFlagName = (typeof ALLOWED_FLAGS)[number];
-export type TelemetryFlags = Partial<Record<TelemetryFlagName, boolean>>;
+export type ErrorReportFlagName = (typeof ALLOWED_FLAGS)[number];
+export type ErrorReportFlags = Partial<Record<ErrorReportFlagName, boolean>>;

@@ -671,7 +671,7 @@ export type EgressMode = 'enforce' | 'report';
  * Say the cost out loud, because it is easy to read "report" as "safe": in
  * report mode a request the policy would have REFUSED is still sent. The
  * refusal becomes a console warning and a Sentry event
- * (services/telemetry.ts), and the bytes go out anyway.
+ * (services/error-reports.ts), and the bytes go out anyway.
  *
  * That is the deliberate trade for the first deployment (Pat, 2026-09-11).
  * The route table was written by reading this codebase, and a route it does

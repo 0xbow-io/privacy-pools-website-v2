@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'bun:test';
-import type { IncomingEvent, OutgoingEvent } from '../telemetry-event';
+import type { IncomingEvent, OutgoingEvent } from '../error-reports-event';
 
 test('reports queued during client loading retain privacy filtering and initialize once', async () => {
   let beforeSend: (event: IncomingEvent) => OutgoingEvent | null;
@@ -16,15 +16,15 @@ test('reports queued during client loading retain privacy filtering and initiali
       if (sent.length === 2) delivered.resolve();
     },
   }));
-  const { initSentry, sendTelemetryEvent } = await import('../telemetry-sentry.web');
-  sendTelemetryEvent({ message: 'deposit-failed' }); // Disabled before initialization.
+  const { initSentry, sendErrorReportEvent } = await import('../error-reports-sentry.web');
+  sendErrorReportEvent({ message: 'deposit-failed' }); // Disabled before initialization.
   initSentry('https://public@example.com/1', { environment: 'staging' });
   initSentry('https://public@example.com/1', { environment: 'staging' });
-  sendTelemetryEvent({
+  sendErrorReportEvent({
     message: 'egress-refused', egressParty: 'asp', egressReason: 'undeclared ASP route',
     walletAddress: 'private-wallet-address',
   });
-  sendTelemetryEvent({ message: 'withdraw-failed', hasAmount: true, amount: 'private-amount' });
+  sendErrorReportEvent({ message: 'withdraw-failed', hasAmount: true, amount: 'private-amount' });
   await delivered.promise;
   expect(initializations).toBe(1);
   expect(sent).toHaveLength(2);

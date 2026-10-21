@@ -64,7 +64,7 @@ describe('classifyDestination', () => {
   });
 
   test('treats an unrecognised host as hostile rather than as fine', () => {
-    expect(classifyDestination('https://telemetry.example.com/x', HOSTS)).toBe('other');
+    expect(classifyDestination('https://errors.example.com/x', HOSTS)).toBe('other');
     expect(classifyDestination('not a url', HOSTS)).toBe('other');
   });
 });
