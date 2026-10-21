@@ -24,7 +24,7 @@ import {
 } from '@/components/home/explore-panel-context';
 import { PortfolioNetValue, type TimePeriod } from '@/components/portfolio/portfolio-net-value';
 import { usePortfolioHistory } from '@/hooks/use-portfolio-history';
-import { getTokenMetadata, NATIVE_ASSET_ADDRESS, getTokenMetadataBySymbol, formatTokenBalance } from '@/config/tokens';
+import { getTokenMetadata, NATIVE_ASSET_ADDRESS, getTokenMetadataBySymbol } from '@/config/tokens';
 import { getSwapInputTokens } from '@/config/intent-swaps';
 import { resolveHandoffToken } from '@/services/swap-token-handoff';
 import { sameSymbol } from '@/services/symbol-match';
@@ -34,7 +34,9 @@ import { usePools, formatUsd } from '@/components/pools-provider';
 import { formatUnits } from 'viem';
 import { approxUnderlyingText, comingSoonDepositMessage, displayTokenSymbol } from '@/services/share-display';
 import { useShareRates } from '@/hooks/use-share-rates';
-import { formatShareAsUnderlying, shareExactAsUnderlying, shareNumberAsUnderlying, underlyingPriceFor } from '@/services/share-rates';
+import { formatShareAsUnderlying, shareNumberAsUnderlying, underlyingPriceFor } from '@/services/share-rates';
+import { shareBalanceDisplay } from '@/services/share-balance-display';
+import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { useDepositModal } from '@/components/deposit-modal-provider';
 import { useWithdrawModal } from '@/components/withdraw-modal-provider';
 import { useTransferModal } from '@/components/transfer-modal-provider';
@@ -316,23 +318,22 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
     // price map has no entry for "PPUSDC", which is why the dollar line said $0.
     const shareAddress = poolEntry?.tokenAddress ?? getTokenMetadataBySymbol(currentPoolToken, poolChainId)?.address;
     const shareRate = rateFor(poolChainId, shareAddress);
-    const convertedActive = shareRate ? shareExactAsUnderlying(activeExact, shareRate) : null;
-    const convertedPending = shareRate ? shareExactAsUnderlying(pendingExact, shareRate) : null;
-    const converted = !!shareRate && convertedActive != null && convertedPending != null;
-    // The coin's name either way: before the rate answers (or when it never
-    // does) the route token is the upper-cased share, and "0 PPETH" is the one
-    // spelling the ETH pool page must never show (codex on dd034a1).
-    const displaySymbol = converted ? displayTokenSymbol(shareRate.underlyingSymbol) : displayTokenSymbol(currentPoolToken);
-    const displayActive = converted ? convertedActive : activeNum;
-    const displayPending = converted ? convertedPending : pendingNum;
-    const price = converted ? underlyingPriceFor(shareRate, priceMap) : (priceMap[currentPoolToken] || 0);
+    // The headline names the coin the figure is in: the underlying when the
+    // rate is known, the share's own symbol when it is not, so a share count is
+    // never printed as "ETH" (a 0.1 ETH shield read "0.09989 ETH", a fee look).
+    const shareSymbol = poolEntry?.name ?? getTokenMetadataBySymbol(currentPoolToken, poolChainId)?.symbol ?? currentPoolToken;
+    const priceFallback = priceMap[currentPoolToken] || 0;
+    const activeView = shareBalanceDisplay({ sharesExact: activeExact, shareSymbol, rate: shareRate, priceMap, fallbackPrice: priceFallback });
+    const pendingView = shareBalanceDisplay({ sharesExact: pendingExact, shareSymbol, rate: shareRate, priceMap, fallbackPrice: priceFallback });
+    const converted = !!shareRate && activeView.converted && pendingView.converted;
+    const price = converted ? underlyingPriceFor(shareRate, priceMap) : priceFallback;
     // What ONE unit of the pool token (a share) is worth in USD: the action
     // panel prices raw share amounts with it, so it carries the rate.
     const unitPrice = converted
       ? Number(formatUnits(shareRate.assetsPerShare, shareRate.underlyingDecimals)) * price
       : price;
     const progressPct = totalNum > 0 ? Math.round((activeNum / totalNum) * 100) : 0;
-    return { activeNum, pendingNum, totalNum, price, unitPrice, progressPct, displaySymbol, displayActive, displayPending };
+    return { activeNum, pendingNum, totalNum, price, unitPrice, progressPct, activeView, pendingView };
   }, [currentPoolToken, poolChainId, data.myPools, priceMap, rateFor]);
 
   // Every figure below is scoped to (symbol, chain): the feed spans chains, so
@@ -733,20 +734,26 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
                   <Text className="text-[12px] leading-[12px] text-[#4D4D4D] font-pp-regular">
                     My Private Balance
                   </Text>
-                  <Text className="text-[24px] text-text font-pp-bold">
-                    {formatTokenBalance(userPoolBalance.displayActive, userPoolBalance.displaySymbol)} {userPoolBalance.displaySymbol}
-                  </Text>
+                  <View className="flex-row items-center gap-[6px]">
+                    <Text testID="pool-private-balance" className="text-[24px] text-text font-pp-bold">
+                      {userPoolBalance.activeView.text}
+                    </Text>
+                    <ShareCountHint hint={userPoolBalance.activeView.hint} testID="pool-private-balance-hint" />
+                  </View>
                   <Text className="text-[12px] leading-[12px] text-[#4D4D4D] font-pp-regular">
-                    ${(userPoolBalance.displayActive * userPoolBalance.price).toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                    ${userPoolBalance.activeView.usd.toLocaleString('en-US', { maximumFractionDigits: 2 })}
                   </Text>
                 </View>
                 <View className="items-center gap-[4px]">
                   <Text className="text-[12px] leading-[12px] text-[#4D4D4D] font-pp-regular">
                     Pending Balance
                   </Text>
-                  <Text className="text-[12px] leading-[12px] text-[#4D4D4D] font-pp-bold">
-                    {formatTokenBalance(userPoolBalance.displayPending, userPoolBalance.displaySymbol)} {userPoolBalance.displaySymbol}
-                  </Text>
+                  <View className="flex-row items-center gap-[4px]">
+                    <Text className="text-[12px] leading-[12px] text-[#4D4D4D] font-pp-bold">
+                      {userPoolBalance.pendingView.text}
+                    </Text>
+                    <ShareCountHint hint={userPoolBalance.pendingView.hint} testID="pool-pending-balance-hint" />
+                  </View>
                 </View>
               </View>
               {/* "My activity": the personal deposit / withdrawal / transfer

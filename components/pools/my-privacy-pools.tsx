@@ -12,9 +12,11 @@ import { ChainBadge, TokenNetworkIcon } from '@/components/ui/token-network-icon
 import { Skeleton } from '@/components/ui/skeleton';
 import { ShareApyChip } from '@/components/yield/share-apy-chip';
 import { approxUnderlyingText, displayTokenSymbol, isShareSymbol } from '@/services/share-display';
-import { formatShareAsUnderlying, shareExactAsUnderlying, underlyingPriceFor } from '@/services/share-rates';
+import { shareExactAsUnderlying, underlyingPriceFor } from '@/services/share-rates';
 import { formatUsd } from '@/services/format-fiat';
 import { useShareRates } from '@/hooks/use-share-rates';
+import { shareBalanceDisplay } from '@/services/share-balance-display';
+import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import { usePools } from '@/components/pools-provider';
@@ -615,14 +617,13 @@ export function MyPrivacyPools({
           const converted = shareRate ? shareExactAsUnderlying(pool.balanceTokenExact, shareRate) : null;
           const convertedPending = shareRate ? shareExactAsUnderlying(pool.pendingTokenExact, shareRate) : null;
           const underlyingPrice = shareRate ? underlyingPriceFor(shareRate, data.priceMap) : 0;
-          // The pre-rate fallbacks carry the SHARE's symbol; rename them to the
-          // underlying and mark them approximate (Pat, 2026-09-12).
-          const balanceText = shareRate && converted != null
-            ? formatShareAsUnderlying(converted, shareRate)
-            : approxUnderlyingText(pool.balanceToken, pool.name);
-          const pendingText = shareRate && convertedPending != null
-            ? formatShareAsUnderlying(convertedPending, shareRate)
-            : approxUnderlyingText(pool.pendingToken, pool.name);
+          // A share with no rate yet keeps its count under the SHARE's own symbol
+          // (balance and pending alike), never under the coin's name.
+          const viewOf = (sharesExact: string) => shareBalanceDisplay({ sharesExact, shareSymbol: pool.name, rate: shareRate, priceMap: data.priceMap, fallbackPrice: 0 });
+          const balanceView = isShareSymbol(pool.name) ? viewOf(pool.balanceTokenExact) : null;
+          const pendingView = isShareSymbol(pool.name) ? viewOf(pool.pendingTokenExact) : null;
+          const balanceText = balanceView ? balanceView.text : approxUnderlyingText(pool.balanceToken, pool.name);
+          const pendingText = pendingView ? pendingView.text : approxUnderlyingText(pool.pendingToken, pool.name);
           // The dollar figures follow the SAME converted quantity, never shares × price.
           const balanceUsdText = converted != null && underlyingPrice > 0 ? formatUsd(converted * underlyingPrice) : pool.balance;
           const pendingUsdText = convertedPending != null && underlyingPrice > 0 ? formatUsd(convertedPending * underlyingPrice) : pool.pending;
@@ -667,9 +668,12 @@ export function MyPrivacyPools({
                     <ShareApyChip chainId={pool.chainId} tokenAddress={pool.tokenAddress} testID={`my-pool-card-apy-${pool.id}`} />
                   </View>
                   <View className="items-end gap-[3px]">
-                    <Text numberOfLines={1} className="font-pp-medium text-[14px] leading-[16px] text-text">
-                      {balanceText}
-                    </Text>
+                    <View className="flex-row items-center gap-[4px]">
+                      <Text numberOfLines={1} className="font-pp-medium text-[14px] leading-[16px] text-text">
+                        {balanceText}
+                      </Text>
+                      <ShareCountHint hint={balanceView?.hint ?? null} />
+                    </View>
                     <Text numberOfLines={1} className="font-pp-regular text-[11px] leading-[13px] text-text-muted">
                       {balanceUsdText}
                     </Text>
@@ -678,9 +682,12 @@ export function MyPrivacyPools({
                 {(parseFloat(pool.pendingTokenExact) || 0) > 0 && (
                   <View className="flex-row items-center justify-between gap-[12px] border-t border-border-light pt-[9px]">
                     <Text className="font-pp-regular text-[11px] text-text-muted">Pending</Text>
-                    <Text numberOfLines={1} className="font-pp-regular text-[11.5px] text-warning">
-                      {pendingText} · {pendingUsdText}
-                    </Text>
+                    <View className="flex-row items-center gap-[4px]">
+                      <Text numberOfLines={1} className="font-pp-regular text-[11.5px] text-warning">
+                        {pendingText} · {pendingUsdText}
+                      </Text>
+                      <ShareCountHint hint={pendingView?.hint ?? null} />
+                    </View>
                   </View>
                 )}
               </Pressable>
@@ -721,13 +728,19 @@ export function MyPrivacyPools({
                   </View>
                   <ShareApyChip chainId={pool.chainId} tokenAddress={pool.tokenAddress} testID={`my-pool-row-apy-${pool.id}`} />
                   <View className="flex-1 gap-[2px]">
-                    <Text numberOfLines={1} className="font-pp-regular text-[13px] leading-[15px] text-text-secondary">
-                      {balanceText}
-                    </Text>
-                    {(parseFloat(pool.pendingTokenExact) || 0) > 0 && (
-                      <Text numberOfLines={1} className="font-pp-regular text-[10.5px] leading-[12px] text-warning">
-                        {pendingText} pending
+                    <View className="flex-row items-center gap-[4px]">
+                      <Text numberOfLines={1} className="font-pp-regular text-[13px] leading-[15px] text-text-secondary">
+                        {balanceText}
                       </Text>
+                      <ShareCountHint hint={balanceView?.hint ?? null} />
+                    </View>
+                    {(parseFloat(pool.pendingTokenExact) || 0) > 0 && (
+                      <View className="flex-row items-center gap-[4px]">
+                        <Text numberOfLines={1} className="font-pp-regular text-[10.5px] leading-[12px] text-warning">
+                          {pendingText} pending
+                        </Text>
+                        <ShareCountHint hint={pendingView?.hint ?? null} />
+                      </View>
                     )}
                   </View>
                 </Pressable>
