@@ -32,6 +32,9 @@ import * as SecureStore from 'expo-secure-store';
 import { ActivePoolSelection } from '@/config/pool-profile';
 import { envScopedStorageKey } from '@/config/app-environment';
 import { useQuery } from '@tanstack/react-query';
+import { setErrorReportWallet } from '@/services/error-reports';
+import { PASSKEY_EOA_CONNECTOR_ID } from '@/services/passkey-eoa/constants';
+import { EMBEDDED_CONNECTOR_ID } from '@/services/embedded-wallet/connector';
 import { useAccount, useConfig, usePublicClient, useReconnect, useSignTypedData } from 'wagmi';
 import { COINBASE_SMART_WALLET_SIGNIN_MESSAGE, connectorIsKnownDeterministicSigner, contractWalletVerdict, isPlainEcdsaSignature, NON_DETERMINISTIC_SIGNER_MESSAGE, SMART_WALLET_SIGNIN_MESSAGE } from '@/services/signer-determinism';
 import { passkeyUnlockDefault } from '@/services/passkey-policy';
@@ -992,6 +995,23 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
   const [baseAppRefused, setBaseAppRefused] = useState<ReadonlySet<string>>(() => new Set());
   const passkeyChosenForSigner = !!address && passkeyForSigner === address.toLowerCase();
   const isSmartWallet = !!smartWalletKey && smartWalletProbe?.key === smartWalletKey && smartWalletProbe.smart;
+  // The failure reports name the KIND of wallet and its connector id, both
+  // folded onto allowlists in services/error-reports-failure.ts. No address.
+  const errorReportConnectorId = isConnected ? activeConnector?.id : undefined;
+  // eoa only once the probe answered "not a contract" for this wallet.
+  const errorReportWalletVerifiedEoa = !!smartWalletKey && smartWalletProbe?.key === smartWalletKey && !smartWalletProbe.smart;
+  useEffect(() => {
+    const kind = !isConnected
+      ? 'unknown'
+      : errorReportConnectorId === PASSKEY_EOA_CONNECTOR_ID
+        ? 'passkey'
+        : errorReportConnectorId === EMBEDDED_CONNECTOR_ID || isSmartWallet
+          ? 'smart'
+          : errorReportWalletVerifiedEoa
+            ? 'eoa'
+            : 'unknown';
+    setErrorReportWallet(kind, errorReportConnectorId);
+  }, [isConnected, errorReportConnectorId, isSmartWallet, errorReportWalletVerifiedEoa]);
   const smartWalletProbeRef = useRef<{ key: string; smart: boolean } | null>(null);
   // A Base refusal is a fact about THAT connection: another wallet on the same
   // address starts clean.

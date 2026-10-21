@@ -48,7 +48,9 @@ import { OriginProofModalProvider } from '@/components/origin-proof-modal-provid
 import { SwapModalProvider } from '@/components/swap-modal-provider';
 import { TxActivityProvider } from '@/components/tx-activity-provider';
 import { startPublicFeeds, stopPublicFeeds } from '@/services/public-feeds';
-import { initTelemetry } from '@/services/telemetry';
+import { initErrorReport } from '@/services/error-reports';
+import { getSupportedChains } from '@/config/chains';
+import { ACTIVE_ENVIRONMENT } from '@/config/environments';
 import { ToastProvider } from '@/components/toast-provider';
 import { StatusNotifier } from '@/components/status-notifier';
 import { WalletConnectModalProvider } from '@/components/wallet-connect-modal-provider';
@@ -247,8 +249,16 @@ export default function RootLayout() {
   // Error reporting. Off entirely without EXPO_PUBLIC_SENTRY_DSN, and web
   // only. Started here, above every provider, so an egress refusal raised
   // during startup is still relayed. What may be reported is decided in
-  // services/telemetry-event.ts, by construction from an allowlist.
-  useEffect(() => initTelemetry(), []);
+  // services/error-reports-event.ts, by construction from an allowlist.
+  // The failure tags name a chain or an asset only from these lists.
+  useEffect(() => initErrorReport({
+    knownChainIds: getSupportedChains().map((chain) => chain.id),
+    // Native symbols too: SUI and XLM are configured on the chain, not in tokensByChain.
+    knownAssetSymbols: [...new Set([
+      ...Object.values(ACTIVE_ENVIRONMENT.tokensByChain).flatMap((tokens) => Object.values(tokens).map((token) => token.symbol)),
+      ...getSupportedChains().map((chain) => chain.nativeCurrency.symbol),
+    ])],
+  }), []);
 
   if (!fontsLoaded) {
     return null;

@@ -56,3 +56,16 @@ export function relayerShareExitMessage(verdict: Exclude<RelayerAssetSupport, 's
   if (verdict === 'unsupported') return `${underlyingSymbol} deposits open once the relayer supports withdrawing this pool. Not yet.`;
   return `Cannot confirm that the relayer supports withdrawing this pool right now. Try again in a moment.`;
 }
+
+/**
+ * The relayer's asset list could not be read, so a yield deposit was refused.
+ * Typed so a failure report can say "relayer-unavailable" from the class
+ * alone (services/error-reports-failure.ts), without reading this message.
+ */
+export class RelayerUnavailableError extends Error {
+  readonly errorReportReason = 'relayer-unavailable';
+  constructor(message: string) {
+    super(message);
+    this.name = 'RelayerUnavailableError';
+  }
+}

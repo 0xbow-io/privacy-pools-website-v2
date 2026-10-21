@@ -8,9 +8,10 @@ import { KeySourceChangedError } from '@/components/sdk-provider';
 import { EthTokenIcon, UsdcTokenIcon, UsdtTokenIcon } from '@/components/ui/token-icons';
 import { truncateAddress } from '@/services/hex-format';
 import { isSessionInitTimeout } from '@/services/session-init-timeout';
-import { tokenAmountLabel, displayTokenSymbol } from '@/services/share-display';
-import { reportTelemetry } from '@/services/telemetry';
-import { classifyFailure } from '@/services/telemetry-cause';
+import { tokenAmountLabel, displayTokenSymbol, isShareSymbol } from '@/services/share-display';
+import { reportErrorReport } from '@/services/error-reports';
+import { classifyFailure } from '@/services/error-reports-cause';
+import { stellarErrorReportStage, type ErrorReportStage } from '@/services/error-reports-failure';
 import { TEST_MODE } from '@/config/env';
 import { ProgressStages, progressStageIndex } from '@/components/ui/progress-stages';
 import { CheckCircleIcon, CloseIcon, SpinnerIcon } from '@/components/ui/modal-icons';
@@ -547,23 +548,34 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   // The token state is declared below this reporter and a ref reads across
   // that order without moving either.
   const diagnosticTokenRef = useRef('ETH');
+  // The stage the running transfer last entered, for the failure report.
+  const transferPhaseRef = useRef<ErrorReportStage>('unknown');
   const reportTransferError = useCallback((msg: string | null, cause?: unknown, stage?: string) => {
     setTransferError(msg);
     if (msg) errorToast({ title: msg, variant: 'destructive' });
     // The fact plus the failure CLASS, never the message. See the same block
     // in the withdraw provider. The values below ride in a separate bag that
-    // only a staging build sends - services/telemetry.ts decides.
+    // only a staging build sends - services/error-reports.ts decides.
     if (msg) {
-      reportTelemetry('transfer-failed', { testMode: TEST_MODE === true, ...classifyFailure(msg, cause) }, {
+      reportErrorReport('transfer-failed', { testMode: TEST_MODE === true, ...classifyFailure(msg, cause) }, {
         ...(stage ? { stage } : {}),
         detail: cause instanceof Error ? `${cause.name}: ${cause.message}` : msg,
         ...(connectedAddress ? { address: connectedAddress } : {}),
         ...(amount ? { amount } : {}),
         asset: diagnosticTokenRef.current,
         chainId,
+      }, undefined, {
+        stage,
+        phase: transferPhaseRef.current,
+        error: cause,
+        // Sui and Stellar have their own chain and asset, which the EVM
+        // selection here does not describe. Left out rather than wrong.
+        chainId: isSui ? undefined : chainId,
+        asset: isSui ? undefined : diagnosticTokenRef.current,
+        isYield: isSui ? undefined : isShareSymbol(diagnosticTokenRef.current),
       });
     }
-  }, [errorToast, connectedAddress, amount, chainId]);
+  }, [errorToast, connectedAddress, amount, chainId, isSui]);
   const [loadingMessage, setLoadingMessage] = useState('Preparing transfer...');
   // Set after a successful out-of-band transfer (recipient never
   // registered, no on-chain Note event) so the success step can show
@@ -1561,6 +1573,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
 
   // Transfer flow
   const handleConfirmUnlocked = useCallback(async () => {
+    transferPhaseRef.current = 'validate';
     if (isConsolidating && consolidationError) {
       reportTransferError(consolidationError);
       return;
@@ -1621,6 +1634,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
       setSentUnits(null);
       setStep('loading');
       reportTransferError(null);
+      transferPhaseRef.current = 'validate';
       setLoadingMessage('Preparing the transfer...');
       try {
         if (recipientAddress === sender) throw new Error('That is your own address. Pick someone else to send to.');
@@ -1636,7 +1650,8 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           && recipientRegistrationCheck.chainId === STELLAR_TESTNET_ID
           && recipientRegistrationCheck.recipientAddress.toUpperCase() === recipientAddress.trim().toUpperCase();
         const inputCommitments = pick.selectedNotes.map((n) => n.commitment as `0x${string}`);
-        const onStage = (stage: Parameters<typeof describeStellarStage>[0]) => { if (live()) setLoadingMessage(describeStellarStage(stage)); };
+        transferPhaseRef.current = 'proof';
+        const onStage = (stage: Parameters<typeof describeStellarStage>[0]) => { if (!live()) return; transferPhaseRef.current = stellarErrorReportStage(stage); setLoadingMessage(describeStellarStage(stage)); };
         let result: { txHash: string };
         if (oneTime) {
           const { buildStellarClaimUrl } = await import('@/services/stellar/stellar-claim-url');
@@ -1722,7 +1737,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           }
         }
         if (!live() || /Superseded/.test(raw)) return;
-        reportTransferError(declined ? 'Transaction was rejected.' : stellarErrorMessage(raw));
+        reportTransferError(declined ? 'Transaction was rejected.' : stellarErrorMessage(raw), err);
         setStep('review');
       }
       return;
@@ -1742,6 +1757,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
       setSentUnits(null);
       setStep('loading');
       reportTransferError(null);
+      transferPhaseRef.current = 'validate';
       setLoadingMessage('Reconstructing Merkle proofs + proving...');
       try {
         // Select active Sui notes covering the amount from ONE lineage —
@@ -1753,6 +1769,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           throw new Error(SUI_SINGLE_NOTE_ERROR);
         }
         const { notes: chosen, sum, label } = selection;
+        transferPhaseRef.current = 'proof';
         // Pure transfer: amountOut = 0. Exact-amount output to the recipient
         // plus a change note back to self (Nx2, lineage label preserved).
         const { randomFieldElement, addressToU256 } = await import('@/services/sui-witness');
@@ -1872,7 +1889,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         }
         log('error', 'Transfer', `Sui transfer failed: ${message}`, err);
         if (live()) {
-          reportTransferError(message);
+          reportTransferError(message, err);
           setStep('review');
         }
       }
@@ -1889,6 +1906,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     setSentUnits(null);
     setStep('loading');
     reportTransferError(null);
+    transferPhaseRef.current = 'validate';
     setLoadingMessage('Syncing latest pool state...');
     // Pause background polling (balances, ASP queries) while the tx
     // is in flight so we don't blast the RPC during the wait.
@@ -1956,6 +1974,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
       // to the head (services/sdk-setup.ts), and the preflight below reads
       // spent state from bulk data, so a pass here only told the ASP and the
       // RPC provider that a spend was about to be proved.
+      transferPhaseRef.current = 'validate';
       setLoadingMessage('Checking private funds...');
       // Read the freshly committed managers, not the render-captured ones —
       // on the first attempt those are still stale right after ensureInitialized().
@@ -2105,6 +2124,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           ? prev
           : verifiedInputCommitments
       ));
+      transferPhaseRef.current = 'proof';
       setLoadingMessage('Generating proof...');
       let amountHex = `0x${sendAmountWei.toString(16)}` as Hex;
 
@@ -2271,6 +2291,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           }
         }
       }
+      transferPhaseRef.current = 'submit';
       setLoadingMessage('Submitting transaction...');
 
 
@@ -2303,6 +2324,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
       // the heal below needs it because the plan cannot know it.
       let relayedChangeCommitment: Hash | null = null;
       if (disclosed) {
+        transferPhaseRef.current = 'submit';
         setLoadingMessage('Confirm the transfer in your wallet…');
         log('info', 'Transfer', 'Submitting transfer directly from wallet (address disclosed)', { from: walletAddress });
         // Pin the sending account + chain to the proof-bound wallet. The proof
@@ -2331,6 +2353,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         const transferQuotes = relayerTransferQuotes(chainId);
         let outputPlan: ReturnType<typeof relayedPlan.plan>;
         const freshRelayerOption = async () => {
+        transferPhaseRef.current = 'quote';
         setLoadingMessage('Getting a fresh relayer quote…');
         const selectedQuote = await requestTransferQuote(transferQuotes, inputTokenId);
         if (!selectedQuote) {
@@ -2392,6 +2415,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         });
         };
         let relayerOption = await freshRelayerOption();
+        transferPhaseRef.current = 'submit';
         setLoadingMessage('Submitting via relayer…');
         log('info', 'Transfer', 'Submitting transfer via SDK relayer', {
           relayer: relayerOption.selectedQuote.relayerInfo.name,
@@ -2419,6 +2443,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           if (method !== 'relayTransfer' || !live()) return;
           relayTimes.relayerAnsweredMs = Date.now() - relayT0;
           relayRun.hash = relayedHash;
+          transferPhaseRef.current = 'confirm';
           const want = relayedHash.toLowerCase();
           relayRun.stopHearing?.();
           relayRun.settled = new Promise<PendingRelayResolution>((resolve) => {
@@ -2431,6 +2456,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           });
           setTxHash(relayedHash as Hash);
           setTxChainId(chainId);
+          transferPhaseRef.current = 'confirm';
           setLoadingMessage(RELAY_WAITING_BLOCK);
         });
         let relayCheck = expectTransferRelay(transferRelayExpectation(relayerOption.selectedQuote, verifiedInputCommitments.length, outputPlan!));
@@ -2445,6 +2471,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
             // armed in place of the refused one.
             refresh: async () => {
               const next = await freshRelayerOption();
+              transferPhaseRef.current = 'submit';
               relayCheck.release();
               relayCheck = expectTransferRelay(transferRelayExpectation(next.selectedQuote, verifiedInputCommitments.length, outputPlan!));
               return next;
@@ -2517,6 +2544,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
       setTxChainId(chainId);
       // Relayed: the block wait is already behind us here (relayTransfer
       // resolves after it), so what is left is matching it in bulk data.
+      transferPhaseRef.current = 'confirm';
       setLoadingMessage(hideAddress ? 'Confirming the transfer…' : 'Waiting for confirmation...');
 
       // PRIVACY: confirm from bulk chain data, NOT by polling this client's RPC
@@ -3280,6 +3308,9 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   // Native mock mode: no real flow starts from the pretend account.
   const blockMockFlow = useNativeMockBlock();
   const openTransferModal = useCallback((prefill?: TransferPrefill) => {
+    // A new flow never inherits the last one's stage (a stale 'confirm' would
+    // mark a pre-send error as broadcast).
+    transferPhaseRef.current = 'unknown';
     if (blockMockFlow()) return;
     if (isOpen && isConsolidating) return;
     // The wallet-picker and seed-derivation gates are EVM session concerns; the

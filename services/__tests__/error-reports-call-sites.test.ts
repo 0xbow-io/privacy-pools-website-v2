@@ -4,12 +4,12 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import ts from 'typescript';
 
-import { ALLOWED_CODE_KEYS, ALLOWED_DIAGNOSTIC_KEYS, ALLOWED_FLAGS, TELEMETRY_MESSAGES } from '../telemetry-event';
+import { ALLOWED_CODE_KEYS, ALLOWED_DIAGNOSTIC_KEYS, ALLOWED_FLAGS, ERROR_REPORT_MESSAGES } from '../error-reports-event';
 
 /**
  * The CALLERS, not the boundary.
  *
- * services/__tests__/telemetry-event.test.ts proves the constructor drops a
+ * services/__tests__/error-reports-event.test.ts proves the constructor drops a
  * non-boolean, an unknown flag name and a free-form message. That is the last
  * line, and it is SILENT: a caller that passes a string where a boolean was
  * expected loses the field with no error anywhere, so the report arrives
@@ -18,8 +18,8 @@ import { ALLOWED_CODE_KEYS, ALLOWED_DIAGNOSTIC_KEYS, ALLOWED_FLAGS, TELEMETRY_ME
  *
  * WHY THIS IS AN AST PASS AND NOT A REGEX. The first version of this file
  * matched source text, and codex walked through it in four different ways:
- * `import { sendTelemetryEvent as emit }` was invisible to a scan that looked
- * for the spelling; `(reportTelemetry as any)('withdraw-failed', {...})` was
+ * `import { sendErrorReportEvent as emit }` was invisible to a scan that looked
+ * for the spelling; `(reportErrorReport as any)('withdraw-failed', {...})` was
  * not a recognised callee; a line containing the characters `//` truncated the
  * scanned text and hid the call after it; and `hasAmount: enteredAmountWei > 0n`
  * satisfied a "looks boolean" rule while exporting form state. Matching text is
@@ -43,8 +43,8 @@ const NOT_SHIPPED = new Set([
 ]);
 
 /** The one module allowed to speak to the platform client. */
-const TELEMETRY_ENTRY = 'services/telemetry.ts';
-const SENTRY_SINKS = ['services/telemetry-sentry.ts', 'services/telemetry-sentry.web.ts'];
+const ERROR_REPORT_ENTRY = 'services/error-reports.ts';
+const SENTRY_SINKS = ['services/error-reports-sentry.ts', 'services/error-reports-sentry.web.ts'];
 
 function sources(): string[] {
   const out: string[] = [];
@@ -74,7 +74,7 @@ function sources(): string[] {
 
 type CallSite = { file: string; line: number; args: ts.NodeArray<ts.Expression>; node: ts.CallExpression; text: string };
 
-/** Every call of the telemetry reporter, found through its IMPORT BINDING. */
+/** Every call of the error reporter, found through its IMPORT BINDING. */
 function scan() {
   const calls: CallSite[] = [];
   const sinkImporters: string[] = [];
@@ -96,8 +96,8 @@ function scan() {
       if (!bindings || !ts.isNamedImports(bindings)) return;
       for (const element of bindings.elements) {
         const imported = (element.propertyName ?? element.name).text;
-        if (imported === 'reportTelemetry') reporterNames.add(element.name.text);
-        if (imported === 'sendTelemetryEvent') importsSink = true;
+        if (imported === 'reportErrorReport') reporterNames.add(element.name.text);
+        if (imported === 'sendErrorReportEvent') importsSink = true;
       }
     });
     if (importsSink) sinkImporters.push(rel);
@@ -167,16 +167,24 @@ const CLASSIFIER_SPREAD = '...classifyFailure(msg, cause)';
  * argument, which is reviewed by key here because unlike the diagnostic bag it
  * travels in a real-money session.
  */
+const FLOW_FAILURE = ['stage', 'phase', 'error', 'chainId', 'asset', 'isYield'];
+
 const REVIEWED: Record<string, {
   message: string;
   flags: Record<string, string>;
   spreads?: string[];
   /** The keys of a fourth `code` argument, which prod sends. */
   code?: string[];
+  /**
+   * The keys of a fifth `failure` argument, which prod also sends. Its values
+   * are folded onto enums and config lists in services/error-reports-event.ts,
+   * and `error` is read there for its class and frames only.
+   */
+  failure?: string[];
 }> = {
-  'components/withdraw-modal-provider.tsx': { message: 'withdraw-failed', flags: { testMode: 'TEST_MODE === true' } },
-  'components/deposit-modal-provider.tsx': { message: 'deposit-failed', flags: { testMode: 'TEST_MODE === true' } },
-  'components/transfer-modal-provider.tsx': { message: 'transfer-failed', flags: { testMode: 'TEST_MODE === true' } },
+  'components/withdraw-modal-provider.tsx': { message: 'withdraw-failed', flags: { testMode: 'TEST_MODE === true' }, failure: FLOW_FAILURE },
+  'components/deposit-modal-provider.tsx': { message: 'deposit-failed', flags: { testMode: 'TEST_MODE === true' }, failure: FLOW_FAILURE },
+  'components/transfer-modal-provider.tsx': { message: 'transfer-failed', flags: { testMode: 'TEST_MODE === true' }, failure: FLOW_FAILURE },
   'components/app-error-boundary.tsx': {
     message: 'client-failed',
     flags: {},
@@ -208,7 +216,7 @@ describe('what the call sites are allowed to say', () => {
       // environment, so a site that passes one has to be reviewed for it by
       // name rather than allowed to appear.
       expect({ at: `${call.file}:${call.line}`, argc: call.args.length })
-        .toEqual({ at: `${call.file}:${call.line}`, argc: reviewed.code ? 4 : 3 });
+        .toEqual({ at: `${call.file}:${call.line}`, argc: reviewed.failure ? 5 : reviewed.code ? 4 : 3 });
 
       // The message: a bare literal on the union, never a template or variable
       // that could carry the error text.
@@ -216,7 +224,7 @@ describe('what the call sites are allowed to say', () => {
       expect({ at: `${call.file}:${call.line}`, literalMessage: ts.isStringLiteral(message) })
         .toEqual({ at: `${call.file}:${call.line}`, literalMessage: true });
       const key = (message as ts.StringLiteral).text;
-      expect(Object.hasOwn(TELEMETRY_MESSAGES, key)).toBe(true);
+      expect(Object.hasOwn(ERROR_REPORT_MESSAGES, key)).toBe(true);
       expect(key).toBe(reviewed.message);
 
       // The flags: an inline object literal, so the decision is readable right
@@ -315,6 +323,24 @@ describe('what the call sites are allowed to say', () => {
         expect({ at: `${call.file}:${call.line}`, names }).toEqual({ at: `${call.file}:${call.line}`, names: reviewed.code });
         for (const name of names) expect(ALLOWED_CODE_KEYS as readonly string[]).toContain(name);
       }
+
+      // The failure bag: the code slot is `undefined`, and the fifth argument
+      // is an inline literal with exactly the reviewed keys, no spread.
+      if (reviewed.failure) {
+        expect({ at: `${call.file}:${call.line}`, codeSlot: call.args[3]!.getText() })
+          .toEqual({ at: `${call.file}:${call.line}`, codeSlot: 'undefined' });
+        const bag = call.args[4]!;
+        expect({ at: `${call.file}:${call.line}`, inlineFailure: ts.isObjectLiteralExpression(bag) })
+          .toEqual({ at: `${call.file}:${call.line}`, inlineFailure: true });
+        const names: string[] = [];
+        for (const property of (bag as ts.ObjectLiteralExpression).properties) {
+          const recognised = ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property);
+          expect({ at: `${call.file}:${call.line}`, recognisedFailure: recognised })
+            .toEqual({ at: `${call.file}:${call.line}`, recognisedFailure: true });
+          names.push(((property as ts.PropertyAssignment).name as ts.Identifier).text);
+        }
+        expect({ at: `${call.file}:${call.line}`, names }).toEqual({ at: `${call.file}:${call.line}`, names: reviewed.failure });
+      }
     }
     // ...and each reviewed site really does still make its call, so reverting
     // to the one-argument form fails here rather than passing quietly.
@@ -325,8 +351,8 @@ describe('what the call sites are allowed to say', () => {
     expect(SCAN.suspicious).toEqual([]);
   });
 
-  test('only the telemetry entry point imports the platform sink', () => {
-    expect(SCAN.sinkImporters.sort()).toEqual([TELEMETRY_ENTRY]);
+  test('only the error reporting entry point imports the platform sink', () => {
+    expect(SCAN.sinkImporters.sort()).toEqual([ERROR_REPORT_ENTRY]);
     // and the sink modules themselves are the only other place it may live
     for (const sink of SENTRY_SINKS) expect(SCAN.sinkImporters).not.toContain(sink);
   });

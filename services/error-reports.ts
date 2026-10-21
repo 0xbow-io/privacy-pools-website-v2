@@ -4,26 +4,28 @@
  * Callers name a MESSAGE from a fixed union and pass booleans. They do not
  * pass an error, a string they built, or anything derived from a note - there
  * is deliberately no parameter that could carry one. What actually leaves is
- * constructed in services/telemetry-event.ts; this module is the entry point
+ * constructed in services/error-reports-event.ts; this module is the entry point
  * and the platform split.
  *
  * Reporting is OFF unless EXPO_PUBLIC_SENTRY_DSN is set, and is web-only:
- * services/telemetry-sentry.ts is a no-op that Metro uses for native, and
+ * services/error-reports-sentry.ts is a no-op that Metro uses for native, and
  * `.web.ts` next to it is the real client.
  */
 import { ACTIVE_APP_ENVIRONMENT } from '@/config/app-environment';
 import { SENTRY_DSN, SENTRY_RELEASE } from '@/config/env';
 import { onEgressRefusal } from '@/services/egress-policy';
-import { initSentry, sendTelemetryEvent } from '@/services/telemetry-sentry';
-import type { TelemetryFlags, TelemetryMessageKey } from '@/services/telemetry-event';
+import { initSentry, sendErrorReportEvent } from '@/services/error-reports-sentry';
+import { RELAYED_SPEND_MESSAGES, type ErrorReportFlags, type ErrorReportMessageKey } from '@/services/error-reports-event';
+import { resolveStage, type ErrorReportWalletKind } from '@/services/error-reports-failure';
+import { onErrorReportsEnabledChange, readErrorReportsEnabled } from '@/services/error-reports-setting';
 
-export type { TelemetryFlags, TelemetryMessageKey };
+export type { ErrorReportFlags, ErrorReportMessageKey };
 
 /**
  * The values a staging build may attach. Never read on a build that is not
  * allowed to send them - see `diagnosticsAllowed` below.
  */
-export type TelemetryDiagnostic = {
+export type ErrorReportDiagnostic = {
   stage?: string;
   detail?: string;
   address?: string;
@@ -38,9 +40,9 @@ export type TelemetryDiagnostic = {
  * Both are SOURCE TEXT: a class name and a component name, the same string for
  * every user who reaches that path. The constructor refuses anything that is
  * not a bare JS identifier, so a caller cannot widen this by passing a value
- * here, however it is spelled. See ALLOWED_CODE_KEYS in telemetry-event.ts.
+ * here, however it is spelled. See ALLOWED_CODE_KEYS in error-reports-event.ts.
  */
-export type TelemetryCode = {
+export type ErrorReportCode = {
   errorName?: string;
   componentFrame?: string;
 };
@@ -106,27 +108,78 @@ let stopEgressRelay: (() => void) | undefined;
 /**
  * Report a failure.
  *
- * A no-op when telemetry was never started, which is the normal state in
+ * A no-op when error reporting was never started, which is the normal state in
  * tests, in native builds, and in any deployment without a DSN.
  */
-export function reportTelemetry(
-  message: TelemetryMessageKey,
-  flags: TelemetryFlags = {},
-  diagnostic?: TelemetryDiagnostic,
-  code?: TelemetryCode,
+export function reportErrorReport(
+  message: ErrorReportMessageKey,
+  flags: ErrorReportFlags = {},
+  diagnostic?: ErrorReportDiagnostic,
+  code?: ErrorReportCode,
+  failure?: ErrorReportFailure,
 ): void {
+  // The user turned reports off: nothing is even handed to the client.
+  if (!readErrorReportsEnabled()) return;
   // Passed unconditionally by callers. What decides whether any of it leaves
   // is `diagnosticsAllowed`, applied in the constructor, not here: a call site
   // that has to remember the rule is a call site that will eventually forget.
   // `code` is the same deal in reverse: it always leaves, and what makes that
   // safe is the identifier filter in the constructor, not the caller's care.
-  sendTelemetryEvent({
+  sendErrorReportEvent({
     message,
     ...flags,
     ...(diagnostic ? { diagnostic } : {}),
     ...(code ? { code } : {}),
-  });
+    ...(failure
+      ? {
+          failure: {
+            // A relayed spend the relayer already accepted stays at confirm
+            // whatever the call site names, so the constructor reports it
+            // without chain or asset (RELAYED_SPEND_MESSAGES).
+            stage: RELAYED_SPEND_MESSAGES.includes(message) && failure.phase === 'confirm'
+              ? 'confirm'
+              : resolveStage(failure.stage, failure.phase),
+            chainId: failure.chainId,
+            asset: failure.asset,
+            isYield: failure.isYield,
+            walletKind: walletContext.walletKind,
+            connector: walletContext.connector,
+          },
+        }
+      : {}),
+  }, failure?.error);
 }
+
+/**
+ * A flow failure, described in fields that travel in EVERY environment.
+ *
+ * `stage` is the call site's own stage name or an enum member, and `phase` is
+ * the stage the flow last entered; both are folded onto the stage enum before
+ * anything leaves. `error` is read for its class and its stack frames only, in
+ * services/error-reports-event.ts, never for its message. `chainId` and `asset` are
+ * checked there against the configured chain and token lists.
+ */
+export type ErrorReportFailure = {
+  stage?: string;
+  phase?: string;
+  error?: unknown;
+  chainId?: number | string;
+  asset?: string;
+  isYield?: boolean;
+};
+
+/** The connected wallet, published by the SDK provider. Enums only. */
+let walletContext: { walletKind: ErrorReportWalletKind; connector?: string } = { walletKind: 'unknown' };
+
+export function setErrorReportWallet(walletKind: ErrorReportWalletKind, connector: string | undefined): void {
+  walletContext = { walletKind, connector };
+}
+
+/** The configured chain ids and token symbols the failure tags are checked against. */
+export type ErrorReportCatalog = {
+  knownChainIds: readonly number[];
+  knownAssetSymbols: readonly string[];
+};
 
 /**
  * Start the reporter, and relay egress refusals into it.
@@ -139,20 +192,37 @@ export function reportTelemetry(
  * Returns a teardown so a caller that starts it can stop it. Safe to call
  * twice; the client initialises once.
  */
-export function initTelemetry(): () => void {
+export function initErrorReport(catalog?: ErrorReportCatalog): () => void {
   if (!SENTRY_DSN) return () => {};
+  // Off: the SDK is not even loaded. Turning it on starts it in place.
+  if (!readErrorReportsEnabled()) {
+    const stop = onErrorReportsEnabledChange((enabled) => {
+      if (!enabled) return;
+      stop();
+      teardown = initErrorReport(catalog);
+    });
+    let teardown: () => void = () => {};
+    return () => { stop(); teardown(); };
+  }
   if (
     !initSentry(SENTRY_DSN, {
       environment: ACTIVE_APP_ENVIRONMENT,
       release: SENTRY_RELEASE,
       diagnosticsAllowed,
+      enabled: () => readErrorReportsEnabled(),
+      knownChainIds: catalog?.knownChainIds,
+      knownAssetSymbols: catalog?.knownAssetSymbols,
+      // Written by `sentry-cli sourcemaps inject` (scripts/sentry-sourcemaps.mjs).
+      debugIds: () => (globalThis as { _sentryDebugIds?: unknown })._sentryDebugIds,
+      origin: typeof globalThis.location?.origin === 'string' ? globalThis.location.origin : undefined,
     })
   ) {
     return () => {};
   }
   stopEgressRelay?.();
   stopEgressRelay = onEgressRefusal((party, reason) => {
-    sendTelemetryEvent({ message: 'egress-refused', egressParty: party, egressReason: reason });
+    if (!readErrorReportsEnabled()) return;
+    sendErrorReportEvent({ message: 'egress-refused', egressParty: party, egressReason: reason });
   });
   return () => {
     stopEgressRelay?.();

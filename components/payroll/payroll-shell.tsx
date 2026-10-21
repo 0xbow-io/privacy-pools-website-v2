@@ -1,3 +1,4 @@
+import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import React, { useState } from 'react';
 import { View, Text, ScrollView, Pressable, Platform, useWindowDimensions } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -23,6 +24,7 @@ const TABS: { key: PayrollTab; label: string; icon: keyof typeof Ionicons.glyphM
 export function PayrollShell({ active, title, subtitle, children }: {
   active: PayrollTab; title: string; subtitle?: string; children: React.ReactNode;
 }) {
+  const tabClearance = useTabBarClearance();
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const router = useRouter();
@@ -50,7 +52,10 @@ export function PayrollShell({ active, title, subtitle, children }: {
   return (
     <View className="flex-1 bg-background">
       <Header />
-      <ScrollView className="flex-1" contentContainerClassName="grow py-[28px]">
+      <ScrollView className="flex-1" contentContainerClassName="grow pt-[28px]"
+        // nw-keep(measured-or-inset): clearance for the floating bottom bar
+        contentContainerStyle={{ paddingBottom: 28 + tabClearance }}
+      >
         {/* Padding sits inside the max-width frame so the header's lockup and
             wallet line up with the content edges, not 20px inside. */}
         <View className="mx-auto w-full max-w-[1080px] grow gap-[22px] px-[20px]">

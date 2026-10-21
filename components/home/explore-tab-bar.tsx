@@ -7,7 +7,7 @@ import { Colors, Fonts, FontWeights } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import type { DrawerSection } from '@/components/home/explore-panel';
 import { NATIVE_BAR_TABS } from '@/services/native-bar-tabs';
-import { tabBarBottomOffset } from '@/services/header-nav';
+import { TAB_BAR_TRACK_HEIGHT, tabBarBottomOffset } from '@/services/header-nav';
 
 /** The bar's tabs: Shield (home), the three data surfaces, and "More". */
 export type MobileNavTab = DrawerSection | 'shield' | 'stats' | 'card' | 'more';
@@ -64,12 +64,6 @@ const BAR_TABS: { key: MobileNavTab; icon: keyof typeof Ionicons.glyphMap; activ
 export function barTabsFor(isConnected: boolean) {
   return BAR_TABS.map((tab): (typeof BAR_TABS)[number] => (!isConnected && tab.key === 'mine' ? STATS_TAB : tab));
 }
-
-/**
- * Space the page must leave at its foot so the last row of content can scroll
- * clear of the floating bar (bar height + its bottom offset).
- */
-export const EXPLORE_TAB_BAR_CLEARANCE = 78;
 
 /**
  * The activity door reads "All activity" for a visitor and "My activity" once
@@ -218,7 +212,7 @@ export function ExploreTabBar({
           // Telegram-calibrated, second pass: same density, a touch more
           // height — Telegram's bar is ~15% taller than the first cut, with
           // slightly larger glyphs. Clearance above tracks trackHeight.
-          config={{ layout: { iconSize: 18, trackHeight: 48, itemHeight: 44, trackInset: 2 } }}
+          config={{ layout: { iconSize: 18, trackHeight: TAB_BAR_TRACK_HEIGHT, itemHeight: 44, trackInset: 2 } }}
         />
       </View>
     </View>

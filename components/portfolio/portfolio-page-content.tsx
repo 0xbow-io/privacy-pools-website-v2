@@ -1,3 +1,4 @@
+import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { poolDisplayLabel } from '@/config/pool-paths';
 import { useMemo } from 'react';
 import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
@@ -62,6 +63,7 @@ export function PortfolioPageContent() {
 }
 
 function PortfolioBody() {
+  const tabClearance = useTabBarClearance();
   const { isConnected } = useAccount();
   const { sessionAddress } = useSdkContext();
   const { positions, totalValue, totalValueFormatted, pendingValueFormatted, hasPositions, chainDisplayName, chainId, isLoading: portfolioLoading, yieldEarnedUsdFormatted } = usePortfolio();
@@ -168,7 +170,10 @@ function PortfolioBody() {
   return (
     <View className="flex-1 bg-background">
       <Header />
-      <ScrollView className="flex-1" contentContainerClassName="grow px-[20px] pt-[20px] pb-[20px]">
+      <ScrollView className="flex-1" contentContainerClassName="grow px-[20px] pt-[20px]"
+        // nw-keep(measured-or-inset): clearance for the floating bottom bar
+        contentContainerStyle={{ paddingBottom: 20 + tabClearance }}
+      >
         {/* 1100px is this app's page width: /explore, /transactions and
             /ecosystem all use it, and the header nav moves between them and
             this page. Portfolio was the one page at 820, so stepping between

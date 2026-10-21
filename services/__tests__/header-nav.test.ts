@@ -178,3 +178,12 @@ test('the web tab bar sits on the bottom edge, whatever inset the webview report
   expect(effectiveSafeAreaInset('ios', 47)).toBe(47);
   expect(effectiveSafeAreaInset('android', Number.NaN)).toBe(0);
 });
+
+test('page clearance always clears the tab bar and its offset, and is zero without the bar', async () => {
+  const { tabBarClearance, tabBarBottomOffset, TAB_BAR_TRACK_HEIGHT } = await import('@/services/header-nav');
+  for (const [platform, inset] of [['web', 0], ['web', 45], ['ios', 34], ['android', 0], ['ios', 59]] as const) {
+    const c = tabBarClearance(platform, 390, inset);
+    expect(c).toBeGreaterThan(TAB_BAR_TRACK_HEIGHT + tabBarBottomOffset(platform, inset));
+  }
+  expect(tabBarClearance('web', 1280, 0)).toBe(0);
+});

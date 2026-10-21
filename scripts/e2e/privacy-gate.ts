@@ -143,9 +143,9 @@ export const WAIVERS: Waiver[] = [
     reason:
       'A STAGING session that reports a failed flow attaches the session address, amount '
       + 'and raw error to the Sentry event on purpose (contexts.diagnostic, gated on the '
-      + 'staging environment in services/telemetry.ts; Pat, 2026-09-16: staging must '
+      + 'staging environment in services/error-reports.ts; Pat, 2026-09-16: staging must '
       + 'provide the rich data, prod sends booleans only). The journey runs on staging, so a '
-      + 'failed step legitimately ships this envelope; it is the one telemetry destination '
+      + 'failed step legitimately ships this envelope; it is the one error reporting destination '
       + 'services/egress-policy.ts allows. Clears when staging diagnostics drop the address.',
   },
 ];

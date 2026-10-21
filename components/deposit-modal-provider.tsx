@@ -10,8 +10,9 @@ import { usePathname } from 'expo-router';
 import { plainNativeDepositRefused, resolveDepositPayAsset } from '@/services/shield-pools';
 import { ACTIVE_ENVIRONMENT } from '@/config/environments';
 import { cappedQuickAmounts, checkDepositCap } from '@/services/deposit-cap';
-import { reportTelemetry } from '@/services/telemetry';
-import { classifyFailure } from '@/services/telemetry-cause';
+import { reportErrorReport } from '@/services/error-reports';
+import { classifyFailure } from '@/services/error-reports-cause';
+import { stellarErrorReportStage, type ErrorReportStage } from '@/services/error-reports-failure';
 import { TEST_MODE } from '@/config/env';
 import { DEPOSIT_FAQ_URL, SUPPORT_FORM_URL, SUPPORT_TELEGRAM_URL } from '@/config/support';
 import { ENTRYPOINT_ASSETS_ABI, getMinimumDepositAmount, getVettingFeeBPS, type EntrypointAssetConfig } from '@/services/entrypoint-assets';
@@ -159,7 +160,7 @@ import { PP_ROUTER_QUOTE_ABI, toYieldDepositFor } from '@/services/yield-deposit
 import { toNativeYieldDeposit } from '@/services/yield-native-deposit';
 import { useYieldVaultProbeVersion } from '@/hooks/use-yield-vault-probe';
 import { useRelayerAssetSupport } from '@/hooks/use-relayer-asset-support';
-import { fetchRelayerAssetAddresses, relayerAssetSupport, relayerShareExitMessage } from '@/services/relayer-assets';
+import { fetchRelayerAssetAddresses, RelayerUnavailableError, relayerAssetSupport, relayerShareExitMessage } from '@/services/relayer-assets';
 import { computeDepositTotal } from '@/services/yield-math';
 import { YieldBlock, YieldCostRow } from '@/components/yield/yield-block';
 import { useTabCloseGuard } from '@/hooks/use-tab-close-guard';
@@ -1027,21 +1028,31 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
   const { toast: errorToast } = useToast();
   // Every flow error ALSO surfaces as a destructive toast — visible even
   // when the inline error line is below the fold or the modal is closing.
+  // The stage the running deposit last entered, and whether it took the yield
+  // route. Written by handleConfirm as it goes, read by the reporter below.
+  const depositErrorReportRef = useRef<{ phase: ErrorReportStage; isYield?: boolean }>({ phase: 'unknown' });
   const reportDepositError = useCallback((msg: string | null, cause?: unknown, stage?: string) => {
     setDepositError(msg);
     if (msg) errorToast({ title: msg, variant: 'destructive' });
     // The fact plus the failure CLASS, never the message itself: these strings
     // quote amounts, tokens, addresses and relayer responses, and the class is
     // a boolean that cannot. The values below ride in a separate bag that only
-    // a staging build sends - services/telemetry.ts decides, not this line.
+    // a staging build sends - services/error-reports.ts decides, not this line.
     if (msg) {
-      reportTelemetry('deposit-failed', { testMode: TEST_MODE === true, ...classifyFailure(msg, cause) }, {
+      reportErrorReport('deposit-failed', { testMode: TEST_MODE === true, ...classifyFailure(msg, cause) }, {
         ...(stage ? { stage } : {}),
         detail: cause instanceof Error ? `${cause.name}: ${cause.message}` : msg,
         ...(depositOwnerAddress ? { address: depositOwnerAddress } : {}),
         ...(amount ? { amount } : {}),
         asset: selectedToken.symbol,
         chainId,
+      }, undefined, {
+        stage,
+        phase: depositErrorReportRef.current.phase,
+        error: cause,
+        chainId,
+        asset: selectedToken.symbol,
+        isYield: depositErrorReportRef.current.isYield,
       });
     }
   }, [errorToast, depositOwnerAddress, amount, selectedToken, chainId]);
@@ -1575,6 +1586,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     // the inline hub, which has no form validation of its own) — re-assert
     // the live field validation here so neither path can bypass it (e.g. the
     // leave-ETH-for-gas balance rule).
+    depositErrorReportRef.current = { phase: 'validate' };
     if (validationError) {
       setStep('deposit');
       reportDepositError(validationError);
@@ -1599,6 +1611,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     // registers the label ciphertext with the ASP registry.
     if (isStellar) {
       if (!stellarOwner) {
+        depositErrorReportRef.current.phase = 'wallet-connect';
         reportDepositError('Stellar wallet not connected.');
         return;
       }
@@ -1620,13 +1633,14 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       }
       setStep('loading');
       reportDepositError(null);
+      depositErrorReportRef.current.phase = 'wallet-connect';
       setLoadingMessage(describeStellarStage('unlocking'));
       try {
         const res = await stellarSession.deposit({
           amount: amountBase,
           recipient: depositRecipientRef.current ?? undefined,
           shouldContinue: live,
-          onStage: (stage) => { if (live()) setLoadingMessage(describeStellarStage(stage)); },
+          onStage: (stage) => { if (!live()) return; depositErrorReportRef.current.phase = stellarErrorReportStage(stage); setLoadingMessage(describeStellarStage(stage)); },
         });
         // A run the user closed must not paint its hash into a newer flow.
         if (!live()) return;
@@ -1641,7 +1655,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
         if (/Superseded/.test(message)) { setStep('deposit'); return; }
         if (/reject|denied|cancel|declined/i.test(message)) {
           setStep('deposit');
-          reportDepositError('Transaction was rejected.');
+          reportDepositError('Transaction was rejected.', err);
           return;
         }
         reportDepositError(`Deposit failed: ${stellarErrorMessage(message)}`, err, 'stellar-broadcast');
@@ -1656,6 +1670,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     // Keeps the EVM/wagmi path below untouched for EVM chains.
     if (isSui) {
       if (!suiSession.account?.address) {
+        depositErrorReportRef.current.phase = 'wallet-connect';
         reportDepositError('Sui wallet not connected.');
         return;
       }
@@ -1674,9 +1689,11 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       }
       setStep('loading');
       reportDepositError(null);
+      depositErrorReportRef.current.phase = 'proof';
       setLoadingMessage('Building deposit proof...');
       try {
         const amountBase = parseUnits(amount, suiToken.decimals);
+        depositErrorReportRef.current.phase = 'submit';
         setLoadingMessage('Submitting deposit (sign in wallet)...');
         const res = await suiSession.deposit({ amount: amountBase, coinType: suiToken.typeArg, shouldContinue: live });
         setTxHash(res.txDigest);
@@ -1691,7 +1708,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
         if (/Superseded/.test(message)) { setStep('deposit'); return; }
         if (/reject|denied|cancel/i.test(message)) {
           setStep('deposit');
-          reportDepositError('Transaction was rejected.');
+          reportDepositError('Transaction was rejected.', err);
           return;
         }
         reportDepositError(`Deposit failed: ${message}`, err, 'sui-broadcast');
@@ -1700,8 +1717,9 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       return;
     }
 
+    depositErrorReportRef.current.phase = 'wallet-connect';
     if (!connectedAddress) {
-      reportDepositError('Wallet not connected.');
+      reportDepositError('Wallet not connected.', undefined, 'wallet-connect');
       return;
     }
     if (!publicClient) {
@@ -1840,6 +1858,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
         // pay-with or cross-chain one (DEV-489, SDK swap-and-deposit recipient).
         // An account-key session cannot: its deposits belong to the key.
         if (keyOwnedDeposit) throw new Error(`${KEY_SESSION_DEPOSIT_FOR_COPY} Nothing was sent.`);
+        depositErrorReportRef.current.phase = 'recipient-check';
         setLoadingMessage('Checking the recipient...');
         const registration = await checkRecipientRegistration(depositChainId, depositRecipientAddr as ViemAddress);
         if (!live()) { releaseTx(); log('warn', 'Deposit', 'Stale run aborted after the recipient check'); return; }
@@ -2070,6 +2089,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
           setStep('deposit');
           return;
         }
+        depositErrorReportRef.current.phase = 'quote';
         setLoadingMessage('Finding a route…');
         // Set when the swap is broadcast (DEV-433), so a revert can take its
         // pending row back down.
@@ -2359,6 +2379,9 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
                 addSwapPendingRow(hash, routed.pendingNote, amountWei);
               },
               submit: async (tx, kind, onBroadcast) => {
+                // A revoke is allowance cleanup, often while unwinding a later
+                // failure: it keeps the stage that failure is reported under.
+                if (kind !== 'revoke') depositErrorReportRef.current.phase = kind === 'approval' ? 'approve' : 'submit';
                 if (!live()) throw new Error(`This deposit was superseded (the modal was closed or reopened). ${nothingSent()}`);
                 const result = await submitWalletTransaction(
                   () => sendWalletTx({
@@ -2370,6 +2393,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
                     if (!live()) throw new Error(`This deposit was superseded (the modal was closed or reopened). ${nothingSent()}`);
                   }),
                   async (hash) => {
+                    if (kind !== 'approval' && kind !== 'revoke') depositErrorReportRef.current.phase = 'confirm';
                     setLoadingMessage(
                       kind === 'approval'
                         ? 'Waiting for approval confirmation…'
@@ -2555,6 +2579,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
         payerAddress: connectedAddress,
         chainId,
       });
+      depositErrorReportRef.current.phase = 'proof';
       setLoadingMessage('Generating proof...');
 
       // Aave yield routing: flag ON + deployment configured + toggle left ON →
@@ -2577,6 +2602,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       // this too, and it is what says "no approval, fund with value" below.
       const liveYieldIsNative = selectedToken.isNative && liveDeployment?.nativeMode === true;
       const useYieldPath = yieldAvailable && yieldOn && !!liveDeployment;
+      depositErrorReportRef.current.isYield = useYieldPath;
       // The native coin on a chain with a CONFIGURED native-mode route has one
       // way in: the router. If the verified route is not available right now
       // (probe pending or failed) the deposit is refused, never shielded plainly
@@ -2603,10 +2629,13 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       if (useYieldPath) {
         // Re-check the exit at the moment money moves: the relayer must list the
         // share, or the note minted here could only leave by ragequit.
+        depositErrorReportRef.current.phase = 'relayer-check';
         const exitVerdict = relayerAssetSupport(await fetchRelayerAssetAddresses(depositChainId), liveDeployment!.ppUSDC);
         if (exitVerdict !== 'supported') {
-          throw new Error(relayerShareExitMessage(exitVerdict, displayTokenSymbol(liveDeployment!.underlyingSymbol)) + ' Nothing was sent.');
+          const refusal = relayerShareExitMessage(exitVerdict, displayTokenSymbol(liveDeployment!.underlyingSymbol)) + ' Nothing was sent.';
+          throw exitVerdict === 'unknown' ? new RelayerUnavailableError(refusal) : new Error(refusal);
         }
+        depositErrorReportRef.current.phase = 'proof';
         const yieldNs = resolveYieldNamespace(session, liveDeployment!, depositChainId);
         // Underlying the router may pull: budget + wrap headroom (sizeWrapDeposit).
         let yieldSpendCap = amountWei;
@@ -2879,6 +2908,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
           approvalCap: approvalCap.toString(),
         });
         const submitYieldApproval = async (value: bigint, message: string) => {
+          depositErrorReportRef.current.phase = 'approve';
           setLoadingMessage(message);
           const approvalHash = await sendWalletTx({
             chainId,
@@ -2972,6 +3002,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
         });
 
         if (payerAllowance < requiredAllowance) {
+          depositErrorReportRef.current.phase = 'approve';
           setLoadingMessage('Requesting token approval...');
           log('info', 'Deposit', 'Submitting payer approval transaction', {
             tokenId,
@@ -3030,6 +3061,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       }
 
       // Step 2: Submit deposit tx
+      depositErrorReportRef.current.phase = 'submit';
       setLoadingMessage('Submitting deposit transaction...');
       log('info', 'Deposit', 'Submitting deposit transaction', {
         to: result.to,
@@ -3265,6 +3297,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
         removePendingOwnRow(chainId, hash);
       };
 
+      depositErrorReportRef.current.phase = 'confirm';
       setLoadingMessage('Waiting for deposit confirmation...');
       let receipt;
       try {
@@ -3391,7 +3424,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
         message.includes('User cancelled')
       ) {
         setStep('deposit');
-        reportDepositError(`Transaction was rejected.${approvalSent ? ' The approval before it already mined and cost gas.' : ''}`);
+        reportDepositError(`Transaction was rejected.${approvalSent ? ' The approval before it already mined and cost gas.' : ''}`, err);
         return;
       }
 
@@ -3521,6 +3554,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
   // Native mock mode: no real flow starts from the pretend account.
   const blockMockFlow = useNativeMockBlock();
   const openDepositModal = useCallback((options?: { tokenSymbol?: string; tokenAddress?: string; initialAmount?: string; recipientAddress?: string }) => {
+    depositErrorReportRef.current = { phase: 'validate' };
     if (blockMockFlow()) return;
     opEpochRef.current += 1;
     cancelPendingRelaunch();
@@ -3628,6 +3662,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     recipientAddress?: string;
   }) => {
     // A new launch supersedes any relaunch still parked from an earlier one.
+    depositErrorReportRef.current = { phase: 'validate' };
     cancelPendingRelaunch();
     if (blockMockFlow()) return;
     if (!isSui) {

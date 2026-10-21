@@ -284,7 +284,7 @@ describe('no network, no persistence', () => {
     'components/mobile-account-keys-provider.tsx',
     'components/mobile-account-keys-provider.native.tsx',
   ];
-  const NETWORK = /\bfetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|egress|telemetry|Sentry|axios|@\/services\/(rpc|relayer|asp|api)/;
+  const NETWORK = /\bfetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|egress|errorReport|Sentry|axios|@\/services\/(rpc|relayer|asp|api)/;
 
   for (const file of files) {
     test(`${file} makes no request`, () => {

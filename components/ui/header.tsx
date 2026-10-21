@@ -51,6 +51,8 @@ import { activeCustomRpcUrl } from '@/config/custom-rpc';
 import { TOR_IN_FORCE, TOR_ON_DEVICE } from '@/config/tor';
 import { NotificationCenter } from '@/components/ui/notification-center';
 import { AccountKeyExportModal } from '@/components/account-key-export-modal';
+import { ErrorReportsModal, useErrorReportsEnabled } from '@/components/error-reports-modal';
+import { errorReportsMenuLabel } from '@/services/error-reports-setting';
 import { AccountKeyToMobileModal } from '@/components/account-key-to-mobile-modal';
 import { useMobileAccountKeys } from '@/components/mobile-account-keys-context';
 import { useTransferModal } from '@/components/transfer-modal-provider';
@@ -228,6 +230,8 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
   const [ensName, setEnsName] = useState<string | null>(null);
   const [ensAvatar, setEnsAvatar] = useState<string | null>(null);
   const [exportKeyOpen, setExportKeyOpen] = useState(false);
+  const [errorReportsOpen, setErrorReportsOpen] = useState(false);
+  const errorReportsEnabled = useErrorReportsEnabled();
   const [exportToMobileOpen, setExportToMobileOpen] = useState(false);
   const mobileAccountKeys = useMobileAccountKeys();
   const {
@@ -913,6 +917,16 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                       {/* No passkey backup download here: the backup has no restore
                           path in the app yet, so offering it would promise a lifeboat
                           that cannot be used (codex on PR #36). */}
+                      <Pressable
+                        className="flex-row items-center gap-[10px] rounded-pill px-[12px] py-[10px] hover:bg-background-secondary"
+                        onPress={() => { setActionsDropdownOpen(false); setErrorReportsOpen(true); }}
+                        testID="menu-error-reports"
+                      >
+                        <Ionicons name="bug-outline" size={16} color={colors.text} />
+                        <Text className="font-pp-sans text-[14px] text-text">
+                          {errorReportsMenuLabel(errorReportsEnabled)}
+                        </Text>
+                      </Pressable>
                     </>
                   ) : (
                   <>
@@ -1227,6 +1241,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
       </View>
 
       <AccountKeyExportModal visible={exportKeyOpen} onClose={() => setExportKeyOpen(false)} />
+      <ErrorReportsModal visible={errorReportsOpen} onClose={() => setErrorReportsOpen(false)} />
       {/* Mounted only while open: closing unmounts it, so the code, key and QR go with it. */}
       {Platform.OS === 'web' && exportToMobileOpen ? (
         <AccountKeyToMobileModal visible onClose={() => setExportToMobileOpen(false)} />

@@ -3,10 +3,10 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 import {
-  privateTelemetryEvent,
-  TELEMETRY_MESSAGES,
+  privateErrorReportEvent,
+  ERROR_REPORT_MESSAGES,
   type IncomingEvent,
-} from '../telemetry-event';
+} from '../error-reports-event';
 
 const ROOT = join(new URL('.', import.meta.url).pathname, '..', '..');
 
@@ -63,7 +63,7 @@ function stuffedEvent(): IncomingEvent {
     extra: { note: { label: SECRETS.label, value: SECRETS.amount } },
     contexts: {
       withdrawal: { amount: SECRETS.amount, target: SECRETS.recipient },
-      telemetry: {
+      errorReport: {
         message: 'withdraw-failed',
         hasAmount: true,
         hasRecipient: false,
@@ -84,7 +84,7 @@ const serialise = (value: unknown): string => JSON.stringify(value);
 
 describe('the reported event is constructed, not scrubbed', () => {
   test('not one planted value survives, from any of the places Sentry puts them', () => {
-    const out = privateTelemetryEvent(stuffedEvent(), { environment: 'prod', release: 'deadbeef' });
+    const out = privateErrorReportEvent(stuffedEvent(), { environment: 'prod', release: 'deadbeef' });
     expect(out).not.toBeNull();
     const wire = serialise(out);
     // Collected rather than asserted one by one, so a failure names every
@@ -99,7 +99,7 @@ describe('the reported event is constructed, not scrubbed', () => {
     // A structural ratchet. Construction is only safe while the construction
     // is the whole event: a field added upstream and passed through without
     // being thought about is exactly how the last leak happened.
-    const out = privateTelemetryEvent(stuffedEvent(), { environment: 'prod', release: 'deadbeef' })!;
+    const out = privateErrorReportEvent(stuffedEvent(), { environment: 'prod', release: 'deadbeef' })!;
     expect(Object.keys(out).sort()).toEqual(
       ['contexts', 'environment', 'event_id', 'level', 'message', 'platform', 'release', 'timestamp'],
     );
@@ -108,9 +108,9 @@ describe('the reported event is constructed, not scrubbed', () => {
   });
 
   test('a flag is kept only when it is really a boolean', () => {
-    const out = privateTelemetryEvent({
+    const out = privateErrorReportEvent({
       contexts: {
-        telemetry: {
+        errorReport: {
           message: 'deposit-failed',
           hasAmount: true,
           hasRelayer: false,
@@ -125,29 +125,29 @@ describe('the reported event is constructed, not scrubbed', () => {
   });
 
   test('a flag name that is not on the list never appears', () => {
-    const out = privateTelemetryEvent({
-      contexts: { telemetry: { message: 'withdraw-failed', hasSeedPhrase: true, hasLabel: true } },
+    const out = privateErrorReportEvent({
+      contexts: { errorReport: { message: 'withdraw-failed', hasSeedPhrase: true, hasLabel: true } },
     })!;
     expect(out.contexts?.flags).toBeUndefined();
   });
 
   test('the message is picked from the fixed set, never taken from the event', () => {
-    const known = privateTelemetryEvent({ contexts: { telemetry: { message: 'transfer-failed' } } })!;
-    expect(known.message).toBe(TELEMETRY_MESSAGES['transfer-failed']);
+    const known = privateErrorReportEvent({ contexts: { errorReport: { message: 'transfer-failed' } } })!;
+    expect(known.message).toBe(ERROR_REPORT_MESSAGES['transfer-failed']);
 
     // An unrecognised key, a free-form string, and a missing context all land
     // on the same generic line rather than saying anything specific.
     for (const message of ['not-a-key', `failed sending ${SECRETS.amount}`, undefined]) {
-      const out = privateTelemetryEvent({ contexts: { telemetry: { message } } })!;
-      expect(out.message).toBe(TELEMETRY_MESSAGES['client-failed']);
+      const out = privateErrorReportEvent({ contexts: { errorReport: { message } } })!;
+      expect(out.message).toBe(ERROR_REPORT_MESSAGES['client-failed']);
     }
-    expect(privateTelemetryEvent({})!.message).toBe(TELEMETRY_MESSAGES['client-failed']);
+    expect(privateErrorReportEvent({})!.message).toBe(ERROR_REPORT_MESSAGES['client-failed']);
   });
 
   test('an egress refusal carries its route-level reason and nothing more', () => {
-    const out = privateTelemetryEvent({
+    const out = privateErrorReportEvent({
       contexts: {
-        telemetry: {
+        errorReport: {
           message: 'egress-refused',
           egressParty: 'asp',
           egressReason: 'undeclared ASP route',
@@ -159,9 +159,9 @@ describe('the reported event is constructed, not scrubbed', () => {
   });
 
   test('a refusal reason is length-capped, so it cannot become a payload', () => {
-    const out = privateTelemetryEvent({
+    const out = privateErrorReportEvent({
       contexts: {
-        telemetry: { message: 'egress-refused', egressReason: 'x'.repeat(5000), egressParty: 'y'.repeat(5000) },
+        errorReport: { message: 'egress-refused', egressReason: 'x'.repeat(5000), egressParty: 'y'.repeat(5000) },
       },
     })!;
     expect(out.contexts?.egress?.reason.length).toBe(300);
@@ -169,8 +169,8 @@ describe('the reported event is constructed, not scrubbed', () => {
   });
 
   test('a non-string reason is dropped rather than coerced', () => {
-    const out = privateTelemetryEvent({
-      contexts: { telemetry: { message: 'egress-refused', egressReason: { label: SECRETS.label } } },
+    const out = privateErrorReportEvent({
+      contexts: { errorReport: { message: 'egress-refused', egressReason: { label: SECRETS.label } } },
     })!;
     expect(out.contexts?.egress).toBeUndefined();
     expect(serialise(out).includes(SECRETS.label)).toBe(false);
@@ -179,46 +179,46 @@ describe('the reported event is constructed, not scrubbed', () => {
   test('event_id is forwarded only in the shape the SDK mints', () => {
     // The envelope header addresses the event by this id, so dropping it is a
     // delivery question - but anything that is not a 32-hex id is not an id.
-    expect(privateTelemetryEvent({ event_id: 'b'.repeat(32) })!.event_id).toBe('b'.repeat(32));
+    expect(privateErrorReportEvent({ event_id: 'b'.repeat(32) })!.event_id).toBe('b'.repeat(32));
     for (const bad of [SECRETS.address, 'B'.repeat(32), 'b'.repeat(31), 42, null]) {
-      expect(privateTelemetryEvent({ event_id: bad })!.event_id).toBeUndefined();
+      expect(privateErrorReportEvent({ event_id: bad })!.event_id).toBeUndefined();
     }
   });
 
   test('timestamp is forwarded only as a number', () => {
-    expect(privateTelemetryEvent({ timestamp: 1789143053.4 })!.timestamp).toBe(1789143053.4);
+    expect(privateErrorReportEvent({ timestamp: 1789143053.4 })!.timestamp).toBe(1789143053.4);
     for (const bad of ['1789143053', Number.NaN, 0, -1, { t: 1 }]) {
-      expect(privateTelemetryEvent({ timestamp: bad })!.timestamp).toBeUndefined();
+      expect(privateErrorReportEvent({ timestamp: bad })!.timestamp).toBeUndefined();
     }
   });
 
   test('environment and release come from us, never from the event', () => {
-    const out = privateTelemetryEvent(
+    const out = privateErrorReportEvent(
       { environment: SECRETS.address, release: SECRETS.label },
       { environment: 'staging', release: 'abc123' },
     )!;
     expect(out.environment).toBe('staging');
     expect(out.release).toBe('abc123');
     // No meta at all means no labels, not the event's own.
-    const bare = privateTelemetryEvent({ environment: SECRETS.address, release: SECRETS.label })!;
+    const bare = privateErrorReportEvent({ environment: SECRETS.address, release: SECRETS.label })!;
     expect(bare.environment).toBeUndefined();
     expect(bare.release).toBeUndefined();
     expect(serialise(bare).includes(SECRETS.address)).toBe(false);
   });
 
   test('an over-long label is dropped rather than truncated into the wire', () => {
-    const out = privateTelemetryEvent({}, { environment: 'e'.repeat(65), release: 'r'.repeat(65) })!;
+    const out = privateErrorReportEvent({}, { environment: 'e'.repeat(65), release: 'r'.repeat(65) })!;
     expect(out.environment).toBeUndefined();
     expect(out.release).toBeUndefined();
   });
 
   test('nothing in means nothing out', () => {
-    expect(privateTelemetryEvent(null)).toBeNull();
-    expect(privateTelemetryEvent(undefined)).toBeNull();
+    expect(privateErrorReportEvent(null)).toBeNull();
+    expect(privateErrorReportEvent(undefined)).toBeNull();
   });
 
   test('the platform is stated, not inherited', () => {
-    expect(privateTelemetryEvent({ platform: 'node' })!.platform).toBe('javascript');
+    expect(privateErrorReportEvent({ platform: 'node' })!.platform).toBe('javascript');
   });
 });
 
@@ -233,7 +233,7 @@ describe('the reported event is constructed, not scrubbed', () => {
 describe('only one module may speak to the reporter', () => {
   const SCANNED_DIRS = ['services', 'components', 'hooks', 'app', 'config'];
   const SKIP_DIRS = new Set(['node_modules', '.next', 'dist', '__tests__']);
-  const ALLOWED = new Set(['services/telemetry-sentry.web.ts']);
+  const ALLOWED = new Set(['services/error-reports-sentry.web.ts']);
 
   function walk(dir: string, out: string[] = []): string[] {
     for (const entry of readdirSync(dir)) {
@@ -249,7 +249,7 @@ describe('only one module may speak to the reporter', () => {
 
   test('the scan actually reaches the app', () => {
     expect(files.length).toBeGreaterThan(100);
-    expect(files.some((f) => f.endsWith('services/telemetry-sentry.web.ts'))).toBe(true);
+    expect(files.some((f) => f.endsWith('services/error-reports-sentry.web.ts'))).toBe(true);
   });
 
   test('no other file imports the Sentry SDK', () => {
@@ -269,8 +269,8 @@ describe('only one module may speak to the reporter', () => {
 
   test('the comment stripper does not simply blank the file', () => {
     // Otherwise both scans below would pass by scanning nothing.
-    const source = code(join(ROOT, 'services/telemetry-event.ts'));
-    expect(source).toContain('export function privateTelemetryEvent');
+    const source = code(join(ROOT, 'services/error-reports-event.ts'));
+    expect(source).toContain('export function privateErrorReportEvent');
     expect(source).not.toContain('captureException');
   });
 
@@ -288,19 +288,19 @@ describe('only one module may speak to the reporter', () => {
     // pools and chains), so a report that does not say which one it is from
     // is a report you cannot act on. Asserted at the wiring, because the
     // constructor cannot know whether its caller passed anything.
-    const source = readFileSync(join(ROOT, 'services/telemetry.ts'), 'utf8');
+    const source = readFileSync(join(ROOT, 'services/error-reports.ts'), 'utf8');
     expect(source).toContain('environment: ACTIVE_APP_ENVIRONMENT');
     expect(source).toContain("from '@/config/app-environment'");
     // And it survives construction.
-    const out = privateTelemetryEvent(
-      { contexts: { telemetry: { message: 'withdraw-failed' } } },
+    const out = privateErrorReportEvent(
+      { contexts: { errorReport: { message: 'withdraw-failed' } } },
       { environment: 'staging' },
     )!;
     expect(out.environment).toBe('staging');
   });
 
   test('the one allowed file really is configured to collect nothing', () => {
-    const source = readFileSync(join(ROOT, 'services/telemetry-sentry.web.ts'), 'utf8');
+    const source = readFileSync(join(ROOT, 'services/error-reports-sentry.web.ts'), 'utf8');
     for (const required of [
       'defaultIntegrations: false',
       'integrations: []',
@@ -310,7 +310,7 @@ describe('only one module may speak to the reporter', () => {
       'sendClientReports: false',
       'beforeBreadcrumb: () => null',
       'beforeSendTransaction: () => null',
-      'privateTelemetryEvent',
+      'privateErrorReportEvent',
     ]) {
       expect(source.includes(required)).toBe(true);
     }
@@ -335,17 +335,17 @@ describe('values, and only in a staging test build', () => {
     chainId: 11155111,
   };
   const event = (flags: Record<string, unknown> = {}) => ({
-    contexts: { telemetry: { message: 'withdraw-failed', ...flags, diagnostic: bag } },
+    contexts: { errorReport: { message: 'withdraw-failed', ...flags, diagnostic: bag } },
   });
 
   test('sends nothing when the build is not allowed, however the event is flagged', () => {
     for (const meta of [{}, { diagnosticsAllowed: false }, { environment: 'staging' }]) {
-      expect(privateTelemetryEvent(event(), meta)!.contexts?.diagnostic).toBeUndefined();
+      expect(privateErrorReportEvent(event(), meta)!.contexts?.diagnostic).toBeUndefined();
     }
   });
 
   test('sends the reviewed keys when the session is staging', () => {
-    const out = privateTelemetryEvent(event(), { diagnosticsAllowed: true })!;
+    const out = privateErrorReportEvent(event(), { diagnosticsAllowed: true })!;
     expect(out.contexts?.diagnostic).toEqual({
       stage: 'relay',
       detail: 'HttpError: relayer said no',
@@ -358,10 +358,10 @@ describe('values, and only in a staging test build', () => {
   });
 
   test('an unlisted key does not ride along, even through the open gate', () => {
-    const out = privateTelemetryEvent(
+    const out = privateErrorReportEvent(
       {
         contexts: {
-          telemetry: {
+          errorReport: {
             message: 'withdraw-failed',
             diagnostic: { address: '0xabc', commitment: '0xdeadbeef', nullifier: '0xfeed', note: { secret: 1 } },
           },
@@ -373,10 +373,10 @@ describe('values, and only in a staging test build', () => {
   });
 
   test('a long error string is capped rather than carried whole', () => {
-    const out = privateTelemetryEvent(
+    const out = privateErrorReportEvent(
       {
         contexts: {
-          telemetry: { message: 'withdraw-failed', diagnostic: { detail: 'x'.repeat(5_000) } },
+          errorReport: { message: 'withdraw-failed', diagnostic: { detail: 'x'.repeat(5_000) } },
         },
       },
       { diagnosticsAllowed: true },
@@ -386,8 +386,8 @@ describe('values, and only in a staging test build', () => {
 
   test('an empty or non-object bag leaves the context absent, not empty', () => {
     for (const diagnostic of [undefined, null, {}, 'address=0xabc', ['0xabc'], { detail: '' }]) {
-      const out = privateTelemetryEvent(
-        { contexts: { telemetry: { message: 'withdraw-failed', diagnostic } } },
+      const out = privateErrorReportEvent(
+        { contexts: { errorReport: { message: 'withdraw-failed', diagnostic } } },
         { diagnosticsAllowed: true },
       )!;
       expect(out.contexts?.diagnostic).toBeUndefined();
@@ -395,7 +395,7 @@ describe('values, and only in a staging test build', () => {
   });
 
   test('the gate is the environment or debug mode, and nothing else', () => {
-    const source = readFileSync(join(ROOT, 'services/telemetry.ts'), 'utf8');
+    const source = readFileSync(join(ROOT, 'services/error-reports.ts'), 'utf8');
     const gate = source.slice(source.indexOf('const diagnosticsAllowed'), source.indexOf('let stopEgressRelay'));
     expect(gate).toContain("ACTIVE_APP_ENVIRONMENT === 'staging'");
 
@@ -423,10 +423,10 @@ describe('values, and only in a staging test build', () => {
     // does reopen it, and it does so through `meta`, which is why this case
     // supplies no `diagnosticsAllowed` at all.
     for (const flags of [{}, { testMode: true }, { testMode: false }, { isUserRejected: true }]) {
-      const out = privateTelemetryEvent(
+      const out = privateErrorReportEvent(
         {
           contexts: {
-            telemetry: {
+            errorReport: {
               message: 'withdraw-failed',
               ...flags,
               diagnostic: { address: '0xabc', amount: '1.5', detail: 'boom' },
@@ -452,7 +452,7 @@ describe('values, and only in a staging test build', () => {
  */
 describe('the code bag travels everywhere, so it carries only identifiers', () => {
   const code = (bag: Record<string, unknown>) =>
-    privateTelemetryEvent({ contexts: { telemetry: { message: 'client-failed', code: bag } } }, {})
+    privateErrorReportEvent({ contexts: { errorReport: { message: 'client-failed', code: bag } } }, {})
       ?.contexts?.code;
 
   test('a class name and a component name survive, in prod, ungated', () => {
@@ -492,8 +492,8 @@ describe('the code bag travels everywhere, so it carries only identifiers', () =
 
 describe('debug mode opens the diagnostic gate, anywhere', () => {
   const detail = (allowed: boolean | (() => boolean) | undefined) =>
-    privateTelemetryEvent(
-      { contexts: { telemetry: { message: 'client-failed', diagnostic: { detail: 'TypeError: x' } } } },
+    privateErrorReportEvent(
+      { contexts: { errorReport: { message: 'client-failed', diagnostic: { detail: 'TypeError: x' } } } },
       { diagnosticsAllowed: allowed },
     )?.contexts?.diagnostic;
 
