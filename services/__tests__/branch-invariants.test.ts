@@ -145,7 +145,7 @@ test('inline shielding refuses unavailable cross-chain routes and closed convers
   ]) {
     const errors: string[] = [];
     const run = evaluate(`return (options) => { ${code}; return 'primed'; };`, {
-      blockMockFlow: () => false, isSui: false, isStellar: false, ensureConnected: () => true, keysReadyRef: { current: true }, chainId: 11155111,
+      blockMockFlow: () => false, isSui: false, isStellar: false, ensureConnected: () => true, keysReadyRef: { current: true }, depositErrorReportRef: { current: { phase: 'unknown' } }, chainId: 11155111,
       cancelPendingRelaunch: () => {},
       keyOwnedDeposit: false, crossChainSwapDepositSupported: () => routable,
       swapDepositEnabledForChain: () => payEnabled, availableTokens: [{ address: 'source-usdc' }],
