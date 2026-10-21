@@ -24,7 +24,7 @@
   },
   "counts": {
     "F-C/theme-infra": 2,
-    "P1/shared-primitives": 54,
+    "P1/shared-primitives": 55,
     "P2/app-routes": 28,
     "P2/classic-pools": 14,
     "P2/ecosystem-payroll": 9,
@@ -644,6 +644,12 @@
     },
     {
       "path": "components/ui/citrea-icon.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/ui/arbitrum-icon.tsx",
       "phase": "P1",
       "slice": "shared-primitives",
       "ported": true
