@@ -1,3 +1,4 @@
+import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useMemo, useState, type ReactNode } from 'react';
 import { SUPPORT_TELEGRAM_URL } from '@/config/support';
 import {
@@ -119,13 +120,17 @@ function MasonryGrid<T,>({
 }
 
 export default function EcosystemScreen() {
+  const tabClearance = useTabBarClearance();
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
 
   return (
     <View className="flex-1 bg-background">
       <Header />
-      <ScrollView className="flex-1" contentContainerClassName="grow pt-[20px] pb-[20px] px-[20px]">
+      <ScrollView className="flex-1" contentContainerClassName="grow pt-[20px] px-[20px]"
+        // nw-keep(measured-or-inset): clearance for the floating bottom bar
+        contentContainerStyle={{ paddingBottom: 20 + tabClearance }}
+      >
         <View className="mx-auto w-full max-w-[1100px] grow gap-[32px]">
           <Hero />
           <PartnersSection />

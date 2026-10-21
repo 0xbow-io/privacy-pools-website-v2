@@ -1,3 +1,4 @@
+import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { Platform, ScrollView, View } from 'react-native';
 import { Header } from '@/components/ui/header';
 import { Footer } from '@/components/ui/footer';
@@ -28,12 +29,16 @@ import { useGlobalStatistics } from '@/hooks/use-global-statistics';
  * full table pushed the pools out of reach.
  */
 export function StatsPageContent() {
+  const tabClearance = useTabBarClearance();
   const stats = useGlobalStatistics();
 
   return (
     <View className="flex-1 bg-background">
       <Header />
-      <ScrollView className="flex-1" contentContainerClassName="grow px-[20px] py-[20px]">
+      <ScrollView className="flex-1" contentContainerClassName="grow px-[20px] pt-[20px]"
+        // nw-keep(measured-or-inset): clearance for the floating bottom bar
+        contentContainerStyle={{ paddingBottom: 20 + tabClearance }}
+      >
         <View className="mx-auto w-full max-w-[1100px] grow gap-[20px]">
           <StatsSummary stats={stats} />
           <StatsAssetCards stats={stats} />
