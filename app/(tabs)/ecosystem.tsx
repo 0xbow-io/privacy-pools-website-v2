@@ -129,7 +129,7 @@ export default function EcosystemScreen() {
       <Header />
       <ScrollView className="flex-1" contentContainerClassName="grow pt-[20px] px-[20px]"
         // nw-keep(measured-or-inset): clearance for the floating bottom bar
-        contentContainerStyle={{ paddingBottom: 20 + (Platform.OS === 'web' ? tabClearance : 0) }}
+        contentContainerStyle={{ paddingBottom: 20 + tabClearance }}
       >
         <View className="mx-auto w-full max-w-[1100px] grow gap-[32px]">
           <Hero />
@@ -139,10 +139,7 @@ export default function EcosystemScreen() {
         </View>
       </ScrollView>
       {Platform.OS !== 'web' && (
-        <View
-          // nw-keep(measured-or-inset): native footer sits under the floating bottom bar
-          style={{ paddingBottom: tabClearance }}
-          >
+        <View>
           <Footer />
         </View>
       )}

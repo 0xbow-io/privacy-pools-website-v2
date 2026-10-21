@@ -11,7 +11,7 @@ export default function TransactionsScreen() {
       <Header />
       <ScrollView className="flex-1" contentContainerClassName="grow px-[20px] pt-[20px]"
         // nw-keep(measured-or-inset): clearance for the floating bottom bar
-        contentContainerStyle={{ paddingBottom: 20 + (Platform.OS === 'web' ? tabClearance : 0) }}
+        contentContainerStyle={{ paddingBottom: 20 + tabClearance }}
       >
         <View className="mx-auto w-full max-w-[1100px] grow gap-[20px]">
           <Transactions mode="full" />
@@ -19,11 +19,7 @@ export default function TransactionsScreen() {
         </View>
       </ScrollView>
       {Platform.OS !== 'web' && (
-        <View
-            className="px-[20px]"
-            // nw-keep(measured-or-inset): native footer sits under the floating bottom bar
-            style={{ paddingBottom: 20 + tabClearance }}
-          >
+        <View className="px-[20px] pb-[20px]">
           <Footer />
         </View>
       )}

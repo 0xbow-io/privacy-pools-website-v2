@@ -106,7 +106,7 @@ export function LegalDocumentView({ doc }: { doc: LegalDocument }) {
       <Header />
       <ScrollView className="flex-1" contentContainerClassName="grow"
         // nw-keep(measured-or-inset): clearance for the floating bottom bar
-        contentContainerStyle={{ paddingBottom: 48 + (Platform.OS === 'web' ? tabClearance : 0) }}
+        contentContainerStyle={{ paddingBottom: 48 + tabClearance }}
       >
         <View className="w-full max-w-[760px] grow gap-[12px] self-center px-[18px] pt-[22px]">
           <Pressable
@@ -134,11 +134,7 @@ export function LegalDocumentView({ doc }: { doc: LegalDocument }) {
         </View>
       </ScrollView>
       {Platform.OS !== 'web' && (
-        <View
-            className="px-[20px]"
-            // nw-keep(measured-or-inset): native footer sits under the floating bottom bar
-            style={{ paddingBottom: 20 + tabClearance }}
-          >
+        <View className="px-[20px] pb-[20px]">
           <Footer />
         </View>
       )}
