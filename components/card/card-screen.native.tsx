@@ -3,7 +3,7 @@ import { Animated, Easing, Pressable, ScrollView, Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useToast } from '@/components/toast-provider';
-import { EXPLORE_TAB_BAR_CLEARANCE } from '@/components/home/explore-tab-bar';
+import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { OrigamiCard } from '@/components/card/origami-card.native';
 
 /**
@@ -12,6 +12,7 @@ import { OrigamiCard } from '@/components/card/origami-card.native';
  */
 export function CardScreen() {
   const insets = useSafeAreaInsets();
+  const tabClearance = useTabBarClearance();
   const { toast } = useToast();
 
   // Copy and button rise in after the card lands.
@@ -32,7 +33,7 @@ export function CardScreen() {
       className="flex-1 bg-background"
       contentContainerClassName="flex-grow items-center justify-center px-[24px]"
       // nw-keep(measured-or-inset): safe-area top inset and clearance for the floating bottom bar
-      contentContainerStyle={{ paddingTop: insets.top + 24, paddingBottom: EXPLORE_TAB_BAR_CLEARANCE + insets.bottom + 24 }}
+      contentContainerStyle={{ paddingTop: insets.top + 24, paddingBottom: tabClearance + 24 }}
     >
       <OrigamiCard />
 

@@ -459,3 +459,14 @@
   .font-pp-semi-bold { font-weight: var(--pp-fontw-semi-bold, normal); }
 }
 /* @generated theme-vars end */
+
+/* iOS Safari: 100% of html is the LARGE viewport, taller than what is visible
+   while the browser toolbar is up, so the bottom of every scroll view sat
+   under the toolbar and the fixed tab bar. dvh tracks the visible viewport. */
+@supports (height: 100dvh) {
+  html,
+  body,
+  #root {
+    height: 100dvh;
+  }
+}

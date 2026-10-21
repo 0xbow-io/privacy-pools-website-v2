@@ -144,3 +144,19 @@ export function tabBarBottomOffset(platform: string, insetBottom: number): numbe
   const inset = effectiveSafeAreaInset(platform, insetBottom);
   return platform === 'web' ? 0 : Math.max(inset, 8);
 }
+
+/** Height of the floating tab bar's track (see ExploreTabBar `trackHeight`). */
+export const TAB_BAR_TRACK_HEIGHT = 48;
+/** Air kept between the last element of a page and the top of the tab bar. */
+export const TAB_BAR_CONTENT_GAP = 32;
+
+/**
+ * Bottom padding a page needs so its last element scrolls fully clear of the
+ * floating tab bar: bar height + the bar's own offset from the screen bottom
+ * (native safe-area inset / home indicator) + a gap. Zero when the bar is not
+ * shown (desktop widths). The one source for every page behind the bar.
+ */
+export function tabBarClearance(platform: string, width: number, insetBottom: number): number {
+  if (!showBottomNav(width)) return 0;
+  return TAB_BAR_TRACK_HEIGHT + tabBarBottomOffset(platform, insetBottom) + TAB_BAR_CONTENT_GAP;
+}
