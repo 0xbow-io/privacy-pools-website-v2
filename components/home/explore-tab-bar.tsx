@@ -7,7 +7,7 @@ import { Colors, Fonts, FontWeights } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import type { DrawerSection } from '@/components/home/explore-panel';
 import { NATIVE_BAR_TABS } from '@/services/native-bar-tabs';
-import { TAB_BAR_CONTENT_GAP, TAB_BAR_TRACK_HEIGHT, tabBarBottomOffset } from '@/services/header-nav';
+import { TAB_BAR_TRACK_HEIGHT, tabBarBottomOffset } from '@/services/header-nav';
 
 /** The bar's tabs: Shield (home), the three data surfaces, and "More". */
 export type MobileNavTab = DrawerSection | 'shield' | 'stats' | 'card' | 'more';
@@ -64,12 +64,6 @@ const BAR_TABS: { key: MobileNavTab; icon: keyof typeof Ionicons.glyphMap; activ
 export function barTabsFor(isConnected: boolean) {
   return BAR_TABS.map((tab): (typeof BAR_TABS)[number] => (!isConnected && tab.key === 'mine' ? STATS_TAB : tab));
 }
-
-/**
- * Space the page must leave at its foot so the last row of content can scroll
- * clear of the floating bar (bar height + its bottom offset).
- */
-export const EXPLORE_TAB_BAR_CLEARANCE = TAB_BAR_TRACK_HEIGHT + TAB_BAR_CONTENT_GAP;
 
 /**
  * The activity door reads "All activity" for a visitor and "My activity" once

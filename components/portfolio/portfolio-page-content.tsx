@@ -172,7 +172,7 @@ function PortfolioBody() {
       <Header />
       <ScrollView className="flex-1" contentContainerClassName="grow px-[20px] pt-[20px]"
         // nw-keep(measured-or-inset): clearance for the floating bottom bar
-        contentContainerStyle={{ paddingBottom: 20 + tabClearance }}
+        contentContainerStyle={{ paddingBottom: 20 + (Platform.OS === 'web' ? tabClearance : 0) }}
       >
         {/* 1100px is this app's page width: /explore, /transactions and
             /ecosystem all use it, and the header nav moves between them and
@@ -229,7 +229,11 @@ function PortfolioBody() {
         </View>
       </ScrollView>
       {Platform.OS !== 'web' && (
-        <View className="px-[20px] pb-[20px]">
+        <View
+            className="px-[20px]"
+            // nw-keep(measured-or-inset): native footer sits under the floating bottom bar
+            style={{ paddingBottom: 20 + tabClearance }}
+          >
           <Footer />
         </View>
       )}

@@ -1,3 +1,4 @@
+import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { LANDING_HERO } from '@/config/landing-hero';
 import { LayoutTransition } from './layout-transition';
 import { showBottomNav } from '@/services/header-nav';
@@ -24,7 +25,7 @@ import { HomePools } from '@/components/home/home-pools';
 import { StatBand } from '@/components/home/stat-band';
 import { ActivityDrawer } from '@/components/home/activity-drawer';
 import { PanelHeading, PanelSections, type DrawerSection } from '@/components/home/explore-panel';
-import { EXPLORE_TABS, EXPLORE_TAB_BAR_CLEARANCE, exploreTabLabel } from '@/components/home/explore-tab-bar';
+import { EXPLORE_TABS, exploreTabLabel } from '@/components/home/explore-tab-bar';
 import { RegistrationStatusCard } from '@/components/home/registration-status-card';
 import {
   CENTERED_MAX_WIDTH,
@@ -372,6 +373,7 @@ export function HomeScreen() {
   // replaces the header hamburger on every route, not just this one. All this
   // screen still needs to know is whether to leave foot room for it — and not
   // to, while a sheet is open, since the bar steps aside for the sheet.
+  const tabClearance = useTabBarClearance();
   const showTabBar = showBottomNav(viewportWidth) && drawer === null;
 
   const containerMaxWidth = splitMounted ? SPLIT_MAX_WIDTH : CENTERED_MAX_WIDTH;
@@ -679,7 +681,7 @@ export function HomeScreen() {
         // where they already are. Only the web landing needs it; every other
         // focus state keeps all its content and so keeps its own height.
         contentContainerStyle={{
-          ...(showTabBar ? { paddingBottom: EXPLORE_TAB_BAR_CLEARANCE } : null),
+          ...(showTabBar ? { paddingBottom: tabClearance } : null),
           ...(focusedLanding && focusFloorPx > 0 ? { minHeight: focusFloorPx } : null),
         }}
       >
@@ -692,7 +694,7 @@ export function HomeScreen() {
           // The typing floor is NOT here: it belongs on the scroll container,
           // in px, so the footer's own grow can take the slack instead of this
           // row ending in blank space (see focusFloorPx above).
-          style={{ maxWidth: landingWide ? 1120 : containerMaxWidth, minHeight: landingHero ? 'calc(100dvh - 95px)' as unknown as number : undefined, paddingBottom: landingHero ? (showTabBar ? EXPLORE_TAB_BAR_CLEARANCE + 72 : 88) : undefined }}
+          style={{ maxWidth: landingWide ? 1120 : containerMaxWidth, minHeight: landingHero ? 'calc(100dvh - 95px)' as unknown as number : undefined, paddingBottom: landingHero ? (showTabBar ? tabClearance + 72 : 88) : undefined }}
         >
         <Animated.View
           className={landingWide ? 'w-full flex-row items-center gap-[64px] py-[32px]' : 'gap-[18px] items-stretch w-full'}

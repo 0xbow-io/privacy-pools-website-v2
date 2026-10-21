@@ -54,7 +54,7 @@ export function PayrollShell({ active, title, subtitle, children }: {
       <Header />
       <ScrollView className="flex-1" contentContainerClassName="grow pt-[28px]"
         // nw-keep(measured-or-inset): clearance for the floating bottom bar
-        contentContainerStyle={{ paddingBottom: 28 + tabClearance }}
+        contentContainerStyle={{ paddingBottom: 28 + (Platform.OS === 'web' ? tabClearance : 0) }}
       >
         {/* Padding sits inside the max-width frame so the header's lockup and
             wallet line up with the content edges, not 20px inside. */}
@@ -132,7 +132,13 @@ export function PayrollShell({ active, title, subtitle, children }: {
         </View>
       </ScrollView>
       {Platform.OS !== 'web' && (
-        <View className="px-[20px] pb-[20px]"><Footer /></View>
+        <View
+          className="px-[20px]"
+          // nw-keep(measured-or-inset): native footer sits under the floating bottom bar
+          style={{ paddingBottom: 20 + tabClearance }}
+        >
+          <Footer />
+        </View>
       )}
     </View>
   );

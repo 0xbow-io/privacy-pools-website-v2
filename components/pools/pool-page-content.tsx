@@ -672,7 +672,7 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
         className="flex-1"
         contentContainerClassName="grow overflow-visible px-[20px] pt-[20px]"
         // nw-keep(measured-or-inset): clearance for the floating bottom bar
-        contentContainerStyle={{ paddingBottom: 20 + tabClearance }}
+        contentContainerStyle={{ paddingBottom: 20 + (Platform.OS === 'web' ? tabClearance : 0) }}
       >
         <View
           // row-reverse while split: the shield widget keeps its place in DOM
@@ -900,7 +900,11 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
         )}
       </ScrollView>
       {Platform.OS !== 'web' && (
-        <View className="px-[20px] pb-[20px]">
+        <View
+            className="px-[20px]"
+            // nw-keep(measured-or-inset): native footer sits under the floating bottom bar
+            style={{ paddingBottom: 20 + tabClearance }}
+          >
           <Footer />
         </View>
       )}
