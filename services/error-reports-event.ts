@@ -433,9 +433,17 @@ function explicitRejection(error: unknown): boolean {
  */
 function mayHaveBroadcast(tags: NonNullable<OutgoingEvent['tags']>, error: unknown): boolean {
   if (tags.reason === 'revert') return true;
+  // Earlier sub-batches of a partial batch already confirmed on-chain, so a 4xx on the last one
+  // (kept as `cause`) must not make the report look like a clean pre-send refusal.
+  if (isPartialBatchError(error)) return true;
   if (tags.stage && PRE_SEND_STAGES.has(tags.stage)) return false;
   if (tags.stage === 'submit' && explicitRejection(error)) return false;
   return true;
+}
+
+/** The error that says some sub-batches confirmed before a later one failed (matched by name, no import). */
+function isPartialBatchError(error: unknown): boolean {
+  return !!error && typeof error === 'object' && (error as { name?: unknown }).name === 'BatchPartiallyWithdrawnError';
 }
 
 function isRelayedSpend(key: unknown): boolean {

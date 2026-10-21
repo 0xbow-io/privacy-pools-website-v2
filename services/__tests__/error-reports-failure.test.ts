@@ -334,6 +334,14 @@ describe('relayed spends say less', () => {
     expect(out.tags).toEqual({ stage: 'submit', reason: 'relayer-unavailable', chainId: '1', asset: 'ETH', isYield: 'true' });
   });
 
+  test('a partial batch whose last sub-batch got a 4xx is still treated as broadcast', () => {
+    const refused = Object.assign(new Error('bad request'), { name: 'RelayerRequestFailed', status: 400 });
+    const partial = Object.assign(new Error('part of your balance was withdrawn'), { name: 'BatchPartiallyWithdrawnError', cause: refused });
+    const out = privateErrorReportEvent(relayed('withdraw-failed', 'submit'), META, partial)!;
+    expect(Object.keys(out.tags!).sort()).toEqual(['reason', 'stage']);
+    expect(out.contexts).toBeUndefined();
+  });
+
   test('a submit with an unknown outcome is treated as broadcast', () => {
     const timedOut = Object.assign(new Error('t'), { name: 'TimeoutError' });
     const network = new TypeError('Failed to fetch');
