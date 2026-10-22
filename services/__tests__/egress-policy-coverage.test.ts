@@ -577,8 +577,6 @@ describe('app-owned network boundary coverage', () => {
       'hooks/use-stellar-balance.ts': 1, // Horizon account balance (the wallet's own, public)
       'hooks/use-sui-proof.ts': 2,
       'hooks/use-sui-relay.ts': 2,
-      'services/fx-rate.ts': 1,
-      'services/price-service.ts': 1,
       'services/sdk-setup.ts': 1, // circuit artifacts, not the ASP client
       // Stellar testnet: its own SDK/Soroban/Horizon stack, like Sui's.
       'services/stellar/stellar-account.ts': 1, // testnet relayer details, before a withdrawal
