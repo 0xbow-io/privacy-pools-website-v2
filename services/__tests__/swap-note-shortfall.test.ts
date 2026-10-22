@@ -59,9 +59,9 @@ describe('which limit the swap actually hit', () => {
 
   test('the figures take their decimals from the asset they are about', () => {
     // 18-decimal share: the same integers must not print as a 6-decimal amount,
-    // and a share count reads as its coin, approximately (DEV-408).
+    // and without a rate the count keeps its share symbol.
     const s = noteShortfall({ totalWei: u('2000000000000000000'), approvedWei: u('1000000000000000000'), selectableWei: u('1000000000000000000') });
-    expect(noteShortfallMessage(s, { symbol: 'ppUSDT', decimals: 18 })).toContain('Spendable now: ≈ 1 USDT');
+    expect(noteShortfallMessage(s, { symbol: 'ppUSDT', decimals: 18 })).toContain('Spendable now: 1 ppUSDT');
   });
 
   test('no message uses an em dash', () => {

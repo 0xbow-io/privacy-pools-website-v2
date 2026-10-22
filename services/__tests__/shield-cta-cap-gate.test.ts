@@ -19,6 +19,7 @@ const SOURCE = readFileSync(
 
 function ctaDisabled(env: {
   a: string;
+  amountField: { error: string | null };
   swapOutToken: unknown;
   swapRecipientBlocks?: boolean;
   shieldRecipientInvalid: boolean;
@@ -34,6 +35,7 @@ function ctaDisabled(env: {
 
 const BASE = {
   a: 'shield',
+  amountField: { error: null },
   swapOutToken: 'ETH',
   swapRecipientBlocks: false,
   shieldRecipientInvalid: false,
@@ -54,6 +56,15 @@ test('a shield still pricing its conversion disables the CTA', () => {
 test('the cap only gates shield, never the other actions', () => {
   for (const a of ['withdraw', 'send', 'swap', 'request']) {
     expect(ctaDisabled({ ...BASE, a, shieldCapBlocksDeposit: true })).toBe(false);
+  }
+});
+
+test('entry errors disable only Withdraw and Send', () => {
+  for (const a of ['withdraw', 'send']) {
+    expect(ctaDisabled({ ...BASE, a, amountField: { error: 'Amount is too small.' } })).toBe(true);
+  }
+  for (const a of ['shield', 'swap', 'request']) {
+    expect(ctaDisabled({ ...BASE, a, amountField: { error: 'Amount is too small.' } })).toBe(false);
   }
 });
 

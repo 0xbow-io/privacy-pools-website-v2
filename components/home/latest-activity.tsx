@@ -1,3 +1,15 @@
+// RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
+// amounts, validation, quotes, relayer and on-chain values stay in shares
+// (exact strings/bigints). Never convert an amount to underlying and back,
+// never feed a displayed underlying figure into an operation.
+// Display headlines use underlying through shareBalanceDisplay; shares appear
+// only in the (i) hint, in fields labelled with the share symbol, or while the
+// rate is unknown. Never print a share count under the underlying symbol.
+// Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
+// MAX retains the original exact shares. USD edits use an exact decimal price
+// in that same boundary. No other operation converts display back.
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
+import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { useEffect, useState } from 'react';
 import { rowTypeLabel } from '@/services/row-type-label';
 import { withPublicSwapRows } from '@/services/swap-route-evidence';
@@ -12,8 +24,8 @@ import { useMultiChainWallet } from '@/hooks/use-multi-chain-wallet';
 import { useMyTransactionOwnership } from '@/hooks/use-my-transaction-ownership';
 import { mergeMyTransactions } from '@/services/transfer-direction';
 import type { Transaction } from '@/components/pools-provider';
-import { displayTokenSymbol, tokenAmountLabel } from '@/services/share-display';
-import { formatTokenBalance } from '@/services/token-format';
+
+
 import { Pill } from '@/components/ui/pill';
 
 function timeAgo(timestamp: number, now: number): string {
@@ -38,7 +50,7 @@ function useNow(intervalMs = 10_000): number {
 }
 
 /** A Swap leg in the same figures as a single amount. */
-const swapAmount = (leg: SwapLeg) => tokenAmountLabel(formatTokenBalance(leg.tokenAmount, displayTokenSymbol(leg.asset)), leg.asset);
+
 
 const TYPE_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
   Deposit: 'arrow-down-circle',
@@ -49,6 +61,9 @@ const TYPE_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
 };
 
 export function ActivityRow({ tx, colors }: { tx: Transaction; colors: typeof Colors['light'] }) {
+  const balanceDisplay = useBalanceDisplay(tx.chainId);
+  const amountView = balanceDisplay(tx.tokenAmount, tx.asset, tx.chainId, tx.tokenAddress);
+  const swapAmount = (leg: SwapLeg) => balanceDisplay(leg.tokenAmount, leg.asset, leg.chainId, leg.tokenAddress).text;
   const scheme = colors === Colors.dark ? 'dark' : 'light';
   const hue = TokenHues[scheme][tx.asset.toUpperCase()] ?? TokenHues[scheme].ETH;
   const pending = tx.status === 'pending';
@@ -63,12 +78,13 @@ export function ActivityRow({ tx, colors }: { tx: Transaction; colors: typeof Co
       </View>
       <View className="flex-1 gap-[1px]">
         <Text className="font-pp-sans-medium text-[13px] text-text" numberOfLines={1}>
-          {rowTypeLabel(tx)} · <Text className="font-pp-mono">{consolidationHeadline(tx) ?? swapHeadline(tx, swapAmount) ?? tokenAmountLabel(formatTokenBalance(tx.tokenAmount, displayTokenSymbol(tx.asset)), tx.asset)}</Text>
+          {rowTypeLabel(tx)} · <Text className="font-pp-mono">{consolidationHeadline(tx) ?? swapHeadline(tx, swapAmount) ?? amountView.text}</Text>
         </Text>
         <Text className="font-pp-sans text-[11.5px] text-text-muted" numberOfLines={1}>
           {timeAgo(tx.timestamp, now)} · {tx.chain}
         </Text>
       </View>
+      <ShareCountHint hint={amountView.hint} />
       <Pill tone={pending ? 'warning' : failed ? 'danger' : 'success'} label={pending ? 'Pending' : failed ? 'Failed' : 'Settled'} />
     </View>
   );

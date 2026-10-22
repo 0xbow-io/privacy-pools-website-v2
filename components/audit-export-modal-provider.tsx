@@ -1,4 +1,13 @@
-import { isShareSymbol, shareAmountText, tokenAmountLabel } from '@/services/share-display';
+import { formatUnits } from 'viem';
+// RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
+// amounts, validation, quotes, relayer and on-chain values stay in shares
+// (exact strings/bigints). Never convert an amount to underlying and back,
+// never feed a displayed underlying figure into an operation.
+// Display headlines use underlying through shareBalanceDisplay; shares appear
+// only in the (i) hint, in fields labelled with the share symbol, or while the
+// rate is unknown. Never print a share count under the underlying symbol.
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
+
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { Pressable, ScrollView, useWindowDimensions, Text, View } from 'react-native';
 import { Modal } from '@/components/ui/modal';
@@ -7,15 +16,15 @@ import QRCode from 'react-native-qrcode-svg';
 
 import { useTheme } from '@/components/theme-provider';
 import { Colors } from '@/constants/theme';
-import { getTokenMetadata, formatTokenBalance } from '@/config/tokens';
+import { getTokenMetadata} from '@/config/tokens';
 import {
   encodePartialViewingKey,
   encodePartialViewingKeyBatch,
   buildVerifyUrl,
   type PartialViewingKeyV1,
 } from '@/services/audit-receipt';
-import { useShareRates } from '@/hooks/use-share-rates';
-import { shareNumberAsUnderlying } from '@/services/share-rates';
+
+
 
 type AuditExportModalContextType = {
   /** One key per note — a multi-lineage transfer discloses several bundles
@@ -66,30 +75,15 @@ export function AuditExportModalProvider({ children }: { children: React.ReactNo
     : '';
   const verifyUrl = bundle ? buildVerifyUrl(encoded) : '';
 
-  const { rateFor } = useShareRates();
+  const balanceDisplay = useBalanceDisplay();
   const amountLabel = useMemo(() => {
     if (!bundles || bundles.length === 0) return '';
     const first = bundles[0];
     const meta = getTokenMetadata(first.tokenId, first.chainId);
     const decimals = meta.decimals ?? 18;
-    let amount = 0;
-    try {
-      // The receipt's total — a multi-lineage payment is several notes.
-      const total = bundles.reduce((s, b) => s + BigInt(b.value), 0n);
-      amount = Number(total) / Math.pow(10, decimals);
-    } catch {
-      amount = 0;
-    }
-    if (!isShareSymbol(meta.symbol)) return tokenAmountLabel(formatTokenBalance(amount, meta.symbol), meta.symbol);
-    // Same conversion as the history row this was opened from, so both agree.
-    const rate = rateFor(first.chainId, first.tokenId);
-    return shareAmountText({
-      amount,
-      assetSymbol: meta.symbol,
-      underlyingAmount: rate ? shareNumberAsUnderlying(amount, rate) : null,
-      format: formatTokenBalance,
-    });
-  }, [bundles, rateFor]);
+    const total = bundles.reduce((sum, b) => sum + BigInt(b.value), 0n);
+    return balanceDisplay(formatUnits(total, decimals), meta.symbol, first.chainId, first.tokenId).text;
+  }, [bundles, balanceDisplay]);
 
   const copy = useCallback(async (text: string, which: 'key' | 'link') => {
     try {

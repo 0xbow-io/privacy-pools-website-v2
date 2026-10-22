@@ -1,4 +1,12 @@
-import { tokenAmountLabel } from '@/services/share-display';
+// RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
+// amounts, validation, quotes, relayer and on-chain values stay in shares
+// (exact strings/bigints). Never convert an amount to underlying and back,
+// never feed a displayed underlying figure into an operation.
+// Display headlines use underlying through shareBalanceDisplay; shares appear
+// only in the (i) hint, in fields labelled with the share symbol, or while the
+// rate is unknown. Never print a share count under the underlying symbol.
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
+
 import React, { useMemo } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
@@ -42,10 +50,11 @@ export default function ReceivePaymentScreen() {
     }
   }, [encoded]);
 
+  const balanceDisplay = useBalanceDisplay();
   const token = receipt ? getTokenMetadata(receipt.tokenId, receipt.chainId) : null;
   const chainName = receipt ? getChainConfig(receipt.chainId)?.displayName ?? `Chain ${receipt.chainId}` : 'Sepolia';
   const amountLabel = receipt && token
-    ? tokenAmountLabel(formatUnits(BigInt(receipt.amount), token.decimals), token.symbol)
+    ? balanceDisplay(formatUnits(BigInt(receipt.amount), token.decimals), token.symbol, receipt.chainId, receipt.tokenId).text
     : null;
 
   return (

@@ -1,3 +1,13 @@
+import { useShareAmountField } from '@/hooks/use-share-amount-field';
+// RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
+// amounts, validation, quotes, relayer and on-chain values stay in shares
+// (exact strings/bigints). Never convert an amount to underlying and back,
+// never feed a displayed underlying figure into an operation.
+// Display headlines use underlying through shareBalanceDisplay; shares appear
+// only in the (i) hint, in fields labelled with the share symbol, or while the
+// rate is unknown. Never print a share count under the underlying symbol.
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
+import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { sameSymbol } from '@/services/symbol-match';
 import { useMemo, useState } from 'react';
 import { WEB_NO_OUTLINE } from '@/components/ui/web-style-shims';
@@ -14,7 +24,7 @@ import { swapSurfaceEnabled } from '@/config/intent-lockdown';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { parseTokenAmount, sanitizeAmountInput } from '@/services/token-amount';
 import { tokenIconFor } from '@/components/pools/pool-page-shared';
-import { approxUnderlyingText, displayTokenSymbol, tokenAmountLabel } from '@/services/share-display';
+import { displayTokenSymbol} from '@/services/share-display';
 
 /**
  * Always-visible action panel for a pool page — the pool-scoped cousin of the
@@ -104,7 +114,7 @@ export function PoolActionPanel({
 }) {
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
-  const { data } = usePools();
+  const { data, isLoading: poolsLoading } = usePools();
   const symbol = poolToken.toUpperCase();
 
   // Availability: the swap tab needs the flag AND a configured processor for
@@ -160,6 +170,9 @@ export function PoolActionPanel({
   // finding 2) — the proof can only spend the ACTIVE chain's notes.
   const pool = data.myPools.find((p) => sameSymbol(p.name, symbol) && p.chainId === activeChainId);
   const spendableExact = pool?.balanceTokenExact ?? '0';
+  const balanceDisplay = useBalanceDisplay(activeChainId);
+  const balanceView = balanceDisplay(spendableExact, symbol, activeChainId, pool?.tokenAddress);
+  const amountField = useShareAmountField({ amount, symbol, chainId: activeChainId, maxSharesExact: spendableExact, capKnown: !poolsLoading, onAmountResolved: setTypedAmount, underlyingEntry: action === 'withdraw' || action === 'transfer' });
 
   /**
    * Fill the amount with a fraction of the spendable balance. Base-unit
@@ -224,8 +237,8 @@ export function PoolActionPanel({
           <View className="gap-[8px] rounded-inner border border-border bg-background-secondary p-[14px]">
             <View className="flex-row items-center gap-[10px]">
               <TextInput
-                value={amount}
-                onChangeText={(text) => setTypedAmount(sanitizeAmountInput(text, decimals))}
+                value={active.spendsPool ? amountField.value : amount}
+                onChangeText={(text) => setTypedAmount(sanitizeAmountInput(active.spendsPool ? amountField.toShares(text) : text, decimals))}
                 placeholder="0"
                 // nw-keep(data-color): placeholder color is a TextInput sink (theme token, no className path)
                 placeholderTextColor={colors.textMuted}
@@ -240,19 +253,20 @@ export function PoolActionPanel({
               <View className="flex-row items-center gap-[6px] rounded-pill border border-border bg-card-background px-[10px] py-[5px]">
                 <TokenIcon size={18} />
                 <Text numberOfLines={1} className="font-pp-semi-bold text-[13px] text-text">
-                  {displayTokenSymbol(amountSymbol)}
+                  {active.spendsPool ? amountField.symbol : displayTokenSymbol(amountSymbol)}
                 </Text>
               </View>
             </View>
             <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
               <Text numberOfLines={1} className="font-pp-regular text-[11px] leading-[14px] text-text-muted">
-                ${(amountNum * amountPriceUsd).toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                ${(active.spendsPool ? balanceDisplay(amount || '0', symbol, activeChainId).usd : amountNum * amountPriceUsd).toLocaleString('en-US', { maximumFractionDigits: 2 })}
               </Text>
               <Text numberOfLines={1} className="font-pp-regular text-[11px] leading-[14px] text-text-muted">
                 {active.spendsPool
-                  ? `Spendable: ${pool?.balanceToken ? approxUnderlyingText(pool.balanceToken, symbol) : tokenAmountLabel('0.0000', symbol)}`
+                  ? `Spendable: ${balanceView.text}`
                   : 'From your wallet balance'}
               </Text>
+              {active.spendsPool ? <ShareCountHint hint={balanceView.hint} /> : null}
             </View>
           </View>
         ) : (

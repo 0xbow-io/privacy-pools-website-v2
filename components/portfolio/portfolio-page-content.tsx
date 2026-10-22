@@ -1,4 +1,14 @@
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
+// RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
+// amounts, validation, quotes, relayer and on-chain values stay in shares
+// (exact strings/bigints). Never convert an amount to underlying and back,
+// never feed a displayed underlying figure into an operation.
+// Display headlines use underlying through shareBalanceDisplay; shares appear
+// only in the (i) hint, in fields labelled with the share symbol, or while the
+// rate is unknown. Never print a share count under the underlying symbol.
+// Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
+// MAX retains the original exact shares. USD edits use an exact decimal price
+// in that same boundary. No other operation converts display back.
 import { LooseShareUnwrap } from '@/components/yield/loose-share-unwrap';
 import { poolDisplayLabel } from '@/config/pool-paths';
 import { useMemo } from 'react';
@@ -135,6 +145,7 @@ function PortfolioBody() {
             ? 'Value temporarily unavailable'
             : `${p.balanceFormatted} ${p.tokenSymbol}`,
           myValueUsd: p.valueUnavailable ? '—' : p.valueUsdFormatted,
+          shareHint: p.shareHint,
           pendingLabel: p.pendingLabel,
           // A real ppUSDC position keeps its identity: venue + live APY (the
           // ASP net realized APY when the feed answers, else the configured
