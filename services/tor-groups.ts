@@ -232,3 +232,10 @@ export function rpcSubject(body: string | null | undefined): TorSubject {
   const [transaction] = transactions;
   return transaction ? { transaction } : {};
 }
+
+/** A LI.FI status query is about the transaction it names; any other call is the operation's. */
+export function lifiStatusSubject(url: string): TorSubject {
+  if (!url.includes('/v1/status')) return {};
+  const transaction = /[?&]txHash=([^&#]+)/.exec(url)?.[1];
+  return transaction ? { transaction: decodeURIComponent(transaction) } : { identifying: true };
+}
