@@ -26,11 +26,13 @@
  * The integration list is the control, and it is empty.
  */
 
+import { TOR_IN_FORCE } from '@/config/tor';
 import {
   privateErrorReportEvent,
   type IncomingEvent,
   type ErrorReportMeta,
 } from '@/services/error-reports-event';
+import { routedFetch } from '@/services/tor-fetch';
 
 let client: Promise<typeof import('@sentry/react')> | undefined;
 
@@ -62,6 +64,10 @@ export function initSentry(dsn: string, meta: ErrorReportMeta): boolean {
       // the input, not the output.
       beforeSend: (event, hint) =>
         privateErrorReportEvent(event as unknown as IncomingEvent, meta, hint?.originalException) as unknown as typeof event | null,
+      // Under anon-rpc a report leaves over the Sentry group's worker, not
+      // direct. Sentry's own transport takes its fetch from a fresh iframe,
+      // so only a transport given this fetch is routed.
+      ...(TOR_IN_FORCE ? { transport: (options: Parameters<typeof Sentry.makeFetchTransport>[0]) => Sentry.makeFetchTransport(options, routedFetch('sentry') as typeof fetch) } : {}),
     });
     return Sentry;
   });
