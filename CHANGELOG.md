@@ -1,13 +1,18 @@
 # Changelog
 
 All notable changes to the Privacy Pools v2 web app are documented in this file.
+
 ## [1.2.0] - 2026-10-22
 
 ### Added
-- unwrap loose shares, ragequit unwrap, EIP-5792 batching
+- Unwrap ppETH, ppUSDC and ppUSDT shares left in your wallet, from Portfolio and as part of ragequit.
+- Wallets that support EIP-5792 confirm approve and deposit, and ragequit and unwrap, in one step.
+
+### Changed
+- Share pool balances, fees and activity read as the underlying asset (0.10 ETH), with the share count in the (i) hint. MAX and the amount fields follow.
 
 ### Fixed
-- share pools read as the underlying everywhere, MAX included
+- The Swap tab no longer crashes (React #185) when the page sits near the scrollbar threshold.
 
 ## [1.1.0] - 2026-10-21
 
