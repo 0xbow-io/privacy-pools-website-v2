@@ -85,7 +85,7 @@ const lc = (s: string) => s.toLowerCase();
 describe('share links', () => {
   test('the real builders put the note secret in the link', () => {
     for (const name of ['sentReceipt', 'recoveredClaim', 'verify']) {
-      const seg = links[name].split('/').pop()!.replace(/^pvk1\./, '');
+      const seg = links[name].split(/[/#]/).pop()!.replace(/^pvk1\./, '');
       const json = Buffer.from(seg.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
       expect(lc(json)).toContain(lc(noteSecret));
     }
@@ -101,16 +101,16 @@ describe('share links', () => {
     for (const level of REDACTION_LEVELS.filter((l): l is Exclude<RedactionLevel, 'full'> => l !== 'full')) {
       for (const [name, url] of Object.entries(links)) {
         // config/env is evaluated once per process: another file may have left PAY_URL_BASE empty, so a link can be relative.
-        const route = /\/(pay|receive|import-note|audit|verify)\//.exec(url)![1];
+        const [, route, sep] = /\/(pay|receive|import-note|audit|verify)([/#])/.exec(url)!;
         const out = JSON.parse(buildDebugRecording(
           [{ timestamp: 1, level: 'info', tag: 'net', message: `→ #1 GET ${url}`, data: { href: url } }],
           { startedAt: 0, stoppedAt: 2, environment: 'x', url },
           level,
         ));
         const text = JSON.stringify(out);
-        expect(out.url).toContain(`/${route}/[redacted:link]`);
-        expect(out.entries[0].message).toContain(`/${route}/[redacted:link]`);
-        expect(text).not.toContain(url.split('/').pop()!);
+        expect(out.url).toContain(`/${route}${sep}[redacted:link]`);
+        expect(out.entries[0].message).toContain(`/${route}${sep}[redacted:link]`);
+        expect(text).not.toContain(url.split(/[/#]/).pop()!);
         expect(lc(text)).not.toContain(lc(noteSecret).slice(2));
         if (name === 'sentReceipt') expect(text).not.toContain('noteSecret');
       }

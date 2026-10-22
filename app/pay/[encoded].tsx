@@ -2,7 +2,6 @@ import { payRelayUnknownMessage } from '@/services/pay-relay-guard';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
 import { useAccount, useChainId, useSwitchChain } from 'wagmi';
 
 import { useTheme } from '@/components/theme-provider';
@@ -10,6 +9,7 @@ import { usePaymentRequestModal } from '@/components/payment-request-modal-provi
 import { usePoolSession } from '@/hooks/use-pool-session';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { useSessionChainId } from '@/hooks/use-session-chain-id';
+import { useShareLinkPayload } from '@/hooks/use-share-link-payload';
 import { useSupportedWalletConnection } from '@/hooks/use-supported-wallet-connection';
 import { INLINE_OP_HOST_ID } from '@/components/inline-op-portal';
 import { useInlineOpsCapable } from '@/hooks/use-inline-ops-capable';
@@ -65,8 +65,7 @@ function isSignablePaymentRequest(
 
 /** Stellar request links (`xlm.…`) have their own page; everything else is the EVM one. */
 export default function PayRequestScreen() {
-  const params = useLocalSearchParams<{ encoded?: string | string[] }>();
-  const encoded = Array.isArray(params.encoded) ? params.encoded[0] : params.encoded;
+  const encoded = useShareLinkPayload();
   if (isStellarRequestLink(encoded)) return <StellarPayRequestScreen encoded={encoded as string} />;
   return <EvmPayRequestScreen />;
 }
@@ -99,9 +98,7 @@ function EvmPayRequestScreen() {
   // it (web, non-classic) — the overlay modal duplicated the page 1:1.
   const inlineCapable = useInlineOpsCapable();
   const flowActive = payFlowOpen && payFlowInline && payFlowMode === 'pay';
-  const params = useLocalSearchParams<{ encoded?: string | string[] }>();
-
-  const encoded = Array.isArray(params.encoded) ? params.encoded[0] : params.encoded;
+  const encoded = useShareLinkPayload();
 
   const request = useMemo(() => {
     if (!encoded) return null;

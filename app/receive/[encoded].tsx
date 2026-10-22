@@ -9,12 +9,12 @@ import { useBalanceDisplay } from '@/hooks/use-balance-display';
 
 import React, { useMemo } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
 import { formatUnits } from 'viem';
 
 import { usePaymentRequestModal } from '@/components/payment-request-modal-provider';
 import { getChainConfig } from '@/config/chains';
 import { getTokenMetadata } from '@/config/tokens';
+import { useShareLinkPayload } from '@/hooks/use-share-link-payload';
 import { decodePaymentReceiptPayloadFromUrl } from '@/services/payment-requests';
 
 function formatRequestCode(requestId: string | null | undefined): string {
@@ -37,9 +37,7 @@ export default function ReceivePaymentScreen() {
   // payment running elsewhere made this button read "Importing..." and go
   // disabled while nothing was importing (code review 2026-08-27).
   const importLocked = receiveFlowOpen && receiveFlowMode === 'receive';
-  const params = useLocalSearchParams<{ encoded?: string | string[] }>();
-
-  const encoded = Array.isArray(params.encoded) ? params.encoded[0] : params.encoded;
+  const encoded = useShareLinkPayload();
 
   const receipt = useMemo(() => {
     if (!encoded) return null;
