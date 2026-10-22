@@ -74,7 +74,7 @@ type HarnessModule = {
   AnonRpcWorker?: unknown;
   ReplacingWorker?: unknown;
   knownWorker?: (id: TorProviderId) => KnownWorkerLike;
-  knownWorkerInit?: (id: TorProviderId, options: { rpcProvider: RpcProviderLike; config?: unknown }) => unknown;
+  knownWorkerInit?: (id: TorProviderId, options: { rpcProvider: RpcProviderLike; config?: unknown }) => object;
 };
 
 /**
@@ -122,7 +122,7 @@ function withAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
  * Takes the bootstrap's signal: the harness stops booting on close() but
  * cannot cancel a read it has handed to this provider, so closing ends it here.
  */
-async function bootstrapProvider(provider: TorProvider, known: KnownWorkerLike, signal: AbortSignal) {
+async function bootstrapProvider(known: KnownWorkerLike, signal: AbortSignal) {
   const { getChainConfig } = await import('@/config/chains');
   let url = getChainConfig(known.specifierChainId)?.rpcUrl;
   if (!url && (known.specifierChainId === 1 || known.specifierChainId === 11155111)) {
@@ -145,28 +145,9 @@ async function bootstrapProvider(provider: TorProvider, known: KnownWorkerLike, 
       if (!response.ok) throw new Error(`specifier read failed: HTTP ${response.status}`);
       const reply = await response.json() as { result?: unknown; error?: { message?: string } };
       if (reply.error) throw new Error(`specifier read failed: ${reply.error.message ?? 'RPC error'}`);
-      if (isWorkerHashRead(known, method, params) && !sameHash(reply.result, provider.workerHash)) {
-        throw new TorUnavailableError('The anon-rpc client named on-chain is not the one this build accepts.');
-      }
       return reply.result;
     },
   };
-}
-
-/** `workerHash()`, the read whose answer decides which code the harness runs. */
-const WORKER_HASH_SELECTOR = '0x3898587d';
-
-function isWorkerHashRead(known: KnownWorkerLike, method: string, params: unknown[] | undefined): boolean {
-  if (method !== 'eth_call') return false;
-  const call = params?.[0] as { to?: unknown; data?: unknown; input?: unknown } | undefined;
-  const data = typeof call?.data === 'string' ? call.data : typeof call?.input === 'string' ? call.input : '';
-  return typeof call?.to === 'string' && call.to.toLowerCase() === known.specifier.toLowerCase()
-    && data.toLowerCase().startsWith(WORKER_HASH_SELECTOR);
-}
-
-function sameHash(result: unknown, pinned: string): boolean {
-  // bytes32 comes back as exactly one 32-byte word.
-  return typeof result === 'string' && result.toLowerCase() === pinned.toLowerCase();
 }
 
 /** What a Test is doing, in order, so the form can say more than "Checking". */
@@ -273,9 +254,14 @@ async function loadClient(
       worker = factory.tor!();
     } else {
       report('specifier');
-      const rpcProvider = await withAbort(bootstrapProvider(provider, knownWorker!(provider.id), signal), signal);
+      const rpcProvider = await withAbort(bootstrapProvider(knownWorker!(provider.id), signal), signal);
       throwIfAborted(signal);
-      worker = new factory(knownWorkerInit!(provider.id, { rpcProvider, config: provider.workerConfig(gatewayUrl) }));
+      // The harness runs a bundle only if the specifier pins this build's hash,
+      // and refuses before fetching it otherwise.
+      worker = new factory({
+        ...knownWorkerInit!(provider.id, { rpcProvider, config: provider.workerConfig(gatewayUrl) }),
+        expectedWorkerHash: provider.workerHash,
+      });
     }
     // Only a Test follows the log: the app's own client leaves it alone.
     if (onStep) unfollow = followWorkerLog(worker, report, signal);
@@ -288,6 +274,9 @@ async function loadClient(
     // Loud, so a device failure names its cause instead of only the message.
     console.warn('[anon-rpc] client start failed', cause);
     if (cause instanceof TorUnavailableError) throw cause;
+    if ((cause as { name?: unknown } | null)?.name === 'WorkerHashMismatchError') {
+      throw new TorUnavailableError('The anon-rpc client named on-chain is not the one this build accepts.', { cause });
+    }
     throw new TorUnavailableError('Could not start the anon-rpc client.', { cause });
   } finally {
     unfollow?.();
