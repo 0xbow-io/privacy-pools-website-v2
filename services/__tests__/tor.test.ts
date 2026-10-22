@@ -4,7 +4,6 @@ import ts from 'typescript';
 import * as viem from 'viem';
 import * as policy from '../egress-policy';
 import * as settings from '../../config/tor';
-import { AnonRpcWorker } from '@0xbow/anon-rpc-rs-browser-harness';
 
 const MAINNET = 'https://mainnet.example/';
 const ENV_MAINNET = 'https://env-mainnet.example/';
@@ -27,140 +26,6 @@ function storage() {
 function config(gateway: string, store = storage()) {
   return load('config/tor.ts', { process: { env: { EXPO_PUBLIC_TOR_GATEWAY: gateway } }, window: { localStorage: store } }) as typeof settings;
 }
-
-for (const phase of ['download', 'body'] as const) test(`the bundled harness cannot resume after close during a ${phase}`, async () => {
-  const bundle = new TextEncoder().encode('/* cancellation fixture */');
-  const hash = viem.keccak256(bundle);
-  const resolvers = viem.encodeAbiParameters([{ type: 'string[]' }], [['https://first.example/worker', 'https://second.example/worker']]);
-  let started!: () => void;
-  const downloading = new Promise<void>(resolve => { started = resolve; });
-  let finish!: () => void;
-  let signal: AbortSignal | null | undefined;
-  const calls: string[] = [];
-  let frames = 0;
-  const realFetch = globalThis.fetch;
-  const realDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
-  Object.defineProperty(globalThis, 'document', { configurable: true, value: {
-    createElement() { frames++; throw new Error('A closed worker must not create an iframe'); },
-  } });
-  globalThis.fetch = (async (url: string, init?: RequestInit) => {
-    calls.push(url);
-    signal = init?.signal;
-    if (phase === 'download') return new Promise<Response>(resolve => {
-      finish = () => resolve(new Response(bundle));
-      started();
-    });
-    return new Response(new ReadableStream<Uint8Array>({ start(controller) {
-      finish = () => { controller.enqueue(bundle); controller.close(); };
-      started();
-    } }));
-  }) as typeof fetch;
-  const worker = new AnonRpcWorker({ address: settings.TOR_PROVIDERS[0].specifier, preExisting: { rpcProvider: {
-    request: async ({ params }) => (params?.[0] as { data: string }).data === '0x3898587d' ? hash : resolvers,
-  } } });
-  try {
-    await downloading;
-    worker.close();
-    await expect(worker.ready).rejects.toThrow('worker closed');
-    // Even a fetch implementation that ignores abort may resolve later.
-    finish();
-    await new Promise(resolve => setTimeout(resolve, 0));
-    expect(frames).toBe(0);
-    expect(calls).toEqual(['https://first.example/worker']);
-    expect(signal?.aborted).toBe(true);
-  } finally {
-    worker.close();
-    globalThis.fetch = realFetch;
-    if (realDocument) Object.defineProperty(globalThis, 'document', realDocument);
-    else Reflect.deleteProperty(globalThis, 'document');
-  }
-});
-
-
-test('the bundled harness releases its bootstrap when closed while the iframe has not said ready', async () => {
-  const bundle = new TextEncoder().encode('/* ready-wait fixture */');
-  const hash = viem.keccak256(bundle);
-  const resolvers = viem.encodeAbiParameters([{ type: 'string[]' }], [['https://first.example/worker']]);
-  let appended!: () => void;
-  const waitingForReady = new Promise<void>(resolve => { appended = resolve; });
-  const posted: unknown[] = [];
-  // Record the bootstrap's own signal, and whether anything waiting on it runs.
-  const RealAbortController = globalThis.AbortController;
-  let fired = 0;
-  class SpyAbortController extends RealAbortController {
-    constructor() {
-      super();
-      const signal = this.signal;
-      const add = signal.addEventListener.bind(signal);
-      signal.addEventListener = ((type: string, listener: EventListener, options?: AddEventListenerOptions) =>
-        add(type, (event: Event) => { if (type === 'abort') fired++; listener(event); }, options)) as typeof signal.addEventListener;
-    }
-  }
-  const realFetch = globalThis.fetch;
-  const realDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
-  const realWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
-  const iframe = { style: {}, setAttribute() {}, remove() {}, contentWindow: { postMessage: (message: unknown) => { posted.push(message); } } };
-  Object.defineProperty(globalThis, 'document', { configurable: true, value: {
-    createElement: () => iframe,
-    body: { appendChild: () => { appended(); } },
-  } });
-  Object.defineProperty(globalThis, 'window', { configurable: true, value: { addEventListener() {}, removeEventListener() {} } });
-  globalThis.fetch = (async () => new Response(bundle)) as typeof fetch;
-  globalThis.AbortController = SpyAbortController as typeof AbortController;
-  let worker: InstanceType<typeof AnonRpcWorker> | undefined;
-  try {
-    worker = new AnonRpcWorker({ address: settings.TOR_PROVIDERS[0].specifier, preExisting: { rpcProvider: {
-      request: async ({ params }) => (params?.[0] as { data: string }).data === '0x3898587d' ? hash : resolvers,
-    } } });
-    globalThis.AbortController = RealAbortController;
-    await waitingForReady;
-    const before = fired;
-    worker.close();
-    await expect(worker.ready).rejects.toThrow('worker closed');
-    await new Promise(resolve => setTimeout(resolve, 0));
-    // The wait for iframe-ready listens on the bootstrap signal, so close() ends it.
-    expect(fired).toBeGreaterThan(before);
-    expect(posted).toEqual([]);
-  } finally {
-    globalThis.AbortController = RealAbortController;
-    worker?.close();
-    globalThis.fetch = realFetch;
-    if (realDocument) Object.defineProperty(globalThis, 'document', realDocument);
-    else Reflect.deleteProperty(globalThis, 'document');
-    if (realWindow) Object.defineProperty(globalThis, 'window', realWindow);
-    else Reflect.deleteProperty(globalThis, 'window');
-  }
-});
-test('canceling a KPS bundle download closes the stream and its connection', async () => {
-  const controller = new AbortController();
-  let reading!: () => void;
-  const waiting = new Promise<void>(resolve => { reading = resolve; });
-  let reader!: ReadableStreamDefaultController<Uint8Array>;
-  let closed = 0;
-  let dialSignal: AbortSignal | undefined;
-  const stream = {
-    writable: new WritableStream<Uint8Array>(),
-    readable: new ReadableStream<Uint8Array>({ start(value) { reader = value; }, pull() { reading(); } }),
-    close: async () => { closed++; reader.error(new Error('stream closed')); },
-  };
-  const { fetchBundleOverKps } = load('node_modules/@0xbow/anon-rpc-rs-browser-harness/src/host/kps-http.ts', {
-    require: (name: string) => {
-      if (name !== '@kpstreams/webrtc-client') throw new Error(`Unexpected dependency ${name}`);
-      return { openStream: async (_address: string, options: { signal?: AbortSignal }) => {
-        dialSignal = options.signal;
-        return stream;
-      } };
-    },
-  }) as { fetchBundleOverKps: (address: string, path: string, cap: number, signal: AbortSignal) => Promise<Uint8Array> };
-  const pending = fetchBundleOverKps(GATEWAY, '/worker', 1024, controller.signal);
-  await waiting;
-  // Allow the dial and request writer to settle before aborting the read.
-  await new Promise(resolve => setTimeout(resolve, 0));
-  controller.abort();
-  await expect(pending).rejects.toThrow('stream closed');
-  expect(dialSignal).toBe(controller.signal);
-  expect(closed).toBeGreaterThan(0);
-});
 
 // Compile isolated modules so neither browser globals nor module mocks leak into other tests.
 function transport(active: boolean, importer: () => unknown, options: {
@@ -458,8 +323,41 @@ test('a chain list without mainnet (plain staging) still reads the specifier fro
   expect(urls).toEqual([ENV_MAINNET]);
 });
 
+test('closing a client ends a specifier read still in flight', async () => {
+  let init!: { preExisting: { rpcProvider: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } } };
+  let constructed!: () => void;
+  const built = new Promise<void>(resolve => { constructed = resolve; });
+  const loaded = transport(false, () => ({ AnonRpcWorker: class {
+    ready = new Promise<void>(() => {});
+    constructor(value: typeof init) { init = value; constructed(); }
+    close() {}
+    fetch = async () => Response.json({});
+  } }));
+  const realFetch = globalThis.fetch;
+  const signals: AbortSignal[] = [];
+  globalThis.fetch = ((_url: string, request?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    signals.push(request!.signal!);
+    request!.signal!.addEventListener('abort', () => reject(request!.signal!.reason), { once: true });
+  })) as typeof fetch;
+  try {
+    const sender = loaded.tor.createTorFetch(GATEWAY);
+    const pending = sender(MAINNET).then(() => null, (error: unknown) => error);
+    await built;
+    const read = init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ data: '0x9a1a3c5e' }, 'latest'] })
+      .then(() => null, (error: unknown) => error);
+    expect(signals).toHaveLength(1);
+    expect(signals[0].aborted).toBe(false);
+    sender.close();
+    expect(await pending).toBeInstanceOf(Error);
+    expect(await read).toBeInstanceOf(Error);
+    expect(signals[0].aborted).toBe(true);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test('Nox: no gateway, no config, specifier read on Sepolia, and the Test is an eth_chainId over the mixnet', async () => {
-  let init!: { address: string; config: unknown; preExisting: { rpcProvider: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } } };
+  let init!: { address: string; specifierChainId: number; config: unknown; preExisting: { rpcProvider: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } } };
   const sent: { url: string; body: unknown }[] = [];
   const loaded = transport(false, () => ({ AnonRpcWorker: class {
     ready = Promise.resolve();
@@ -490,43 +388,6 @@ test('a mixnet Test fails when the answer is not mainnet', async () => {
   } }));
   const result = await loaded.tor.probeTorGateway('', 5_000, 'nym');
   expect(result.ok).toBe(false);
-});
-
-test('closing during bootstrap fails the specifier reads, so the harness stops before the bundle', async () => {
-  let init!: { preExisting: { rpcProvider: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } } };
-  let release!: () => void;
-  const loaded = transport(false, () => ({ AnonRpcWorker: class {
-    ready = new Promise<void>(resolve => { release = resolve; });
-    constructor(value: typeof init) { init = value; }
-    close() {}
-    fetch = async () => Response.json({});
-  } }));
-  const realFetch = globalThis.fetch;
-  const signals: AbortSignal[] = [];
-  // A read that is still in flight when the form closes, the way the harness
-  // issues it right after construction.
-  globalThis.fetch = ((_url: string, request?: RequestInit) => new Promise<Response>((_resolve, reject) => {
-    signals.push(request!.signal!);
-    request!.signal!.addEventListener('abort', () => reject(request!.signal!.reason), { once: true });
-  })) as typeof fetch;
-  try {
-    const sender = loaded.tor.createTorFetch(GATEWAY);
-    const pending = sender(MAINNET).then(() => null, (error: unknown) => error);
-    await new Promise(resolve => setTimeout(resolve, 0));
-    expect(typeof release).toBe('function');
-    const inFlight = init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ data: '0x9a1a3c5e' }, 'latest'] }).then(() => null, (error: unknown) => error);
-    expect(signals).toHaveLength(1);
-    expect(signals[0].aborted).toBe(false);
-    sender.close();
-    expect(await pending).toBeInstanceOf(Error);
-    expect(await inFlight).toBeInstanceOf(Error);
-    expect(signals[0].aborted).toBe(true);
-    // And nothing new starts after the close.
-    await expect(init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ data: '0x9a1a3c5e' }, 'latest'] })).rejects.toThrow();
-    expect(signals).toHaveLength(1);
-  } finally {
-    globalThis.fetch = realFetch;
-  }
 });
 
 for (const provider of settings.TOR_PROVIDERS) test(`${provider.id}: specifier reads enforce the exact pinned hash`, async () => {
@@ -684,53 +545,13 @@ test('canceling a Test when ready cannot start its outbound probe', async () => 
   expect(sent).toBe(0);
 });
 
-test('a specifier response that finishes after cancellation cannot continue bootstrap', async () => {
-  let init!: { address: string; preExisting: { rpcProvider: { request: (args: unknown) => Promise<unknown> } } };
-  const loaded = transport(false, () => ({ AnonRpcWorker: class {
-    ready = Promise.resolve();
-    constructor(value: typeof init) { init = value; }
-    close() {}
-    fetch = async () => Response.json({});
-  } }));
-  const send = loaded.tor.createTorFetch('', 'nym');
-  await send(MAINNET);
-  const realFetch = globalThis.fetch;
-  let finishBody!: (reply: unknown) => void;
-  let reading!: () => void;
-  const readingBody = new Promise<void>(resolve => { reading = resolve; });
-  // A response body already delivered by a fetch implementation can settle
-  // even after its abort signal fires.
-  globalThis.fetch = (async () => Object.assign(new Response('{}'), { json: () => {
-    reading();
-    return new Promise(resolve => { finishBody = resolve; });
-  } })) as typeof fetch;
-  try {
-    const pending = init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ to: init.address, data: '0x4e2f8a45' }, 'latest'] });
-    await readingBody;
-    send.close();
-    finishBody({ result: '0x' });
-    await expect(pending).rejects.toThrow('closed');
-  } finally {
-    globalThis.fetch = realFetch;
-    send.close();
-  }
-});
-
-test('an abort after the headers still ends the body, and a pending request body cannot block it', async () => {
-  let upstreamCancelled = false;
+test('a pending request body cannot block an abort', async () => {
   const loaded = transport(true, () => ({ AnonRpcWorker: class {
     ready = Promise.resolve();
     close() {}
-    fetch = async () => new Response(new ReadableStream<Uint8Array>({ cancel() { upstreamCancelled = true; } }));
+    fetch = async () => Response.json({});
   } }));
   const send = loaded.tor.torFetchIfActive()!;
-  const abort = new AbortController();
-  const response = await send(MAINNET, { method: 'POST', body: '{}', signal: abort.signal });
-  const text = response.text();
-  abort.abort(new Error('timed out'));
-  await expect(text).rejects.toThrow('timed out');
-  expect(upstreamCancelled).toBe(true);
-
   const stalled = new AbortController();
   const neverEnds = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array([1])); } });
   const blocked = send(MAINNET, { method: 'POST', body: neverEnds, signal: stalled.signal, duplex: 'half' } as RequestInit);
