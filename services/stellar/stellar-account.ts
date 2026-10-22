@@ -69,6 +69,7 @@ import {
   type StellarRpcInteractor,
 } from '@/services/stellar/stellar-runtime';
 import { createStellarRelayer } from '@/services/stellar/stellar-relayer';
+import { routeSoroban } from '@/services/stellar/stellar-runtime';
 import {
   decodeStellarBackup,
   decodeStellarRequestBackup,
@@ -1151,10 +1152,10 @@ async function deriveProtocolKeys(
   const walletInteractor = new sdk.FreighterWalletInteractor({
     provider: signer,
     networkPassphrase: STELLAR_TESTNET_NETWORK.networkPassphrase,
-    rpcInteractor: new sdk.SorobanRPCInteractor({
+    rpcInteractor: routeSoroban(new sdk.SorobanRPCInteractor({
       rpcUrl: STELLAR_TESTNET_RPC_URL,
       networkPassphrase: STELLAR_TESTNET_NETWORK.networkPassphrase,
-    }),
+    })),
   });
   const signature = await walletInteractor.signKeyDerivationMessage(address);
   const derived = new sdk.StellarCryptoService().deriveKeysFromSignature({
