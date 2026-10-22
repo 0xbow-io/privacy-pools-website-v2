@@ -154,7 +154,7 @@ try {
   let matches = false;
   try {
     const link = await payer.page.evaluate(() => navigator.clipboard.readText());
-    const encoded = new URL(link).pathname.split('/import-note/')[1];
+    const encoded = new URL(link).hash.slice(1);
     const receipt = JSON.parse(Buffer.from(encoded, 'base64url').toString());
     const note = receipt.notes?.[0];
     matches = receipt.chainId === 11155111 && receipt.notes.length === 1
