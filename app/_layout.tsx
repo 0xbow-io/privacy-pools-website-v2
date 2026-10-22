@@ -74,6 +74,7 @@ import { SuiProvider } from '@/components/sui-provider';
 import { StellarWalletProvider } from '@/components/stellar-wallet-provider';
 import { useStellarAccountBinding } from '@/hooks/use-stellar-session';
 import { ChainProvider } from '@/components/chain-provider';
+import { TorAccounts } from '@/components/tor-accounts';
 import { installNetworkTrace } from '@/services/perf-trace';
 
 // `networkMode: 'always'` for MUTATIONS, deliberately.
@@ -297,6 +298,7 @@ export default function RootLayout() {
               {/* SdkProvider above the wallet modal so the picker's
                   account-key sign-in can reach the session context. */}
               <SdkProvider>
+                <TorAccounts />
                 {/* Native only (web is a passthrough): account keys imported
                     from the web and saved on the phone. Above the wallet
                     modal, which opens it. */}
