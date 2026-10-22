@@ -21,6 +21,7 @@
 import { useState, useCallback } from 'react';
 import { encodePayoutRouting } from '@/services/sui-witness/crypto';
 import { friendlyError } from '@/services/sui-witness/abort-codes';
+import { routedFetch } from '@/services/tor-fetch';
 
 /**
  * Re-export the 72-byte PayoutRouting encoder (recipient(32) || feeRecipient(32)
@@ -135,7 +136,7 @@ async function postJson<T>(url: string, body: unknown, timeoutMs: number): Promi
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   let resp: Response;
   try {
-    resp = await fetch(url, {
+    resp = await routedFetch('relayer')(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -173,7 +174,7 @@ async function getJson<T>(url: string, timeoutMs: number): Promise<T> {
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   let resp: Response;
   try {
-    resp = await fetch(url, { method: 'GET', cache: 'no-store', signal: controller?.signal });
+    resp = await routedFetch('relayer')(url, { method: 'GET', cache: 'no-store', signal: controller?.signal });
   } catch (err) {
     const reason = controller?.signal?.aborted
       ? `request timed out after ${timeoutMs}ms`
