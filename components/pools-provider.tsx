@@ -482,16 +482,22 @@ function mapEventToTransaction(
   // Review -> outcome lives in services/funds-state.ts (declined -> failed,
   // poi_required -> pending outcome + an 'at risk' fund state below).
 
+  // A feed deposit with no reviewStatus: the ASP stopped publishing per-deposit
+  // verdicts (publicFeed.hideReviewStatus, DEV-587), since each one dates the
+  // deposit's leaf. The deposit happened, so it reads completed; my own rows
+  // derive their verdict below.
+  const feedHidesVerdict = rawType === 'deposit' && event.reviewStatus === undefined
+    && typeof event.eventId !== 'string';
   // Withdrawals and ragequits don't carry a reviewStatus from the API.
   // If they've been recorded on-chain they are effectively completed.
   const effectiveReviewStatus = event.reviewStatus
-    ?? (rawType === 'deposit' ? 'pending' : 'approved');
+    ?? (feedHidesVerdict ? '' : rawType === 'deposit' ? 'pending' : 'approved');
   // My deposit from the event snapshot (a local string id; the ASP's ids are
   // numbers): no ASP verdict, so the row claims none until its note is
   // matched and one is derived locally. A public row keeps the ASP's, even
   // when it carries the commitment of the own row it covers.
   const commitment = 'commitment' in event ? event.commitment : undefined;
-  const noVerdict = rawType === 'deposit' && typeof event.eventId === 'string';
+  const noVerdict = rawType === 'deposit' && (typeof event.eventId === 'string' || feedHidesVerdict);
 
   return {
     id: event.eventId.toString(),
@@ -509,7 +515,7 @@ function mapEventToTransaction(
     usdValue,
     value: formatUsd(usdValue),
     timestamp: normalizedTimestamp,
-    status: reviewOutcome(effectiveReviewStatus),
+    status: feedHidesVerdict ? 'completed' : reviewOutcome(effectiveReviewStatus),
     txHash: event.txHash,
     reviewStatus: noVerdict ? '' : effectiveReviewStatus,
     // Declined / Proof-required deposits are 'at risk' before any local note
@@ -2367,8 +2373,9 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
       // A row built from the snapshot names its commitment and is mine or
       // authored by me by construction (services/own-history-rows.ts).
       const ownCommitment = tx.ownCommitment ? normalizeCommitment(tx.ownCommitment) : null;
-      // No ASP verdict on the row: it comes from the snapshot.
-      const derived = !!ownCommitment && !tx.reviewStatus;
+      // No ASP verdict on the row: it comes from the snapshot, or the feed hides
+      // verdicts (DEV-587). Every row past the ownership check below is mine.
+      const derived = !tx.reviewStatus;
       // Ownership: the depositor is me, OR one of my notes claims the row.
       // A cross-chain shield is executed on the destination by LiFi's
       // executor, so the row names it as depositor; the label still ties
@@ -2427,7 +2434,8 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
           || viewingKeyMatches.get(hash) === false || ownershipPending(hash, depositorIsMe)) {
           return { ...tx, status: 'completed', reviewStatus: '', fundsState: undefined, fundsReason: undefined };
         }
-        return tx;
+        // A feed row with no note yet reads pending (syncing) below, like an approved one did.
+        if (ownCommitment) return tx;
       }
       if (!matchedNote) {
         // #213: an ASP-approved deposit with NO local note (neither by label
