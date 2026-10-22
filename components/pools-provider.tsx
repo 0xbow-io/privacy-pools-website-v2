@@ -24,6 +24,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAccount, useBalance, useReadContracts } from 'wagmi';
 import { erc20Abi, formatUnits } from 'viem';
 import type { Address } from 'viem';
+import { getPinnedYieldDeployments } from '@/config/yield';
 import apiClient from '@/services/api-client';
 import { buildPaidRequestTxHashSet } from '@/services/paid-requests-store';
 import { buildSentTxHashSet, readAllSentTransfers } from '@/services/sent-transfers-store';
@@ -369,6 +370,12 @@ type PoolsContextType = {
    * cadence here, app-wide, so no screen can cause it.
    */
   yieldEarned: YieldEarnedByShare;
+  /**
+   * Raw wallet balance of every pinned yield SHARE token on `chainId`, keyed by
+   * lowercase share address. Read by the same fixed-cadence balance poll as
+   * every other wallet token (services/loose-share-unwrap.ts).
+   */
+  walletShareBalances?: { chainId: number; owner: string; balances: Record<string, bigint>; allowances: Record<string, bigint> };
   statistics: GlobalStatistics | null;
   isLoading: boolean;
   error: string | null;
@@ -1307,7 +1314,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
     () => {
       if (!address) return [];
 
-      return nonNativeSupportedTokenPrices
+      const priced = nonNativeSupportedTokenPrices
         .map((price) => ({
           // Resolve symbol-or-address to the real ERC-20 contract address;
           // `tokenSymbol` is now a symbol ("USDC") from /token-prices.
@@ -1316,8 +1323,20 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
           functionName: 'balanceOf' as const,
           args: [address],
         }));
+      // Pinned yield share tokens are appended AFTER the priced list (which is
+      // consumed positionally below), so loose shares in the wallet can be
+      // found and unwrapped. A static, config-derived list on the same
+      // cadence: nothing here depends on a note or on what the user is doing.
+      const extra = getPinnedYieldDeployments(defaultChain.id)
+        .map((d) => d.ppUSDC as Address)
+        .filter((share, i, all) => all.findIndex((x) => x.toLowerCase() === share.toLowerCase()) === i)
+        .map((share) => ({ address: share, abi: erc20Abi, functionName: 'balanceOf' as const, args: [address] }));
+      const allowances = getPinnedYieldDeployments(defaultChain.id)
+        .filter((d) => !!d.zap)
+        .map((d) => ({ address: d.ppUSDC, abi: erc20Abi, functionName: 'allowance' as const, args: [address, d.zap!] }));
+      return [...priced, ...extra, ...allowances];
     },
-    [address, nonNativeSupportedTokenPrices],
+    [address, nonNativeSupportedTokenPrices, defaultChain.id],
   );
 
   // `enabled` gates on data readiness only. It used to carry `&& !txPending`,
@@ -1344,6 +1363,22 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
   // another's name. Including the addresses makes that a reset instead.
   const erc20BalancesIdentity = `${walletReadIdentity}:${erc20BalanceContracts.map((c) => c.address).join(',')}`;
   const erc20Balances = useLatchedWhile(liveErc20Balances, txPending, erc20BalancesIdentity);
+
+  const walletShareBalances = useMemo(() => {
+    if (!address) return undefined;
+    const shares = new Set(getPinnedYieldDeployments(defaultChain.id).map((d) => d.ppUSDC.toLowerCase()));
+    const balances: Record<string, bigint> = {};
+    const allowances: Record<string, bigint> = {};
+    erc20BalanceContracts.forEach((c, i) => {
+      const key = c.address.toLowerCase();
+      const r = erc20Balances?.[i];
+      if (shares.has(key) && r?.status === 'success' && typeof r.result === 'bigint') {
+        if (c.functionName === 'allowance') allowances[key] = r.result;
+        else balances[key] = r.result;
+      }
+    });
+    return { chainId: defaultChain.id, owner: address, balances, allowances };
+  }, [address, defaultChain.id, erc20BalanceContracts, erc20Balances]);
 
   // The feeds and our own pending operations, reconciled ONCE per pass:
   // public rows deduped, own-history rows deduped against them and filtered to
@@ -3005,7 +3040,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
   });
 
   return (
-    <PoolsContext.Provider value={{ data, yieldEarned, statistics: statistics || null, isLoading, error }}>
+    <PoolsContext.Provider value={{ data, yieldEarned, walletShareBalances, statistics: statistics || null, isLoading, error }}>
       {children}
     </PoolsContext.Provider>
   );
