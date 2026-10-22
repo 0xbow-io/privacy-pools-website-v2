@@ -1,10 +1,21 @@
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
+// RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
+// amounts, validation, quotes, relayer and on-chain values stay in shares
+// (exact strings/bigints). Never convert an amount to underlying and back,
+// never feed a displayed underlying figure into an operation.
+// Display headlines use underlying through shareBalanceDisplay; shares appear
+// only in the (i) hint, in fields labelled with the share symbol, or while the
+// rate is unknown. Never print a share count under the underlying symbol.
+// Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
+// MAX retains the original exact shares. USD edits use an exact decimal price
+// in that same boundary. No other operation converts display back.
 import { useActiveEvmChain } from '@/hooks/use-active-evm-chain';
 import { createContext, useContext, useMemo, ReactNode } from 'react';
 import { formatUnits, parseUnits } from 'viem';
 import { usePools } from '@/components/pools-provider';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { useShareRates } from '@/hooks/use-share-rates';
-import { tokenAmountLabel } from '@/services/share-display';
+
 import { useAllChainsPriceMap } from '@/hooks/use-all-chains-price-map';
 import { EMPTY_PRICE_MAP, priceFromMap } from '@/services/price-map-merge';
 import { getChainConfig } from '@/config/chains';
@@ -24,6 +35,7 @@ export type PortfolioPosition = {
   /** ACTIVE (leaf-gated spendable) balance — yield rows: redeemable underlying. */
   balance: number;
   balanceFormatted: string;
+  shareHint?: string | null;
   /** ACTIVE USD value — the only figure feeding Net Value / allocation. */
   valueUsd: number;
   valueUsdFormatted: string;
@@ -100,6 +112,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
 
   const { data: poolsData, yieldEarned, isLoading: poolsLoading, error: poolsError } = usePools();
   const { rateFor, loading: ratesLoading } = useShareRates();
+  const balanceDisplay = useBalanceDisplay(chainId);
 
   // Off the public-feed grid, not a query. The chain-scoped getAllPrices()
   // this replaces shared the scheduler's cache scope, but only while that
@@ -173,10 +186,12 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
 
     const positions: PortfolioPosition[] = aggregated.positions.map((p) => {
       const earned = earnedFor(p);
+      const held = p.isYield ? poolsData.myPools.find(pool => pool.chainId === p.chainId && pool.tokenAddress.toLowerCase() === p.tokenAddress.toLowerCase()) : undefined;
+      const shareView = held ? balanceDisplay(held.balanceTokenExact, held.name, held.chainId, held.tokenAddress) : null;
       let pendingLabel: string | null = null;
       if (p.pendingBalance > 0) {
         pendingLabel = p.pendingValueUnavailable
-          ? `${tokenAmountLabel(formatTokenBalance(p.pendingBalance, p.tokenSymbol), p.shareSymbol ?? p.tokenSymbol)} pending. Value unavailable.`
+          ? `${`${formatTokenBalance(p.pendingBalance, p.shareSymbol ?? p.tokenSymbol)} ${p.shareSymbol ?? p.tokenSymbol}`} pending. Value unavailable.`
           : `${formatTokenBalance(p.pendingBalance, p.tokenSymbol)} ${p.tokenSymbol} pending`;
       }
       return {
@@ -185,6 +200,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         ...(p.chainId !== undefined ? { chainId: p.chainId } : {}),
         balance: p.activeBalance,
         balanceFormatted: formatTokenBalance(p.activeBalance, p.tokenSymbol),
+        shareHint: shareView?.hint,
         valueUsd: p.activeValueUsd,
         valueUsdFormatted: formatUsd(p.activeValueUsd),
         pendingLabel,
@@ -204,7 +220,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       hasPositions: aggregated.hasPositions,
       yieldEarnedUsd: totalYieldEarnedUsd(earnedRows),
     };
-  }, [poolsData.myPools, priceMap, chainId, yieldSources, yieldEarned]);
+  }, [poolsData.myPools, priceMap, chainId, yieldSources, yieldEarned, balanceDisplay]);
 
   const isLoading = poolsLoading || pricesLoading;
   // usePools surfaces a string. The Error branch that used to be here existed

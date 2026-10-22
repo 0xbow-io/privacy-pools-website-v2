@@ -1,3 +1,14 @@
+import { useShareAmountField } from '@/hooks/use-share-amount-field';
+// RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
+// amounts, validation, quotes, relayer and on-chain values stay in shares
+// (exact strings/bigints). Never convert an amount to underlying and back,
+// never feed a displayed underlying figure into an operation.
+// Display headlines use underlying through shareBalanceDisplay; shares appear
+// only in the (i) hint, in fields labelled with the share symbol, or while the
+// rate is unknown. Never print a share count under the underlying symbol.
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
+import { ShareCountHint } from '@/components/pools/share-count-hint';
+import { BalanceAmount } from '@/components/pools/balance-amount';
 import { compactPhoneLayout } from '@/services/header-nav';
 import { HoverHint } from '@/components/ui/hover-hint';
 import { crossFlowsEnabled } from '@/config/intent-lockdown';
@@ -72,7 +83,7 @@ import { subscribeProofProgress } from '@/services/proof-progress';
 import { isFeeCommitmentExpired } from '@/services/fee-commitment';
 import { isReprovableRelayRefusal } from '@/services/relayed-transfer';
 import { getActionableTokens, getKnownTokenMetadata, getTokenMetadataBySymbol, getTokenMetadata, isStablecoin, formatTokenBalance as sharedFormatTokenBalance } from '@/config/tokens';
-import { formatTokenBalanceDown } from '@/services/token-format';
+
 import { assertRelayerSwapProcessor } from '@/services/relayer-details';
 import { viewOnExplorerLabel } from '@/services/explorer-label';
 import { resolveRelayerFee, feeSanity, feeSanityMessage } from '@/services/relayer-fee';
@@ -183,7 +194,7 @@ import { feeWithinReviewed, relayerFeeJitterAllowance } from '@/services/relayer
 import { quoteMatchesSignedCommitment } from '@/services/relayer-quote-integrity';
 import { decodeGasTopUpWei, formatGasTopUp } from '@/services/gas-top-up';
 import { setReceiveSetup } from '@/services/receive-setup';
-import { tokenAmountLabel, approxUnderlyingText, displayTokenSymbol, isShareSymbol, netSharesWei, shareRedemptionDisclosure, shareReviewHeadline } from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol, netSharesWei, shareRedemptionDisclosure, shareReviewHeadline } from '@/services/share-display';
 import { sdkErrorText, type ErrorUnits } from '@/services/sdk-error-amounts';
 import { RelayFeeIncreasedError, relayWithdrawalWithFreshQuote } from '@/services/relayed-withdrawal';
 import { PREVIEW_REDEEM_ABI } from '@/services/deposit-limits';
@@ -565,6 +576,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // chainId` switch guard below meaningful: it used to compare the wallet's
   // chain against itself and could never fire.
   const chainId = useActiveEvmChain().id;
+  const balanceDisplay = useBalanceDisplay(chainId);
   const withOpLock = useOpLock();
   // Chain FROZEN at submission — explorer links must not follow a later
   // app-chain switch (codex round 3, P2).
@@ -1639,7 +1651,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       : effectiveReceiveExact
         ? 'ok'
         : enteredAmountWei > 0n && feeBudgetForVerdictWei >= enteredAmountWei ? 'exceeds-amount' : 'ok';
-  const feeRefusal = feeSanityMessage(feeVerdict, { ...resolvedFee, text: approxUnderlyingText(resolvedFee.text, resolvedFee.symbol) });
+  const feeRefusal = feeSanityMessage(feeVerdict, { ...resolvedFee, text: balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text });
   // DEV-229: split the entered value into the pool-leaving total vs the
   // recipient's net, depending on the "receive exact amount" toggle.
   const grossWithdrawn = effectiveReceiveExact ? enteredAmount + relayerFee : enteredAmount;
@@ -1663,7 +1675,6 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     feeWei: feeBudgetWei,
     receiveExact: effectiveReceiveExact,
   });
-  const singleProofMaxInputNum = tokenBalanceNum(singleProofMaxInputWei, selectedTokenDecimals);
   // === Full-balance batch withdrawal (flag-gated) ===
   // The SDK's batch flow withdraws the ENTIRE active balance of an asset —
   // the only shape it supports — so the batch route applies exactly when the
@@ -1761,6 +1772,14 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // exit is a single proof over up to 5 notes of any label, so it advertises
   // that single-proof cap even with batching on; batch-eligible plain
   // withdrawals advertise the full active balance.
+  const amountField = useShareAmountField({ amount, symbol: selectedToken, chainId, maxSharesExact: formatUnits(getWithdrawMaxWei(selectedToken) ?? 0n, selectedTokenDecimals), underlyingEntry: !isSui });
+  const amountDollarLabel = useCallback((sharesExact: string) => {
+    if (isShareSymbol(selectedToken)) {
+      const view = balanceDisplay(sharesExact, selectedToken, chainId);
+      return view.converted ? `$${view.usd.toFixed(2)}` : '';
+    }
+    return `$${((parseFloat(sharesExact) || 0) * currentPrice).toFixed(2)}`;
+  }, [selectedToken, balanceDisplay, chainId, currentPrice]);
   const displayAvailableNum = isSui
     ? Number(suiWithdraw.maxSingle) / altScale
     : tokenBalanceNum(
@@ -2423,7 +2442,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           if (!isCurrent()) return;
           reportWithdrawError(
             selection.total > 0n
-              ? `A withdraw + swap spends up to 5 approved notes in one proof. Largest spendable now: ${tokenAmountLabel(max, selectedToken)}.`
+              ? `A withdraw + swap spends up to 5 approved notes in one proof. Largest spendable now: ${balanceDisplay(max, selectedToken, chainId).text}.`
               : `No approved, spendable ${displayTokenSymbol(selectedToken)} notes are available yet.`,
           );
           return;
@@ -2725,7 +2744,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         const maxInput = formatUnits(maxInputWei, tokenDecimals);
         reportWithdrawError(
           maxInputWei > 0n
-            ? `That's more than one transaction can carry. Enter at most ${tokenAmountLabel(maxInput, selectedToken)} (up to ${WITHDRAW_MAX_INPUTS} notes per proof${effectiveReceiveExact ? ', after reserving the relayer fee' : ''}).`
+            ? `That's more than one transaction can carry. Enter at most ${balanceDisplay(maxInput, selectedToken, chainId).text} (up to ${WITHDRAW_MAX_INPUTS} notes per proof${effectiveReceiveExact ? ', after reserving the relayer fee' : ''}).`
             : `Your ${displayTokenSymbol(selectedToken)} notes don't have enough active balance to cover the relayer fee.`,
         );
         setActiveFeeCommitment(null);
@@ -3919,8 +3938,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         reportWithdrawError(
           maxInputWei > 0n
             ? (isSwapExit
-              ? `That's more than a withdraw + swap can carry. Enter at most ${tokenAmountLabel(maxInput, selectedToken)} (up to ${WITHDRAW_MAX_INPUTS} notes in one proof${effectiveReceiveExact ? ', after reserving the relayer fee' : ''}).`
-              : `That's more than one transaction can carry. Enter at most ${tokenAmountLabel(maxInput, selectedToken)} (up to ${WITHDRAW_MAX_INPUTS} notes per proof${effectiveReceiveExact ? ', after reserving the relayer fee' : ''}).`)
+              ? `That's more than a withdraw + swap can carry. Enter at most ${balanceDisplay(maxInput, selectedToken, chainId).text} (up to ${WITHDRAW_MAX_INPUTS} notes in one proof${effectiveReceiveExact ? ', after reserving the relayer fee' : ''}).`
+              : `That's more than one transaction can carry. Enter at most ${balanceDisplay(maxInput, selectedToken, chainId).text} (up to ${WITHDRAW_MAX_INPUTS} notes per proof${effectiveReceiveExact ? ', after reserving the relayer fee' : ''}).`)
             : `Your ${displayTokenSymbol(selectedToken)} notes don't have enough active balance to cover this withdrawal + the relayer fee.`,
         );
         submittedRef.current = false;
@@ -4645,10 +4664,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     setSelectedTab(null);
     invalidateQuoteRequests();
     setMaxSelected(false);
-    const num = parseFloat(val) || 0;
-    setDollarValue(`$${(num * currentPrice).toFixed(2)}`);
+    setDollarValue(amountDollarLabel(val));
     bumpSelection();
-  }, [tokenDecimalsForDisplay, currentPrice, invalidateQuoteRequests, bumpSelection]);
+  }, [tokenDecimalsForDisplay, amountDollarLabel, invalidateQuoteRequests, bumpSelection]);
 
   // DEV-531: the hub's card token, pushed live (Send has had this since
   // DEV-469). Same resets as the form's own token dropdown: the receive-as
@@ -4864,7 +4882,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     const val = formatUnits(amountWei, tokenDecimalsForDisplay);
     setMaxSelected(selection.maxSelected);
     setAmount(val);
-    setDollarValue(`$${(parseFloat(val) * currentPrice).toFixed(2)}`);
+    setDollarValue(amountDollarLabel(val));
   };
 
   const handleTabPress = (tab: string) => {
@@ -4882,7 +4900,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       const val = (Math.floor(exact * 10000) / 10000).toFixed(4);
       setMaxSelected(false);
       setAmount(val);
-      setDollarValue(`$${(parseFloat(val) * currentPrice).toFixed(2)}`);
+      setDollarValue(amountDollarLabel(val));
     } else {
       // Pass the route and cap explicitly. Route-change handlers call the same
       // helper with the DESTINATION cap before React has re-rendered it.
@@ -4917,20 +4935,24 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     bumpSelection();
   };
 
+  // Exact-share writes (including Use maximum) bypass the entry boundary.
   // Single write path for "apply a suggested amount" — the exact sequence the
   // quick-amount chips already ran inline (sanitize with the token's decimals →
   // setAmount → clear tab/Max intent → drop in-flight quotes → refresh the USD
   // line → fresh guard consent). Presentation only: nothing here changes how an
   // amount is parsed, capped or guarded.
-  const applyPresetAmount = (value: string) => {
+  const applyShareAmount = (value: string) => {
     const val = sanitizeAmountInput(value, tokenDecimalsForDisplay);
     setAmount(val);
     setSelectedTab(null);
     setMaxSelected(false);
     invalidateQuoteRequests();
-    setDollarValue(`$${((parseFloat(val) || 0) * currentPrice).toFixed(2)}`);
+    setDollarValue(amountDollarLabel(val));
     bumpSelection();
   };
+
+  // Quick presets are underlying literals when the rate is known, shares otherwise.
+  const applyPresetAmount = (value: string) => applyShareAmount(amountField.toShares(value));
 
   // FullWithdrawalGuard escape hatch: one tap resets the selection to 75%.
   const handleFullWithdrawalEscape = () => {
@@ -4985,7 +5007,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     onPress={() => setTokenDropdownOpen(!tokenDropdownOpen)}
                   >
                     <Text className="text-[16px] leading-[16px] flex-1 text-text font-pp-regular">
-                      {poolDisplayLabel(selectedToken, chainId)}
+                      {amountField.symbol}
                     </Text>
                     <Pressable
                       className="flex-row items-center gap-[4px] px-[8px] py-[4px] border border-border-light rounded-control"
@@ -5006,7 +5028,6 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     >
                       {(isSui ? [altSymbol] : sourceTokens.map((t) => t.symbol)).map((token, idx, arr) => {
                         const bal = tokenBalances.get(token);
-                        const balanceNum = bal ? tokenBalanceNum(bal.active, withdrawTokenDecimals(token, chainId, isSui)) : 0;
                         return (
                           <Pressable
                             key={token}
@@ -5041,7 +5062,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                               {poolDisplayLabel(token, chainId)}
                             </Text>
                             <Text className="text-text-secondary font-pp-regular text-[12px]">
-                              {tokenAmountLabel(sharedFormatTokenBalance(balanceNum, token), token)}
+                              {balanceDisplay(bal ? formatUnits(bal.active, withdrawTokenDecimals(token, chainId, isSui)) : '0', token, chainId).text}
                             </Text>
                           </Pressable>
                         );
@@ -5063,13 +5084,13 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                           className={`text-[24px] leading-[30px] p-0 m-0 font-pp-regular ${amount ? 'text-text' : 'text-[#999999]'}`}
                           // nw-keep(platform-css): web-only outline reset + text cursor have no className path (empty on native)
                           // nw-keep(measured-or-inset): font size shrinks to the measured field width for long figures
-                          style={[WEB_NO_OUTLINE, Platform.OS === 'web' ? { cursor: 'text' } as unknown as TextStyle : {}, { fontSize: fitAmountFontSize(amount, amountFieldWidth, 24) }]}
+                          style={[WEB_NO_OUTLINE, Platform.OS === 'web' ? { cursor: 'text' } as unknown as TextStyle : {}, { fontSize: fitAmountFontSize(amountField.value, amountFieldWidth, 24) }]}
                           onLayout={(e) => setAmountFieldWidth(Math.round(e.nativeEvent.layout.width))}
-                          value={amount}
+                          value={amountField.value}
                           placeholder="0"
                           placeholderTextColor="#999999"
                           onChangeText={(text) => {
-                            const val = sanitizeAmountInput(text, tokenDecimalsForDisplay);
+                            const val = sanitizeAmountInput(amountField.toShares(text), tokenDecimalsForDisplay);
                             setAmount(val);
                             setSelectedTab(null);
                             // Amount is part of the swap-quote key.
@@ -5078,17 +5099,18 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                             // only counts as full when it equals the balance to
                             // the wei (checked in fullBalanceRequested).
                             setMaxSelected(false);
-                            const num = parseFloat(val) || 0;
-                            setDollarValue(`$${(num * currentPrice).toFixed(2)}`);
+                            setDollarValue(amountDollarLabel(val));
                             // New selection → fresh consent (codex finding 7).
                             bumpSelection();
                           }}
                           keyboardType="numeric"
                         />
                         <Text className="text-[14px] text-[#999999] font-pp-regular">
-                          {dollarValue}
+                          {isShareSymbol(selectedToken) ? amountDollarLabel(amount) : dollarValue}
                         </Text>
                       </View>
+                      {isShareSymbol(selectedToken) ? <BalanceAmount view={balanceDisplay(amount || '0', selectedToken, chainId)} className="text-[12px] text-text-secondary" /> : null}
+                      {amountField.error ? <Text className="text-[12px] text-danger">{amountField.error}</Text> : null}
                       <View className="shrink gap-[6px] items-end">
                         <View className="flex-row items-center gap-[4px] flex-wrap justify-end">
                           <Text className="text-[14px] text-[#999999] text-right font-pp-regular">
@@ -5096,8 +5118,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                               ? 'Loading shielded balance…'
                               : spendabilityError
                                 ? 'Shielded balance unavailable'
-                                : `Available: ${tokenAmountLabel(formatTokenBalanceDown(displayAvailableNum, selectedToken), selectedToken)}`}
+                                : `Available: ${balanceDisplay(isSui ? String(displayAvailableNum) : formatUnits(resolveDisplayAvailableWei({ isSwapExit, batchEnabled, spendableWei: currentBalance.active, singleProofCapWei: availableWei }), selectedTokenDecimals), selectedToken, chainId).text}`}
                           </Text>
+                          <ShareCountHint hint={balanceDisplay(isSui ? String(displayAvailableNum) : formatUnits(resolveDisplayAvailableWei({ isSwapExit, batchEnabled, spendableWei: currentBalance.active, singleProofCapWei: availableWei }), selectedTokenDecimals), selectedToken, chainId).hint} />
                           <ModalInfoIcon color="#999999" />
                         </View>
                         <View className="flex-row gap-[2px] flex-wrap justify-end max-w-[188px]">
@@ -5136,10 +5159,10 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                         current route's per-transaction cap (#214). */}
                     <View className="flex-row justify-between">
                       <Text className="text-[12px] text-[#4D4D4D] font-pp-regular">
-                        Balance: {spendabilityBlocked ? '—' : tokenAmountLabel(formatTokenBalanceDown(spendableNum, selectedToken), selectedToken)}
+                        Balance: {spendabilityBlocked ? '—' : balanceDisplay(formatUnits(currentBalance.active, selectedTokenDecimals), selectedToken, chainId).text}
                       </Text>
                       <Text className="text-[12px] text-[#999999] font-pp-regular">
-                        Pending: {spendabilityBlocked ? '—' : tokenAmountLabel(sharedFormatTokenBalance(pendingNum, selectedToken), selectedToken)}
+                        Pending: {spendabilityBlocked ? '—' : balanceDisplay(formatUnits(currentBalance.pending, selectedTokenDecimals), selectedToken, chainId).text}
                       </Text>
                     </View>
                     {spendabilityError ? (
@@ -5169,7 +5192,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                   {!inlineHubActive && (
                   <View className="flex-row flex-wrap gap-[8px] mt-[10px] items-center">
                     {(usesNativeWithdrawPresets(selectedToken) ? QUICK_AMOUNTS_NATIVE : QUICK_AMOUNTS_STABLE).map((preset) => {
-                      const active = amount === preset;
+                      const active = isShareSymbol(selectedToken) ? amountField.value === preset : amount === preset;
                       return (
                         <Pressable
                           key={preset}
@@ -5178,9 +5201,10 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                           style={[{ minWidth: 50 }, active ? { backgroundColor: `${colors.tint}22` } : null]}
                           className={`items-center px-[12px] py-[6px] rounded-[8px] border ${active ? 'border-tint' : 'border-border-light'} ${active ? '' : 'bg-transparent'}`}
                           onPress={() => applyPresetAmount(preset)}
+                          disabled={spendabilityBlocked}
                         >
                           <Text className={`text-[13px] font-pp-regular ${active ? 'text-tint' : 'text-text'}`}>
-                            {formatQuickAmount(preset)}
+                            {isShareSymbol(selectedToken) ? `${formatQuickAmount(preset)} ${amountField.symbol}` : formatQuickAmount(preset)}
                           </Text>
                         </Pressable>
                       );
@@ -5266,25 +5290,25 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       <View className="gap-[4px]">
                         <Text className="text-[12px] text-[#E53935] font-pp-regular">
                           {isSwapExit
-                            ? `One withdraw + swap can spend ${tokenAmountLabel(formatTokenBalanceDown(availableNum, selectedToken), selectedToken)} (up to ${WITHDRAW_MAX_INPUTS} notes per proof). The rest of your ${tokenAmountLabel(formatTokenBalanceDown(spendableNum, selectedToken), selectedToken)} balance needs another transaction`
-                            : `One withdrawal can spend ${tokenAmountLabel(formatTokenBalanceDown(availableNum, selectedToken), selectedToken)} (up to ${WITHDRAW_MAX_INPUTS} notes per proof). The rest of your ${tokenAmountLabel(formatTokenBalanceDown(spendableNum, selectedToken), selectedToken)} balance needs another transaction`}
+                            ? `One withdraw + swap can spend ${balanceDisplay(formatUnits(availableWei, selectedTokenDecimals), selectedToken, chainId).text} (up to ${WITHDRAW_MAX_INPUTS} notes per proof). The rest of your ${balanceDisplay(formatUnits(currentBalance.active, selectedTokenDecimals), selectedToken, chainId).text} balance needs another transaction`
+                            : `One withdrawal can spend ${balanceDisplay(formatUnits(availableWei, selectedTokenDecimals), selectedToken, chainId).text} (up to ${WITHDRAW_MAX_INPUTS} notes per proof). The rest of your ${balanceDisplay(formatUnits(currentBalance.active, selectedTokenDecimals), selectedToken, chainId).text} balance needs another transaction`}
                           {batchEnabled && !isSwapExit
                             ? ', or use 100% to withdraw everything.'
                             : singleProofMaxInputWei > 0n
-                              ? `, so enter ${singleProofMaxInputNum.toFixed(4)} now and repeat for the rest.`
+                              ? `, so enter ${balanceDisplay(formatUnits(singleProofMaxInputWei, tokenDecimalsForDisplay), selectedToken, chainId).text} now and repeat for the rest.`
                               : '. The relayer fee currently consumes that one-proof cap.'}
                         </Text>
                         {singleProofMaxInputWei > 0n ? (
-                          <Pressable onPress={() => applyPresetAmount(formatUnits(singleProofMaxInputWei, tokenDecimalsForDisplay))}>
+                          <Pressable onPress={() => applyShareAmount(formatUnits(singleProofMaxInputWei, tokenDecimalsForDisplay))}>
                             <Text className="text-[12px] underline text-text font-pp-medium">
-                              {`Use ${tokenAmountLabel(singleProofMaxInputNum.toFixed(4), selectedToken)}`}
+                              {`Use ${balanceDisplay(formatUnits(singleProofMaxInputWei, tokenDecimalsForDisplay), selectedToken, chainId).text}`}
                             </Text>
                           </Pressable>
                         ) : null}
                       </View>
                     ) : (
                       <Text className="text-[12px] text-[#E53935] font-pp-regular">
-                        {`Amount exceeds your shielded balance (${tokenAmountLabel(formatTokenBalanceDown(spendableNum, selectedToken), selectedToken)})`}
+                        {`Amount exceeds your shielded balance (${balanceDisplay(formatUnits(currentBalance.active, selectedTokenDecimals), selectedToken, chainId).text})`}
                       </Text>
                     )
                   ) : null}
@@ -5501,9 +5525,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
               const outSym = swapSnapshot ? swapSnapshot.outputToken.symbol : shareUnderlyingSymbol;
               const outHue = TokenHues[colorScheme][outSym.toUpperCase()] ?? TokenHues[colorScheme].ETH;
               const grossNum = swapSnapshot ? swapReviewGrossNum : reviewGross;
-              const grossUsd = (swapSnapshot ? swapReviewGrossNum * swapReviewInputPrice : reviewGross * currentPrice);
+              const grossUsd = balanceDisplay(swapSnapshot ? formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals) : String(reviewGross), swapSnapshot ? swapReviewInputSymbol : selectedToken, swapSnapshot?.poolChainId ?? chainId).usd;
               const netLabel = swapSnapshot
-                ? `~${swapSnapshot.display.estimatedOutput} ${outSym}`
+                ? `~${balanceDisplay(swapSnapshot.display.estimatedOutput, outSym, swapSnapshot.destinationChainId).text}`
                 : reviewNetLabel;
               const netUsd = swapSnapshot
                 ? (parseFloat(swapSnapshot.display.estimatedOutput) || 0) * (priceMap[outSym] || 0)
@@ -5520,11 +5544,11 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     <View className="flex-1 gap-[1px]">
                       <Text className="font-pp-sans-medium text-[13px] text-text" numberOfLines={1}>Unshielding</Text>
                       <Text className="font-pp-sans text-[11.5px] text-text-muted" numberOfLines={1}>
-                        {poolName} · {tokenAmountLabel(sharedFormatTokenBalance(batchPlan ? 0 : remainingAmount, selectedToken), selectedToken)} left after
+                        {poolName} · {balanceDisplay(batchPlan ? 0 : remainingAmount, selectedToken, chainId).text} left after
                       </Text>
                     </View>
                     <View className="items-end gap-[1px]">
-                      <Text className="font-pp-mono text-[13px] text-text">~{sharedFormatTokenBalance(grossNum, swapSnapshot ? swapReviewInputSymbol : selectedToken)} {displayTokenSymbol(swapSnapshot ? swapReviewInputSymbol : selectedToken)}</Text>
+                      <Text className="font-pp-mono text-[13px] text-text">{balanceDisplay(swapSnapshot ? formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals) : String(grossNum), swapSnapshot ? swapReviewInputSymbol : selectedToken, swapSnapshot?.poolChainId ?? chainId).text}</Text>
                       <Text className="font-pp-sans text-[11.5px] text-text-muted">${grossUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}</Text>
                     </View>
                   </View>
@@ -5563,7 +5587,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                   ) : (
                   <View className="flex-row flex-wrap items-center justify-between gap-[6px] py-[9px]">
                     <Text className="font-pp-sans text-[11.5px] text-text-muted">
-                      Relayer fee {swapSnapshot ? `${swapSnapshot.display.relayerFee} ${displayTokenSymbol(swapReviewInputSymbol)}` : (batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${tokenAmountLabel(sharedFormatTokenBalance(reviewFee, selectedToken), selectedToken)}` : approxUnderlyingText(resolvedFee.text, resolvedFee.symbol)} (~${((swapSnapshot ? (parseFloat(swapSnapshot.display.relayerFee) || 0) * swapReviewInputPrice : (batchPlan || isStellar) ? reviewFee * currentPrice : reviewFee * (priceMap[resolvedFee.symbol] ?? currentPrice))).toFixed(2)})
+                      Relayer fee {swapSnapshot ? `${balanceDisplay(swapSnapshot.display.relayerFee, swapReviewInputSymbol, swapSnapshot.poolChainId).text}` : (batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text} (~${balanceDisplay(swapSnapshot ? swapSnapshot.display.relayerFee : String(reviewFee), swapSnapshot ? swapReviewInputSymbol : (batchPlan || isStellar) ? selectedToken : resolvedFee.symbol, swapSnapshot?.poolChainId ?? chainId).usd.toFixed(2)})
                     </Text>
                     <View className="flex-row items-center gap-[10px]">
                       <Pressable className="flex-row items-center gap-[3px]" onPress={() => setRelayerSelectorOpen((v) => !v)}>
@@ -5592,7 +5616,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       {/* nw-keep(data-color): bolt glyph tint token (vector-icon color prop) */}
                       <Ionicons name="flash-outline" size={13} color={colors.tint} />
                       <Text className="flex-1 font-pp-sans text-[11px] leading-[16px] text-text-secondary">
-                        {describeRelayedClaim((batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${tokenAmountLabel(sharedFormatTokenBalance(reviewFee, selectedToken), selectedToken)}` : approxUnderlyingText(resolvedFee.text, resolvedFee.symbol))}
+                        {describeRelayedClaim((batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text)}
                       </Text>
                     </View>
                   )}
@@ -5701,12 +5725,12 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       <Text className="text-[20px] font-pp-regular">~</Text>
                       <Text className="text-[20px] font-pp-bold">
                         {swapSnapshot
-                          ? `${swapReviewGrossNum.toFixed(4)} ${displayTokenSymbol(swapReviewInputSymbol)}`
-                          : tokenAmountLabel(reviewGross.toFixed(4), selectedToken)}
+                          ? `${balanceDisplay(formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals), swapReviewInputSymbol, swapSnapshot.poolChainId).text}`
+                          : balanceDisplay(reviewGross, selectedToken, chainId).text}
                       </Text>
                     </Text>
                     <Text className="text-[14px] text-text font-pp-regular">
-                      ${((swapSnapshot ? swapReviewGrossNum * swapReviewInputPrice : reviewGross * currentPrice)).toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                      ${(balanceDisplay(swapSnapshot ? formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals) : String(reviewGross), swapSnapshot ? swapReviewInputSymbol : selectedToken, swapSnapshot?.poolChainId ?? chainId).usd).toLocaleString('en-US', { maximumFractionDigits: 2 })}
                     </Text>
                   </View>
                   {/* Vertical Divider */}
@@ -5722,7 +5746,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       <Text className="text-text">
                         <Text className="text-[20px] font-pp-regular">~</Text>
                         <Text className="text-[20px] font-pp-bold">
-                          {swapSnapshot.display.estimatedOutput} {displayTokenSymbol(swapSnapshot.outputToken.symbol)}
+                          {balanceDisplay(swapSnapshot.display.estimatedOutput, swapSnapshot.outputToken.symbol, swapSnapshot.destinationChainId).text}
                         </Text>
                       </Text>
                     ) : (
@@ -5845,13 +5869,13 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       {/* The fee's OWN asset and decimals (services/relayer-fee.ts),
                           not the withdrawn token's. When they differ the symbol
                           says so instead of relabelling one asset as another. */}
-                      Relayer fee: {swapSnapshot ? `${swapSnapshot.display.relayerFee} ${displayTokenSymbol(swapReviewInputSymbol)}` : (batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${tokenAmountLabel(sharedFormatTokenBalance(reviewFee, selectedToken), selectedToken)}` : approxUnderlyingText(resolvedFee.text, resolvedFee.symbol)} (~${((swapSnapshot ? (parseFloat(swapSnapshot.display.relayerFee) || 0) * swapReviewInputPrice : (batchPlan || isStellar) ? reviewFee * currentPrice : reviewFee * (priceMap[resolvedFee.symbol] ?? currentPrice))).toFixed(2)})
+                      Relayer fee: {swapSnapshot ? `${balanceDisplay(swapSnapshot.display.relayerFee, swapReviewInputSymbol, swapSnapshot.poolChainId).text}` : (batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text} (~${balanceDisplay(swapSnapshot ? swapSnapshot.display.relayerFee : String(reviewFee), swapSnapshot ? swapReviewInputSymbol : (batchPlan || isStellar) ? selectedToken : resolvedFee.symbol, swapSnapshot?.poolChainId ?? chainId).usd.toFixed(2)})
                     </Text>
                   </View>
                   <FeeWarning breakdown={withdrawFeeBreakdown} testID="withdraw-fee-warning" />
                   {coldStartClaim && (
                     <Text className="text-[13px] leading-[19px] text-[#737373] font-pp-regular">
-                      {describeRelayedClaim((batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${tokenAmountLabel(sharedFormatTokenBalance(reviewFee, selectedToken), selectedToken)}` : approxUnderlyingText(resolvedFee.text, resolvedFee.symbol))}
+                      {describeRelayedClaim((batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text)}
                     </Text>
                   )}
                   {gasTopUp && (
@@ -5867,21 +5891,21 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       <View className="flex-row items-center justify-between gap-[4px]">
                         <Text className="text-[13px] leading-[24px] text-[#737373] font-pp-regular">Swapped after fee</Text>
                         <Text className="text-[13px] leading-[24px] text-right text-text font-pp-regular">
-                          {swapSnapshot.display.netSwapped} {displayTokenSymbol(swapReviewInputSymbol)}
+                          {balanceDisplay(swapSnapshot.display.netSwapped, swapReviewInputSymbol, swapSnapshot.poolChainId).text}
                         </Text>
                       </View>
                       {!!swapSnapshot.display.rate && (
                         <View className="flex-row items-center justify-between gap-[4px]">
                           <Text className="text-[13px] leading-[24px] text-[#737373] font-pp-regular">Rate</Text>
                           <Text className="text-[13px] leading-[24px] text-right text-text font-pp-regular">
-                            1 {displayTokenSymbol(swapReviewInputSymbol)} ≈ {swapSnapshot.display.rate} {displayTokenSymbol(swapSnapshot.outputToken.symbol)}
+                            1 {balanceDisplay('1', swapReviewInputSymbol, swapSnapshot.poolChainId).symbol} ≈ {Number(swapSnapshot.display.rate) * balanceDisplay('1', swapSnapshot.outputToken.symbol, swapSnapshot.destinationChainId).amount / balanceDisplay('1', swapReviewInputSymbol, swapSnapshot.poolChainId).amount} {balanceDisplay('1', swapSnapshot.outputToken.symbol, swapSnapshot.destinationChainId).symbol}
                           </Text>
                         </View>
                       )}
                       <View className="flex-row items-center justify-between gap-[4px]">
                         <Text className="text-[13px] leading-[24px] text-[#737373] font-pp-regular">Min received</Text>
                         <Text className="text-[13px] leading-[24px] text-right text-text font-pp-bold">
-                          {swapSnapshot.display.minReceived} {displayTokenSymbol(swapSnapshot.outputToken.symbol)}
+                          {balanceDisplay(swapSnapshot.display.minReceived, swapSnapshot.outputToken.symbol, swapSnapshot.destinationChainId).text}
                         </Text>
                       </View>
                       <View className="flex-row items-center justify-between gap-[4px]">
@@ -5908,7 +5932,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     <Text className="font-pp-bold">{poolName}</Text>
                   </Text>
                   <Text className="text-[20px] text-text font-pp-regular">
-                    {sharedFormatTokenBalance(batchPlan ? 0 : remainingAmount, selectedToken)} {displayTokenSymbol(selectedToken)}
+                    {balanceDisplay(batchPlan ? 0 : remainingAmount, selectedToken, chainId).text}
                   </Text>
                 </View>
 
@@ -5990,7 +6014,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                 <View className="items-center gap-[5px]">
                   <Text className="text-[24px] text-text font-pp-regular">
                     {swapSnapshot
-                      ? `≥ ${swapSnapshot.display.minReceived} ${displayTokenSymbol(swapSnapshot.outputToken.symbol)}`
+                      ? `≥ ${balanceDisplay(swapSnapshot.display.minReceived, swapSnapshot.outputToken.symbol, swapSnapshot.destinationChainId).text}`
                       : reviewNetLabel}
                   </Text>
                   {!swapSnapshot && sharePayoutDisclosure ? (
@@ -6101,7 +6125,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                 <View className="items-center gap-[5px]">
                   <Text className="text-[24px] text-text font-pp-regular">
                     {swapSnapshot
-                      ? `≥ ${swapSnapshot.display.minReceived} ${displayTokenSymbol(swapSnapshot.outputToken.symbol)}`
+                      ? `≥ ${balanceDisplay(swapSnapshot.display.minReceived, swapSnapshot.outputToken.symbol, swapSnapshot.destinationChainId).text}`
                       : successNetLabel}
                   </Text>
                   <Text className="text-[14px] text-[#737373] font-pp-regular">

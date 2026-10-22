@@ -1,3 +1,15 @@
+// RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
+// amounts, validation, quotes, relayer and on-chain values stay in shares
+// (exact strings/bigints). Never convert an amount to underlying and back,
+// never feed a displayed underlying figure into an operation.
+// Display headlines use underlying through shareBalanceDisplay; shares appear
+// only in the (i) hint, in fields labelled with the share symbol, or while the
+// rate is unknown. Never print a share count under the underlying symbol.
+// Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
+// MAX retains the original exact shares. USD edits use an exact decimal price
+// in that same boundary. No other operation converts display back.
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
+import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { poolDisplayLabel } from '@/config/pool-paths';
 import React, { useCallback, useMemo, useState } from 'react';
 import { CloseIcon } from '@/components/ui/modal-icons';
@@ -177,6 +189,7 @@ type TokenRow = {
    * asset has none (or the pools data has not resolved) — never a fake 0.
    */
   privateBalance?: string;
+  privateHint?: string | null;
   /** Directly depositable on the active chain (present in the pool config). */
   poolSupported: boolean;
   /** Resolved from a pasted address rather than the configured list. */
@@ -341,15 +354,16 @@ export function TokenSelectSheet({
   // Shielded balances, from the same provider every other surface reads — so
   // this sheet can never disagree with the balance shown on the form behind it.
   const { data: poolsData } = usePools();
+  const balanceDisplay = useBalanceDisplay(chainId);
   const privateByToken = useMemo(() => {
-    const map = new Map<string, string>();
+    const map = new Map<string, ReturnType<typeof balanceDisplay>>();
     poolsData.myPools.forEach((pool) => {
       const amount = Number(pool.balanceTokenExact);
       // A zero (or unparseable) shielded balance contributes nothing: the row
       // omits the line rather than printing "0 private".
       if (!Number.isFinite(amount) || amount <= 0) return;
       const key = pool.tokenAddress?.toLowerCase();
-      const formatted = formatTokenBalance(amount, pool.name);
+      const formatted = balanceDisplay(pool.balanceTokenExact, pool.name, pool.chainId, pool.tokenAddress);
       // Chain-qualified keys: myPools spans chains, and a bare address/symbol
       // key let a foreign row overwrite the active chain's entry — guaranteed
       // for the shared native sentinel (kimi review, finding 3).
@@ -359,7 +373,7 @@ export function TokenSelectSheet({
       map.set(`${pool.chainId}:${pool.name.toUpperCase()}`, formatted);
     });
     return map;
-  }, [poolsData.myPools]);
+  }, [poolsData.myPools, balanceDisplay]);
 
   const { address: evmAddress } = useAccount();
   const suiAccount = useCurrentAccount();
@@ -619,7 +633,7 @@ export function TokenSelectSheet({
           : (token.unavailableReason ? token.walletUsdValue : undefined),
         // Custom (pasted) tokens are not pool assets, so they have no shielded
         // balance by definition.
-        ...(!custom && priv && balanceMode !== 'none' ? { privateBalance: priv } : {}),
+        ...(!custom && priv && balanceMode !== 'none' ? { privateBalance: priv.text, privateHint: priv.hint } : {}),
         poolSupported: !custom,
         custom,
         poolAsset: !custom && !!token.poolAsset,
@@ -849,6 +863,7 @@ export function TokenSelectSheet({
               wallet balance restated the line above it in another unit.
               Omitted entirely when the asset has nothing shielded, so a
               "0 private" line never competes with a real one. */}
+          {row.privateHint ? <ShareCountHint hint={row.privateHint} /> : null}
           {row.privateBalance ? (
             <Text className="font-pp-regular text-[11px] text-text-muted">
               {row.privateBalance} private

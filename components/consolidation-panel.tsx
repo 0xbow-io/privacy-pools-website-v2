@@ -1,10 +1,23 @@
+// RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
+// amounts, validation, quotes, relayer and on-chain values stay in shares
+// (exact strings/bigints). Never convert an amount to underlying and back,
+// never feed a displayed underlying figure into an operation.
+// Display headlines use underlying through shareBalanceDisplay; shares appear
+// only in the (i) hint, in fields labelled with the share symbol, or while the
+// rate is unknown. Never print a share count under the underlying symbol.
+// Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
+// MAX retains the original exact shares. USD edits use an exact decimal price
+// in that same boundary. No other operation converts display back.
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
+import { useActiveEvmChain } from '@/hooks/use-active-evm-chain';
+import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { useRef, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { formatUnits } from 'viem';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/components/theme-provider';
 import { Colors } from '@/constants/theme';
-import { displayTokenSymbol, tokenAmountLabel } from '@/services/share-display';
+import { displayTokenSymbol} from '@/services/share-display';
 import {
   consolidationSelectionError, consolidationNet, MAX_CONSOLIDATION_INPUTS, planConsolidation, selectConsolidationGroup,
   type ConsolidationCandidate,
@@ -13,10 +26,13 @@ import {
 export function ConsolidationSummary({ total, fee, decimals, symbol }: {
   total: bigint; fee: bigint | null; decimals: number; symbol: string;
 }) {
+  const chainId = useActiveEvmChain().id;
+  const balanceDisplay = useBalanceDisplay(chainId);
   const net = consolidationNet(total, fee);
-  const units = (value: bigint) => tokenAmountLabel(formatUnits(value, decimals), symbol);
+  const units = (value: bigint) => balanceDisplay(formatUnits(value, decimals), symbol, chainId).text;
   return (
     <View className="w-full rounded-control border border-border-light bg-background-secondary p-[14px] gap-[10px]">
+      <ShareCountHint hint={balanceDisplay(formatUnits(total, decimals), symbol, chainId).hint} />
       {[
         ['Selected value', units(total)],
         ['Estimated relayer fee', fee === null ? 'Unavailable' : units(fee)],
@@ -46,6 +62,8 @@ export function ConsolidationPanel({ groups, selected, fee, decimals, symbol, er
   onBack?: () => void;
 }) {
   // Keep the open group when its last note is unchecked; recover if a sync removes it.
+  const chainId = useActiveEvmChain().id;
+  const balanceDisplay = useBalanceDisplay(chainId);
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const [groupLabel, setGroupLabel] = useState(() => groups.find((g) => g.notes.some((n) => selected.includes(n.commitment)))?.label);
@@ -151,7 +169,7 @@ export function ConsolidationPanel({ groups, selected, fee, decimals, symbol, er
                   <Ionicons name={checked ? 'checkbox' : 'square-outline'} size={18}
                     color={checked ? colors.buttonPrimary : colors.textMuted} />
                   <Text className="font-pp-regular text-[13px] text-text-secondary">Note {noteIndex + 1}</Text>
-                  <Text className="flex-1 text-right font-pp-medium text-[13px] text-text">{tokenAmountLabel(formatUnits(BigInt(note.value), decimals), symbol)}</Text>
+                  <Text className="flex-1 text-right font-pp-medium text-[13px] text-text">{balanceDisplay(formatUnits(BigInt(note.value), decimals), symbol, chainId).text}</Text>
                 </Pressable>
               );
             })}

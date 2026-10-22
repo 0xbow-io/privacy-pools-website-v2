@@ -1,8 +1,18 @@
+// RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
+// amounts, validation, quotes, relayer and on-chain values stay in shares
+// (exact strings/bigints). Never convert an amount to underlying and back,
+// never feed a displayed underlying figure into an operation.
+// Display headlines use underlying through shareBalanceDisplay; shares appear
+// only in the (i) hint, in fields labelled with the share symbol, or while the
+// rate is unknown. Never print a share count under the underlying symbol.
+// Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
+// MAX retains the original exact shares. USD edits use an exact decimal price
+// in that same boundary. No other operation converts display back.
 // Display-only coin names and amount formatting. Raw symbols stay in state,
 // proof/signing inputs, storage and analytics. Accounting exports write a share
 // as its underlying coin and amount at the time of the transaction.
 // UI amounts use the converted value when available; otherwise share counts
-// are explicitly approximate under their coin name.
+// keep the share symbol until the rate is known.
 
 /** Share symbol (upper-cased) → the underlying it is denominated in. */
 const SHARE_UNDERLYING: Record<string, string> = {
@@ -93,25 +103,7 @@ export function wrapsIntoShareSubtitle(shareSymbol: string | undefined): string 
   return 'Earns Aave yield';
 }
 
-/**
- * A transaction amount under the name the user is shown. For an ordinary asset
- * that is its own symbol and its own number. For a SHARE it is always the
- * underlying's name (Pat, relaying Ameen, 2026-09-12: the share is named
- * nowhere), with the figure converted when the live rate has been read.
- *
- * Before the rate lands - it is an on-chain read, so the first paint of a feed
- * is usually without it - the share COUNT is printed under the underlying's
- * name and marked approximate. That is the one place a number and a symbol
- * come from different objects, and it is deliberate:
- *   - the gap is the accrued exchange rate (1.0007 USDC per share today), so
- *     the tilde is honest at the precision shown;
- *   - it UNDERSTATES, never overstates, so the row can never claim more than
- *     the note holds;
- *   - the alternative shipped the share count under the SHARE's name, and a
- *     deposit of 49.913840 USDC then read "49.87911 ppUSDC", which looks like
- *     a fee was taken (Pat, 2026-09-12).
- * Once the rate arrives the same row prints the exact converted figure.
- */
+/** Converted underlying when supplied; otherwise the count under its share symbol. */
 export function shareAmountText(args: {
   amount: number;
   assetSymbol: string;
@@ -124,23 +116,13 @@ export function shareAmountText(args: {
   const symbol = displayTokenSymbol(assetSymbol);
   return underlyingAmount != null
     ? `${format(underlyingAmount, symbol)} ${symbol}`
-    : `≈ ${format(amount, symbol)} ${symbol}`;
+    : `${format(amount, assetSymbol)} ${assetSymbol}`;
 }
 
-/**
- * The same rule for an amount that arrives ALREADY FORMATTED with its symbol
- * in it - the ASP's compact figures ("1.23K ppUSDC"), a provider's
- * balanceToken. Renames the share to its underlying and marks the result
- * approximate, for exactly the reasons in shareAmountText. A non-share string
- * is returned untouched.
- */
+/** Legacy preformatted fallback. Share strings keep their own units until converted by the caller. */
 export function approxUnderlyingText(text: string, assetSymbol: string): string {
-  if (!text) return text;
-  const symbol = displayTokenSymbol(assetSymbol);
-  if (symbol === assetSymbol && !isShareSymbol(assetSymbol)) return text;
-  const renamed = text.replace(new RegExp(`\\b${assetSymbol}\\b`, 'gi'), symbol);
-  if (!isShareSymbol(assetSymbol)) return renamed;
-  return renamed.trimStart().startsWith('≈') ? renamed : `≈ ${renamed}`;
+  if (!text || isShareSymbol(assetSymbol)) return text;
+  return text.replace(new RegExp(`\\b${assetSymbol}\\b`, 'gi'), displayTokenSymbol(assetSymbol));
 }
 
 /**
@@ -174,11 +156,8 @@ export function shareReviewHeadline(args: {
   if (!isShare) return `${format(shares, shareSymbol)} ${underlyingSymbol}`;
   if (underlying != null) return `≈ ${format(underlying, underlyingSymbol)} ${underlyingSymbol.toUpperCase()}`;
   if (pending) return `Estimating ${underlyingSymbol.toUpperCase()}…`;
-  // The read failed rather than being in flight. Same rule as shareAmountText:
-  // the share count under the UNDERLYING's name, marked approximate, because
-  // naming the share here is the one thing this module may not do
-  // (Pat, 2026-09-12).
-  return `≈ ${format(shares, shareSymbol)} ${underlyingSymbol.toUpperCase()}`;
+  // A failed rate read keeps the count under its own share symbol.
+  return `${format(shares, shareSymbol)} ${shareSymbol}`;
 }
 
 /**
@@ -186,5 +165,5 @@ export function shareReviewHeadline(args: {
  * 1:1. Renames and marks only; convert first where a rate is available.
  */
 export function tokenAmountLabel(amount: string, symbol: string): string {
-  return `${isShareSymbol(symbol) ? '≈ ' : ''}${amount} ${displayTokenSymbol(symbol)}`;
+  return `${amount} ${isShareSymbol(symbol) ? symbol : displayTokenSymbol(symbol)}`;
 }

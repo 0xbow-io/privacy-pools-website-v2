@@ -19,6 +19,8 @@ export type TransitionTx = {
   tokenAmount: number;
   asset: string;
   timestamp: number;
+  chainId?: number;
+  tokenAddress?: string;
 };
 
 export type NotificationEvent = {
@@ -58,13 +60,17 @@ function baseType(type: string): string {
   return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
 }
 
+// The display boundary can supply a rate-aware label; raw transaction amounts
+// and transition memory remain in shares. Without it, keep the share symbol.
+export type TransitionAmountDisplay = (tx: TransitionTx) => string;
+
 /**
  * The user-facing copy for a settled (or failed) transition, keyed off the base
  * transaction type. A deposit "approves" (the ASP clears it); everything else
  * "completes".
  */
-export function buildTransitionEvent(tx: TransitionTx): NotificationEvent {
-  const amount = formatAmount(tx.tokenAmount, tx.asset);
+export function buildTransitionEvent(tx: TransitionTx, amountDisplay?: TransitionAmountDisplay): NotificationEvent {
+  const amount = amountDisplay ? amountDisplay(tx) : formatAmount(tx.tokenAmount, tx.asset);
   const failed = FAILURE_STATUSES.has(tx.status.toLowerCase());
   const base = baseType(tx.type);
 
@@ -126,6 +132,7 @@ export type DepositRowLike = {
   timestamp: number;
   noteStatus?: string;
   ownCommitment?: string;
+  tokenAddress?: string;
 };
 
 /**
@@ -161,6 +168,8 @@ export function depositTransitionTxs<R extends DepositRowLike>(
       status: row.reviewStatus === 'declined' ? 'declined'
         : row.reviewStatus === 'poi_required' ? 'poi_required'
         : row.status,
+      chainId: row.chainId,
+      tokenAddress: row.tokenAddress,
       tokenAmount: row.tokenAmount,
       asset: row.asset,
       timestamp: row.timestamp,
@@ -201,6 +210,7 @@ const MAX_TRACKED = 1000;
 export function detectStatusTransitions(
   prev: Record<string, string>,
   current: TransitionTx[],
+  amountDisplay?: TransitionAmountDisplay,
 ): { events: NotificationEvent[]; next: Record<string, string> } {
   // Start from prev so txs absent from the current feed window keep their
   // known state (insertion order = age, used for eviction below).
@@ -216,7 +226,7 @@ export function detectStatusTransitions(
     if (isPending(tx.status)) continue; // still pending. No change
     if (tx.status === before) continue; // still waiting on the proof. No change
     next[tx.id] = tx.status;
-    events.push(buildTransitionEvent(tx));
+    events.push(buildTransitionEvent(tx, amountDisplay));
   }
   // Bounded retention: evict oldest entries beyond the cap.
   const keys = Object.keys(next);

@@ -1,3 +1,16 @@
+import { formatUnits } from 'viem';
+// RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
+// amounts, validation, quotes, relayer and on-chain values stay in shares
+// (exact strings/bigints). Never convert an amount to underlying and back,
+// never feed a displayed underlying figure into an operation.
+// Display headlines use underlying through shareBalanceDisplay; shares appear
+// only in the (i) hint, in fields labelled with the share symbol, or while the
+// rate is unknown. Never print a share count under the underlying symbol.
+// Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
+// MAX retains the original exact shares. USD edits use an exact decimal price
+// in that same boundary. No other operation converts display back.
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
+import { ShareCountHint } from '@/components/pools/share-count-hint';
 import React, { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react';
 import { DROPDOWN_SHADOW, WEB_FIXED_POSITION } from '@/components/ui/web-style-shims';
 import { View, Text, Pressable, Platform, Linking, Animated, Easing, Alert, useWindowDimensions } from 'react-native';
@@ -55,7 +68,7 @@ import { useChainRouter } from '@/hooks/use-chain-router';
 import { useSessionChainId } from '@/hooks/use-session-chain-id';
 import { pendingRowActionStep, type PendingRowAction } from '@/services/row-chain-action';
 import { ChainBadge, TokenNetworkIcon, hasTokenMark } from '@/components/ui/token-network-icon';
-import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, shareAmountText } from '@/services/share-display';
+import { tokenAmountLabel, displayTokenSymbol, isShareSymbol} from '@/services/share-display';
 import { stableRowKeys } from '@/services/row-keys';
 import { shareNumberAsUnderlying, underlyingPriceFor } from '@/services/share-rates';
 import { formatUsd, formatUsdPrecise } from '@/services/format-fiat';
@@ -114,9 +127,7 @@ const TRANSFER_RESOLVING_COPY = 'Loading';
  * amount must not blank the whole transactions table.
  */
 /** An exact on-chain figure in the detail's number style (detailAmountDigits). */
-function exactUnitsLabel(wei: bigint, decimals: number, symbol: string): string {
-  return tokenAmountLabel(detailAmountDigits(formatFeeUnits(wei, decimals), displayTokenSymbol(symbol)), symbol);
-}
+
 
 function feeRowWei(tx: { rawAmount?: string }): bigint {
   return rawWei(tx.rawAmount);
@@ -667,16 +678,15 @@ export function TransactionDetailModal({ tx, onClose, onCloseForAction, actions 
   const { data: poolsData } = usePools();
   // The detail header speaks the same units as the row that opened it.
   const { rateFor: rateForDetail } = useShareRates();
-  const detailRate = !isFeeAmountRow(tx) && isShareSymbol(tx.asset) ? rateForDetail(tx.chainId, tx.tokenAddress) : undefined;
+  const balanceDisplay = useBalanceDisplay(tx.chainId);
+  const exactUnitsLabel = (wei: bigint, decimals: number, symbol: string) => isShareSymbol(symbol)
+    ? balanceDisplay(formatUnits(wei, decimals), symbol, tx.chainId, tx.tokenAddress).text
+    : tokenAmountLabel(detailAmountDigits(formatFeeUnits(wei, decimals), displayTokenSymbol(symbol)), symbol);
+  const detailRate = isShareSymbol(tx.asset) ? rateForDetail(tx.chainId, tx.tokenAddress) : undefined;
   const detailPrice = detailRate ? underlyingPriceFor(detailRate, poolsData.priceMap) : 0;
   // Same rule as the feed row (services/share-display.ts): the underlying's
   // name always, exact with the rate, approximate without it.
-  const detailAmount = (n: number): string => shareAmountText({
-    amount: n,
-    assetSymbol: tx.asset,
-    underlyingAmount: detailRate ? shareNumberAsUnderlying(n, detailRate) : null,
-    format: (v, symbol) => formatTokenBalance(v, symbol),
-  });
+  const detailAmount = (n: number): string => balanceDisplay(n, tx.asset, tx.chainId, tx.tokenAddress).text;
   const detailUsd = (n: number, fallback: number): string => (detailRate && detailPrice > 0
     ? `≈ ${formatUsd(shareNumberAsUnderlying(n, detailRate) * detailPrice)}`
     : `≈ $${fallback.toLocaleString('en-US', { maximumFractionDigits: 2 })}`);
@@ -881,13 +891,7 @@ export function TransactionDetailModal({ tx, onClose, onCloseForAction, actions 
     return { rate, amount: rate ? shareNumberAsUnderlying(leg.tokenAmount, rate) : leg.tokenAmount };
   };
   const legAmount = (leg: SwapLeg, approx = false) => {
-    const { rate } = legUnits(leg);
-    const text = shareAmountText({
-      amount: leg.tokenAmount,
-      assetSymbol: leg.asset,
-      underlyingAmount: rate ? shareNumberAsUnderlying(leg.tokenAmount, rate) : null,
-      format: (v, symbol) => formatTokenBalance(v, symbol),
-    });
+    const text = balanceDisplay(leg.tokenAmount, leg.asset, leg.chainId, leg.tokenAddress).text;
     return approx && !text.startsWith('\u2248') ? `\u2248 ${text}` : text;
   };
   const legUsd = (leg: SwapLeg) => {
@@ -1055,6 +1059,7 @@ export function TransactionDetailModal({ tx, onClose, onCloseForAction, actions 
             <AssetChainMark asset={tx.asset} chain={tx.chain} chainId={tx.chainId} size={40} />
             <View className="min-w-0 flex-1 gap-[2px]">
               <Text numberOfLines={1} className="font-pp-bold text-[20px] text-text">{headerAmount}</Text>
+              <ShareCountHint hint={balanceDisplay(transferTokenAmount ?? tx.tokenAmount, tx.asset, tx.chainId, tx.tokenAddress).hint} />
               {headerUsd ? <Text numberOfLines={1} className="font-pp-sans text-[12px] text-text-muted">{headerUsd}</Text> : null}
             </View>
           </View>
@@ -1221,6 +1226,7 @@ export function Transactions({
   const { data } = usePools();
   // Live USDC-per-ppUSDC: a share row prints the USDC it is worth, share named in a hint.
   const { rateFor } = useShareRates();
+  const balanceDisplay = useBalanceDisplay();
   // The feed is a LIST of self-describing rows, not a column grid, so there are
   // no per-column visibility breakpoints left: each row carries its own asset
   // mark, direction glyph and stacked amount, and the meta line ellipsizes.
@@ -2148,35 +2154,24 @@ export function Transactions({
           // A share amount prints as the underlying it is worth at the live rate
           // ("30.00 USDC", hint "held as ppUSDC"); the share count is the
           // fallback until the rate has been read. Fee-amount rows keep their asset.
-          const shareRate = !feeAmountRow && isShareSymbol(tx.asset) ? rateFor(tx.chainId, tx.tokenAddress) : undefined;
+          const shareRate = isShareSymbol(tx.asset) ? rateFor(tx.chainId, tx.tokenAddress) : undefined;
           // Always the UNDERLYING's name, converted when the rate is in and
           // marked approximate while it is not. The old fallback printed the
           // share count under the SHARE's name, so a 49.913840 USDC deposit
           // read "49.87911 ppUSDC" on the public feed and looked like a fee had
           // been taken (Pat, 2026-09-12).
-          const amountText = (n: number) => shareAmountText({
-            amount: n,
-            assetSymbol: tx.asset,
-            underlyingAmount: shareRate ? shareNumberAsUnderlying(n, shareRate) : null,
-            format: formatTokenBalance,
-          });
+          const amountText = (n: number) => balanceDisplay(n, tx.asset, tx.chainId, tx.tokenAddress).text;
           // A consolidation leads with its note counts, as the consolidation
           // panel does, and keeps the fee on the line underneath.
           const exactFeeText = feeAmountRow
-            ? exactUnitsLabel(feeRowWei(tx), getTokenMetadata(tx.tokenAddress, tx.chainId).decimals ?? 18, tx.asset)
+            ? balanceDisplay(formatUnits(feeRowWei(tx), getTokenMetadata(tx.tokenAddress, tx.chainId).decimals ?? 18), tx.asset, tx.chainId, tx.tokenAddress).text
             : '';
           const consolidationText = consolidationHeadline(tx);
           // A two-leg row reads as the action widget does: what left, then what
           // arrived, each in the units its own row would use. A phone row puts
           // the arrival on the second line, so the type keeps its width.
           const legText = (leg: SwapLeg) => {
-            const rate = isShareSymbol(leg.asset) ? rateFor(leg.chainId, leg.tokenAddress) : undefined;
-            return shareAmountText({
-              amount: leg.tokenAmount,
-              assetSymbol: leg.asset,
-              underlyingAmount: rate ? shareNumberAsUnderlying(leg.tokenAmount, rate) : null,
-              format: formatTokenBalance,
-            });
+            return balanceDisplay(leg.tokenAmount, leg.asset, leg.chainId, leg.tokenAddress).text;
           };
           const legs = swapLegTexts(tx, legText);
           const legsText = legs && (compactRows ? `${legs.from} \u2192` : `${legs.from} \u2192 ${legs.to}`);
@@ -2288,6 +2283,7 @@ export function Transactions({
                     <Text numberOfLines={1} className="font-pp-semi-bold text-[13.5px] leading-[18px] text-text">
                       {rowTokenText}
                     </Text>
+                    <ShareCountHint hint={balanceDisplay(transferTokenAmount ?? tx.tokenAmount, tx.asset, tx.chainId, tx.tokenAddress).hint} />
                     <Text numberOfLines={1} className={stackedLegs ? 'font-pp-semi-bold text-[13.5px] leading-[18px] text-text' : 'font-pp-regular text-[11.5px] leading-[16px] text-text-muted'}>
                       {rowUsdText}
                     </Text>

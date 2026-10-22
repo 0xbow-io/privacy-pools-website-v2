@@ -1,5 +1,13 @@
+// RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
+// amounts, validation, quotes, relayer and on-chain values stay in shares
+// (exact strings/bigints). Never convert an amount to underlying and back,
+// never feed a displayed underlying figure into an operation.
+// Display headlines use underlying through shareBalanceDisplay; shares appear
+// only in the (i) hint, in fields labelled with the share symbol, or while the
+// rate is unknown. Never print a share count under the underlying symbol.
 import { describe, expect, test } from 'bun:test';
 import { shareBalanceDisplay } from '@/services/share-balance-display';
+import { parseTokenAmount } from '@/services/token-amount';
 import type { ShareRate } from '@/services/share-rates';
 
 // Mainnet ppETH on 2026-10-21: 1 ppETH = 1.001094122102504299 WETH.
@@ -77,4 +85,23 @@ describe('shareBalanceDisplay', () => {
     expect(v.usd).toBe(0);
     expect(v.text).toBe('0 USDC');
   });
+});
+
+
+test('display conversion leaves the exact share input used by spend paths unchanged', () => {
+  const amount = '0.099891872636417805';
+  const submittedBeforeDisplay = parseTokenAmount(amount, 18);
+  const view = shareBalanceDisplay({ sharesExact: amount, shareSymbol: 'ppETH', rate: PP_ETH, priceMap: PRICES, fallbackPrice: 0 });
+  expect(view.text).toBe('0.10 ETH');
+  expect(view.hint).toContain('ppETH shares');
+  expect(parseTokenAmount(amount, 18)).toBe(99891872636417805n);
+  expect(parseTokenAmount(amount, 18)).toBe(submittedBeforeDisplay);
+});
+
+test('ppUSDT uses its own decimals and symbol, with a share fallback before rates arrive', () => {
+  const rate = { ...PP_USDC, shareSymbol: 'ppUSDT', underlyingSymbol: 'USDT' };
+  const args = { sharesExact: '38.100000000000000001', shareSymbol: 'ppUSDT', priceMap: {}, fallbackPrice: 0 };
+  expect(shareBalanceDisplay({ ...args, rate }).text).toBe('38.10 USDT');
+  expect(shareBalanceDisplay({ ...args, rate: undefined }).text).toBe('38.10 ppUSDT');
+  expect(parseTokenAmount(args.sharesExact, 18)).toBe(38100000000000000001n);
 });

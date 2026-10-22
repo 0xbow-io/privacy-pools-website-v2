@@ -54,12 +54,13 @@ describe('the review renders no raw share symbol', () => {
     test(`"${label}" is renamed and marked approximate`, () => {
       const row = payoutRow(label);
       expect(row).not.toBeNull();
-      expect(row).toContain('approxUnderlyingText(');
+      expect(row).toContain('balanceDisplay(');
     });
   }
 
   test('the rate row names the underlying on both sides', () => {
-    expect(SOURCE).toContain('1 {displayTokenSymbol(snapshot.fromToken.symbol)} ≈ {snapshot.display.rate} {displayTokenSymbol(snapshot.outputToken.symbol)}');
+    expect(SOURCE).toContain("balanceDisplay('1', snapshot.fromToken.symbol, chainId).symbol");
+    expect(SOURCE).toContain("balanceDisplay('1', snapshot.outputToken.symbol, snapshot.destinationChainId).symbol");
   });
 });
 
@@ -75,8 +76,8 @@ describe('the rename is honest about what a share count is', () => {
       expect(isShareSymbol(share)).toBe(true);
       expect(displayTokenSymbol(share)).toBe(underlying);
       const text = approxUnderlyingText(`5 ${share}`, share);
-      expect(text).toBe(`≈ 5 ${underlying}`);
-      expect(text).not.toContain(share);
+      expect(text).toBe(`5 ${share}`);
+      expect(text).toContain(share);
     });
   }
 

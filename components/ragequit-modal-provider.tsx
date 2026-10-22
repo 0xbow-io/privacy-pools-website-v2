@@ -1,3 +1,15 @@
+// RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
+// amounts, validation, quotes, relayer and on-chain values stay in shares
+// (exact strings/bigints). Never convert an amount to underlying and back,
+// never feed a displayed underlying figure into an operation.
+// Display headlines use underlying through shareBalanceDisplay; shares appear
+// only in the (i) hint, in fields labelled with the share symbol, or while the
+// rate is unknown. Never print a share count under the underlying symbol.
+// Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
+// MAX retains the original exact shares. USD edits use an exact decimal price
+// in that same boundary. No other operation converts display back.
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
+import { ShareCountHint } from '@/components/pools/share-count-hint';
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
 import { DOCS_URL, SUPPORT_FORM_URL, SUPPORT_TELEGRAM_URL } from '@/config/support';
@@ -37,7 +49,7 @@ import type { Transaction } from '@/components/pools-provider';
 // --- Token display helpers ---
 
 import { getTokenMetadata } from '@/config/tokens';
-import { tokenAmountLabel } from '@/services/share-display';
+
 import { useBackHandler } from '@/hooks/use-back-handler';
 import { useNativeMockBlock } from '@/hooks/use-native-mock-block';
 
@@ -156,6 +168,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
   // chainId` switch guard below meaningful: it used to compare the wallet's
   // chain against itself and could never fire.
   const chainId = useActiveEvmChain().id;
+  const balanceDisplay = useBalanceDisplay(chainId);
   const withOpLock = useOpLock();
   // Chain FROZEN at submission (codex round 3, P2).
   const [txChainId, setTxChainId] = useState<number | null>(null);
@@ -771,8 +784,9 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
                         >
                           <View className="gap-[2px]">
                             <Text className="font-pp-medium text-[14px] text-text">
-                              {tokenAmountLabel(formatNote(note), meta.symbol)}
+                              {balanceDisplay(formatNote(note), meta.symbol, chainId).text}
                             </Text>
+                            <ShareCountHint hint={balanceDisplay(formatNote(note), meta.symbol, chainId).hint} />
                             <Text className="font-pp-regular text-[11px] text-[#737373]">
                               {truncateHash(note.commitment)}
                             </Text>
@@ -829,7 +843,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
                     Exiting note
                   </Text>
                   <Text className="font-pp-medium text-[18px] text-text">
-                    {tokenAmountLabel(formatNote(selectedNote), noteMeta(selectedNote).symbol)}
+                    {balanceDisplay(formatNote(selectedNote), noteMeta(selectedNote).symbol, chainId).text}
                   </Text>
                   <Text className="font-pp-regular text-[11px] text-[#737373]">
                     {truncateHash(selectedNote.commitment)}
@@ -908,7 +922,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
                   </Text>
                   {selectedNote && (
                     <Text className="font-pp-regular text-[14px] text-center text-[#737373]">
-                      {tokenAmountLabel(formatNote(selectedNote), noteMeta(selectedNote).symbol)} returned to this wallet
+                      {balanceDisplay(formatNote(selectedNote), noteMeta(selectedNote).symbol, chainId).text} returned to this wallet
                     </Text>
                   )}
                 </View>

@@ -1,3 +1,15 @@
+import { ShareCountHint } from '@/components/pools/share-count-hint';
+// RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
+// amounts, validation, quotes, relayer and on-chain values stay in shares
+// (exact strings/bigints). Never convert an amount to underlying and back,
+// never feed a displayed underlying figure into an operation.
+// Display headlines use underlying through shareBalanceDisplay; shares appear
+// only in the (i) hint, in fields labelled with the share symbol, or while the
+// rate is unknown. Never print a share count under the underlying symbol.
+// Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
+// MAX retains the original exact shares. USD edits use an exact decimal price
+// in that same boundary. No other operation converts display back.
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Platform, Pressable, Share, Text, View, type LayoutChangeEvent } from 'react-native';
 
@@ -34,7 +46,7 @@ import { getKnownTokenMetadata, getTokenMetadata, isStablecoin } from '@/config/
 import { getChainConfig, STELLAR_TESTNET_ID } from '@/config/chains';
 import { STELLAR_XLM } from '@/config/stellar-deployment';
 import { PAY_URL_BASE } from '@/config/env';
-import { isShareSymbol, tokenAmountLabel } from '@/services/share-display';
+import { isShareSymbol} from '@/services/share-display';
 import { formatUsd } from '@/services/format-fiat';
 import { priceFromMap } from '@/services/price-map-merge';
 import { shareNumberAsUnderlying, underlyingPriceFor } from '@/services/share-rates';
@@ -123,6 +135,7 @@ export function PaymentRequestsCard({
   const { data: poolsData } = usePools();
   const priceMap = poolsData?.priceMap;
   const { rateFor } = useShareRates();
+  const balanceDisplay = useBalanceDisplay();
   // The dollar line under each amount, priced like Activity rows: the row's
   // own chain's price, and a share at its underlying through the live rate.
   const usdLabel = useCallback((r: PaymentRequestListRow): string => {
@@ -462,8 +475,9 @@ export function PaymentRequestsCard({
                       <View className={`min-w-0 flex-row items-center gap-[16px] ${stacked ? 'pl-[38px]' : 'flex-1 justify-end'}`}>
                         <View className={`min-w-0 gap-[3px] ${stacked ? 'flex-1' : 'shrink items-end'}`}>
                           <Text className={`font-pp-sans-semi-bold text-[13.5px] text-text ${stacked ? '' : 'text-right'}`}>
-                            {tokenAmountLabel(r.amountFormatted, r.assetSymbol)}
+                            {balanceDisplay(r.amountFormatted, r.assetSymbol, r.chainId, r.tokenAddress).text}
                           </Text>
+                          <ShareCountHint hint={balanceDisplay(r.amountFormatted, r.assetSymbol, r.chainId, r.tokenAddress).hint} />
                           {/* The dollar value, as on Activity rows; the chain is on the icon's badge. */}
                           <Text className={`font-pp-sans text-[11.5px] text-text-muted ${stacked ? '' : 'text-right'}`}>{usdLabel(r)}</Text>
                         </View>

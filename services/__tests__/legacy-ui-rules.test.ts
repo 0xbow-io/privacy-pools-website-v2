@@ -20,8 +20,8 @@ test('native presets follow displayed ETH, SUI and cBTC; share sizing remains ra
   for (const symbol of ['ETH', 'ppETH', 'PPETH', 'WETH', 'SUI', 'cBTC']) expect(usesNativeWithdrawPresets(symbol)).toBe(true);
   for (const symbol of ['ppUSDC', 'ppUSDT', 'USDC']) expect(usesNativeWithdrawPresets(symbol)).toBe(false);
 });
-test('raw share quantities get approximate coin labels without changing their units', () => {
-  expect(tokenAmountLabel('0.123456789012345678', 'ppETH')).toBe('≈ 0.123456789012345678 ETH');
-  expect(tokenAmountLabel('5', 'ppUSDC')).toBe('≈ 5 USDC');
+test('raw share quantities keep their own symbols until converted', () => {
+  expect(tokenAmountLabel('0.123456789012345678', 'ppETH')).toBe('0.123456789012345678 ppETH');
+  expect(tokenAmountLabel('5', 'ppUSDC')).toBe('5 ppUSDC');
   expect(tokenAmountLabel('1', 'WETH')).toBe('1 ETH');
 });

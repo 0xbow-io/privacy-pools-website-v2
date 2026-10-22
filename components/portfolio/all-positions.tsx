@@ -1,3 +1,14 @@
+// RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
+// amounts, validation, quotes, relayer and on-chain values stay in shares
+// (exact strings/bigints). Never convert an amount to underlying and back,
+// never feed a displayed underlying figure into an operation.
+// Display headlines use underlying through shareBalanceDisplay; shares appear
+// only in the (i) hint, in fields labelled with the share symbol, or while the
+// rate is unknown. Never print a share count under the underlying symbol.
+// Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
+// MAX retains the original exact shares. USD edits use an exact decimal price
+// in that same boundary. No other operation converts display back.
+import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { useState } from 'react';
 import { getPoolPath } from '@/config/pool-paths';
 import { View, Text, Pressable, Image, useWindowDimensions, Platform } from 'react-native';
@@ -169,6 +180,7 @@ type Position = {
   chainId?: number;
   chainIcon?: string;
   myValueToken: string;
+  shareHint?: string | null;
   myValueUsd: string;
   /** Pending funds for this token — shown as a labeled secondary line. */
   pendingLabel?: string | null;
@@ -442,6 +454,7 @@ export function AllPositions({
                         {position.myValueToken}
                         {position.venueLabel ? ' earning' : ''}
                       </Text>
+                      <ShareCountHint hint={position.shareHint ?? null} />
                       {position.pendingLabel ? (
                         <Text className="font-pp-regular text-[11px] leading-[12px] text-text-muted">
                           {position.pendingLabel}

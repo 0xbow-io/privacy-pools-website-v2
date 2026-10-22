@@ -105,6 +105,7 @@ describe('the Send form uses them', () => {
     expect(src).toContain('(hideAddress && !isSwapSend && feeOverflowsCap(enteredAmountWei, relayFeeCeiled, maxSpendableWei))');
     expect(src).toContain('const effectiveReceiveExact = !maxGrossIntent && resolveEffectiveReceiveExact(');
     expect(src).toContain('capText(maxSpendableWei, enteredAmountWei, selectedDecimals)');
+    expect(src).toContain('const displayAmountError = amountError?.replace(');
     expect(src).toContain('onPress={() => setAmount(maxSpendableFormatted)}');
     expect(src).toContain("`Exceeds your shielded balance of ${cap}`");
     expect(src).not.toContain('parseFloat(maxSpendableFormatted).toFixed(4)');

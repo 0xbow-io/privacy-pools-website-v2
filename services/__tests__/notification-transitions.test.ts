@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { shareBalanceDisplay } from '@/services/share-balance-display';
+import type { ShareRate } from '@/services/share-rates';
 
 import {
   buildTransitionEvent,
@@ -154,12 +157,48 @@ describe('poi_required (Proof of Innocence demanded)', () => {
   });
 });
 
-test('share deposit approval and decline use approximate coin quantities', () => {
+const RATE: ShareRate = {
+  chainId: 1, share: 'share', underlying: 'asset', shareSymbol: 'ppETH',
+  shareDecimals: 18, underlyingDecimals: 18, underlyingSymbol: 'WETH',
+  assetsPerShare: 1_001_100_000_000_000_000n,
+};
+const amountDisplay = (rate: ShareRate | undefined) => (t: TransitionTx) => {
+  const view = shareBalanceDisplay({ sharesExact: String(t.tokenAmount), shareSymbol: t.asset,
+    rate, priceMap: {}, fallbackPrice: 0 });
+  return `${view.converted ? '≈ ' : ''}${view.text}`;
+};
+
+test('share deposit approval and decline use approximate coin quantities with a known rate', () => {
   for (const status of ['approved', 'declined']) {
-    const event = buildTransitionEvent(tx({ status, asset: 'ppETH', tokenAmount: 0.1 }));
-    expect(event.description).toContain('≈ 0.10 ETH');
+    const t = tx({ status, asset: 'ppETH', tokenAmount: 0.09989 });
+    const event = buildTransitionEvent(t, amountDisplay(RATE));
+    expect(event.description).toBe('≈ 0.10 ETH');
     expect(event.description).not.toContain('ppETH');
+    // A non-par rate proves the amount was converted, not just renamed.
+    const doubled = { ...RATE, assetsPerShare: 2_000_000_000_000_000_000n };
+    expect(detectStatusTransitions({ t1: 'pending' }, [t], amountDisplay(doubled)).events[0].description)
+      .toBe('≈ 0.19978 ETH');
+    expect(t.tokenAmount).toBe(0.09989);
   }
+});
+
+test('share deposit notifications without a rate keep their share units', () => {
+  for (const status of ['approved', 'declined']) {
+    const t = tx({ status, asset: 'ppETH', tokenAmount: 0.1 });
+    expect(buildTransitionEvent(t).description).toBe('0.10 ppETH');
+    expect(buildTransitionEvent(t, amountDisplay(undefined)).description).toBe('0.10 ppETH');
+  }
+});
+
+test('approval toasts read the display boundary with the deposit chain and token', () => {
+  const source = readFileSync(new URL('../../components/status-notifier.tsx', import.meta.url), 'utf8');
+  expect(source).toContain('useBalanceDisplay(activeChainId)');
+  expect(source).toContain('balanceDisplay(tx.tokenAmount, tx.asset, tx.chainId, tx.tokenAddress)');
+  expect(source).toContain("view.converted ? '≈ ' : ''");
+  expect(source).toContain('data.transactions, balanceDisplay, toast]');
+  const row = { type: 'Deposit', txHash: '0xabc', chainId: 10, tokenAddress: 'share-on-chain-10',
+    status: 'completed', reviewStatus: 'approved', tokenAmount: 0.1, asset: 'ppETH', timestamp: 1 };
+  expect(depositTransitionTxs([row], () => true)[0]).toMatchObject({ chainId: 10, tokenAddress: 'share-on-chain-10' });
 });
 
 describe('depositTransitionTxs: the account\'s deposits, one per transaction', () => {
