@@ -598,8 +598,8 @@ test('a mixnet Test fails when the answer is not mainnet', async () => {
   expect(result.ok).toBe(false);
 });
 
-for (const provider of settings.TOR_PROVIDERS) test(`${provider.id}: specifier reads enforce the exact pinned hash`, async () => {
-  let init!: { address: string; preExisting: { rpcProvider: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } } };
+for (const provider of settings.TOR_PROVIDERS) test(`${provider.id}: each worker requires this build's pinned hash, and specifier reads pass through`, async () => {
+  let init!: { address: string; expectedWorkerHash?: string; preExisting: { rpcProvider: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } } };
   const loaded = transport(true, () => ({ AnonRpcWorker: class {
     ready = Promise.resolve();
     constructor(value: typeof init) { init = value; }
@@ -608,23 +608,14 @@ for (const provider of settings.TOR_PROVIDERS) test(`${provider.id}: specifier r
   } }));
   const send = loaded.tor.createTorFetch(GATEWAY, provider.id);
   await send(MAINNET, { method: 'POST', body: '{}' });
-  const pinned = provider.workerHash;
+  expect(init.expectedWorkerHash).toBe(provider.workerHash);
   const realFetch = globalThis.fetch;
-  let answer: unknown = pinned;
-  globalThis.fetch = (async () => Response.json({ result: answer })) as typeof fetch;
+  const other = `0x${'ab'.repeat(32)}`;
+  globalThis.fetch = (async () => Response.json({ result: other })) as typeof fetch;
   try {
-    const read = () => init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ to: init.address.toLowerCase(), data: '0x3898587d' }, 'latest'] });
-    expect(await read()).toBe(pinned);
-    answer = pinned.toUpperCase();
-    expect(await read()).toBe(answer);
-    for (const invalid of [`0x${'ab'.repeat(32)}`, pinned.slice(0, -2), `${pinned}00`, null, 1]) {
-      answer = invalid;
-      await expect(read()).rejects.toThrow('not the one this build accepts');
-      await expect(init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ to: init.address, input: '0x3898587d' }, 'latest'] }))
-        .rejects.toThrow('not the one this build accepts');
-    }
-    // Other specifier reads (the resolver list) pass through untouched.
-    expect(await init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ to: init.address, data: '0x4e2f8a45' }, 'latest'] })).toBe(answer);
+    // The harness compares the answer with expectedWorkerHash; the provider
+    // only carries it.
+    expect(await init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ to: init.address, data: '0x3898587d' }, 'latest'] })).toBe(other);
   } finally {
     globalThis.fetch = realFetch;
     send.close();
@@ -644,7 +635,10 @@ for (const provider of settings.TOR_PROVIDERS) test(`${provider.id}: a rejected 
     const loaded = transport(false, () => ({ AnonRpcWorker: class {
       ready: Promise<void>;
       constructor(init: { address: string; preExisting: { rpcProvider: { request: (args: unknown) => Promise<unknown> } } }) {
-        this.ready = init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ to: init.address, data: '0x3898587d' }, 'latest'] }).then(() => {});
+        // As the harness does: read workerHash(), then refuse the mismatch
+        // before fetching any bundle.
+        this.ready = init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ to: init.address, data: '0x3898587d' }, 'latest'] })
+          .then(() => { throw Object.assign(new Error('specifier pins another bundle'), { name: 'WorkerHashMismatchError' }); });
       }
       close() { closed++; }
       fetch = async () => { relayed++; return Response.json({}); };
