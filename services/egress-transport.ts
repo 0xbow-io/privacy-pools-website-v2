@@ -17,7 +17,8 @@
 import { http, stringify, type HttpTransport, type HttpTransportConfig } from 'viem';
 
 import { assertEgressAllowed, EgressRefusedError } from '@/services/egress-policy';
-import { rpcTimeoutMs, torFetchIfActive } from '@/services/tor-fetch';
+import { rpcTimeoutMs, torFetchFor } from '@/services/tor-fetch';
+import { rpcSubject } from '@/services/tor-groups';
 
 type RpcArgs = { method: string; params?: unknown };
 
@@ -41,19 +42,23 @@ export function policedHttp(url?: string, config?: HttpTransportConfig): HttpTra
           throw new EgressRefusedError('rpc', 'request is outside the configured RPC endpoint');
         }
         const headers = new Headers(init?.headers);
+        const body = typeof init?.body === 'string' ? init.body : null;
         assertEgressAllowed('rpc', {
           method: init?.method ?? 'POST',
           url: endpoint,
           headers: Object.fromEntries(headers.entries()),
-          body: typeof init?.body === 'string' ? init.body : null,
+          body,
         });
         // Tor, when the user has asked for it, sits HERE: underneath the
         // allowlist check above rather than around it, so it changes how a
         // permitted request travels and never what may be sent. Null when Tor
         // is off, and services/tor-fetch.ts throws rather than falling back,
         // so a broken gateway fails the call instead of quietly sending it
-        // direct (see the note there).
-        const send = torFetchIfActive() ?? config?.fetchFn ?? fetch;
+        // direct (see the note there). The body picks the worker: a call that
+        // names the user's account goes over that account's, and one that
+        // sends or looks up a transaction over that transaction's
+        // (services/tor-groups.ts).
+        const send = torFetchFor('rpc', body ?? '', rpcSubject(body)) ?? config?.fetchFn ?? fetch;
         return send(input, {
           ...init, redirect: 'error', credentials: 'omit', referrerPolicy: 'no-referrer',
         });

@@ -577,7 +577,6 @@ describe('app-owned network boundary coverage', () => {
       'hooks/use-stellar-balance.ts': 1, // Horizon account balance (the wallet's own, public)
       'hooks/use-sui-proof.ts': 2,
       'hooks/use-sui-relay.ts': 2,
-      'services/egress-fetch.ts': 1,
       'services/fx-rate.ts': 1,
       'services/lifi-quote.ts': 2,
       'services/lifi-token-list.ts': 1, // whole-chain token list, names no wallet
@@ -588,7 +587,7 @@ describe('app-owned network boundary coverage', () => {
       'services/stellar/stellar-relayer.ts': 1, // testnet relayer quote + relay
       'services/stellar/stellar-runtime.ts': 2, // asp-v2 events + ASP data, and circuit artifacts
       'services/sui-witness/asp-labels.ts': 1,
-      'services/tor-fetch.ts': 1, // anon-rpc specifier read, allowlist-checked, before Tor exists
+      'services/tor-fetch.ts': 2, // the specifier read before Tor exists, and routedFetch's direct send when Tor is off
       'services/wallet-tokens.ts': 1, // Alchemy token REST API, not JSON-RPC
     });
   });
