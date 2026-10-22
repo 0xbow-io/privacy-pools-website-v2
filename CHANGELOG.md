@@ -2,6 +2,14 @@
 
 All notable changes to the Privacy Pools v2 web app are documented in this file.
 
+## [1.3.0] - 2026-10-22
+
+### Added
+- unwrap loose shares, ragequit unwrap, EIP-5792 batching
+
+### Fixed
+- share pools read as the underlying everywhere, MAX included
+
 ## [1.2.0] - 2026-10-22
 
 ### Added
