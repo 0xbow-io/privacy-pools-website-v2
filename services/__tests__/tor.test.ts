@@ -31,13 +31,14 @@ function config(gateway: string, store = storage()) {
 
 // Compile isolated modules so neither browser globals nor module mocks leak into other tests.
 function transport(active: boolean, importer: () => unknown, options: {
+  timeoutSignal?: (ms: number) => AbortSignal;
   mainnetInChainList?: boolean;
   chainUrls?: Record<number, string>;
   customRpcUrls?: Record<number, string>;
 } = {}) {
   let imports = 0;
   const tor = load('services/tor-fetch.ts', { require(name: string) {
-    if (name === '@/services/abort-signal') return abortSignal;
+    if (name === '@/services/abort-signal') return options.timeoutSignal ? { ...abortSignal, timeoutSignal: options.timeoutSignal } : abortSignal;
     if (name === '@/config/tor') return { ...settings, TOR_IN_FORCE: active, ACTIVE_TOR_SETTINGS: { enabled: active, gatewayUrl: GATEWAY, provider: 'tor-js' } };
     if (name === '@/services/egress-policy') return policy;
     if (name === '@/config/chains') return { getChainConfig: (id: number) => options.chainUrls?.[id] ? { rpcUrl: options.chainUrls[id] }
@@ -241,6 +242,92 @@ describe('Tor sender under the egress policy', () => {
   });
 });
 
+// Each fetch takes the next outcome: 'ok', a status to answer with, 'fail', 'hang' (never settles), or a pending response.
+function scriptedWorkers(outcomes: (string | number | Promise<Response>)[]) {
+  const workers: { id: number; calls: number; closed: boolean }[] = [];
+  const loaded = transport(true, () => ({ AnonRpcWorker: class {
+    readonly me = { id: workers.length + 1, calls: 0, closed: false };
+    constructor() { workers.push(this.me); }
+    ready = Promise.resolve();
+    close() { this.me.closed = true; }
+    fetch = async () => {
+      this.me.calls++;
+      const next = outcomes.shift();
+      if (next === 'fail') throw new Error('operation timed out');
+      if (next === 'hang') return new Promise<Response>(() => {});
+      if (next instanceof Promise) return next;
+      return new Response('{}', { status: typeof next === 'number' ? next : 200 });
+    };
+  } }));
+  return { send: loaded.tor.createTorFetch(GATEWAY, 'tor-js'), workers, tor: loaded.tor };
+}
+
+test('a client that fails before it has ever answered is replaced by the next call', async () => {
+  const { send, workers } = scriptedWorkers(['fail', 'ok', 'ok']);
+  await expect(send('https://rpc.example')).rejects.toThrow('operation timed out');
+  expect(workers.map(w => w.closed)).toEqual([true]);
+  expect((await send('https://rpc.example')).status).toBe(200);
+  expect((await send('https://rpc.example')).status).toBe(200);
+  expect(workers.map(w => [w.calls, w.closed])).toEqual([[1, true], [2, false]]);
+});
+
+// Holds back every timer of `ms`, the route deadline, until the test fires it.
+function heldDeadlines(ms: number) {
+  const realSet = globalThis.setTimeout;
+  const realClear = globalThis.clearTimeout;
+  const held: (() => void)[] = [];
+  const ids = new Set<unknown>();
+  globalThis.setTimeout = ((fn: () => void, delay?: number, ...args: unknown[]) => {
+    if (delay !== ms) return realSet(fn, delay, ...args);
+    const id = { held: held.length };
+    ids.add(id);
+    held.push(fn);
+    return id;
+  }) as typeof setTimeout;
+  globalThis.clearTimeout = ((id?: unknown) => { if (!ids.has(id)) realClear(id as number); }) as typeof clearTimeout;
+  return { held, restore() { globalThis.setTimeout = realSet; globalThis.clearTimeout = realClear; } };
+}
+
+test('an answered client survives one failure and is replaced at the second in a row; the route deadline counts, an error status and a caller\'s abort do not', async () => {
+  const { send, workers, tor } = scriptedWorkers(['ok', 'fail', 500, 'hang', 'fail', 'hang', 'ok']);
+  const deadlines = heldDeadlines(tor.TOR_ROUTE_DEADLINE_MS);
+  try {
+    const outcome = (p: Promise<Response>) => p.then(r => r.status, () => 'failed');
+    const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+    expect(await outcome(send('https://rpc.example'))).toBe(200);
+    expect(await outcome(send('https://rpc.example'))).toBe('failed');
+    expect(await outcome(send('https://rpc.example'))).toBe(500);
+    const caller = new AbortController();
+    const abandoned = outcome(send('https://rpc.example', { signal: caller.signal }));
+    await tick();
+    caller.abort();
+    expect(await abandoned).toBe('failed');
+    expect(await outcome(send('https://rpc.example'))).toBe('failed');
+    expect(workers.map(w => w.closed)).toEqual([false]);
+    const hung = outcome(send('https://rpc.example'));
+    await tick();
+    deadlines.held.at(-1)!();
+    expect(await hung).toBe('failed');
+    expect(workers.map(w => w.closed)).toEqual([true]);
+    expect(await outcome(send('https://rpc.example'))).toBe(200);
+    expect(workers.map(w => [w.calls, w.closed])).toEqual([[6, true], [1, false]]);
+  } finally {
+    deadlines.restore();
+  }
+});
+
+test('a failing host leaves the client in place while a call to another host may still answer', async () => {
+  let answer!: (response: Response) => void;
+  const { send, workers } = scriptedWorkers([new Promise<Response>(resolve => { answer = resolve; }), 'fail']);
+  const healthy = send('https://healthy.example');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await expect(send('https://broken.example')).rejects.toThrow('operation timed out');
+  expect(workers.map(w => w.closed)).toEqual([false]);
+  answer(new Response('{}'));
+  expect((await healthy).status).toBe(200);
+  expect(workers.map(w => [w.calls, w.closed])).toEqual([[2, false]]);
+});
+
 test('an RPC body still arrives when Request has no .body (React Native whatwg-fetch)', async () => {
   const RealRequest = globalThis.Request;
   class PolyfillRequest extends RealRequest {
@@ -370,6 +457,99 @@ test('app RPC timeouts allow for building a route only while Tor is in force', (
   expect(timeoutOf(off)).toBe(10_000);
 });
 
+test('a Test retries transport failures on a new client within its deadline, never an answer', async () => {
+  let calls = 0;
+  let started = 0;
+  let failures = 0;
+  let answer: unknown = { jsonrpc: '2.0', id: 1, result: '0x1' };
+  const loaded = transport(false, () => ({ AnonRpcWorker: class {
+    constructor() { started++; }
+    ready = Promise.resolve();
+    close() {}
+    fetch = async () => {
+      calls++;
+      if (failures-- > 0) throw new Error('IO error: tls handshake eof');
+      return Response.json(answer);
+    };
+  } }));
+  failures = 2;
+  expect(await loaded.tor.probeTorGateway('', 5_000, 'nym')).toEqual({ ok: true });
+  expect([calls, started]).toEqual([3, 3]);
+  calls = started = 0;
+  failures = 3;
+  expect(await loaded.tor.probeTorGateway('', 5_000, 'nym')).toEqual({ ok: false, message: 'Could not reach the anon-rpc network.' });
+  expect([calls, started]).toEqual([3, 3]);
+  calls = started = 0;
+  failures = 0;
+  answer = { jsonrpc: '2.0', id: 1, result: '0xaa36a7' };
+  expect((await loaded.tor.probeTorGateway('', 5_000, 'nym')).ok).toBe(false);
+  expect([calls, started]).toEqual([1, 1]);
+});
+
+test('a Test gives an attempt unanswered for the route deadline up for a new client', async () => {
+  let started = 0;
+  let waiting!: () => void;
+  const firstWaiting = new Promise<void>(resolve => { waiting = resolve; });
+  const loaded = transport(false, () => ({ AnonRpcWorker: class {
+    readonly first = ++started === 1;
+    ready = Promise.resolve();
+    close() {}
+    fetch = async () => {
+      if (!this.first) return Response.json({ jsonrpc: '2.0', id: 1, result: '0x1' });
+      waiting();
+      return new Promise<Response>(() => {});
+    };
+  } }));
+  const deadlines = heldDeadlines(loaded.tor.TOR_ROUTE_DEADLINE_MS);
+  try {
+    const result = loaded.tor.probeTorGateway('', 5_000, 'nym');
+    await firstWaiting;
+    deadlines.held[0]();
+    expect(await result).toEqual({ ok: true });
+    expect([started, deadlines.held.length]).toEqual([2, 2]);
+  } finally {
+    deadlines.restore();
+  }
+});
+
+test('an answer that arrives before the attempt deadline keeps its body past it', async () => {
+  const deadline = new AbortController();
+  let finish!: () => void;
+  const loaded = transport(false, () => ({ AnonRpcWorker: class {
+    ready = Promise.resolve();
+    close() {}
+    // As the harness does, a streamed body ends when the call's signal aborts.
+    fetch = async (_url: string, init?: RequestInit) => new Response(new ReadableStream({
+      start(controller) {
+        init?.signal?.addEventListener('abort', () => controller.error(init.signal!.reason));
+        finish = () => { controller.enqueue(new TextEncoder().encode('{"jsonrpc":"2.0","id":1,"result":"0x1"}')); controller.close(); };
+      },
+    }));
+  } }), { timeoutSignal: (ms) => ms === loaded.tor.TOR_RPC_TIMEOUT_MS ? deadline.signal : AbortSignal.timeout(ms) });
+  const result = loaded.tor.probeTorGateway('', 5_000, 'nym');
+  while (!finish) await new Promise(resolve => setTimeout(resolve, 0));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  deadline.abort();
+  finish();
+  expect(await result).toEqual({ ok: true });
+});
+
+test('a Test canceled during a failing attempt starts no further attempt', async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  const loaded = transport(false, () => ({ AnonRpcWorker: class {
+    ready = Promise.resolve();
+    close() {}
+    fetch = async () => {
+      calls++;
+      controller.abort();
+      throw new Error('IO error: tls handshake eof');
+    };
+  } }));
+  expect((await loaded.tor.probeTorGateway('', 5_000, 'nym', undefined, controller.signal)).ok).toBe(false);
+  expect(calls).toBe(1);
+});
+
 test('Nox: no gateway, no config, specifier read on Sepolia, and the Test is an eth_chainId over the mixnet', async () => {
   let init!: { address: string; specifierChainId: number; config: unknown; preExisting: { rpcProvider: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } } };
   const sent: { url: string; body: unknown }[] = [];
@@ -489,15 +669,18 @@ for (const from of ['registry', 'override'] as const) test(`Nox bootstraps from 
 });
 
 for (const provider of ['nym', 'nox'] as const) {
-  test(`${provider}: a failed probe does not ask for a gateway`, async () => {
+  test(`${provider}: a failed probe does not ask for a gateway, and closes every client it started`, async () => {
+    let started = 0;
     let closed = 0;
     const loaded = transport(false, () => ({ AnonRpcWorker: class {
+      constructor() { started++; }
       ready = Promise.resolve();
       close() { closed++; }
       fetch = async () => { throw new Error('offline'); };
     } }));
     expect(await loaded.tor.probeTorGateway('', 5_000, provider)).toEqual({ ok: false, message: 'Could not reach the anon-rpc network.' });
-    expect(closed).toBe(1);
+    expect(started).toBe(3);
+    expect(closed).toBe(3);
   });
 
   test(`${provider}: only a valid JSON-RPC probe response succeeds in enforce mode`, async () => {
