@@ -135,6 +135,7 @@ import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { FeeWarning } from '@/components/fee-warning';
 import { relayedSpendBreakdown } from '@/services/fee-warning';
 import { SHIELDED_TRANSFER_GAS } from '@/services/transfer-fee-estimate';
+import { useTorOperation } from '@/hooks/use-tor-operation';
 
 // Web-only styles
 
@@ -375,6 +376,7 @@ function createRelayRun(): RelayRun {
 
 export function TransferModalProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
+  useTorOperation(isOpen);
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const isDark = colorScheme === 'dark';

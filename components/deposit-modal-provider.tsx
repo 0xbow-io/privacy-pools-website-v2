@@ -54,6 +54,7 @@ import { formatUsdPrecise } from '@/services/format-fiat';
 import { useDebug } from '@/components/debug-provider';
 import { useTxActivity } from '@/components/tx-activity-provider';
 import { useLatchedWhile } from '@/hooks/use-latched-while';
+import { useTorOperation } from '@/hooks/use-tor-operation';
 import { useKeystoreRegistrationModal } from '@/components/keystore-registration-modal-provider';
 import { useAccountRecoveryModal } from '@/components/account-recovery-modal-provider';
 import { getExplorerName, getExplorerTxUrl, getChainConfig, isChainSelectable, supportedChainIds, STELLAR_TESTNET_ID, SUI_TESTNET_ID } from '@/config/chains';
@@ -612,6 +613,7 @@ export function useDepositModal() {
 
 export function DepositModalProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
+  useTorOperation(isOpen);
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const isDark = colorScheme === 'dark';
