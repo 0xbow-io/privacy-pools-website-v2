@@ -25,7 +25,7 @@ test('Use maximum keeps an exact share string, without treating it as underlying
   const setter = source.slice(source.indexOf('  const applyShareAmount ='), source.indexOf('  const applyPresetAmount ='));
   expect(setter).toContain('setAmount(val)');
   expect(setter).not.toContain('toShares(');
-  expect(source).toContain('const applyPresetAmount = (value: string) => applyShareAmount(amountField.toShares(value));');
+  expect(source).toContain('applyShareAmount(amountField.toShares(value));');
   expect(source).toContain('onPress={() => applyShareAmount(formatUnits(singleProofMaxInputWei, tokenDecimalsForDisplay))}');
 });
 
@@ -77,5 +77,41 @@ test('equivalent rate object refreshes preserve the draft key; actual rate chang
   const field = read('hooks/use-share-amount-field.ts');
   expect(field).toContain('edit.rateKey === rateKey');
   expect(field).not.toContain('edit.rate === rate');
-  expect(field).not.toMatch(/useEffect|setAmount\(/);
+  expect(field).not.toMatch(/setAmount\(/);
+  expect(field).toContain('if (!pendingEdit || !capKnown || !rate');
+});
+
+
+test('modal refuses an out-of-reach share preset before clamping and greys its chip', () => {
+  const cap = '0.29967';
+  const preview = shareAmountFromUnderlying({ text: '1', rate: RATE, maxSharesExact: cap, displayedMax: '0.30', preview: true });
+  expect(preview.exceedsMax).toBe(true);
+  let amount = '0.01';
+  if (!preview.exceedsMax) amount = preview.shares;
+  expect(amount).toBe('0.01');
+  const source = read('components/withdraw-modal-provider.tsx');
+  const setter = source.slice(source.indexOf('  const applyPresetAmount ='), source.indexOf('  // FullWithdrawalGuard escape hatch'));
+  expect(setter).toContain('amountField.presetExceedsMax(value)');
+  expect(setter).toContain('You can withdraw up to');
+  expect(setter.indexOf('return;')).toBeLessThan(setter.indexOf('amountField.toShares(value)'));
+  expect(source).toContain('accessibilityState={{ disabled: outOfReach || spendabilityBlocked }}');
+  expect(source).toContain("outOfReach ? 'opacity-40'");
+  let writes = 0;
+  let conversions = 0;
+  let ceiling = '';
+  const run = new Function('spendabilityBlocked', 'getWithdrawMaxWei', 'selectedToken', 'selectedTokenDecimals',
+    'amountField', 'presetExceedsWithdrawMax', 'errorToast', 'spendableLabel', 'formatUnits', 'chainId', 'applyShareAmount',
+    new Bun.Transpiler({ loader: 'ts' }).transformSync(`${setter}; return applyPresetAmount;`))(
+      false, () => 299670000000000000n, 'ppETH', 18,
+      { presetExceedsMax: (text: string) => shareAmountFromUnderlying({ text, rate: RATE, maxSharesExact: cap, displayedMax: '0.30', preview: true }).exceedsMax,
+        toShares: (text: string) => { conversions++; return shareAmountFromUnderlying({ text, rate: RATE, maxSharesExact: cap, displayedMax: '0.30' }); } },
+      () => false, (message: { title: string }) => { ceiling = message.title; }, () => '0.30 ETH',
+      () => cap, 1, () => { writes++; });
+  run('1');
+  expect(writes).toBe(0);
+  expect(conversions).toBe(0);
+  expect(ceiling).toBe('You can withdraw up to 0.30 ETH.');
+  run('0.1');
+  expect(writes).toBe(1);
+  expect(conversions).toBe(1);
 });

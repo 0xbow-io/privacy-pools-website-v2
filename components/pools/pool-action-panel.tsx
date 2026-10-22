@@ -114,7 +114,7 @@ export function PoolActionPanel({
 }) {
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
-  const { data } = usePools();
+  const { data, isLoading: poolsLoading } = usePools();
   const symbol = poolToken.toUpperCase();
 
   // Availability: the swap tab needs the flag AND a configured processor for
@@ -172,7 +172,7 @@ export function PoolActionPanel({
   const spendableExact = pool?.balanceTokenExact ?? '0';
   const balanceDisplay = useBalanceDisplay(activeChainId);
   const balanceView = balanceDisplay(spendableExact, symbol, activeChainId, pool?.tokenAddress);
-  const amountField = useShareAmountField({ amount, symbol, chainId: activeChainId, maxSharesExact: spendableExact, underlyingEntry: action === 'withdraw' || action === 'transfer' });
+  const amountField = useShareAmountField({ amount, symbol, chainId: activeChainId, maxSharesExact: spendableExact, capKnown: !poolsLoading, onAmountResolved: setTypedAmount, underlyingEntry: action === 'withdraw' || action === 'transfer' });
 
   /**
    * Fill the amount with a fraction of the spendable balance. Base-unit

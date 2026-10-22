@@ -71,7 +71,9 @@ test('USD entry is gated on real prices and positive edits cannot submit zero si
   expect(field).toContain("if (denomination === 'usd' && !usdAvailable) return amount;");
   expect(field).toContain("tooSmall: /[1-9]/.test(text) && shares === '0'");
   expect(field).toContain("'Amount is too small.'");
-  expect(field).not.toMatch(/useEffect|usdToTokenAmount/);
+  expect(field).not.toMatch(/usdToTokenAmount/);
+  expect(field).toContain('if (!pendingEdit || !capKnown || !rate');
+  expect(field).toContain('onAmountResolved(toShares(edit.text, edit.denomination))');
   const hub = read('components/home/action-hub.tsx');
   expect(hub).toContain("amountField.toShares(text, 'usd')");
   expect(hub).toContain('shareFiatEntry ? amountField.usdValue : usdInput');

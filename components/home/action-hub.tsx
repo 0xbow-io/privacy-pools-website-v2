@@ -1,3 +1,4 @@
+import { spendableBalanceLabel } from '@/services/spendable-balance-label';
 import { useShareAmountField } from '@/hooks/use-share-amount-field';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
@@ -2412,7 +2413,12 @@ export function ActionHub({
     : action === 'send'
       ? (sendMaxText ?? shielded.exact)
       : shielded.exact;
-  const amountField = useShareAmountField({ amount, symbol: tokenMeta.symbol, chainId, maxSharesExact: maxText, underlyingEntry: action === 'withdraw' || action === 'send' });
+  const amountField = useShareAmountField({ amount, symbol: tokenMeta.symbol, chainId, maxSharesExact: maxText, capKnown: action === 'withdraw' ? !withdrawBalanceBlocked && withdrawMaxWei !== null : action === 'send' ? sendMaxText !== null && !poolsLoading : true,
+    onAmountResolved: (shares) => {
+      setAmount(shares);
+      if (withdrawInline) pushWithdrawAmount(shares);
+      else if (transferInline) pushTransferAmount(shares);
+    }, underlyingEntry: action === 'withdraw' || action === 'send' });
   const fillMax = () => {
     // Withdraw's max is the shielded balance, and while the association set is
     // still loading that figure is not yet provable — filling it would seed the
@@ -3081,7 +3087,7 @@ export function ActionHub({
           disabled={a === 'withdraw' && withdrawBalanceBlocked}
           onPress={() => {
             if (outOfReach && withdrawMaxWei !== null) {
-              toast({ title: `You can withdraw up to ${balanceDisplay(formatUnits(withdrawMaxWei, tokenMeta.decimals), tokenMeta.symbol, chainId).text}.`, variant: 'warning' });
+              toast({ title: `You can withdraw up to ${spendableBalanceLabel(formatUnits(withdrawMaxWei, tokenMeta.decimals), tokenMeta.symbol, () => balanceDisplay(formatUnits(withdrawMaxWei, tokenMeta.decimals), tokenMeta.symbol, chainId).text)}.`, variant: 'warning' });
               return;
             }
             const next = a === 'withdraw' ? amountField.toShares(preset) : preset;
@@ -3556,7 +3562,7 @@ export function ActionHub({
                       ? 'Retry'
                       : withdrawBalanceLoading
                         ? '—'
-                        : pageBalanceView.text)
+                        : spendableBalanceLabel(withdrawSpendableExact, pageTargetSymbol, () => pageBalanceView.text))
                     : (poolsLoading
                       ? '—'
                       : pageBalanceView.text)}

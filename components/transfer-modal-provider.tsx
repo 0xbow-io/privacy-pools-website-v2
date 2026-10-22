@@ -480,7 +480,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   const publicClient = usePublicClient({ chainId });
   const { noteManager, keystoreManager, exportAccount, ensureInitialized, getCommittedManagers } = usePoolSession();
   const { transfer, prepareRelayed } = useTransfer();
-  const { notes, refetch: refetchNotes } = useNotes();
+  const { notes, refetch: refetchNotes, isLoading: isLoadingNotes } = useNotes();
   const { beginTx, endTx } = useTxActivity();
 
   const [step, setStep] = useState<TransferStep>('select-notes');
@@ -1274,7 +1274,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     // Stellar: the same five-input / two-lineage cap the amount check uses,
     // so the hub's Max never fills more than one transfer can move.
     if (isStellar) return stellarConnected ? (tokenSymbol === altSymbol ? suiMaxLineageTotal : 0n) : null;
-    if (isSui || !connectedAddress) return null;
+    if (isSui || !connectedAddress || isLoadingNotes) return null;
     const tokenId = getTokenMetadataBySymbol(tokenSymbol, activeEvmChainId)?.address?.toLowerCase();
     if (!tokenId) return null;
     const owner = connectedAddress.toLowerCase();
@@ -1285,7 +1285,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
       try { return BigInt(n.value) > 0n; } catch { return false; }
     });
     return maxCoverableTransfer(eligible, TRANSFER_MAX_INPUTS, TRANSFER_MAX_LABELS);
-  }, [isSui, isStellar, stellarConnected, altSymbol, suiMaxLineageTotal, connectedAddress, notes, activeEvmChainId]);
+  }, [isSui, isStellar, stellarConnected, altSymbol, suiMaxLineageTotal, connectedAddress, notes, isLoadingNotes, activeEvmChainId]);
   const maxSpendableWei = useMemo(
     () => maxCoverableTransfer(activeNotes, TRANSFER_MAX_INPUTS, TRANSFER_MAX_LABELS),
     [activeNotes],
@@ -2410,7 +2410,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           // Same shortfall wording as Pay request (Mike, #282): the fee is
           // inside "needs", costs round up, what can be used rounds down.
           const amt = (v: bigint, up: boolean) =>
-            balanceDisplay(formatShortfallAmount(v, selectedDecimals, up, selectedSymbol), selectedSymbol, chainId).text;
+            isShareSymbol(selectedSymbol) ? balanceDisplay(formatShortfallAmount(v, selectedDecimals, up, selectedSymbol), selectedSymbol, chainId).text : tokenAmountLabel(formatShortfallAmount(v, selectedDecimals, up, selectedSymbol), selectedSymbol);
           // The guard checks the notes picked for this amount, not the account:
           // only call the balance short when the one-transfer cap is short too
           // (cubic on #282).
@@ -3540,7 +3540,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   // should name: in send-exact mode the typed figure is the debit, not the
   // delivery, and showing the typed figure on the review and success screens
   // would overstate what was sent.
-  const amountField = useShareAmountField({ amount, symbol: selectedSymbol, chainId, maxSharesExact: formatUnits(maxSpendableWei, selectedDecimals), underlyingEntry: !isSui });
+  const amountField = useShareAmountField({ amount, symbol: selectedSymbol, chainId, maxSharesExact: formatUnits(maxSpendableWei, selectedDecimals), capKnown: !isLoadingNotes, onAmountResolved: setAmount, underlyingEntry: !isSui });
   const transferAmountFormatted = sentAmountWei != null
     // Gross mode nets an ESTIMATED fee until the relayer's binding fee is
     // known at relay time; the marker says so (codex #1/#2).
@@ -3776,7 +3776,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                     <Text className="text-[12px] mt-[4px] text-[#737373] font-pp-regular">
                       One transfer combines up to {TRANSFER_MAX_INPUTS} notes from{' '}
                       {TRANSFER_MAX_LABELS} deposits; the most you can send at once is{' '}
-                      {balanceDisplay(formatUnits(maxSpendableWei, selectedDecimals), selectedSymbol, chainId).text}.
+                      {isShareSymbol(selectedSymbol) ? balanceDisplay(formatUnits(maxSpendableWei, selectedDecimals), selectedSymbol, chainId).text : tokenAmountLabel(capText(maxSpendableWei, enteredAmountWei, selectedDecimals), selectedSymbol)}.
                     </Text>
                   )}
                 </View>

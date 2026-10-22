@@ -1,3 +1,5 @@
+import { spendableBalanceLabel } from '@/services/spendable-balance-label';
+import { presetExceedsWithdrawMax } from '@/services/withdraw-preset-guard';
 import { useShareAmountField } from '@/hooks/use-share-amount-field';
 // RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
 // amounts, validation, quotes, relayer and on-chain values stay in shares
@@ -194,7 +196,7 @@ import { feeWithinReviewed, relayerFeeJitterAllowance } from '@/services/relayer
 import { quoteMatchesSignedCommitment } from '@/services/relayer-quote-integrity';
 import { decodeGasTopUpWei, formatGasTopUp } from '@/services/gas-top-up';
 import { setReceiveSetup } from '@/services/receive-setup';
-import { displayTokenSymbol, isShareSymbol, netSharesWei, shareRedemptionDisclosure, shareReviewHeadline } from '@/services/share-display';
+import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, netSharesWei, shareRedemptionDisclosure, shareReviewHeadline } from '@/services/share-display';
 import { sdkErrorText, type ErrorUnits } from '@/services/sdk-error-amounts';
 import { RelayFeeIncreasedError, relayWithdrawalWithFreshQuote } from '@/services/relayed-withdrawal';
 import { PREVIEW_REDEEM_ABI } from '@/services/deposit-limits';
@@ -577,6 +579,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // chain against itself and could never fire.
   const chainId = useActiveEvmChain().id;
   const balanceDisplay = useBalanceDisplay(chainId);
+  const spendableLabel = (exact: string, symbol: string, cid: number) =>
+    spendableBalanceLabel(exact, symbol, () => balanceDisplay(exact, symbol, cid).text);
   const withOpLock = useOpLock();
   // Chain FROZEN at submission — explorer links must not follow a later
   // app-chain switch (codex round 3, P2).
@@ -1772,7 +1776,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // exit is a single proof over up to 5 notes of any label, so it advertises
   // that single-proof cap even with batching on; batch-eligible plain
   // withdrawals advertise the full active balance.
-  const amountField = useShareAmountField({ amount, symbol: selectedToken, chainId, maxSharesExact: formatUnits(getWithdrawMaxWei(selectedToken) ?? 0n, selectedTokenDecimals), underlyingEntry: !isSui });
+  const amountField = useShareAmountField({ amount, symbol: selectedToken, chainId, maxSharesExact: formatUnits(getWithdrawMaxWei(selectedToken) ?? 0n, selectedTokenDecimals), capKnown: !spendabilityBlocked, onAmountResolved: (shares) => applyShareAmount(shares), underlyingEntry: !isSui });
   const amountDollarLabel = useCallback((sharesExact: string) => {
     if (isShareSymbol(selectedToken)) {
       const view = balanceDisplay(sharesExact, selectedToken, chainId);
@@ -2442,7 +2446,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           if (!isCurrent()) return;
           reportWithdrawError(
             selection.total > 0n
-              ? `A withdraw + swap spends up to 5 approved notes in one proof. Largest spendable now: ${balanceDisplay(max, selectedToken, chainId).text}.`
+              ? `A withdraw + swap spends up to 5 approved notes in one proof. Largest spendable now: ${isShareSymbol(selectedToken) ? balanceDisplay(max, selectedToken, chainId).text : tokenAmountLabel(max, selectedToken)}.`
               : `No approved, spendable ${displayTokenSymbol(selectedToken)} notes are available yet.`,
           );
           return;
@@ -2744,7 +2748,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         const maxInput = formatUnits(maxInputWei, tokenDecimals);
         reportWithdrawError(
           maxInputWei > 0n
-            ? `That's more than one transaction can carry. Enter at most ${balanceDisplay(maxInput, selectedToken, chainId).text} (up to ${WITHDRAW_MAX_INPUTS} notes per proof${effectiveReceiveExact ? ', after reserving the relayer fee' : ''}).`
+            ? `That's more than one transaction can carry. Enter at most ${isShareSymbol(selectedToken) ? balanceDisplay(maxInput, selectedToken, chainId).text : tokenAmountLabel(maxInput, selectedToken)} (up to ${WITHDRAW_MAX_INPUTS} notes per proof${effectiveReceiveExact ? ', after reserving the relayer fee' : ''}).`
             : `Your ${displayTokenSymbol(selectedToken)} notes don't have enough active balance to cover the relayer fee.`,
         );
         setActiveFeeCommitment(null);
@@ -3938,8 +3942,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         reportWithdrawError(
           maxInputWei > 0n
             ? (isSwapExit
-              ? `That's more than a withdraw + swap can carry. Enter at most ${balanceDisplay(maxInput, selectedToken, chainId).text} (up to ${WITHDRAW_MAX_INPUTS} notes in one proof${effectiveReceiveExact ? ', after reserving the relayer fee' : ''}).`
-              : `That's more than one transaction can carry. Enter at most ${balanceDisplay(maxInput, selectedToken, chainId).text} (up to ${WITHDRAW_MAX_INPUTS} notes per proof${effectiveReceiveExact ? ', after reserving the relayer fee' : ''}).`)
+              ? `That's more than a withdraw + swap can carry. Enter at most ${isShareSymbol(selectedToken) ? balanceDisplay(maxInput, selectedToken, chainId).text : tokenAmountLabel(maxInput, selectedToken)} (up to ${WITHDRAW_MAX_INPUTS} notes in one proof${effectiveReceiveExact ? ', after reserving the relayer fee' : ''}).`
+              : `That's more than one transaction can carry. Enter at most ${isShareSymbol(selectedToken) ? balanceDisplay(maxInput, selectedToken, chainId).text : tokenAmountLabel(maxInput, selectedToken)} (up to ${WITHDRAW_MAX_INPUTS} notes per proof${effectiveReceiveExact ? ', after reserving the relayer fee' : ''}).`)
             : `Your ${displayTokenSymbol(selectedToken)} notes don't have enough active balance to cover this withdrawal + the relayer fee.`,
         );
         submittedRef.current = false;
@@ -4952,7 +4956,15 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   };
 
   // Quick presets are underlying literals when the rate is known, shares otherwise.
-  const applyPresetAmount = (value: string) => applyShareAmount(amountField.toShares(value));
+  const applyPresetAmount = (value: string) => {
+    if (spendabilityBlocked) return;
+    const maxWei = getWithdrawMaxWei(selectedToken);
+    if (amountField.presetExceedsMax(value) ?? presetExceedsWithdrawMax(value, maxWei, selectedTokenDecimals)) {
+      errorToast({ title: `You can withdraw up to ${spendableLabel(formatUnits(maxWei ?? 0n, selectedTokenDecimals), selectedToken, chainId)}.`, variant: 'warning' });
+      return;
+    }
+    applyShareAmount(amountField.toShares(value));
+  };
 
   // FullWithdrawalGuard escape hatch: one tap resets the selection to 75%.
   const handleFullWithdrawalEscape = () => {
@@ -5118,7 +5130,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                               ? 'Loading shielded balance…'
                               : spendabilityError
                                 ? 'Shielded balance unavailable'
-                                : `Available: ${balanceDisplay(isSui ? String(displayAvailableNum) : formatUnits(resolveDisplayAvailableWei({ isSwapExit, batchEnabled, spendableWei: currentBalance.active, singleProofCapWei: availableWei }), selectedTokenDecimals), selectedToken, chainId).text}`}
+                                : `Available: ${spendableLabel(isSui ? String(displayAvailableNum) : formatUnits(resolveDisplayAvailableWei({ isSwapExit, batchEnabled, spendableWei: currentBalance.active, singleProofCapWei: availableWei }), selectedTokenDecimals), selectedToken, chainId)}`}
                           </Text>
                           <ShareCountHint hint={balanceDisplay(isSui ? String(displayAvailableNum) : formatUnits(resolveDisplayAvailableWei({ isSwapExit, batchEnabled, spendableWei: currentBalance.active, singleProofCapWei: availableWei }), selectedTokenDecimals), selectedToken, chainId).hint} />
                           <ModalInfoIcon color="#999999" />
@@ -5159,7 +5171,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                         current route's per-transaction cap (#214). */}
                     <View className="flex-row justify-between">
                       <Text className="text-[12px] text-[#4D4D4D] font-pp-regular">
-                        Balance: {spendabilityBlocked ? '—' : balanceDisplay(formatUnits(currentBalance.active, selectedTokenDecimals), selectedToken, chainId).text}
+                        Balance: {spendabilityBlocked ? '—' : spendableLabel(formatUnits(currentBalance.active, selectedTokenDecimals), selectedToken, chainId)}
                       </Text>
                       <Text className="text-[12px] text-[#999999] font-pp-regular">
                         Pending: {spendabilityBlocked ? '—' : balanceDisplay(formatUnits(currentBalance.pending, selectedTokenDecimals), selectedToken, chainId).text}
@@ -5193,13 +5205,16 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                   <View className="flex-row flex-wrap gap-[8px] mt-[10px] items-center">
                     {(usesNativeWithdrawPresets(selectedToken) ? QUICK_AMOUNTS_NATIVE : QUICK_AMOUNTS_STABLE).map((preset) => {
                       const active = isShareSymbol(selectedToken) ? amountField.value === preset : amount === preset;
+                      const outOfReach = !spendabilityBlocked && (amountField.presetExceedsMax(preset)
+                        ?? presetExceedsWithdrawMax(preset, getWithdrawMaxWei(selectedToken), selectedTokenDecimals));
                       return (
                         <Pressable
                           key={preset}
                           // nw-keep(data-color): active chip fill is a runtime tint token at 22 (~13%) alpha — no static class value;
                           // minWidth is runtime so 1- and 3-digit chips render the same box
                           style={[{ minWidth: 50 }, active ? { backgroundColor: `${colors.tint}22` } : null]}
-                          className={`items-center px-[12px] py-[6px] rounded-[8px] border ${active ? 'border-tint' : 'border-border-light'} ${active ? '' : 'bg-transparent'}`}
+                          className={`items-center px-[12px] py-[6px] rounded-[8px] border ${active ? 'border-tint' : 'border-border-light'} ${active ? '' : 'bg-transparent'} ${outOfReach ? 'opacity-40' : ''}`}
+                          accessibilityState={{ disabled: outOfReach || spendabilityBlocked }}
                           onPress={() => applyPresetAmount(preset)}
                           disabled={spendabilityBlocked}
                         >
@@ -5290,25 +5305,25 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       <View className="gap-[4px]">
                         <Text className="text-[12px] text-[#E53935] font-pp-regular">
                           {isSwapExit
-                            ? `One withdraw + swap can spend ${balanceDisplay(formatUnits(availableWei, selectedTokenDecimals), selectedToken, chainId).text} (up to ${WITHDRAW_MAX_INPUTS} notes per proof). The rest of your ${balanceDisplay(formatUnits(currentBalance.active, selectedTokenDecimals), selectedToken, chainId).text} balance needs another transaction`
-                            : `One withdrawal can spend ${balanceDisplay(formatUnits(availableWei, selectedTokenDecimals), selectedToken, chainId).text} (up to ${WITHDRAW_MAX_INPUTS} notes per proof). The rest of your ${balanceDisplay(formatUnits(currentBalance.active, selectedTokenDecimals), selectedToken, chainId).text} balance needs another transaction`}
+                            ? `One withdraw + swap can spend ${spendableLabel(formatUnits(availableWei, selectedTokenDecimals), selectedToken, chainId)} (up to ${WITHDRAW_MAX_INPUTS} notes per proof). The rest of your ${spendableLabel(formatUnits(currentBalance.active, selectedTokenDecimals), selectedToken, chainId)} balance needs another transaction`
+                            : `One withdrawal can spend ${spendableLabel(formatUnits(availableWei, selectedTokenDecimals), selectedToken, chainId)} (up to ${WITHDRAW_MAX_INPUTS} notes per proof). The rest of your ${spendableLabel(formatUnits(currentBalance.active, selectedTokenDecimals), selectedToken, chainId)} balance needs another transaction`}
                           {batchEnabled && !isSwapExit
                             ? ', or use 100% to withdraw everything.'
                             : singleProofMaxInputWei > 0n
-                              ? `, so enter ${balanceDisplay(formatUnits(singleProofMaxInputWei, tokenDecimalsForDisplay), selectedToken, chainId).text} now and repeat for the rest.`
+                              ? `, so enter ${spendableLabel(formatUnits(singleProofMaxInputWei, tokenDecimalsForDisplay), selectedToken, chainId)} now and repeat for the rest.`
                               : '. The relayer fee currently consumes that one-proof cap.'}
                         </Text>
                         {singleProofMaxInputWei > 0n ? (
                           <Pressable onPress={() => applyShareAmount(formatUnits(singleProofMaxInputWei, tokenDecimalsForDisplay))}>
                             <Text className="text-[12px] underline text-text font-pp-medium">
-                              {`Use ${balanceDisplay(formatUnits(singleProofMaxInputWei, tokenDecimalsForDisplay), selectedToken, chainId).text}`}
+                              {`Use ${spendableLabel(formatUnits(singleProofMaxInputWei, tokenDecimalsForDisplay), selectedToken, chainId)}`}
                             </Text>
                           </Pressable>
                         ) : null}
                       </View>
                     ) : (
                       <Text className="text-[12px] text-[#E53935] font-pp-regular">
-                        {`Amount exceeds your shielded balance (${balanceDisplay(formatUnits(currentBalance.active, selectedTokenDecimals), selectedToken, chainId).text})`}
+                        {`Amount exceeds your shielded balance (${spendableLabel(formatUnits(currentBalance.active, selectedTokenDecimals), selectedToken, chainId)})`}
                       </Text>
                     )
                   ) : null}
