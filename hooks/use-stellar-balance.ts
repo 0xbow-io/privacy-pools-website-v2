@@ -11,6 +11,7 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { STELLAR_TESTNET_HORIZON_URL, STELLAR_XLM } from '@/config/stellar-deployment';
+import { routedFetch } from '@/services/tor-fetch';
 
 const REFRESH_MS = 20_000;
 
@@ -54,7 +55,7 @@ export function stellarBalanceFromAccount(account: HorizonAccount): StellarBalan
 }
 
 export async function fetchStellarBalance(address: string): Promise<StellarBalance> {
-  const res = await fetch(`${STELLAR_TESTNET_HORIZON_URL}/accounts/${encodeURIComponent(address)}`, { cache: 'no-store' });
+  const res = await routedFetch('rpc')(`${STELLAR_TESTNET_HORIZON_URL}/accounts/${encodeURIComponent(address)}`, { cache: 'no-store' });
   if (res.status === 404) return { total: 0n, spendable: 0n, unfunded: true };
   if (!res.ok) throw new Error(`Horizon ${res.status}`);
   return stellarBalanceFromAccount((await res.json()) as HorizonAccount);

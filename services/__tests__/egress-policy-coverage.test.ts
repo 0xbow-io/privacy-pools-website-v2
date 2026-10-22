@@ -574,7 +574,6 @@ describe('app-owned network boundary coverage', () => {
     // are outside the EVM boundary. Inventory is not a runtime sandbox for them.
     expect(counts).toEqual({
       'components/newsletter-modal.tsx': 1,
-      'hooks/use-stellar-balance.ts': 1, // Horizon account balance (the wallet's own, public)
       'hooks/use-sui-proof.ts': 2,
       'services/sdk-setup.ts': 1, // circuit artifacts, not the ASP client
       // Stellar testnet: its own SDK/Soroban/Horizon stack, like Sui's.
