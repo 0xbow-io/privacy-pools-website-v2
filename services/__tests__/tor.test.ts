@@ -4,6 +4,7 @@ import ts from 'typescript';
 import * as viem from 'viem';
 import * as policy from '../egress-policy';
 import * as settings from '../../config/tor';
+import * as harness from '@0xbow/anon-rpc-rs-browser-harness';
 
 const MAINNET = 'https://mainnet.example/';
 const ENV_MAINNET = 'https://env-mainnet.example/';
@@ -41,7 +42,7 @@ function transport(active: boolean, importer: () => unknown, options: {
       : id === 1 && options.mainnetInChainList !== false ? { rpcUrl: MAINNET } : undefined };
     if (name === '@/config/custom-rpc') return { activeCustomRpcUrl: (id: number) => options.customRpcUrls?.[id] };
     if (name === '@/config/env') return { MAINNET_RPC_URL: ENV_MAINNET, SEPOLIA_RPC_URL: ENV_SEPOLIA };
-    if (name === '@0xbow/anon-rpc-rs-browser-harness') { imports++; return importer(); }
+    if (name === '@0xbow/anon-rpc-rs-browser-harness') { imports++; return { ...harness, ...importer() as object }; }
     throw new Error(`Unexpected dependency ${name}`);
   } }) as typeof import('../tor-fetch');
   const { policedHttp } = load('services/egress-transport.ts', { require(name: string) {
@@ -113,21 +114,17 @@ describe('Tor configuration', () => {
     expect(config('', refusing).saveTorSettings(settings.TOR_OFF)).toBe(true);
   });
 
-  test('the tor-js provider is the published anon-rpc specifier and takes the gateway as its config', () => {
+  test('the tor-js provider takes the gateway as its config, as the harness requires', () => {
     const provider = settings.torProvider('tor-js')!;
-    expect(provider.specifier).toBe('0x700dA3193D35fA54Cd3fBf29B66f2a2A0385659e');
-    expect(provider.specifierChainId).toBe(1);
     expect(provider.workerConfig(GATEWAY)).toEqual({ gateways: [GATEWAY] });
-    // The passthrough reference worker sends with a plain fetch.
-    expect(settings.TOR_PROVIDERS.map(p => p.specifier.toLowerCase())).not.toContain('0x4fd77be300f31c5fe6ab266d35d27750a3478d27');
+    expect(harness.knownWorker('tor-js').requiredConfig).toEqual(['gateways']);
   });
 
-  test('the provider list is tor-js, Nym and Nox, each pinned to its published specifier', () => {
-    expect(settings.TOR_PROVIDERS.map(p => [p.id, p.specifier, p.specifierChainId, p.needsGateway])).toEqual([
-      ['tor-js', '0x700dA3193D35fA54Cd3fBf29B66f2a2A0385659e', 1, true],
-      ['nym', '0x3aCD9742C68F6d993066Ae25533e09b9e1f60eD0', 1, false],
-      ['nox', '0x35133267A8F7EC35046a83DCA0f4Ca8A6e1b7A9A', 11155111, false],
-    ]);
+  test('the provider list is the harness\'s anonymizing workers: tor-js, Nym and Nox', () => {
+    expect(settings.TOR_PROVIDERS.map(p => [p.id, p.needsGateway])).toEqual([['tor-js', true], ['nym', false], ['nox', false]]);
+    // The passthrough reference worker sends with a plain fetch.
+    expect(harness.KNOWN_WORKERS.filter(w => w.kind === 'network').map(w => w.id)).toEqual(settings.TOR_PROVIDERS.map(p => p.id));
+    for (const p of settings.TOR_PROVIDERS) expect(harness.knownWorker(p.id).requiredConfig.length > 0).toBe(p.needsGateway);
     expect(settings.TOR_PROVIDERS.map(p => [p.id, p.workerHash])).toEqual([
       ['tor-js', '0xe39f8c42ed72b7f580a73c46c3300f6d3ad3954bbc26e5fe075b18c48fedc8b5'],
       ['nym', '0xf13a448a8721b9d0b20da3d5b80ffe00bf4c5bb3aae812a38d3d1e3bc81fceb8'],
@@ -270,7 +267,7 @@ test('an RPC body still arrives when Request has no .body (React Native whatwg-f
 
 test('the worker gets the specifier, the gateway config, and a direct bootstrap read that passes the allowlist', async () => {
   policy.setEgressMode('enforce');
-  let init!: { address: string; config: unknown; preExisting: { rpcProvider: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } } };
+  let init!: { address: string; specifierChainId: number; config: unknown; preExisting: { rpcProvider: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } } };
   const loaded = transport(true, () => ({ AnonRpcWorker: class {
     ready = Promise.resolve();
     constructor(value: typeof init) { init = value; }
@@ -280,6 +277,7 @@ test('the worker gets the specifier, the gateway config, and a direct bootstrap 
   const reply = await loaded.tor.torFetchIfActive()!(MAINNET, { method: 'POST', body: '{"id":1}' });
   expect(await reply.json()).toEqual({ result: '{"id":1}' });
   expect(init.address).toBe('0x700dA3193D35fA54Cd3fBf29B66f2a2A0385659e');
+  expect(init.specifierChainId).toBe(1);
   expect(init.config).toEqual({ gateways: [GATEWAY] });
 
   const realFetch = globalThis.fetch;
@@ -367,6 +365,7 @@ test('Nox: no gateway, no config, specifier read on Sepolia, and the Test is an 
   } }), { mainnetInChainList: false });
   expect(await loaded.tor.probeTorGateway('', 5_000, 'nox')).toEqual({ ok: true });
   expect(init.address).toBe('0x35133267A8F7EC35046a83DCA0f4Ca8A6e1b7A9A');
+  expect(init.specifierChainId).toBe(11155111);
   expect(init.config).toBeUndefined();
   expect(sent).toEqual([{ url: loaded.tor.MIXNET_PROBE_URL, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }) }]);
   const realFetch = globalThis.fetch;
@@ -443,7 +442,7 @@ for (const provider of settings.TOR_PROVIDERS) test(`${provider.id}: a rejected 
     } }));
     const result = await loaded.tor.probeTorGateway(GATEWAY, 5_000, provider.id);
     expect(result).toEqual({ ok: false, message: 'The anon-rpc client named on-chain is not the one this build accepts.' });
-    expect(calls).toEqual([provider.specifierChainId === 1 ? MAINNET : ENV_SEPOLIA]);
+    expect(calls).toEqual([harness.knownWorker(provider.id).specifierChainId === 1 ? MAINNET : ENV_SEPOLIA]);
     expect(relayed).toBe(0);
     expect(closed).toBe(1);
   } finally {

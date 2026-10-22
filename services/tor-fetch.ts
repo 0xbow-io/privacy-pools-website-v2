@@ -12,10 +12,11 @@
  * (and names a gateway if it needs one). The client is never in our bundle:
  * the harness fetches it from the specifier's resolvers.
  *
- * ONE READ GOES OUT DIRECT. Before the client exists, the harness reads the
- * specifier (two eth_calls to a public contract) through the bootstrap provider
- * below. They show that this browser is starting an anon-rpc client and nothing about the
- * user, and they still pass the egress allowlist.
+ * ONE READ GOES OUT DIRECT. Before the client exists, the harness checks the
+ * chain and reads the specifier (eth_chainId, then two eth_calls to a public
+ * contract) through the bootstrap provider below. They show that this browser
+ * is starting an anon-rpc client and nothing about the user, and they still
+ * pass the egress allowlist.
  *
  * WHY IT RETURNS A FETCH. services/egress-transport.ts already threads a
  * `fetchFn` through to the sender, with the egress allowlist checked in front
@@ -53,6 +54,17 @@ type AnonRpcWorkerLike = {
   fetch: (input: string, init?: RequestInit) => Promise<Response>;
   close: () => void;
   acceptLog?: (options: { signal: AbortSignal }) => Promise<{ args: unknown[] }>;
+};
+
+type RpcProviderLike = { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> };
+
+/** The harness's knownWorker() entry: where a provider's specifier lives. */
+type KnownWorkerLike = { specifier: string; specifierChainId: number };
+
+type HarnessModule = {
+  AnonRpcWorker?: unknown;
+  knownWorker?: (id: TorProviderId) => KnownWorkerLike;
+  knownWorkerInit?: (id: TorProviderId, options: { rpcProvider: RpcProviderLike; config?: unknown }) => unknown;
 };
 
 /**
@@ -142,19 +154,21 @@ function withAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
  * The specifier's chain may be missing from the app's chain list (plain
  * staging is Sepolia only, prod has no Sepolia, and Nox's specifier lives on
  * Sepolia), so a missing registry entry falls back to the user's override for
- * that chain, then ours. Same reads, same allowlist, whichever chain.
+ * that chain, then ours. Same reads, same allowlist, whichever chain. The
+ * harness checks this endpoint's eth_chainId against the specifier's chain
+ * before it reads.
  *
  * Takes the bootstrap's signal: the harness stops booting on close() but
  * cannot cancel a read it has handed to this provider, so closing ends it here.
  */
-async function bootstrapProvider(provider: TorProvider, signal: AbortSignal) {
+async function bootstrapProvider(provider: TorProvider, known: KnownWorkerLike, signal: AbortSignal) {
   const { getChainConfig } = await import('@/config/chains');
-  let url = getChainConfig(provider.specifierChainId)?.rpcUrl;
-  if (!url && (provider.specifierChainId === 1 || provider.specifierChainId === 11155111)) {
+  let url = getChainConfig(known.specifierChainId)?.rpcUrl;
+  if (!url && (known.specifierChainId === 1 || known.specifierChainId === 11155111)) {
     const { activeCustomRpcUrl } = await import('@/config/custom-rpc');
     const { MAINNET_RPC_URL, SEPOLIA_RPC_URL } = await import('@/config/env');
-    url = activeCustomRpcUrl(provider.specifierChainId)
-      ?? (provider.specifierChainId === 1 ? MAINNET_RPC_URL : SEPOLIA_RPC_URL);
+    url = activeCustomRpcUrl(known.specifierChainId)
+      ?? (known.specifierChainId === 1 ? MAINNET_RPC_URL : SEPOLIA_RPC_URL);
   }
   if (!url) throw new TorUnavailableError('No endpoint to read the anon-rpc client specifier from.');
   const endpoint = url;
@@ -170,7 +184,7 @@ async function bootstrapProvider(provider: TorProvider, signal: AbortSignal) {
       if (!response.ok) throw new Error(`specifier read failed: HTTP ${response.status}`);
       const reply = await response.json() as { result?: unknown; error?: { message?: string } };
       if (reply.error) throw new Error(`specifier read failed: ${reply.error.message ?? 'RPC error'}`);
-      if (isWorkerHashRead(provider, method, params) && !sameHash(reply.result, provider.workerHash)) {
+      if (isWorkerHashRead(known, method, params) && !sameHash(reply.result, provider.workerHash)) {
         throw new TorUnavailableError('The anon-rpc client named on-chain is not the one this build accepts.');
       }
       return reply.result;
@@ -181,11 +195,11 @@ async function bootstrapProvider(provider: TorProvider, signal: AbortSignal) {
 /** `workerHash()`, the read whose answer decides which code the harness runs. */
 const WORKER_HASH_SELECTOR = '0x3898587d';
 
-function isWorkerHashRead(provider: TorProvider, method: string, params: unknown[] | undefined): boolean {
+function isWorkerHashRead(known: KnownWorkerLike, method: string, params: unknown[] | undefined): boolean {
   if (method !== 'eth_call') return false;
   const call = params?.[0] as { to?: unknown; data?: unknown; input?: unknown } | undefined;
   const data = typeof call?.data === 'string' ? call.data : typeof call?.input === 'string' ? call.input : '';
-  return typeof call?.to === 'string' && call.to.toLowerCase() === provider.specifier.toLowerCase()
+  return typeof call?.to === 'string' && call.to.toLowerCase() === known.specifier.toLowerCase()
     && data.toLowerCase().startsWith(WORKER_HASH_SELECTOR);
 }
 
@@ -258,14 +272,14 @@ async function loadClient(
   const gateway = validateTorGatewayFor(provider.id, gatewayUrl);
   if (!gateway.ok) throw new TorUnavailableError(gateway.message);
   report('loading');
-  let module: { AnonRpcWorker?: unknown };
+  let module: HarnessModule;
   try {
     // The only two references in the repo, both bare dynamic imports, so a
     // user who never turns anon-rpc on never loads either. On a device the
     // client is Arti compiled into the app (@0xbow/anon-rpc-rs-react-native,
     // AnonRpcWorker.tor()): same worker shape, no gateway, no specifier, no
     // bundle.
-    module = await withAbort<{ AnonRpcWorker?: unknown }>(
+    module = await withAbort<HarnessModule>(
       TOR_ON_DEVICE ? import('@0xbow/anon-rpc-rs-react-native') : import('@0xbow/anon-rpc-rs-browser-harness'),
       signal,
     );
@@ -277,7 +291,9 @@ async function loadClient(
   const factory = module.AnonRpcWorker as
     | ((new (init: unknown) => AnonRpcWorkerLike) & { tor?: () => AnonRpcWorkerLike })
     | undefined;
-  if (typeof factory !== 'function' || (TOR_ON_DEVICE && typeof factory.tor !== 'function')) {
+  const { knownWorker, knownWorkerInit } = module;
+  if (typeof factory !== 'function' || (TOR_ON_DEVICE ? typeof factory.tor !== 'function'
+    : typeof knownWorker !== 'function' || typeof knownWorkerInit !== 'function')) {
     throw new TorUnavailableError('The anon-rpc client does not expose the expected interface.');
   }
 
@@ -289,13 +305,9 @@ async function loadClient(
       worker = factory.tor!();
     } else {
       report('specifier');
-      const rpcProvider = await withAbort(bootstrapProvider(provider, signal), signal);
+      const rpcProvider = await withAbort(bootstrapProvider(provider, knownWorker!(provider.id), signal), signal);
       throwIfAborted(signal);
-      worker = new factory({
-        address: provider.specifier,
-        config: provider.workerConfig(gateway.url),
-        preExisting: { rpcProvider },
-      });
+      worker = new factory(knownWorkerInit!(provider.id, { rpcProvider, config: provider.workerConfig(gateway.url) }));
     }
     // Only a Test follows the log: the app's own client leaves it alone.
     if (onStep) unfollow = followWorkerLog(worker, report, signal);
