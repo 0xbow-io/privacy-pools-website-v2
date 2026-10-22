@@ -2436,8 +2436,9 @@ export function ActionHub({
   // #185 (Swap tab crash, 2026-10-21). See services/layout-pass-budget.ts.
   const measureBudget = useRef(createLayoutPassBudget());
   const measureBudgetFrame = useRef<number | null>(null);
-  // Damps the same cycle at frame rate (onLayout included): a width that only
-  // flips back to the one before is the scrollbar, the pager holds the narrower.
+  // Damps the same cycle at frame rate (onLayout included): a width that
+  // quickly flips back by a scrollbar's worth is the scrollbar, the pager holds
+  // the narrower for a moment. Bigger or slower changes are followed.
   const pagerWidthDamper = useRef(createWidthDamper());
   const takeMeasurePass = () => {
     if (measureBudgetFrame.current === null && typeof requestAnimationFrame === 'function') {
@@ -2450,6 +2451,13 @@ export function ActionHub({
   };
   useEffect(() => () => {
     if (measureBudgetFrame.current !== null) cancelAnimationFrame(measureBudgetFrame.current);
+  }, []);
+  // A window resize is a real width change, never the scrollbar cycle.
+  useEffect(() => {
+    if (!WEB || typeof window === 'undefined') return;
+    const release = () => pagerWidthDamper.current.release();
+    window.addEventListener('resize', release);
+    return () => window.removeEventListener('resize', release);
   }, []);
   useLayoutEffect(() => {
     if (!WEB || !isFocused) return;

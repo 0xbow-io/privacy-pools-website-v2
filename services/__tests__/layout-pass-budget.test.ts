@@ -68,32 +68,75 @@ describe('layout pass budget', () => {
 });
 
 describe('width damper', () => {
+  /** A damper on a fake clock, committing like the pager does. */
+  function harness() {
+    let t = 0;
+    const d = createWidthDamper({ now: () => t });
+    let w = 0;
+    const commit = (m: number, after = 16) => {
+      t += after;
+      const n = d.next(m, w);
+      if (n !== null) w = n;
+      return n;
+    };
+    return { d, commit, width: () => w, wait: (ms: number) => { t += ms; } };
+  }
+
   test('follows ordinary width changes', () => {
-    const d = createWidthDamper();
-    expect(d.next(400, 0)).toBe(400);
-    expect(d.next(400, 400)).toBeNull();
-    expect(d.next(600, 400)).toBe(600);
+    const { commit, width } = harness();
+    expect(commit(400)).toBe(400);
+    expect(commit(400)).toBeNull();
+    expect(commit(600)).toBe(600);
+    expect(width()).toBe(600);
   });
 
   test('a scrollbar flip-flop settles on the narrower width and stays there', () => {
-    const d = createWidthDamper();
-    let w = 0;
-    const commit = (m: number) => { const n = d.next(m, w); if (n !== null) w = n; return n; };
+    const { commit, width } = harness();
     commit(400); // first measure
     commit(385); // scrollbar appears
-    commit(400); // scrollbar gone: flip back, cycle detected
-    expect(w).toBe(385);
+    commit(400); // scrollbar gone: flip back a frame later, cycle detected
+    expect(width()).toBe(385);
     // The cycle keeps reporting both values; nothing more is committed.
     for (let i = 0; i < 20; i += 1) expect(commit(i % 2 ? 385 : 400)).toBeNull();
-    expect(w).toBe(385);
+    expect(width()).toBe(385);
   });
 
   test('a genuine resize releases the pin', () => {
-    const d = createWidthDamper();
-    let w = 0;
-    const commit = (m: number) => { const n = d.next(m, w); if (n !== null) w = n; };
+    const { commit, width } = harness();
     commit(400); commit(385); commit(400);
     commit(700);
-    expect(w).toBe(700);
+    expect(width()).toBe(700);
+  });
+
+  test('a real resize back to an earlier, much wider width is honoured', () => {
+    const { commit, width } = harness();
+    // Landscape, portrait, landscape, portrait, landscape (or maximize/restore twice).
+    for (const w of [700, 400, 700, 400, 700]) {
+      commit(w);
+      expect(width()).toBe(w);
+    }
+  });
+
+  test('a slow flip back by a scrollbar width is a real resize', () => {
+    const { commit, width } = harness();
+    commit(400);
+    commit(385);
+    commit(400, 1000); // devtools opened then closed a second later
+    expect(width()).toBe(400);
+  });
+
+  test('the pin runs out and release() drops it', () => {
+    const h = harness();
+    h.commit(400); h.commit(385); h.commit(400);
+    expect(h.width()).toBe(385);
+    h.wait(5000);
+    h.commit(400);
+    expect(h.width()).toBe(400);
+
+    h.commit(385); h.commit(400);
+    expect(h.width()).toBe(385);
+    h.d.release(); // window resize event
+    h.commit(400);
+    expect(h.width()).toBe(400);
   });
 });
