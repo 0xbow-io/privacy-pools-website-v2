@@ -144,8 +144,8 @@ function withAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
  * Sepolia), so a missing registry entry falls back to the user's override for
  * that chain, then ours. Same reads, same allowlist, whichever chain.
  *
- * Takes the bootstrap's signal: the harness keeps booting after close(), so
- * failing these reads is what stops it before the bundle download and iframe.
+ * Takes the bootstrap's signal: the harness stops booting on close() but
+ * cannot cancel a read it has handed to this provider, so closing ends it here.
  */
 async function bootstrapProvider(provider: TorProvider, signal: AbortSignal) {
   const { getChainConfig } = await import('@/config/chains');
@@ -161,7 +161,6 @@ async function bootstrapProvider(provider: TorProvider, signal: AbortSignal) {
   let id = 0;
   return {
     async request({ method, params }: { method: string; params?: unknown[] }): Promise<unknown> {
-      throwIfAborted(signal);
       const body = JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params: params ?? [] });
       const headers = { 'content-type': 'application/json' };
       assertEgressAllowed('rpc', { method: 'POST', url: endpoint, headers, body });
@@ -170,7 +169,6 @@ async function bootstrapProvider(provider: TorProvider, signal: AbortSignal) {
       });
       if (!response.ok) throw new Error(`specifier read failed: HTTP ${response.status}`);
       const reply = await response.json() as { result?: unknown; error?: { message?: string } };
-      throwIfAborted(signal);
       if (reply.error) throw new Error(`specifier read failed: ${reply.error.message ?? 'RPC error'}`);
       if (isWorkerHashRead(provider, method, params) && !sameHash(reply.result, provider.workerHash)) {
         throw new TorUnavailableError('The anon-rpc client named on-chain is not the one this build accepts.');
@@ -317,32 +315,6 @@ async function loadClient(
 }
 
 /**
- * The harness drops a call's abort listener once headers arrive, while the
- * body may still be streaming. Re-attach the signal to the body, so a timeout
- * still ends a probe that has its headers but not its answer.
- */
-function abortableBody(response: Response, signal: AbortSignal): Response {
-  if (!response.body) return response;
-  const reader = response.body.getReader();
-  const body = new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      try {
-        const { value, done } = await withAbort(reader.read(), signal);
-        if (done) controller.close();
-        else controller.enqueue(value);
-      } catch (error) {
-        void reader.cancel(error).catch(() => {});
-        controller.error(error);
-      }
-    },
-    cancel(reason) {
-      return reader.cancel(reason);
-    },
-  });
-  return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
-}
-
-/**
  * The Tor fetch for this page load, or null when Tor is not in force.
  *
  * Null rather than a passthrough, so a caller has to decide what to do about
@@ -382,13 +354,14 @@ export function createTorFetch(gatewayUrl: string, providerId: TorProviderId = D
         ? null : new Uint8Array(await withAbort(request.arrayBuffer(), signal));
       const body = bytes && bytes.byteLength > 0 ? bytes : undefined;
       throwIfAborted(signal);
-      const response = await withAbort(client.fetch(request.url, {
+      // The harness ends a streamed body when this signal aborts, so a timeout
+      // still ends a probe that has its headers but not its answer.
+      return await withAbort(client.fetch(request.url, {
         method: request.method,
         headers: Object.fromEntries(request.headers.entries()),
         body,
         signal,
       }), signal);
-      return abortableBody(response, signal);
     } finally {
       // Where release does anything (React Native), the native client has
       // already buffered the whole response, so no body is left to abort.
