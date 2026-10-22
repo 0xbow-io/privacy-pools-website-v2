@@ -2,6 +2,11 @@
 
 All notable changes to the Privacy Pools v2 web app are documented in this file.
 
+## [1.1.1] - 2026-10-21
+
+### Fixed
+- The Swap tab no longer crashes (React #185) when the page sits near the scrollbar threshold.
+
 ## [1.0.0] - 2026-10-20
 
 First public release of the Privacy Pools v2 web app, live at https://privacypools.com.
