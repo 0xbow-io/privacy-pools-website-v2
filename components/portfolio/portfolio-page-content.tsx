@@ -1,4 +1,5 @@
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
+import { LooseShareUnwrap } from '@/components/yield/loose-share-unwrap';
 import { poolDisplayLabel } from '@/config/pool-paths';
 import { useMemo } from 'react';
 import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
@@ -182,6 +183,7 @@ function PortfolioBody() {
             constant because NativeWind only compiles class strings it can read
             statically. */}
         <View className="mx-auto w-full max-w-[1100px] grow gap-[20px]">
+          <LooseShareUnwrap />
           {signedOut ? (
             <View
               testID="portfolio-sign-in"

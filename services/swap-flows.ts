@@ -149,6 +149,12 @@ export type SubmitSwapTx = (
   onBroadcast?: (hash: Hex) => void,
 ) => Promise<SubmittedTx>;
 
+/** Null: the wallet cannot batch atomically here, and nothing was sent. */
+export type SubmitSwapBatch = (
+  txs: PreparedTxLike[],
+  onBroadcast?: (hash: Hex) => void,
+) => Promise<SubmittedTx | null>;
+
 /** Raised when a prepared transaction doesn't match what it claims to be. */
 export class UnexpectedSwapTxError extends Error {
   constructor(message: string) {
@@ -685,6 +691,14 @@ export async function runSwapAndDeposit(
      * the swap go through this.
      */
     submit: SubmitSwapTx;
+    /**
+     * Submit the approval(s) and the swap as ONE atomic batch (EIP-5792
+     * `wallet_sendCalls` with atomic execution) and resolve once it is mined.
+     * Resolve null, having sent nothing, when the wallet cannot batch
+     * atomically on this chain: the flow then approves step by step as before.
+     * `onBroadcast` gets the swap's transaction hash once the batch has one.
+     */
+    submitBatch?: SubmitSwapBatch;
     /** Caller-owned recovery rows, retained across retries for this wallet/chain/token. */
     approvalRecovery?: SentApprovalRecord[];
     /** Own-wallet receipts only. Null means the transaction is not confirmed yet. */
@@ -1161,6 +1175,12 @@ export async function runSwapAndDeposit(
       );
     }
   };
+  // Approvals this run would put in front of the wallet one by one. When the
+  // wallet can batch atomically (EIP-5792) and the route already simulated
+  // clean, they ride in ONE call with the swap instead (below): one prompt, and
+  // an approval that can never outlive a reverted swap. Anything else keeps the
+  // step-by-step path exactly as before.
+  const queued: unknown[] = [];
   if (prepared.approvalTx !== null && prepared.approvalTx !== undefined) {
     // Every approval the SDK planned, in order: an approve(0) reset comes
     // first for a token that rejects non-zero to non-zero approvals (USDT).
@@ -1170,7 +1190,14 @@ export async function runSwapAndDeposit(
     const planned = Array.isArray(prepared.approvalTxs) && prepared.approvalTxs.length > 0
       ? prepared.approvalTxs
       : [prepared.approvalTx];
-    for (const raw of planned) await approve(raw);
+    // The route supplies the spender, never an unlimited spending cap.
+    // Keep zero resets and replace positive grants with the reviewed input.
+    queued.push(...planned.map(raw => {
+      const tx = assertSwapApprovalTx(raw, params.inputToken, spender);
+      const grant = approvedAmountOf(tx.data);
+      const needed = hexToBigInt(prepared.estimatedInputAmount);
+      return grant === 0n || grant === needed ? tx : buildApprovalTx(params.inputToken, spender, needed);
+    }));
   } else if (params.readAllowance) {
     // The SDK builds no approval when it believes the allowance already
     // covers the route. That belief has been wrong before, so read the real
@@ -1188,10 +1215,76 @@ export async function runSwapAndDeposit(
     try { held = await params.readAllowance(params.inputToken, spender); } catch { held = null; }
     if (held !== null) {
       for (const amount of approvalAmountPlan(held, needed)) {
-        await approve(buildApprovalTx(params.inputToken, spender, amount));
+        queued.push(buildApprovalTx(params.inputToken, spender, amount));
       }
     }
   }
+
+  // ── One atomic call, where the wallet supports it ─────────────────────
+  //
+  // Only when the route was already proven against the allowance it is about
+  // to receive (routeValidated): the step-by-step path's post-approval
+  // simulation and retry ladder have nothing to run against inside a batch.
+  // `submitBatch` returns null, having sent nothing, when this wallet cannot
+  // batch atomically on this chain, and the step-by-step path runs instead.
+  let beforeSwapRan = false;
+  if (queued.length > 0 && params.submitBatch && routeValidated) {
+    const approvals = queued.map((raw) => assertSwapApprovalTx(raw, params.inputToken, spender));
+    if (!prepared.transactionTo || !prepared.transactionData) {
+      await abandon(UnexpectedSwapTxError, 'The route returned no swap transaction.');
+    }
+    if (params.beforeSwapSubmit) {
+      const final = prepared;
+      await guarded(() => params.beforeSwapSubmit!(final, depositAmountWei));
+      // Same route and amount on the step-by-step fallback: not asked twice.
+      beforeSwapRan = true;
+    }
+    params.onStep?.('submit', `Approve and swap in one step (sign in wallet).`);
+    const swapTx = {
+      to: prepared.transactionTo,
+      data: prepared.transactionData,
+      ...(prepared.msgValue ? { value: prepared.msgValue } : {}),
+    };
+    console.log('[SwapDeposit] submitting approval + swap as one atomic batch', { calls: approvals.length + 1 });
+    // The spender is read back on any failure, like a step-by-step approval:
+    // an atomic revert also rolls back an approve(0) reset, which leaves any
+    // allowance that stood before this run standing again.
+    prompted.push(spender);
+    const batched = await guarded(async () => {
+      swapState = 'unknown';
+      let result: SubmittedTx | null;
+      try {
+        result = await params.submitBatch!([...approvals, swapTx], (hash) => {
+        try {
+          params.onSwapBroadcast?.(hash, prepared, depositAmountWei);
+        } catch {
+          // A display hook must not fail the swap.
+        }
+        });
+      } catch (err) {
+        // The wallet answered that it never included the batch: nothing is in
+        // flight, and the error may say so plainly.
+        if (err instanceof Error && err.name === 'BatchNotSubmittedError') swapState = null;
+        throw err;
+      }
+      if (result === null) swapState = null;
+      else swapState = result.success ? null : 'reverted';
+      return result;
+    });
+    if (batched !== null) {
+      if (!batched.success) {
+        // Atomic: this run's approvals reverted with the swap. Whatever allowance
+        // stood before it is read back and handed back by abandon, which says so.
+        await abandon(
+          SwapDepositPreflightError,
+          'The approve and swap batch reverted on-chain. Everything in it rolled back together, so nothing was shielded.',
+        );
+      }
+      return { prepared, txHash: batched.txHash, depositAmountWei };
+    }
+    console.log('[SwapDeposit] wallet cannot batch atomically here, approving step by step');
+  }
+  for (const raw of queued) await approve(raw);
 
   params.onStep?.('submit');
   if (!prepared.transactionTo || !prepared.transactionData) {
@@ -1279,7 +1372,7 @@ export async function runSwapAndDeposit(
       params.onStep?.('submit');
     }
   }
-  if (params.beforeSwapSubmit) {
+  if (params.beforeSwapSubmit && !beforeSwapRan) {
     const final = prepared;
     await guarded(() => params.beforeSwapSubmit!(final, depositAmountWei));
   }

@@ -8,7 +8,14 @@ import { useOpLock } from '@/hooks/use-op-lock';
 import { View, Text, Pressable, Platform, useWindowDimensions, Animated, Easing, Linking, ScrollView } from 'react-native';
 import type { ViewStyle } from 'react-native';
 import Svg, { Path, Circle, Ellipse } from 'react-native-svg';
-import { useAccount, useSendTransaction, usePublicClient } from 'wagmi';
+import { useAccount, useConfig, useSendTransaction, usePublicClient } from 'wagmi';
+import { getAccount, sendCalls, getCallsStatus } from '@wagmi/core';
+import { walletCapabilities } from '@/services/wallet-signature-timeout';
+import { submitAtomicBatch } from '@/services/wallet-batch';
+import { buildRagequitUnwrapCalls, receivedWrappedNative, wrappedNativeWithdrawCall } from '@/services/ragequit-unwrap';
+import { getPinnedYieldDeployments } from '@/config/yield';
+import { unwrapTargetSymbol } from '@/services/loose-share-unwrap';
+import { usePools } from '@/components/pools-provider';
 import { useQueryClient } from '@tanstack/react-query';
 import { NoteStatus, type Note } from '@/services/sdk-types';
 import { invalidateTransactionCaches } from '@/services/cache';
@@ -159,7 +166,9 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
   const withOpLock = useOpLock();
   // Chain FROZEN at submission (codex round 3, P2).
   const [txChainId, setTxChainId] = useState<number | null>(null);
-  const { address: connectedAddress } = useAccount();
+  const { address: connectedAddress, connector } = useAccount();
+  const wagmiConfig = useConfig();
+  const { walletShareBalances } = usePools();
   // Sui chain branch: the ragequit modal is otherwise EVM-only (wagmi + EVM
   // SDK). On Sui we exit via the native Sui session instead — its notes live in
   // a separate local store the EVM NoteManager never sees.
@@ -194,6 +203,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
   const [txHash, setTxHash] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [loadingMessage, setLoadingMessage] = useState('');
+  const [exitResult, setExitResult] = useState<string | null>(null);
   const spinAnim = useRef(new Animated.Value(0)).current;
 
   // Entrance animation: bottom drawer slide-up on mobile, settle-in on desktop.
@@ -338,6 +348,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
 
     setStep('loading');
     setErrorMessage(null);
+    setExitResult(null);
     // This attempt is accepted: drop the previous attempt's hash/chain pair so
     // the loading UI can never link the PRIOR failed transaction (codex).
     setTxHash(null);
@@ -480,42 +491,49 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
       // overlay is on and is exported wholesale into bug reports.
       log('info', 'Ragequit', 'prepareRageQuit succeeded', { to: result.ragequitTx.to });
 
-      // Step 2: Submit on-chain transaction via wagmi
-      if (!live()) { log('warn', 'Ragequit', 'Stale run aborted before broadcast'); return; }
-      setLoadingMessage('Submitting ragequit transaction...');
-      log('debug', 'Ragequit', 'Submitting transaction', { to: result.ragequitTx.to });
-
-      const hash = await sendTransactionAsync({
-        to: result.ragequitTx.to as ViemHex,
-        data: result.ragequitTx.data as ViemHex,
-        // Pinned: prepareRageQuit() above builds calldata for THIS chain and
-        // runs long enough for the wallet to change networks underneath it.
-        // Unpinned, the connector submits that calldata wherever it now points
-        // — and the receipt wait below watches this chain's client, so the
-        // result is a hang after wasted gas, or a silent no-op on a chain
-        // where the target address has no code.
-        chainId,
-      });
-
-      log('info', 'Ragequit', 'Transaction submitted', { txHash: hash });
-      setTxHash(hash);
-      setTxChainId(chainId);
-
-      // Step 3: Wait for confirmation (required — cannot mark EXITED without receipt)
-      if (!publicClient) {
-        throw new Error('Public client unavailable. Cannot confirm transaction. Check wallet connection and try again.');
-      }
-      setLoadingMessage('Waiting for confirmation...');
-      const receipt = await publicClient.waitForTransactionReceipt({
-        hash,
-        timeout: 180_000,
-      });
-      // Literal 'success' required (codex round 1): a REVERTED ragequit used
-      // to be marked EXITED locally — the note vanished from the UI while
-      // the funds were still in the pool.
-      if (receipt.status !== 'success') {
-        throw new Error(`Ragequit transaction reverted on-chain (tx ${hash}). The note was NOT exited.`);
-      }
+      if (!publicClient || !connectedAddress) throw new Error('Connect the owner wallet to continue.');
+      const owner = connectedAddress;
+      const assertWallet = () => {
+        const account = getAccount(wagmiConfig);
+        if (!live() || account.address?.toLowerCase() !== owner.toLowerCase() || account.chainId !== chainId) {
+          throw new Error('Wallet or network changed. Continue with the original wallet and network.');
+        }
+      };
+      const deployment = getPinnedYieldDeployments(chainId).find(d => d.ppUSDC.toLowerCase() === selectedNote.tokenId.toLowerCase());
+      const allowance = walletShareBalances?.chainId === chainId && walletShareBalances.owner.toLowerCase() === owner.toLowerCase()
+        ? walletShareBalances.allowances[selectedNote.tokenId.toLowerCase()] : undefined;
+      const calls = buildRagequitUnwrapCalls(result.ragequitTx, deployment, BigInt(selectedNote.value), owner, allowance);
+      const send = async (call: typeof calls[number], label: string) => {
+        assertWallet();
+        setLoadingMessage(`Confirm ${label} in your wallet...`);
+        const hash = await sendTransactionAsync({ account: owner, to: call.to as ViemHex, data: call.data as ViemHex, value: call.value ? BigInt(call.value) : 0n, chainId });
+        if (live()) { setTxHash(hash); setTxChainId(chainId); setLoadingMessage(`Waiting for ${label} confirmation...`); }
+        const receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 180_000 });
+        if (receipt.status !== 'success') throw new Error(`${label} reverted.`);
+        return receipt;
+      };
+      assertWallet();
+      const batch = deployment ? await submitAtomicBatch({
+        getCapabilities: async () => {
+          const caps = await walletCapabilities(connector, owner);
+          return (caps as Record<string, Record<string, unknown>> | null)?.[`0x${chainId.toString(16)}`];
+        },
+        sendCalls: async ({ calls: batchCalls }) => {
+          assertWallet();
+          setLoadingMessage('Confirm exit and unwrap in your wallet...');
+          return sendCalls(wagmiConfig, { account: owner, chainId, forceAtomic: true, calls: batchCalls.map(call => ({ to: call.to as ViemHex, data: call.data as ViemHex, value: call.value ? BigInt(call.value) : 0n })) });
+        },
+        getCallsStatus: async id => {
+          if (live()) setLoadingMessage('Waiting for exit and unwrap confirmation...');
+          return getCallsStatus(wagmiConfig, { id });
+        },
+      }, { chainId, calls, onBroadcast: hash => { if (live()) { setTxHash(hash); setTxChainId(chainId); } } }) : null;
+      if (batch && !batch.success) throw new Error('Exit and unwrap reverted. Nothing was exited.');
+      const receipt = batch?.txHash
+        ? await publicClient.waitForTransactionReceipt({ hash: batch.txHash as ViemHex, timeout: 180_000 })
+        : await send(calls[0], 'exit');
+      if (receipt.status !== 'success') throw new Error('Exit reverted. Nothing was exited.');
+      const hash = receipt.transactionHash;
       log('info', 'Ragequit', 'Transaction confirmed', { txHash: hash });
 
       // This exit is the chain's now, not a claim — so drop it from the offered
@@ -566,6 +584,30 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
       // Refresh every page that shows transactions / events / stats.
       await invalidateTransactionCaches(queryClient);
 
+      // The exit is recorded before any further wallet prompt. Cancelling an
+      // unwrap must never offer the already-exited note for another ragequit.
+      if (deployment) {
+        let redeemed = !!batch;
+        try {
+          let redeemReceipt = receipt;
+          if (!batch) {
+            for (const call of calls.slice(1)) redeemReceipt = await send(call, call.to.toLowerCase() === deployment.ppUSDC.toLowerCase() && deployment.zap ? 'approval' : 'unwrap');
+            redeemed = true;
+          }
+          if (live()) setExitResult(`Unwrapped to ${unwrapTargetSymbol(deployment)}`);
+          if (deployment.zap && deployment.nativeMode && deployment.underlyingSymbol.toUpperCase() === 'WETH') {
+            const weth = receivedWrappedNative(redeemReceipt.logs, deployment.underlying, owner);
+            await send(wrappedNativeWithdrawCall(deployment.underlying, weth), 'ETH unwrap');
+            if (live()) setExitResult('Unwrapped to ETH');
+          }
+        } catch {
+          if (live()) setExitResult(redeemed
+            ? deployment.nativeMode && deployment.zap
+              ? 'Exit complete. Check your wallet for ETH or WETH.'
+              : `Exit complete. Unwrapped to ${unwrapTargetSymbol(deployment)}.`
+            : 'Exit complete. Finish unwrapping in Portfolio.');
+        }
+      }
       if (live()) setStep('success');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -596,7 +638,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
     } finally {
       releaseTx();
     }
-  }, [selectedNote, sendTransactionAsync, publicClient, log, refetchNotes, ensureInitialized, identityMode, exportAccount, queryClient, chainId, connectedAddress, beginTx, endTx, openKeystoreRegistrationModal, isSui, isStellar, suiSession, stellarSession]);
+  }, [connector, wagmiConfig, walletShareBalances, selectedNote, sendTransactionAsync, publicClient, log, refetchNotes, ensureInitialized, identityMode, exportAccount, queryClient, chainId, connectedAddress, beginTx, endTx, openKeystoreRegistrationModal, isSui, isStellar, suiSession, stellarSession]);
 
   // Same-tick double-press guard — see hooks/use-op-lock.ts.
   const handleAcceptAndExit = useMemo(() => withOpLock(handleAcceptAndExitUnlocked), [withOpLock, handleAcceptAndExitUnlocked]);
@@ -908,7 +950,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
                   </Text>
                   {selectedNote && (
                     <Text className="font-pp-regular text-[14px] text-center text-[#737373]">
-                      {tokenAmountLabel(formatNote(selectedNote), noteMeta(selectedNote).symbol)} returned to this wallet
+                      {exitResult ?? `${tokenAmountLabel(formatNote(selectedNote), noteMeta(selectedNote).symbol)} returned to this wallet`}
                     </Text>
                   )}
                 </View>
