@@ -38,6 +38,29 @@ function evaluate(node: ts.Node, root: ts.SourceFile, context: Record<string, un
     ...Object.values(context),
   );
 }
+// The component's sameOrigin, run against a page at `href`.
+function sameOriginAt(href: string): (url: string) => boolean {
+  const declaration = find(
+    newsletter,
+    (node) => ts.isFunctionDeclaration(node) && node.name?.getText(newsletter) === 'sameOrigin',
+  );
+  const js = ts.transpileModule(declaration.getText(newsletter), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const location = new URL(href);
+  return new Function('location', `${js}\nreturn sameOrigin;`)({ href: location.href, origin: location.origin });
+}
+
+describe('newsletter endpoint origin', () => {
+  test('only a URL that resolves to the page origin counts as same-origin', () => {
+    const sameOrigin = sameOriginAt('https://app.example/landing');
+    expect(sameOrigin('/api/newsletter')).toBe(true);
+    expect(sameOrigin('https://app.example/api/newsletter')).toBe(true);
+    expect(sameOrigin('//mailer.example/subscribe')).toBe(false);
+    expect(sameOrigin('https://mailer.example/subscribe')).toBe(false);
+  });
+});
+
 function submissionFixture(fetch: typeof globalThis.fetch) {
   const state = { step: 'form', email: 'person@example.com', error: null as unknown };
   const submission = { current: null as AbortController | null };
@@ -49,6 +72,7 @@ function submissionFixture(fetch: typeof globalThis.fetch) {
     turnstileToken: 'test-token',
     EMAIL_REGEX: /.+@.+\..+/,
     NEWSLETTER_API_URL: '/test-newsletter',
+    sameOrigin: () => true,
     setStep: (step: string) => {
       state.step = step;
     },
