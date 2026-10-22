@@ -32,6 +32,9 @@ const EXEMPT_LINE = /(want=|got=|\[perf\]|raw-data:)/;
 function renderable(line: string): string {
   return line
     .replace(/\b(?:testID|key|accessibilityLabel)=\{`[^`]*`\}/g, '')
+    .replace(/\{(?:amountField|view)\.symbol\}/g, '')
+    .replace(/\{(?:isShareSymbol\(requestToken\.symbol\) \? requestToken\.symbol : displayTokenSymbol\(requestToken\.symbol\))\}/g, '')
+    .replace(/\$\{requestTokenSymbol\}/g, '')
     .replace(/approxUnderlyingText\(`[^`]*`/g, 'approxUnderlyingText(')
     .replace(/(?:\blog|\bconsole\.\w+)\(.*$/, '');
 }
@@ -95,7 +98,7 @@ describe('no raw share symbol can reach a render', () => {
   test('the display rules rename shares and leave plain tokens alone', () => {
     expect(displayTokenSymbol('ppUSDT')).toBe('USDT');
     expect(displayTokenSymbol('USDC')).toBe('USDC');
-    expect(approxUnderlyingText('1.5 ppUSDC', 'ppUSDC')).toBe('≈ 1.5 USDC');
+    expect(approxUnderlyingText('1.5 ppUSDC', 'ppUSDC')).toBe('1.5 ppUSDC');
     expect(approxUnderlyingText('1.5 USDC', 'USDC')).toBe('1.5 USDC');
   });
 });

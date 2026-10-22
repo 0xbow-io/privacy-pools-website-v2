@@ -8,6 +8,7 @@ import { useNotes } from '@/hooks/use-notes';
 import { usePoolSession } from '@/hooks/use-pool-session';
 import { useMultiChainWallet } from '@/hooks/use-multi-chain-wallet';
 import { useChainRouter } from '@/hooks/use-chain-router';
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { depositTransitionTxs, detectStatusTransitions } from '@/services/notification-transitions';
 
 /**
@@ -66,6 +67,7 @@ export function StatusNotifier(): null {
   const { identityMode, sessionAddress } = usePoolSession();
   const { address: walletAddress } = useMultiChainWallet();
   const { activeChainId } = useChainRouter();
+  const balanceDisplay = useBalanceDisplay(activeChainId);
 
   // The logical notification identity. Any change fully re-seeds the memory.
   const identityKey = `${activeChainId}|${identityMode ?? 'none'}|${(sessionAddress ?? walletAddress ?? '').toLowerCase()}`;
@@ -97,7 +99,12 @@ export function StatusNotifier(): null {
     const input = depositTransitionTxs(data.transactions, (tx) => (noteTxHashes
       ? noteTxHashes.has(tx.txHash.toLowerCase())
       : !!addrLc && !!tx.fullAddress && tx.fullAddress.toLowerCase() === addrLc));
-    const { events, next } = detectStatusTransitions(prevStatuses.current, input);
+    const { events, next } = detectStatusTransitions(prevStatuses.current, input, (tx) => {
+      // Toast copy only: the grid-backed rate converts the displayed quantity,
+      // never the activity row or any operational amount.
+      const view = balanceDisplay(tx.tokenAmount, tx.asset, tx.chainId, tx.tokenAddress);
+      return `${view.converted ? '≈ ' : ''}${view.text}`;
+    });
     prevStatuses.current = next;
     saveSeenStatuses(identityKey, next);
     for (const event of events) {
@@ -107,7 +114,7 @@ export function StatusNotifier(): null {
       if (event.baseType !== 'Deposit') continue;
       toast({ title: event.title, description: event.description, variant: event.variant });
     }
-  }, [identityKey, identityMode, sessionAddress, walletAddress, notes, data.transactions, toast]);
+  }, [identityKey, identityMode, sessionAddress, walletAddress, notes, data.transactions, balanceDisplay, toast]);
 
   return null;
 }

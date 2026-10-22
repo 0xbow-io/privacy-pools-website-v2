@@ -514,7 +514,7 @@ describe('runSwapAndDeposit (flow 1 orchestration)', () => {
     // Submitting only approvalTx skipped the reset and reverted the second
     // USDT swap-deposit. Both must go out, reset first, then the swap.
     const reset = { to: USDC, data: approveCalldata(LIFI_PROXY, 0n) };
-    const grant = { to: USDC, data: approveCalldata(LIFI_PROXY, 5n) };
+    const grant = { to: USDC, data: approveCalldata(LIFI_PROXY, 2_000_000n) };
     const submitted: { kind: string; data: string }[] = [];
     const { session } = makeSession({ ...base, approvalTx: grant, approvalTxs: [reset, grant] });
     await runSwapAndDeposit(session, {
@@ -2176,7 +2176,8 @@ describe('an abandoned swap-deposit leaves no live allowance', () => {
       simulateWithAllowance: async () => ({ ok: true, supported: true }),
     }).catch((err: Error) => err.message);
     // The allowance really is still there, and the copy says so plus what to do.
-    expect(w.live()).toEqual([1_000_000n]);
+    // The permission is capped to the reviewed route input, not the SDK grant.
+    expect(w.live()).toEqual([2_000_000n]);
     expect(message).toMatch(/reverted on-chain/);
     expect(message).toMatch(/did not go through/);
     expect(message).toMatch(/Revoke it in your wallet/);

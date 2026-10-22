@@ -59,7 +59,7 @@ describe('share display', () => {
   });
 });
 
-describe('a share amount is shown under its underlying, converted or approximate', () => {
+describe('a share amount uses underlying only after conversion', () => {
   const fmt = (v: number, _s: string) => v.toFixed(5);
 
   test('with the live rate the row prints the exact converted figure in the underlying', () => {
@@ -69,13 +69,11 @@ describe('a share amount is shown under its underlying, converted or approximate
       .toBe('49.91384 USDC');
   });
 
-  test('without the rate it prints the share COUNT under the underlying name, marked approximate', () => {
-    // This is the case that shipped: the same deposit read "49.87911 ppUSDC"
-    // on the public feed and looked like a fee had been taken (Pat,
-    // 2026-09-12). It may never name the share, and it may never overstate.
+  test('without the rate it keeps the share COUNT under its own symbol', () => {
+    // Without a rate the figure is still a share count, not USDC.
     const text = shareAmountText({ amount: 49.879113693, assetSymbol: 'ppUSDC', underlyingAmount: null, format: fmt });
-    expect(text).toBe('≈ 49.87911 USDC');
-    expect(text).not.toMatch(/\bpp(usdc|usdt)\b/i);
+    expect(text).toBe('49.87911 ppUSDC');
+    expect(text).toContain('ppUSDC');
     expect(parseFloat(text.replace('≈ ', ''))).toBeLessThan(49.913840);
   });
 
@@ -86,15 +84,15 @@ describe('a share amount is shown under its underlying, converted or approximate
   });
 
   test('USDT shares follow the same rule, so this is not a USDC special case', () => {
-    expect(shareAmountText({ amount: 10, assetSymbol: 'ppUSDT', underlyingAmount: null, format: fmt })).toBe('≈ 10.00000 USDT');
+    expect(shareAmountText({ amount: 10, assetSymbol: 'ppUSDT', underlyingAmount: null, format: fmt })).toBe('10.00000 ppUSDT');
     expect(shareAmountText({ amount: 10, assetSymbol: 'ppUSDT', underlyingAmount: 10.007, format: fmt })).toBe('10.00700 USDT');
   });
 
-  test('a pre-formatted figure (the ASP compact string, a provider balance) is renamed in place', () => {
-    expect(approxUnderlyingText('1.23K ppUSDC', 'ppUSDC')).toBe('≈ 1.23K USDC');
-    expect(approxUnderlyingText('0.0000 ppUSDT', 'ppUSDT')).toBe('≈ 0.0000 USDT');
+  test('a pre-formatted share fallback keeps its own units', () => {
+    expect(approxUnderlyingText('1.23K ppUSDC', 'ppUSDC')).toBe('1.23K ppUSDC');
+    expect(approxUnderlyingText('0.0000 ppUSDT', 'ppUSDT')).toBe('0.0000 ppUSDT');
     // Case as the ASP sends it.
-    expect(approxUnderlyingText('5 PPUSDC', 'ppUSDC')).toBe('≈ 5 USDC');
+    expect(approxUnderlyingText('5 PPUSDC', 'ppUSDC')).toBe('5 PPUSDC');
     // Idempotent: a string already marked is not marked twice.
     expect(approxUnderlyingText('≈ 1.23K USDC', 'ppUSDC')).toBe('≈ 1.23K USDC');
     // Non-shares and empties pass straight through.
@@ -112,15 +110,14 @@ describe('share review figures', () => {
     expect(netSharesWei(100n, 100n, false)).toBeNull();
     expect(netSharesWei(0n, 0n, true)).toBeNull();
   });
-  test('a share reads as USDC converted, estimating, or approximate - never as the share', () => {
+  test('a share reads as converted USDC, estimating, or the share fallback', () => {
     const format = (n: number) => String(n);
     const base = { isShare: true, shares: 100, shareSymbol: 'ppUSDC', underlyingSymbol: 'USDC', format };
     expect(shareReviewHeadline({ ...base, underlying: 105.2, pending: false })).toBe('≈ 105.2 USDC');
     expect(shareReviewHeadline({ ...base, underlying: null, pending: true })).toBe('Estimating USDC…');
-    // The read failed, not in flight: still the underlying's name, marked
-    // approximate and understating (Pat, 2026-09-12).
-    expect(shareReviewHeadline({ ...base, underlying: null, pending: false })).toBe('≈ 100 USDC');
-    expect(shareReviewHeadline({ ...base, underlying: null, pending: false })).not.toMatch(/\bpp(usdc|usdt)\b/i);
+    // The read failed: the fallback is a share count, so it names the share.
+    expect(shareReviewHeadline({ ...base, underlying: null, pending: false })).toBe('100 ppUSDC');
+    expect(shareReviewHeadline({ ...base, underlying: null, pending: false })).toContain('ppUSDC');
     expect(shareReviewHeadline({ ...base, isShare: false, shareSymbol: 'ETH', underlyingSymbol: 'ETH', underlying: null, pending: false })).toBe('100 ETH');
   });
 });

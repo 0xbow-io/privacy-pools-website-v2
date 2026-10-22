@@ -1,4 +1,15 @@
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
+// RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
+// amounts, validation, quotes, relayer and on-chain values stay in shares
+// (exact strings/bigints). Never convert an amount to underlying and back,
+// never feed a displayed underlying figure into an operation.
+// Display headlines use underlying through shareBalanceDisplay; shares appear
+// only in the (i) hint, in fields labelled with the share symbol, or while the
+// rate is unknown. Never print a share count under the underlying symbol.
+// Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
+// MAX retains the original exact shares. USD edits use an exact decimal price
+// in that same boundary. No other operation converts display back.
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { poolVisible } from '@/services/pool-visibility-rule';
 import { isSupersededLegacyPool, poolDisplayLabel, poolSymbolFromRoute } from '@/config/pool-paths';
 import { Fragment, useState, useMemo, useEffect, useRef, useCallback } from 'react';
@@ -134,6 +145,7 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
   const { data, statistics } = usePools();
   // Live USDC-per-ppUSDC: a share pool prints the USDC it is worth (Pat, 2026-09-05).
   const { rateFor } = useShareRates();
+  const balanceDisplay = useBalanceDisplay();
   const { openDepositModal } = useDepositModal();
   const { openWithdrawModal } = useWithdrawModal();
   const { openTransferModal } = useTransferModal();
@@ -512,12 +524,12 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
       ),
       balance: pool.balance,
       pendingValue: pool.pending,
-      ethBalance: approxUnderlyingText(pool.balanceToken, pool.name),
+      ethBalance: balanceDisplay(pool.balanceTokenExact, pool.name, pool.chainId, pool.tokenAddress).text,
       scoreColor: SCORE_COLORS[Math.min(i % 3, 2)],
       filledDots: Math.min(pool.poolAccounts, 3),
       total: pool.balance,
     }));
-  }, [data.myPools]);
+  }, [data.myPools, balanceDisplay]);
 
   // A share pool is named by its underlying: "USDC Pool", not "PPUSDC Pool".
   const poolName = `${poolDisplayLabel(currentPoolToken, poolChainId)} Pool`;

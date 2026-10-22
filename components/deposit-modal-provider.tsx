@@ -5,6 +5,10 @@ import { relaunchReady } from '@/services/deposit-relaunch';
 import { simulateWithAllowanceOverride } from '@/services/allowance-override-sim';
 import { KEY_SESSION_DEPOSIT_FOR_COPY } from '@/services/recipient-registration-hint';
 import { submitWalletTransaction } from '@/services/wallet-submit';
+import { buildDepositApprovalCalls, submitApprovedDeposit } from '@/services/deposit-batch';
+import { walletCapabilities } from '@/services/wallet-signature-timeout';
+import { getAccount } from '@wagmi/core';
+import { BatchNotSubmittedError, submitAtomicBatch, supportsAtomicBatch, type BatchCall } from '@/services/wallet-batch';
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { usePathname } from 'expo-router';
 import { plainNativeDepositRefused, resolveDepositPayAsset } from '@/services/shield-pools';
@@ -35,7 +39,7 @@ import Svg, { Circle } from 'react-native-svg';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { resolveConfiguredEntrypoint } from '@/services/pool-entrypoint';
 import { useAccount, useBalance, useSendTransaction, useSignTypedData, usePublicClient, useReadContract, useSwitchChain, useEstimateFeesPerGas, useConfig } from 'wagmi';
-import { getPublicClient } from 'wagmi/actions';
+import { getPublicClient, getCallsStatus, getCapabilities, sendCalls } from 'wagmi/actions';
 import { encodeFunctionData, erc20Abi, parseUnits, formatUnits } from 'viem';
 import type { Address as ViemAddress, Hex } from 'viem';
 import { Colors } from '@/constants/theme';
@@ -665,7 +669,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
   const chainDisplayName = isSui
     ? (activeChain?.displayName ?? (isStellar ? 'Stellar' : 'Sui'))
     : (chainConfig?.displayName ?? `Chain ${chainId}`);
-  const { address: connectedAddress, chainId: walletChainId } = useAccount();
+  const { address: connectedAddress, chainId: walletChainId, connector } = useAccount();
   const ensureConnected = useRequireConnection();
   // Key gate: actions that need the derived keys prompt for the one-time
   // signature on demand (the modal no longer auto-opens on connect). Read
@@ -679,13 +683,13 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
   keysReadyRef.current = keysReady;
   const { openSeedDerivationModal } = useSeedDerivationModal();
   const { sendTransactionAsync } = useSendTransaction();
+  const wagmiConfig = useConfig();
   // Keep unresolved wallet broadcasts when the modal closes or a run throws.
   // A different account, chain or input token must never inherit these rows.
   const swapApprovalRecoveryRef = useRef(new Map<string, SentApprovalRecord[]>());
   const { signTypedDataAsync } = useSignTypedData();
   const { switchChainAsync } = useSwitchChain();
   const publicClient = usePublicClient({ chainId });
-  const wagmiConfig = useConfig();
   // Every wallet send in this flow goes out with the shared fee policy
   // (services/wallet-tx-fees.ts, DEV-542), read from this app's RPC for the
   // tx's own chain: estimated gas + 20%; EIP-1559 tip = max(node tip, chain
@@ -2408,6 +2412,50 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
                 if (kind === 'approval') approvalSent = true;
                 return result;
               },
+              // EIP-5792: approve and swap in one atomic wallet call where this
+              // wallet supports it on this chain (MetaMask, Coinbase Wallet).
+              // Null, with nothing sent, everywhere else, and the flow above
+              // runs step by step as before.
+              submitBatch: async (txs, onBroadcast) => {
+                if (!live()) throw new Error(`This deposit was superseded (the modal was closed or reopened). ${nothingSent()}`);
+                // beforeSwapSubmit has already saved the provisional blind
+                // claim backup. onSwapBroadcast re-keys it when the batch
+                // exposes its hash, including when that happens only at mining.
+                const result = await submitAtomicBatch(
+                  {
+                    getCapabilities: async (id) => {
+                      const caps = await getCapabilities(wagmiConfig, { chainId: id as never });
+                      return caps as unknown as Record<string, unknown>;
+                    },
+                    sendCalls: async ({ chainId: id, calls }) => {
+                      // The capability read was async: a modal closed or reopened
+                      // meanwhile must not open a signing prompt for this route.
+                      if (!live()) throw new BatchNotSubmittedError(`This deposit was superseded (the modal was closed or reopened). ${nothingSent()}`);
+                      const account = getAccount(wagmiConfig);
+                      if (account.address?.toLowerCase() !== connectedAddress.toLowerCase() || account.chainId !== id) {
+                        throw new BatchNotSubmittedError('Wallet or network changed. Continue with the original wallet and network.');
+                      }
+                      setLoadingMessage('Approve and swap in one step (sign in wallet)…');
+                      return await sendCalls(wagmiConfig, {
+                        account: connectedAddress,
+                        chainId: id as never,
+                        forceAtomic: true,
+                        calls: calls.map((call) => ({
+                          to: call.to as ViemAddress,
+                          data: call.data as Hex,
+                          value: call.value ? BigInt(call.value) : 0n,
+                        })),
+                      });
+                    },
+                    getCallsStatus: async (id) => {
+                      setLoadingMessage('Waiting for confirmation…');
+                      return await getCallsStatus(wagmiConfig, { id });
+                    },
+                  },
+                  { chainId, calls: txs, onBroadcast },
+                );
+                return result;
+              },
             },
           );
           log('info', 'Deposit', 'Swap-and-deposit confirmed', {
@@ -2882,183 +2930,209 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
         hasApprovalTx: !!result.approvalTx,
       });
 
-      // Step 1: Submit approval tx if needed (ERC-20 tokens).
-      //
-      // The SDK prepares approvals against the session owner. In key-owned
-      // deposit mode the token source is the connected wallet payer instead, so
-      // validate allowance for the actual tx sender before sending.
-      // Not on the native route: msg.value funds the router, so there is no
-      // ERC-20 to approve. Approving WETH here would prompt the user for an
-      // allowance that the call they are about to sign never uses.
-      if (yieldPrep && liveDeployment && yieldApprovalCap !== null && !liveYieldIsNative) {
-        // Yield path: force the payer's underlying→router allowance to EXACTLY
-        // the app cap even when an older/infinite allowance is already larger.
-        // That exact allowance is the second bound beside the caller-supplied
-        // calldata cap (SDK PR #398); an older SDK build still reverts on it.
-        const approvalCap = yieldApprovalCap;
-        const payerAllowance = await publicClient.readContract({
-          address: liveDeployment.underlying as ViemAddress,
-          abi: erc20Abi,
-          functionName: 'allowance',
-          args: [connectedAddress, liveDeployment.ppRouter as ViemAddress],
-        }) as bigint;
-        log('debug', 'Deposit', 'Checked payer allowance for yield router', {
-          payerAllowance: payerAllowance.toString(),
-          maxUnderlyingIn: yieldPrep.maxUnderlyingIn.toString(),
-          approvalCap: approvalCap.toString(),
-        });
-        const submitYieldApproval = async (value: bigint, message: string) => {
-          depositErrorReportRef.current.phase = 'approve';
-          setLoadingMessage(message);
-          const approvalHash = await sendWalletTx({
-            chainId,
-            to: liveDeployment.underlying as ViemAddress,
-            data: encodeFunctionData({
-              abi: erc20Abi,
-              functionName: 'approve',
-              args: [liveDeployment.ppRouter as ViemAddress, value],
-            }) as Hex,
-            value: 0n,
-          });
-          log('info', 'Deposit', 'Yield approval tx submitted, waiting for confirmation', {
-            approvalHash,
-            value: value.toString(),
-          });
-          setLoadingMessage('Waiting for approval confirmation...');
-          const approvalReceipt = await publicClient.waitForTransactionReceipt({
-            hash: approvalHash,
-            timeout: 180_000,
-          });
-          if (approvalReceipt.status !== 'success') {
-            approvalSent = true;
-            throw new Error('Token approval transaction reverted on-chain. It still cost gas.');
-          }
-          approvalSent = true;
-        };
-
-        const approvalValues = yieldApprovalValues(
-          payerAllowance,
-          approvalCap,
-          selectedToken.symbol,
-        );
-        if (approvalValues.length === 1) {
-          try {
-            await submitYieldApproval(approvalValues[0], 'Set the token approval to the reviewed amount.');
-          } catch (approvalErr) {
-            // Some ERC-20s reject a non-zero→non-zero approval even when they
-            // are not named USDT. Retry only a contract-style failure. A user
-            // rejection or an RPC timeout never triggers surprise prompts.
-            if (payerAllowance === 0n || !approvalErrorAllowsZeroReset(approvalErr)) throw approvalErr;
-            await submitYieldApproval(0n, 'This token requires clearing its existing approval. Approve 0 first.');
-            await submitYieldApproval(approvalCap, 'Now approve the reviewed amount.');
-          }
-        } else {
-          for (const value of approvalValues) {
-            await submitYieldApproval(
-              value,
-              value === 0n
-                ? 'This token requires clearing its existing approval. Approve 0 first.'
-                : 'Now approve the reviewed amount.',
-            );
-          }
+      const assertDepositWallet = () => {
+        const account = getAccount(wagmiConfig);
+        if (!live() || account.address?.toLowerCase() !== connectedAddress.toLowerCase() || account.chainId !== chainId) {
+          throw new BatchNotSubmittedError('Wallet or network changed. Continue with the original wallet and network.');
         }
-
-        // Receipt success is not the invariant. Read the actual allowance and
-        // require equality, including after an approve-down from infinity.
-        const postAllowance = await publicClient.readContract({
-          address: liveDeployment.underlying as ViemAddress,
-          abi: erc20Abi,
-          functionName: 'allowance',
-          args: [connectedAddress, liveDeployment.ppRouter as ViemAddress],
-        }) as bigint;
-        if (postAllowance !== approvalCap) {
-          throw new Error('Token approval could not be set to the reviewed spend limit. The deposit was not attempted.');
-        }
-        log('info', 'Deposit', 'Exact yield approval confirmed', { postAllowance: postAllowance.toString() });
-      } else if (!selectedToken.isNative) {
-        const entrypointAddress = result.to as ViemAddress;
-        const assetConfig = await publicClient.readContract({
-          address: entrypointAddress,
-          abi: ENTRYPOINT_ASSETS_ABI,
-          functionName: 'assets',
-          args: [tokenId],
-        }) as EntrypointAssetConfig;
-        const feeBPS = getVettingFeeBPS(assetConfig);
-        const requiredAllowance = amountWei + ((amountWei * feeBPS) / 10_000n);
-        const payerAllowance = await publicClient.readContract({
-          address: tokenId,
-          abi: erc20Abi,
-          functionName: 'allowance',
-          args: [connectedAddress, entrypointAddress],
-        }) as bigint;
-
-        log('debug', 'Deposit', 'Checked payer ERC-20 allowance', {
-          tokenId,
-          payer: connectedAddress,
-          entrypoint: entrypointAddress,
-          payerAllowance: payerAllowance.toString(),
-          requiredAllowance: requiredAllowance.toString(),
-          sdkHadApprovalTx: !!result.approvalTx,
-        });
-
-        if (payerAllowance < requiredAllowance) {
-          depositErrorReportRef.current.phase = 'approve';
-          setLoadingMessage('Requesting token approval...');
-          log('info', 'Deposit', 'Submitting payer approval transaction', {
-            tokenId,
-            payer: connectedAddress,
-            entrypoint: entrypointAddress,
-            amount: requiredAllowance.toString(),
+      };
+      // Wallet-local capability read only. No public feed or note-derived RPC.
+      const walletCaps = !selectedToken.isNative
+        ? await walletCapabilities(connector, connectedAddress) : null;
+      const chainCaps = (walletCaps as Record<string, Record<string, unknown>> | null)?.[`0x${chainId.toString(16)}`];
+      assertDepositWallet();
+      const depositApprovals: BatchCall[] = [];
+      const approveTokens = async (defer: boolean) => {
+        // Step 1: Submit approval tx if needed (ERC-20 tokens).
+        //
+        // The SDK prepares approvals against the session owner. In key-owned
+        // deposit mode the token source is the connected wallet payer instead, so
+        // validate allowance for the actual tx sender before sending.
+        // Not on the native route: msg.value funds the router, so there is no
+        // ERC-20 to approve. Approving WETH here would prompt the user for an
+        // allowance that the call they are about to sign never uses.
+        if (yieldPrep && liveDeployment && yieldApprovalCap !== null && !liveYieldIsNative) {
+          // Yield path: force the payer's underlying→router allowance to EXACTLY
+          // the app cap even when an older/infinite allowance is already larger.
+          // That exact allowance is the second bound beside the caller-supplied
+          // calldata cap (SDK PR #398); an older SDK build still reverts on it.
+          const approvalCap = yieldApprovalCap;
+          const payerAllowance = await publicClient.readContract({
+            address: liveDeployment.underlying as ViemAddress,
+            abi: erc20Abi,
+            functionName: 'allowance',
+            args: [connectedAddress, liveDeployment.ppRouter as ViemAddress],
+          }) as bigint;
+          log('debug', 'Deposit', 'Checked payer allowance for yield router', {
+            payerAllowance: payerAllowance.toString(),
+            maxUnderlyingIn: yieldPrep.maxUnderlyingIn.toString(),
+            approvalCap: approvalCap.toString(),
           });
-
-          const approvalHash = await sendWalletTx({
-            chainId,
-            to: tokenId,
-            data: encodeFunctionData({
-              abi: erc20Abi,
-              functionName: 'approve',
-              args: [entrypointAddress, requiredAllowance],
-            }) as Hex,
-            value: 0n,
-          });
-
-          log('info', 'Deposit', 'Approval tx submitted, waiting for confirmation', { approvalHash });
-          setLoadingMessage('Waiting for approval confirmation...');
-
-          const approvalReceipt = await publicClient.waitForTransactionReceipt({
-            hash: approvalHash,
-            timeout: 180_000,
-          });
-          // A REVERTED approval must stop the flow (codex round 1): the
-          // deposit below would just revert too, after burning the user's
-          // gas on a doomed transaction.
-          if (approvalReceipt.status !== 'success') {
+          const submitYieldApproval = async (value: bigint, message: string) => {
+            depositErrorReportRef.current.phase = 'approve';
+            setLoadingMessage(message);
+            const approvalHash = await sendWalletTx({
+              chainId,
+              to: liveDeployment.underlying as ViemAddress,
+              data: encodeFunctionData({
+                abi: erc20Abi,
+                functionName: 'approve',
+                args: [liveDeployment.ppRouter as ViemAddress, value],
+              }) as Hex,
+              value: 0n,
+            });
+            log('info', 'Deposit', 'Yield approval tx submitted, waiting for confirmation', {
+              approvalHash,
+              value: value.toString(),
+            });
+            setLoadingMessage('Waiting for approval confirmation...');
+            const approvalReceipt = await publicClient.waitForTransactionReceipt({
+              hash: approvalHash,
+              timeout: 180_000,
+            });
+            if (approvalReceipt.status !== 'success') {
+              approvalSent = true;
+              throw new Error('Token approval transaction reverted on-chain. It still cost gas.');
+            }
             approvalSent = true;
-            throw new Error('Token approval reverted on-chain. It still cost gas, and the deposit was not attempted.');
-          }
-          approvalSent = true;
+          };
 
-          // Trust the ALLOWANCE, not the receipt (code review 2026-08-27).
-          // MetaMask and friends let the user edit the spending cap in the
-          // prompt, so a *successful* receipt can encode a cap BELOW what this
-          // deposit needs — and the deposit below would then be guaranteed to
-          // revert, burning the user's gas for nothing. Same guard the yield
-          // branch above already had.
+          const approvalValues = yieldApprovalValues(
+            payerAllowance,
+            approvalCap,
+            selectedToken.symbol,
+          );
+          if (defer && approvalValues.length > 0) {
+            depositApprovals.push(...buildDepositApprovalCalls(liveDeployment.underlying as ViemAddress, liveDeployment.ppRouter as ViemAddress, payerAllowance > 0n && approvalValues[0] !== 0n ? [0n, ...approvalValues] : approvalValues));
+            return;
+          }
+          if (approvalValues.length === 1) {
+            try {
+              await submitYieldApproval(approvalValues[0], 'Set the token approval to the reviewed amount.');
+            } catch (approvalErr) {
+              // Some ERC-20s reject a non-zero→non-zero approval even when they
+              // are not named USDT. Retry only a contract-style failure. A user
+              // rejection or an RPC timeout never triggers surprise prompts.
+              if (payerAllowance === 0n || !approvalErrorAllowsZeroReset(approvalErr)) throw approvalErr;
+              await submitYieldApproval(0n, 'This token requires clearing its existing approval. Approve 0 first.');
+              await submitYieldApproval(approvalCap, 'Now approve the reviewed amount.');
+            }
+          } else {
+            for (const value of approvalValues) {
+              await submitYieldApproval(
+                value,
+                value === 0n
+                  ? 'This token requires clearing its existing approval. Approve 0 first.'
+                  : 'Now approve the reviewed amount.',
+              );
+            }
+          }
+
+          // Receipt success is not the invariant. Read the actual allowance and
+          // require equality, including after an approve-down from infinity.
           const postAllowance = await publicClient.readContract({
+            address: liveDeployment.underlying as ViemAddress,
+            abi: erc20Abi,
+            functionName: 'allowance',
+            args: [connectedAddress, liveDeployment.ppRouter as ViemAddress],
+          }) as bigint;
+          if (postAllowance !== approvalCap) {
+            throw new Error('Token approval could not be set to the reviewed spend limit. The deposit was not attempted.');
+          }
+          log('info', 'Deposit', 'Exact yield approval confirmed', { postAllowance: postAllowance.toString() });
+        } else if (!selectedToken.isNative) {
+          const entrypointAddress = result.to as ViemAddress;
+          const assetConfig = await publicClient.readContract({
+            address: entrypointAddress,
+            abi: ENTRYPOINT_ASSETS_ABI,
+            functionName: 'assets',
+            args: [tokenId],
+          }) as EntrypointAssetConfig;
+          const feeBPS = getVettingFeeBPS(assetConfig);
+          const requiredAllowance = amountWei + ((amountWei * feeBPS) / 10_000n);
+          const payerAllowance = await publicClient.readContract({
             address: tokenId,
             abi: erc20Abi,
             functionName: 'allowance',
             args: [connectedAddress, entrypointAddress],
           }) as bigint;
-          if (postAllowance < requiredAllowance) {
-            throw new Error(
-              `The approved spending cap (${formatUnits(postAllowance, selectedToken.decimals)} ${displayTokenSymbol(selectedToken.symbol)}) is lower than this deposit needs (${formatUnits(requiredAllowance, selectedToken.decimals)} ${displayTokenSymbol(selectedToken.symbol)}). If you edited the amount in your wallet's approval prompt, approve the full amount and try again. The deposit was not submitted.`,
-            );
-          }
 
-          log('info', 'Deposit', 'Approval confirmed', { postAllowance: postAllowance.toString() });
+          log('debug', 'Deposit', 'Checked payer ERC-20 allowance', {
+            tokenId,
+            payer: connectedAddress,
+            entrypoint: entrypointAddress,
+            payerAllowance: payerAllowance.toString(),
+            requiredAllowance: requiredAllowance.toString(),
+            sdkHadApprovalTx: !!result.approvalTx,
+          });
+
+          if (payerAllowance < requiredAllowance) {
+            if (defer) {
+              // Reset a prior partial allowance inside the same atomic batch,
+              // including for tokens that reject non-zero to non-zero approval.
+              depositApprovals.push(...buildDepositApprovalCalls(tokenId, entrypointAddress, payerAllowance > 0n ? [0n, requiredAllowance] : [requiredAllowance]));
+              return;
+            }
+            depositErrorReportRef.current.phase = 'approve';
+            setLoadingMessage('Requesting token approval...');
+            log('info', 'Deposit', 'Submitting payer approval transaction', {
+              tokenId,
+              payer: connectedAddress,
+              entrypoint: entrypointAddress,
+              amount: requiredAllowance.toString(),
+            });
+
+            const approvalHash = await sendWalletTx({
+              chainId,
+              to: tokenId,
+              data: encodeFunctionData({
+                abi: erc20Abi,
+                functionName: 'approve',
+                args: [entrypointAddress, requiredAllowance],
+              }) as Hex,
+              value: 0n,
+            });
+
+            log('info', 'Deposit', 'Approval tx submitted, waiting for confirmation', { approvalHash });
+            setLoadingMessage('Waiting for approval confirmation...');
+
+            const approvalReceipt = await publicClient.waitForTransactionReceipt({
+              hash: approvalHash,
+              timeout: 180_000,
+            });
+            // A REVERTED approval must stop the flow (codex round 1): the
+            // deposit below would just revert too, after burning the user's
+            // gas on a doomed transaction.
+            if (approvalReceipt.status !== 'success') {
+              approvalSent = true;
+              throw new Error('Token approval reverted on-chain. It still cost gas, and the deposit was not attempted.');
+            }
+            approvalSent = true;
+
+            // Trust the ALLOWANCE, not the receipt (code review 2026-08-27).
+            // MetaMask and friends let the user edit the spending cap in the
+            // prompt, so a *successful* receipt can encode a cap BELOW what this
+            // deposit needs — and the deposit below would then be guaranteed to
+            // revert, burning the user's gas for nothing. Same guard the yield
+            // branch above already had.
+            const postAllowance = await publicClient.readContract({
+              address: tokenId,
+              abi: erc20Abi,
+              functionName: 'allowance',
+              args: [connectedAddress, entrypointAddress],
+            }) as bigint;
+            if (postAllowance < requiredAllowance) {
+              throw new Error(
+                `The approved spending cap (${formatUnits(postAllowance, selectedToken.decimals)} ${displayTokenSymbol(selectedToken.symbol)}) is lower than this deposit needs (${formatUnits(requiredAllowance, selectedToken.decimals)} ${displayTokenSymbol(selectedToken.symbol)}). If you edited the amount in your wallet's approval prompt, approve the full amount and try again. The deposit was not submitted.`,
+              );
+            }
+
+            log('info', 'Deposit', 'Approval confirmed', { postAllowance: postAllowance.toString() });
+          }
         }
-      }
+
+      };
+      await approveTokens(supportsAtomicBatch(chainCaps));
 
       // Step 2: Submit deposit tx
       depositErrorReportRef.current.phase = 'submit';
@@ -3101,49 +3175,55 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       // can land on a replica lagging behind the approval we just mined, which
       // is the one false positive that would otherwise stop a good deposit.
       if (useYieldPath) yieldPhase = 'deposit';
-      let simulationRevertDetail: string | null = null;
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          await publicClient.call({
-            account: connectedAddress as ViemAddress,
-            to: result.to as ViemAddress,
-            data: callData,
-            value: BigInt(result.msgValue),
-          });
-          console.log('[Deposit][debug] eth_call simulation OK. Tx should not revert');
-          simulationRevertDetail = null;
-          break;
-        } catch (simErr) {
-          const { executionReverted, detail } = classifySimulationFailure(simErr);
-          if (!executionReverted) {
-            console.error('[Deposit][debug] eth_call simulation could not be performed, not blocking:', detail, simErr);
+      const simulateDeposit = async () => {
+        let simulationRevertDetail: string | null = null;
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            await publicClient.call({
+              account: connectedAddress as ViemAddress,
+              to: result.to as ViemAddress,
+              data: callData,
+              value: BigInt(result.msgValue),
+            });
+            console.log('[Deposit][debug] eth_call simulation OK. Tx should not revert');
             simulationRevertDetail = null;
             break;
+          } catch (simErr) {
+            const { executionReverted, detail } = classifySimulationFailure(simErr);
+            if (!executionReverted) {
+              console.error('[Deposit][debug] eth_call simulation could not be performed, not blocking:', detail, simErr);
+              simulationRevertDetail = null;
+              break;
+            }
+            console.error(`[Deposit][debug] eth_call simulation REVERTED (attempt ${attempt}/2):`, detail, simErr);
+            simulationRevertDetail = detail;
           }
-          console.error(`[Deposit][debug] eth_call simulation REVERTED (attempt ${attempt}/2):`, detail, simErr);
-          simulationRevertDetail = detail;
         }
-      }
-      if (simulationRevertDetail) {
-        log('error', 'Deposit', 'Pre-submit simulation reverted, deposit not broadcast', {
-          to: result.to,
-          revert: simulationRevertDetail,
-        });
-        // Only name the reason when there IS one — a bare revert() gives
-        // nothing to quote, and "(no revert data)" helps nobody.
-        const reason = simulationRevertDetail === 'no revert data' || simulationRevertDetail === '0x'
-          ? ''
-          : ` (${simulationRevertDetail})`;
-        // An exact-shares deposit whose quote expired while the wallet prompt
-        // waited reverts on the allowance/slippage check. Say that, not the
-        // raw revert (Ameen, 2026-09-05).
-        if (useYieldPath && isExpiredYieldQuoteError(simulationRevertDetail)) {
-          throw new Error(`${YIELD_QUOTE_EXPIRED_MESSAGE} ${nothingSent()}`);
+        if (simulationRevertDetail) {
+          log('error', 'Deposit', 'Pre-submit simulation reverted, deposit not broadcast', {
+            to: result.to,
+            revert: simulationRevertDetail,
+          });
+          // Only name the reason when there IS one — a bare revert() gives
+          // nothing to quote, and "(no revert data)" helps nobody.
+          const reason = simulationRevertDetail === 'no revert data' || simulationRevertDetail === '0x'
+            ? ''
+            : ` (${simulationRevertDetail})`;
+          // An exact-shares deposit whose quote expired while the wallet prompt
+          // waited reverts on the allowance/slippage check. Say that, not the
+          // raw revert (Ameen, 2026-09-05).
+          if (useYieldPath && isExpiredYieldQuoteError(simulationRevertDetail)) {
+            throw new Error(`${YIELD_QUOTE_EXPIRED_MESSAGE} ${nothingSent()}`);
+          }
+          throw new Error(
+            `This deposit would revert on-chain${reason}, so it was not submitted.${approvalSent ? ' The approval before it already mined and cost gas.' : ' No gas was spent.'} Check the amount and try again.`,
+          );
         }
-        throw new Error(
-          `This deposit would revert on-chain${reason}, so it was not submitted.${approvalSent ? ' The approval before it already mined and cost gas.' : ' No gas was spent.'} Check the amount and try again.`,
-        );
-      }
+
+      };
+      // A deferred approval has not mined yet. The wallet simulates the atomic
+      // bundle with its approvals; simulating only the deposit would revert.
+      if (depositApprovals.length === 0) await simulateDeposit();
 
       // BEFORE the wallet prompt, for a blind deposit. Nothing on chain will
       // ever point at this recipient, so this secret is the only route to the
@@ -3218,12 +3298,31 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
 
       // Deposit: estimated gas + 20% (a real ETH deposit used 963,277), the
       // budget when the node cannot estimate, never the wallet's own tier.
-      const hash = await sendWalletTx({
-        chainId,
-        to: result.to as ViemAddress,
-        data: callData,
-        value: BigInt(result.msgValue),
-      }, DEPOSIT_GAS_BUDGET);
+      const hash = await submitApprovedDeposit({
+        getCapabilities: async () => chainCaps,
+        sendCalls: async ({ calls }) => {
+          assertDepositWallet();
+          setLoadingMessage('Confirm approval and deposit in your wallet...');
+          return sendCalls(wagmiConfig, { account: connectedAddress, chainId, forceAtomic: true, calls: calls.map(call => ({ to: call.to as ViemAddress, data: call.data as Hex, value: call.value ? BigInt(call.value) : 0n })) });
+        },
+        getCallsStatus: async id => {
+          if (live()) setLoadingMessage('Waiting for deposit confirmation...');
+          return getCallsStatus(wagmiConfig, { id });
+        },
+      }, {
+        chainId, approvals: depositApprovals,
+        deposit: { to: result.to, data: callData, value: result.msgValue },
+        onBroadcast: hash => { if (live()) { setTxHash(hash); setTxChainId(chainId); } },
+        fallback: async () => {
+          if (depositApprovals.length > 0) {
+            assertDepositWallet();
+            await approveTokens(false);
+            await simulateDeposit();
+          }
+          assertDepositWallet();
+          return sendWalletTx({ chainId, to: result.to as ViemAddress, data: callData, value: BigInt(result.msgValue) }, DEPOSIT_GAS_BUDGET);
+        },
+      });
       // No live() abort here: by now prepareDeposit and the claim backup may
       // be durable, and the deposit has always gone through once prepared.
 
@@ -3507,11 +3606,13 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     assertCanDeposit,
     chainId,
     walletChainId,
+    wagmiConfig,
     validationError,
     depositMinPayWei,
     depositMinIsEstimate,
     refetchMinAssets,
     connectedAddress,
+    connector,
     depositOwnerAddress,
     yieldAvailable,
     yieldOptIn,

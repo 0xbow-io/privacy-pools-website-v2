@@ -408,6 +408,14 @@ export function getPinnedYieldRouters(chainId: number): string[] {
   return (YIELD_DEPLOYMENTS_MAP[chainId] ?? []).map((d) => d.ppRouter.toLowerCase());
 }
 
+/**
+ * Every yield deployment pinned for `chainId`, whatever the flags: a user holding
+ * loose shares in their wallet must be able to unwrap them after a flag turns off.
+ */
+export function getPinnedYieldDeployments(chainId: number): YieldDeployment[] {
+  return YIELD_DEPLOYMENTS_MAP[chainId] ?? [];
+}
+
 /** Every deployment on `chainId` whose vault has been verified on chain, in env order. */
 export function getYieldDeploymentsForChain(chainId: number): YieldDeployment[] {
   return getConfiguredYieldDeployments(chainId).filter((d) => yieldVaultUsable(chainId, d.ppUSDC));

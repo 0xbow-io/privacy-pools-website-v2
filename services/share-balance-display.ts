@@ -1,3 +1,13 @@
+// RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
+// amounts, validation, quotes, relayer and on-chain values stay in shares
+// (exact strings/bigints). Never convert an amount to underlying and back,
+// never feed a displayed underlying figure into an operation.
+// Display headlines use underlying through shareBalanceDisplay; shares appear
+// only in the (i) hint, in fields labelled with the share symbol, or while the
+// rate is unknown. Never print a share count under the underlying symbol.
+// Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
+// MAX retains the original exact shares. USD edits use an exact decimal price
+// in that same boundary. No other operation converts display back.
 // A share-pool balance as the headline shows it. Pure: no config imports, so it
 // is unit-testable (bun cannot load config/tokens).
 //
@@ -10,6 +20,8 @@
 // symbol ("0.09989 ppETH"), never under the coin's name, so it cannot read as a
 // fee ("0.09989 ETH" for a 0.1 ETH shield). Display only: nothing here feeds a
 // MAX or withdraw amount, those keep reading the exact share strings.
+import { formatUnits } from 'viem';
+import { parseTokenAmount } from '@/services/token-amount';
 import { formatTokenBalance } from '@/services/token-format';
 import { displayTokenSymbol } from '@/services/share-display';
 import { formatShareAsUnderlying, shareExactAsUnderlying, underlyingPriceFor, type ShareRate } from '@/services/share-rates';
@@ -66,4 +78,28 @@ export function shareBalanceDisplay(args: {
     converted: false,
     hint: null,
   };
+}
+
+
+/** Exact USD equivalent for a field. Missing rates/prices never assume par. Display only. */
+export function shareUsdDisplayExact(sharesExact: string, rate: ShareRate | undefined, priceExact: string | undefined, options?: { field?: boolean }): string | null {
+  if (!rate || rate.assetsPerShare <= 0n || !priceExact || !/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(priceExact)) return null;
+  const priceDecimals = (priceExact.split('.')[1] ?? '').length;
+  const price = parseTokenAmount(priceExact, priceDecimals);
+  if (price <= 0n) return null;
+  const shares = parseTokenAmount(sharesExact, rate.shareDecimals);
+  const assets = shares * rate.assetsPerShare / 10n ** BigInt(rate.shareDecimals);
+  const usd = assets * price * 10n ** 18n / 10n ** BigInt(rate.underlyingDecimals + priceDecimals);
+  if (options?.field) {
+    const cents = (usd + 5_000_000_000_000_000n) / 10_000_000_000_000_000n;
+    if (cents === 0n && usd > 0n) return formatUnits(usd, 18);
+    return `${cents / 100n}.${(cents % 100n).toString().padStart(2, '0')}`;
+  }
+  return formatUnits(usd, 18);
+}
+
+/** Identical refreshed rate objects must not discard the user's draft text. */
+export function shareRateSnapshotKey(rate: ShareRate | undefined): string {
+  return rate ? [rate.chainId, rate.share, rate.underlying, rate.shareSymbol, rate.underlyingSymbol,
+    rate.shareDecimals, rate.underlyingDecimals, rate.assetsPerShare].join(':') : '';
 }

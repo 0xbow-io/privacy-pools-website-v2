@@ -1,3 +1,15 @@
+// RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
+// amounts, validation, quotes, relayer and on-chain values stay in shares
+// (exact strings/bigints). Never convert an amount to underlying and back,
+// never feed a displayed underlying figure into an operation.
+// Display headlines use underlying through shareBalanceDisplay; shares appear
+// only in the (i) hint, in fields labelled with the share symbol, or while the
+// rate is unknown. Never print a share count under the underlying symbol.
+// Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
+// MAX retains the original exact shares. USD edits use an exact decimal price
+// in that same boundary. No other operation converts display back.
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
+import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { useEffect, useMemo, useState } from 'react';
 import { rowTypeLabel } from '@/services/row-type-label';
 import { withPublicSwapRows } from '@/services/swap-route-evidence';
@@ -15,14 +27,14 @@ import { mergeMyTransactions } from '@/services/transfer-direction';
 import { Colors } from '@/constants/theme';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { notifyUiUrl, retireUiParamEntry, setUiParamEntry } from '@/components/ui-url-events';
-import { displayTokenSymbol, tokenAmountLabel } from '@/services/share-display';
-import { formatTokenBalance } from '@/services/token-format';
+
+
 import { transactionBaseType, transactionTypeColor, transactionTypeGlyph } from '@/services/transaction-visuals';
 import { TokenNetworkIcon } from '@/components/ui/token-network-icon';
 import { Pill } from '@/components/ui/pill';
 
 /** A Swap leg in the same figures as a single amount. */
-const swapAmount = (leg: SwapLeg) => tokenAmountLabel(formatTokenBalance(leg.tokenAmount, displayTokenSymbol(leg.asset)), leg.asset);
+
 
 type Tab = 'mine' | 'all';
 
@@ -55,6 +67,9 @@ function useNow(intervalMs = 10_000): number {
 
 
 function NotificationRow({ tx, colors, colorScheme }: { tx: Transaction; colors: (typeof Colors)['light']; colorScheme: 'light' | 'dark' }) {
+  const balanceDisplay = useBalanceDisplay(tx.chainId);
+  const amountView = balanceDisplay(tx.tokenAmount, tx.asset, tx.chainId, tx.tokenAddress);
+  const swapAmount = (leg: SwapLeg) => balanceDisplay(leg.tokenAmount, leg.asset, leg.chainId, leg.tokenAddress).text;
   const pending = tx.status === 'pending';
   // Same mark and direction glyph as the My transactions rows.
   const baseType = transactionBaseType(tx.type);
@@ -68,13 +83,14 @@ function NotificationRow({ tx, colors, colorScheme }: { tx: Transaction; colors:
           {/* nw-keep(data-color): direction glyph color is per-type (theme token, or the bespoke transfer hue) into the vector-icon sink */}
           <Ionicons name={transactionTypeGlyph(tx.type, baseType)} size={13} color={transactionTypeColor(baseType, colors, colorScheme)} />
           <Text className="min-w-0 flex-1 font-pp-medium text-[12.5px] text-text" numberOfLines={1}>
-            {rowTypeLabel(tx)} · {consolidationHeadline(tx) ?? swapHeadline(tx, swapAmount) ?? tokenAmountLabel(formatTokenBalance(tx.tokenAmount, displayTokenSymbol(tx.asset)), tx.asset)}
+            {rowTypeLabel(tx)} · {consolidationHeadline(tx) ?? swapHeadline(tx, swapAmount) ?? amountView.text}
           </Text>
         </View>
         <Text className="font-pp-regular text-[11px] text-text-muted" numberOfLines={1}>
           {timeAgo(tx.timestamp, now)} · {tx.chain}
         </Text>
       </View>
+      <ShareCountHint hint={amountView.hint} />
       <Pill tone={pending ? 'warning' : failed ? 'danger' : 'success'} label={pending ? 'Pending' : failed ? 'Failed' : 'Completed'} />
     </View>
   );

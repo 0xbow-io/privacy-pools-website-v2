@@ -1,3 +1,17 @@
+import { ShareCountHint } from '@/components/pools/share-count-hint';
+// RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
+// amounts, validation, quotes, relayer and on-chain values stay in shares
+// (exact strings/bigints). Never convert an amount to underlying and back,
+// never feed a displayed underlying figure into an operation.
+// Display headlines use underlying through shareBalanceDisplay; shares appear
+// only in the (i) hint, in fields labelled with the share symbol, or while the
+// rate is unknown. Never print a share count under the underlying symbol.
+// Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
+// MAX retains the original exact shares. USD edits use an exact decimal price
+// in that same boundary. No other operation converts display back.
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
+
+import { BalanceAmount } from '@/components/pools/balance-amount';
 import { sdkErrorText } from '@/services/sdk-error-amounts';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
 import { requestWalletRefusalFor } from '@/services/request-wallet-availability';
@@ -138,7 +152,7 @@ import { onRelayedTxHash } from '@/services/relayed-receipt';
 import { receiptChain } from '@/services/receipt-chain-registry';
 import { requestChainRefusal } from '@/services/receipt-chain';
 import { linkToken } from '@/services/link-token-registry';
-import { linkAmountText } from '@/services/link-token';
+
 import {
   decodePaymentReceiptPayloadFromUrl,
   decodePaymentRequestPayloadFromUrl,
@@ -423,6 +437,7 @@ function isSignablePaymentRequest(
  */
 function PaymentPreviewCard({
   amountLabel,
+  amountHint,
   requestCode,
   status,
   verifiedWalletLabel,
@@ -432,6 +447,7 @@ function PaymentPreviewCard({
   noticeBody,
 }: {
   amountLabel: string;
+  amountHint?: string | null;
   /** Omitted until a real request/receipt code exists. */
   requestCode?: string;
   /** Omitted in the draft state (nothing to report yet). */
@@ -447,7 +463,10 @@ function PaymentPreviewCard({
     <View className="gap-[16px] rounded-inner border border-border-light bg-card-background px-[18px] py-[18px]">
       <View className="flex-row items-center justify-between">
         <Text className="font-pp-bold text-[16px] text-text">Total</Text>
-        <Text className="font-pp-bold text-[16px] text-text">{amountLabel}</Text>
+        <View className="flex-row items-center gap-[4px]">
+          <Text className="font-pp-bold text-[16px] text-text">{amountLabel}</Text>
+          <ShareCountHint hint={amountHint ?? null} />
+        </View>
       </View>
 
       <View className="gap-[8px]">
@@ -549,6 +568,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
   // chainId` switch guard below meaningful: it used to compare the wallet's
   // chain against itself and could never fire.
   const chainId = useActiveEvmChain().id;
+  const balanceDisplay = useBalanceDisplay(chainId);
   const withOpLock = useOpLock();
   const queryClient = useQueryClient();
   // The COMMITTED chain of the live session (null while none) — used ONLY to
@@ -622,7 +642,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
   const [outputPayload, setOutputPayload] = useState('');
   // Amount/token FROZEN at create time — the Ready card must describe the
   // payload it created, not the live (still-editable) draft (codex r3, P2).
-  const [createdDraft, setCreatedDraft] = useState<{ amountLabel: string } | null>(null);
+  const [createdDraft, setCreatedDraft] = useState<{ amountLabel: string; amountHint: string | null } | null>(null);
   const [payLink, setPayLink] = useState<string | null>(null);
   const [receiveLink, setReceiveLink] = useState<string | null>(null);
   // Whether the CURRENT links have been secured (copied). Reset whenever a
@@ -1383,7 +1403,8 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
     // and the Ready card must render the request that was CREATED, not the
     // live inputs (codex r3: a 1 ETH request could display as Ready for a
     // later 2 USDC edit).
-    const frozenAmountLabel = tokenAmountLabel(amountInput.trim(), isSui ? 'SUI' : requestTokenSymbol);
+    const frozenView = balanceDisplay(amountInput.trim(), isSui ? 'SUI' : requestTokenSymbol, chainId);
+    const frozenAmountLabel = `${isShareSymbol(requestTokenSymbol) && frozenView.converted ? '≈ ' : ''}${frozenView.text}`;
     // === Stellar path === the SDK's blind request (stellar-request.ts): the
     // link carries note slots, a payment key and a tag, never this account's
     // address. The SDK keeps the request in this account, and its sync finds
@@ -1403,7 +1424,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         const request = stellarSdkPaymentRequestPayload(sdkRequest, STELLAR_TESTNET_ID);
         setStatusMessage(null);
         setOutputPayload(JSON.stringify(request, null, 2));
-        setCreatedDraft({ amountLabel: frozenAmountLabel });
+        setCreatedDraft({ amountLabel: frozenAmountLabel, amountHint: frozenView.hint });
         const stellarPayLink = canUseBrowserApis()
           ? withStellarLinkParams(`${shareLinkBase()}/pay/${encodeStellarBlindRequest(request)}`, ACTIVE_APP_ENVIRONMENT, { stagingMainnet: STAGING_MAINNET_EXPLICIT })
           : null;
@@ -1467,7 +1488,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           createdAt: new Date().toISOString(),
         };
         setOutputPayload(JSON.stringify(request, null, 2));
-        setCreatedDraft({ amountLabel: frozenAmountLabel });
+        setCreatedDraft({ amountLabel: frozenAmountLabel, amountHint: frozenView.hint });
         // No pay link on Sui: the /pay codec (#212 strict validation) only
         // understands the EVM payload kinds — the payer pastes this payload
         // into "Pay via Private Transfer" instead.
@@ -1664,7 +1685,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         }
 
         setOutputPayload(JSON.stringify(request, null, 2));
-        setCreatedDraft({ amountLabel: frozenAmountLabel });
+        setCreatedDraft({ amountLabel: frozenAmountLabel, amountHint: frozenView.hint });
         const createdPayLink = canUseBrowserApis()
           ? `${shareLinkBase()}/pay/${encodePaymentRequestPayloadForUrl(request)}`
           : null;
@@ -1685,8 +1706,8 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         bumpPaymentRequestRevision();
         toast({
           title: request.signature
-            ? `Signed payment request created for ${tokenAmountLabel(amountInput, selectedToken.symbol)}.`
-            : `Payment request created for ${tokenAmountLabel(amountInput, selectedToken.symbol)}.`,
+            ? `Signed payment request created for ${balanceDisplay(amountInput, selectedToken.symbol, chainId).text}.`
+            : `Payment request created for ${balanceDisplay(amountInput, selectedToken.symbol, chainId).text}.`,
         });
         // DEV-217: drop the "wallet is registered / no backup needed" yellow
         // info box; only surface a signature warning if one actually occurred.
@@ -1824,14 +1845,14 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         if (wrote) toast({ title: BACKUP_SAVED_TOAST });
       }
 
-        setCreatedDraft({ amountLabel: frozenAmountLabel });
+        setCreatedDraft({ amountLabel: frozenAmountLabel, amountHint: frozenView.hint });
       if (canUseBrowserApis()) {
         setPayLink(`${shareLinkBase()}/pay/${encodePaymentRequestPayloadForUrl(shareableRequest)}`);
       }
       toast({
         title: shareableRequest.signature
-          ? `Signed payment request created for ${tokenAmountLabel(amountInput, selectedToken.symbol)}.`
-          : `Payment request created for ${tokenAmountLabel(amountInput, selectedToken.symbol)}.`,
+          ? `Signed payment request created for ${balanceDisplay(amountInput, selectedToken.symbol, chainId).text}.`
+          : `Payment request created for ${balanceDisplay(amountInput, selectedToken.symbol, chainId).text}.`,
       });
       // Only a real signature problem is a warning here. The backup story is
       // told once, by the panel under the pay link: a V3 request is only
@@ -2221,8 +2242,8 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         }) as bigint;
         if (payerBalance < requiredAllowance) {
           const meta = getTokenMetadata(request.tokenId, request.chainId);
-          const need = `${formatUnits(requiredAllowance, meta.decimals)} ${displayTokenSymbol(meta.symbol)}`;
-          const have = `${formatUnits(payerBalance, meta.decimals)} ${displayTokenSymbol(meta.symbol)}`;
+          const need = balanceDisplay(formatUnits(requiredAllowance, meta.decimals), meta.symbol, request.chainId, request.tokenId).text;
+          const have = balanceDisplay(formatUnits(payerBalance, meta.decimals), meta.symbol, request.chainId, request.tokenId).text;
           throw new Error(
             isShareSymbol(meta.symbol)
               ? `This request asks for ${need}, a pool share your wallet cannot hold. Nothing was paid. Pay it from your shielded ${displayTokenSymbol(meta.symbol)} balance instead.`
@@ -3023,7 +3044,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         // In the request token's units, not raw base units: this line is user-
         // visible while notes are selected (audit, 2026-08-29).
         const meta = getTokenMetadata(request.tokenId, request.chainId);
-        const fmt = (wei: bigint) => tokenAmountLabel(formatUnits(wei, meta.decimals), meta.symbol);
+        const fmt = (wei: bigint) => balanceDisplay(formatUnits(wei, meta.decimals), meta.symbol, request.chainId, request.tokenId).text;
         setStatusMessage(`Using ${selectedNotes.length} note(s) totalling ${fmt(accumulated)} (need ${fmt(trueTarget)})`);
       }
       // Debug-only, and still redacted because the debug provider keeps an
@@ -3736,7 +3757,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
       removeStoredPaymentRequest(storedRequest.requestId);
       bumpPaymentRequestRevision();
 
-      setStatusMessage(`Received payment imported as ${tokenAmountLabel(formatUnits(BigInt(receipt.amount), tokenMetadata.decimals), tokenMetadata.symbol)}.`);
+      setStatusMessage(`Received payment imported as ${balanceDisplay(formatUnits(BigInt(receipt.amount), tokenMetadata.decimals), tokenMetadata.symbol, receipt.chainId, receipt.tokenId).text}.`);
       setOutputPayload(JSON.stringify(note, null, 2));
       // Offer the on-chain claim: until anchored, this note exists only in
       // this browser's storage. Bind it to the receipt's chain + recipient.
@@ -3906,7 +3927,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
       // FROZEN label once created; live draft label before that.
       const amountLabel = outputPayload && createdDraft
         ? createdDraft.amountLabel
-        : amountInput.trim() ? tokenAmountLabel(amountInput.trim(), requestTokenSymbol) : '—';
+        : amountInput.trim() ? balanceDisplay(amountInput.trim(), requestTokenSymbol, chainId).text : '—';
       // Parsed once (it drives the code row).
       const createdRequest = outputPayload
         ? (() => {
@@ -3925,6 +3946,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
       const createdRequestId = createdRequest?.paymentId ?? createdRequest?.requestId;
       return {
         amountLabel,
+        amountHint: outputPayload && createdDraft ? createdDraft.amountHint : balanceDisplay(amountInput || '0', requestTokenSymbol, chainId).hint,
         // Real code or nothing — no "Awaiting request" filler row.
         requestCode: createdRequestId ? formatRequestCode(createdRequestId) : undefined,
         status: outputPayload ? { label: 'Ready', color: colors.success } : undefined,
@@ -3940,13 +3962,14 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
       // Nothing pasted yet → no total (a sample figure would read as the
       // amount this request is actually asking for).
       const amountLabel = previewPayRequest && previewRequestToken
-        ? linkAmountText(BigInt(previewPayRequest.amount), previewRequestToken)
+        ? (previewRequestToken.known ? balanceDisplay(formatUnits(BigInt(previewPayRequest.amount), previewRequestToken.decimals), previewRequestToken.symbol, previewPayRequest.chainId, previewPayRequest.tokenId).text : previewRequestToken.label)
         : '—';
       const payRequestId = previewPayRequest?.kind === 'ppv2-sdk-payment-request'
         ? previewPayRequest.paymentId
         : previewPayRequest?.requestId;
       return {
         amountLabel,
+        amountHint: previewPayRequest && previewRequestToken?.known ? balanceDisplay(formatUnits(BigInt(previewPayRequest.amount), previewRequestToken.decimals), previewRequestToken.symbol, previewPayRequest.chainId, previewPayRequest.tokenId).hint : null,
         requestCode: payRequestId ? formatRequestCode(payRequestId) : undefined,
         status: {
           label: txHash ? 'Paid' : previewPayExpired ? 'Expired' : previewPayRequest ? 'Awaiting payment' : 'Paste request',
@@ -3978,10 +4001,11 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
     }
 
     const amountLabel = previewReceipt && previewReceiptToken
-      ? linkAmountText(BigInt(previewReceipt.amount), previewReceiptToken)
+      ? (previewReceiptToken.known ? balanceDisplay(formatUnits(BigInt(previewReceipt.amount), previewReceiptToken.decimals), previewReceiptToken.symbol, previewReceipt.chainId, previewReceipt.tokenId).text : previewReceiptToken.label)
       : '—';
     return {
       amountLabel,
+      amountHint: previewReceipt && previewReceiptToken?.known ? balanceDisplay(formatUnits(BigInt(previewReceipt.amount), previewReceiptToken.decimals), previewReceiptToken.symbol, previewReceipt.chainId, previewReceipt.tokenId).hint : null,
       requestCode: previewReceipt?.requestId ? formatRequestCode(previewReceipt.requestId) : undefined,
       status: {
         label: outputPayload ? 'Imported' : previewReceipt ? 'Ready to import' : 'Paste receipt',
@@ -3994,7 +4018,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
     };
     // `requestSignatureStatus` is read directly by the pay-mode notice now that
     // the (unrendered) sender field it used to arrive through is gone.
-  }, [amountInput, colors.success, createdDraft, colors.textMuted, mode, outputPayload, previewPayExpired, previewPayRequest, previewReceipt, previewReceiptToken, previewRequestToken, requestSignatureStatus, requestTokenSymbol, txHash, verifiedWalletLabel, verifiedWalletUrl]);
+  }, [amountInput, colors.success, createdDraft, colors.textMuted, mode, outputPayload, previewPayExpired, previewPayRequest, previewReceipt, previewReceiptToken, previewRequestToken, requestSignatureStatus, requestTokenSymbol, txHash, verifiedWalletLabel, verifiedWalletUrl, balanceDisplay, chainId, receiveLink]);
 
   // One status surface at a time (DEV-496): the rail while a payment runs,
   // the success card after it, the box only otherwise.
@@ -4071,6 +4095,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
               {(!inlineHubActive || !!previewCardProps.requestCode) && !payRunning && (
               <PaymentPreviewCard
                 amountLabel={previewCardProps.amountLabel}
+                amountHint={previewCardProps.amountHint}
                 requestCode={previewCardProps.requestCode}
                 status={previewCardProps.status}
                 verifiedWalletLabel={previewCardProps.verifiedWalletLabel}
@@ -4139,16 +4164,18 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                   {/* Same split as the token: inline, the hub's amount card owns
                       the figure and pushes it here. */}
                   {!inlineHubActive ? (<>
-                  <Text className="font-pp-semi-bold text-[12px] text-text-secondary">Amount</Text>
+                  <Text className="font-pp-semi-bold text-[12px] text-text-secondary">Amount ({requestTokenSymbol})</Text>
                   <TextInput
                     value={amountInput}
                     onChangeText={(text) => setAmountInput(sanitizeAmountInput(text, requestTokenDecimals))}
-                    placeholder={`${!isSui && isStablecoin(selectedToken.symbol) ? '5' : '0.01'} ${displayTokenSymbol(requestTokenSymbol)}`}
+                    placeholder={`${!isSui && isStablecoin(selectedToken.symbol) ? '5' : '0.01'} ${requestTokenSymbol}`}
                     // nw-keep(data-color): placeholder color is a TextInput sink (theme token, no className path)
                     placeholderTextColor={colors.textMuted}
                     keyboardType="numeric"
                     className="rounded-control border border-border-light px-[12px] py-[10px] font-pp-regular text-[14px] text-text"
                   />
+                  {isShareSymbol(requestTokenSymbol) ? <Text className="text-[12px] text-text-secondary">Estimated value</Text> : null}
+                  <BalanceAmount view={balanceDisplay(amountInput || '0', requestTokenSymbol, chainId)} className="text-[12px] text-text-secondary" />
                   </>) : null}
                   {!isSui && !isStellar && canSignPaymentRequest ? (
                     /* One compact line: toggle + (when on) the display-name
@@ -4225,7 +4252,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                       <Text className="font-pp-regular text-[12px] text-text">Recipient: hidden (double-blind)</Text>
                       <Text className="font-pp-regular text-[12px] text-text">Token: {previewRequestToken ? (previewRequestToken.known ? poolDisplayLabel(previewRequestToken.symbol, previewPayRequest.chainId) : previewRequestToken.label) : previewPayRequest.tokenId}</Text>
                       <Text className="font-pp-regular text-[12px] text-text">
-                        Amount: {previewRequestToken ? linkAmountText(BigInt(previewPayRequest.amount), previewRequestToken) : previewPayRequest.amount}
+                        Amount: {previewRequestToken ? (previewRequestToken.known ? balanceDisplay(formatUnits(BigInt(previewPayRequest.amount), previewRequestToken.decimals), previewRequestToken.symbol, previewPayRequest.chainId, previewPayRequest.tokenId).text : previewRequestToken.label) : previewPayRequest.amount}
                       </Text>
                     </View>
                   ) : null}
@@ -4233,7 +4260,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                     <View className="gap-[6px] rounded-control border border-border-light p-[12px]">
                       <Text className="font-pp-regular text-[12px] text-text">Request: {previewReceipt.requestId}</Text>
                       <Text className="font-pp-regular text-[12px] text-text">
-                        Amount: {previewReceiptToken ? linkAmountText(BigInt(previewReceipt.amount), previewReceiptToken) : previewReceipt.amount}
+                        Amount: {previewReceiptToken ? (previewReceiptToken.known ? balanceDisplay(formatUnits(BigInt(previewReceipt.amount), previewReceiptToken.decimals), previewReceiptToken.symbol, previewReceipt.chainId, previewReceipt.tokenId).text : previewReceiptToken.label) : previewReceipt.amount}
                       </Text>
                       <Text className="font-pp-regular text-[12px] text-text">
                         Commitment: {truncateAddress(previewReceipt.commitment)}
