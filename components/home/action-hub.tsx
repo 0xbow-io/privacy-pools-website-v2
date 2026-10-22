@@ -107,6 +107,7 @@ import { useBackHandler } from '@/hooks/use-back-handler';
 import { NATIVE_MOCK_ACTIVE } from '@/constants/native-mock';
 import { getNativeMockWalletBalance } from '@/services/native-mock-data';
 import { maxShieldAmountWei } from '@/services/wallet-tx-fees';
+import { createLayoutPassBudget, createWidthDamper } from '@/services/layout-pass-budget';
 import { Pill } from '@/components/ui/pill';
 import { FeeWarning } from '@/components/fee-warning';
 import { ShieldElsewherePanel } from '@/components/home/shield-elsewhere-panel';
@@ -2428,6 +2429,28 @@ export function ActionHub({
 
   // Web onLayout is asynchronous. Resolve the initial pager and active face
   // before paint so the card never displays its tabs-only intermediate height.
+  // Each write re-runs this effect before paint, and width and height can feed
+  // each other (the window scrollbar coming and going rewraps the page), so the
+  // corrections are capped per frame. Past the cap the effect waits for the
+  // next frame and the pages' onLayout instead of looping until React throws
+  // #185 (Swap tab crash, 2026-10-21). See services/layout-pass-budget.ts.
+  const measureBudget = useRef(createLayoutPassBudget());
+  const measureBudgetFrame = useRef<number | null>(null);
+  // Damps the same cycle at frame rate (onLayout included): a width that only
+  // flips back to the one before is the scrollbar, the pager holds the narrower.
+  const pagerWidthDamper = useRef(createWidthDamper());
+  const takeMeasurePass = () => {
+    if (measureBudgetFrame.current === null && typeof requestAnimationFrame === 'function') {
+      measureBudgetFrame.current = requestAnimationFrame(() => {
+        measureBudgetFrame.current = null;
+        measureBudget.current.reset();
+      });
+    }
+    return measureBudget.current.take();
+  };
+  useEffect(() => () => {
+    if (measureBudgetFrame.current !== null) cancelAnimationFrame(measureBudgetFrame.current);
+  }, []);
   useLayoutEffect(() => {
     if (!WEB || !isFocused) return;
     const frame = pagerFrameNode.current as unknown as HTMLElement | null;
@@ -2435,15 +2458,18 @@ export function ActionHub({
     const width = frame.offsetWidth - 2 * PAGE_EDGE;
     if (width <= 0) return;
     if (width !== pagerW) {
-      setPagerW(width);
-      return;
+      const nextWidth = pagerWidthDamper.current.next(width, pagerW);
+      if (nextWidth !== null) {
+        if (takeMeasurePass()) setPagerW(nextWidth);
+        return;
+      }
     }
     const page = pageNodes.current[action] as unknown as HTMLElement | null;
     if (!page) return;
     const height = page.offsetHeight;
     if (height <= 0) return;
     if (height !== pageHeights[action]) {
-      setPageHeights(previous => ({ ...previous, [action]: height }));
+      if (takeMeasurePass()) setPageHeights(previous => (previous[action] === height ? previous : { ...previous, [action]: height }));
       return;
     }
     const form = formNode.current as unknown as HTMLElement | null;
@@ -4372,7 +4398,7 @@ export function ActionHub({
         // width is the content width, so the padding is taken back out.
         // nw-keep(measured-or-inset): edge slack around the measured pager
         style={{ marginHorizontal: -PAGE_EDGE, paddingHorizontal: PAGE_EDGE, ...(WEB ? { height: pageHeights[action] } : {}) }}
-        onLayout={(e) => { if (isFocused && e.nativeEvent.layout.width > 2 * PAGE_EDGE) setPagerW(Math.round(e.nativeEvent.layout.width) - 2 * PAGE_EDGE); }}
+        onLayout={(e) => { if (!isFocused || e.nativeEvent.layout.width <= 2 * PAGE_EDGE) return; const nextWidth = pagerWidthDamper.current.next(Math.round(e.nativeEvent.layout.width) - 2 * PAGE_EDGE, pagerW); if (nextWidth !== null) setPagerW(nextWidth); }}
       >
         {pagerW > 0 && (
           <RNScrollView
