@@ -3,6 +3,7 @@ import { WEB_NO_OUTLINE } from '@/components/ui/web-style-shims';
 import { View, Text, Pressable, Platform, TextInput, Animated, Easing } from 'react-native';
 import { Modal } from '@/components/ui/modal';
 import { Colors } from '@/constants/theme';
+import { routedFetch } from '@/services/tor-fetch';
 import { useTheme } from '@/components/theme-provider';
 import { useBackHandler } from '@/hooks/use-back-handler';
 
@@ -170,7 +171,10 @@ export function NewsletterModal({ visible, onClose }: { visible: boolean; onClos
     setStep('loading');
     setError(null);
     try {
-      const resp = await fetch(NEWSLETTER_API_URL, {
+      // Same-origin by default, which stays direct: the app's own host already
+      // has the connection. Elsewhere, over anon-rpc on a worker of its own.
+      const send = sameOrigin(NEWSLETTER_API_URL) ? fetch : routedFetch('web', () => true);
+      const resp = await send(NEWSLETTER_API_URL, {
         signal: controller.signal,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -303,4 +307,14 @@ export function NewsletterModal({ visible, onClose }: { visible: boolean; onClos
       </View>
     </Modal>
   );
+}
+
+/** Whether `url` resolves to this page's origin; never on a device, which has no page. */
+function sameOrigin(url: string): boolean {
+  if (typeof location === 'undefined') return false;
+  try {
+    return new URL(url, location.href).origin === location.origin;
+  } catch {
+    return false;
+  }
 }
