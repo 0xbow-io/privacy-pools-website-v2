@@ -2,16 +2,16 @@ import { expect, test } from 'bun:test';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-const root = join(import.meta.dir, '../..');
+const root = join(new URL('.', import.meta.url).pathname, '../..');
 const read = (path: string) => readFileSync(join(root, path), 'utf8');
 const providers = ['withdraw', 'transfer', 'swap', 'payment-request', 'ragequit', 'deposit'].map(n => `components/${n}-modal-provider.tsx`);
 const amountServices = readdirSync(join(root, 'services')).filter(n => /^(?:relayed-(?:transfer|withdrawal)|withdraw-|transfer-|send-amount|swap-flows|payment-request-deposit|token-amount)/.test(n) && n.endsWith('.ts')).map(n => `services/${n}`);
 
 test('operation providers and amount services never import the underlying display service', () => {
   for (const file of [...providers, ...amountServices]) {
-    expect(read(file), file).not.toMatch(/from\s+['"][^'"]*share-balance-display['"]/);
-    expect(read(file), file).not.toMatch(/(?:amount|value|fromAmountWei|grossWei|netAmount|feeAmount|amountWei):\s*(?:balanceDisplay|shareBalanceDisplay|shareUsdDisplayExact|amountField\.(?:value|usdValue))/);
-    expect(read(file), file).not.toMatch(/(?:parseUnits|parseTokenAmount)\(\s*(?:balanceDisplay|shareBalanceDisplay|shareExactAsUnderlying|shareUsdDisplayExact|amountField\.(?:value|usdValue))/);
+    expect(read(file)).not.toMatch(/from\s+['"][^'"]*share-balance-display['"]/);
+    expect(read(file)).not.toMatch(/(?:amount|value|fromAmountWei|grossWei|netAmount|feeAmount|amountWei):\s*(?:balanceDisplay|shareBalanceDisplay|shareUsdDisplayExact|amountField\.(?:value|usdValue))/);
+    expect(read(file)).not.toMatch(/(?:parseUnits|parseTokenAmount)\(\s*(?:balanceDisplay|shareBalanceDisplay|shareExactAsUnderlying|shareUsdDisplayExact|amountField\.(?:value|usdValue))/);
   }
 });
 
@@ -30,7 +30,7 @@ test('MAX and submitted units remain the original exact share state', () => {
 
 test('the only underlying entry boundary is called by the Withdraw/Send field adapter', () => {
   for (const file of [...providers, ...amountServices]) {
-    expect(read(file), file).not.toMatch(/shareAmountFromUnderlying\(/);
+    expect(read(file)).not.toMatch(/shareAmountFromUnderlying\(/);
   }
   expect(read('hooks/use-share-amount-field.ts')).toContain('shareAmountFromUnderlying({');
   expect(read('services/share-amount-entry.ts')).not.toMatch(/Number\(|parseFloat\(|Math\./);

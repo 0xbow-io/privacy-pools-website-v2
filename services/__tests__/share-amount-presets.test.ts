@@ -4,6 +4,8 @@ import { shareAmountFromUnderlying } from '@/services/share-amount-entry';
 import { shareBalanceDisplay, shareRateSnapshotKey, shareUsdDisplayExact } from '@/services/share-balance-display';
 import { parseTokenAmount, sanitizeAmountInput } from '@/services/token-amount';
 import type { ShareRate } from '@/services/share-rates';
+// Bun.Transpiler is not in the app's type declarations, so the typecheck gate would reject a direct use.
+type BunGlobal = { Bun: { Transpiler: new (options: { loader: 'ts' }) => { transformSync(source: string): string } } };
 
 const RATE: ShareRate = { chainId: 1, share: 'share', underlying: 'asset', shareSymbol: 'ppETH', shareDecimals: 18,
   underlyingDecimals: 18, underlyingSymbol: 'WETH', assetsPerShare: 1001100000000000000n };
@@ -101,7 +103,7 @@ test('modal refuses an out-of-reach share preset before clamping and greys its c
   let ceiling = '';
   const run = new Function('spendabilityBlocked', 'getWithdrawMaxWei', 'selectedToken', 'selectedTokenDecimals',
     'amountField', 'presetExceedsWithdrawMax', 'errorToast', 'spendableLabel', 'formatUnits', 'chainId', 'applyShareAmount',
-    new Bun.Transpiler({ loader: 'ts' }).transformSync(`${setter}; return applyPresetAmount;`))(
+    new (globalThis as unknown as BunGlobal).Bun.Transpiler({ loader: 'ts' }).transformSync(`${setter}; return applyPresetAmount;`))(
       false, () => 299670000000000000n, 'ppETH', 18,
       { presetExceedsMax: (text: string) => shareAmountFromUnderlying({ text, rate: RATE, maxSharesExact: cap, displayedMax: '0.30', preview: true }).exceedsMax,
         toShares: (text: string) => { conversions++; return shareAmountFromUnderlying({ text, rate: RATE, maxSharesExact: cap, displayedMax: '0.30' }); } },

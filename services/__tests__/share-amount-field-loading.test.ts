@@ -6,6 +6,8 @@ import { shareBalanceDisplay, shareRateSnapshotKey, shareUsdDisplayExact } from 
 import { parseTokenAmount, sanitizeAmountInput } from '@/services/token-amount';
 import { displayTokenSymbol, isShareSymbol } from '@/services/share-display';
 import type { ShareRate } from '@/services/share-rates';
+// Bun.Transpiler is not in the app's type declarations, so the typecheck gate would reject a direct use.
+type BunGlobal = { Bun: { Transpiler: new (options: { loader: 'ts' }) => { transformSync(source: string): string } } };
 
 const rate: ShareRate = { chainId: 1, share: 'share', underlying: 'asset', shareSymbol: 'ppETH', shareDecimals: 18,
   underlyingDecimals: 18, underlyingSymbol: 'WETH', assetsPerShare: 1001100000000000000n };
@@ -21,7 +23,7 @@ function fieldHarness(initialAmount = '') {
   let capKnown = false;
   let maxSharesExact = '0';
   const source = read('hooks/use-share-amount-field.ts').replace(/^import .*;$/gm, '').replace('export function', 'function');
-  const body = new Bun.Transpiler({ loader: 'ts' }).transformSync(source);
+  const body = new (globalThis as unknown as BunGlobal).Bun.Transpiler({ loader: 'ts' }).transformSync(source);
   const dependencies = {
     useState: (initial: unknown) => { const i = cursor++; if (!(i in states)) states[i] = initial;
       return [states[i], (value: unknown) => { states[i] = value; }]; },
@@ -92,7 +94,7 @@ test('cap and readiness changes invalidate a resolved edit, without reparsing st
 test('all four amount-field surfaces explicitly identify unresolved caps and accept resolved shares', () => {
   for (const file of ['components/withdraw-modal-provider.tsx', 'components/home/action-hub.tsx', 'components/transfer-modal-provider.tsx', 'components/pools/pool-action-panel.tsx']) {
     const call = read(file).slice(read(file).indexOf('const amountField = useShareAmountField('));
-    expect(call.slice(0, call.indexOf('});') + 3), file).toContain('capKnown:');
-    expect(call.slice(0, call.indexOf('});') + 3), file).toContain('onAmountResolved:');
+    expect(call.slice(0, call.indexOf('});') + 3)).toContain('capKnown:');
+    expect(call.slice(0, call.indexOf('});') + 3)).toContain('onAmountResolved:');
   }
 });
