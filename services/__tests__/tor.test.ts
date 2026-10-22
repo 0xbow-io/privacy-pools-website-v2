@@ -35,11 +35,18 @@ function transport(active: boolean, importer: () => unknown, options: {
   mainnetInChainList?: boolean;
   chainUrls?: Record<number, string>;
   customRpcUrls?: Record<number, string>;
+  cores?: number;
+  device?: boolean;
 } = {}) {
   let imports = 0;
-  const tor = load('services/tor-fetch.ts', { require(name: string) {
+  const errors = load('services/tor-errors.ts', {});
+  const groups = load('services/tor-groups.ts', { require: (name: string) => { if (name === 'viem') return viem; throw new Error(`Unexpected dependency ${name}`); } }) as typeof import('../tor-groups');
+  const tor = load('services/tor-fetch.ts', { navigator: { hardwareConcurrency: options.cores ?? 4 }, require(name: string) {
+    if (name === '@/services/tor-errors') return errors;
+    if (name === '@/services/tor-groups') return groups;
+    if (name === '@0xbow/anon-rpc-rs-react-native') { imports++; return importer(); }
     if (name === '@/services/abort-signal') return options.timeoutSignal ? { ...abortSignal, timeoutSignal: options.timeoutSignal } : abortSignal;
-    if (name === '@/config/tor') return { ...settings, TOR_IN_FORCE: active, ACTIVE_TOR_SETTINGS: { enabled: active, gatewayUrl: GATEWAY, provider: 'tor-js' } };
+    if (name === '@/config/tor') return { ...settings, TOR_IN_FORCE: active, TOR_ON_DEVICE: options.device ?? false, ACTIVE_TOR_SETTINGS: { enabled: active, gatewayUrl: GATEWAY, provider: 'tor-js' } };
     if (name === '@/services/egress-policy') return policy;
     if (name === '@/config/chains') return { getChainConfig: (id: number) => options.chainUrls?.[id] ? { rpcUrl: options.chainUrls[id] }
       : id === 1 && options.mainnetInChainList !== false ? { rpcUrl: MAINNET } : undefined };
@@ -52,9 +59,10 @@ function transport(active: boolean, importer: () => unknown, options: {
     if (name === 'viem') return viem;
     if (name === '@/services/egress-policy') return policy;
     if (name === '@/services/tor-fetch') return tor;
+    if (name === '@/services/tor-groups') return groups;
     throw new Error(`Unexpected dependency ${name}`);
   } }) as typeof import('../egress-transport');
-  return { tor, policedHttp, imports: () => imports };
+  return { tor, groups, policedHttp, imports: () => imports };
 }
 
 describe('Tor configuration', () => {
@@ -423,34 +431,35 @@ test('a chain list without mainnet (plain staging) still reads the specifier fro
   expect(urls).toEqual([ENV_MAINNET]);
 });
 
-test('closing a client ends a specifier read still in flight', async () => {
-  let init!: { preExisting: { rpcProvider: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } } };
-  let constructed!: () => void;
-  const built = new Promise<void>(resolve => { constructed = resolve; });
+test('every client reads the specifier through one provider per endpoint, each read under its own deadline', async () => {
+  type Init = { preExisting: { rpcProvider: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } } };
+  const inits: Init[] = [];
+  const deadlines: AbortController[] = [];
   const loaded = transport(false, () => ({ AnonRpcWorker: class {
-    ready = new Promise<void>(() => {});
-    constructor(value: typeof init) { init = value; constructed(); }
+    ready = Promise.resolve();
+    constructor(value: Init) { inits.push(value); }
     close() {}
     fetch = async () => Response.json({});
-  } }));
+  } }), { timeoutSignal: () => { const deadline = new AbortController(); deadlines.push(deadline); return deadline.signal; } });
   const realFetch = globalThis.fetch;
-  const signals: AbortSignal[] = [];
   globalThis.fetch = ((_url: string, request?: RequestInit) => new Promise<Response>((_resolve, reject) => {
-    signals.push(request!.signal!);
-    request!.signal!.addEventListener('abort', () => reject(request!.signal!.reason), { once: true });
+    request!.signal!.addEventListener('abort', () => reject(new Error('read ended')), { once: true });
   })) as typeof fetch;
   try {
-    const sender = loaded.tor.createTorFetch(GATEWAY);
-    const pending = sender(MAINNET).then(() => null, (error: unknown) => error);
-    await built;
-    const read = init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ data: '0x9a1a3c5e' }, 'latest'] })
-      .then(() => null, (error: unknown) => error);
-    expect(signals).toHaveLength(1);
-    expect(signals[0].aborted).toBe(false);
-    sender.close();
-    expect(await pending).toBeInstanceOf(Error);
+    const first = loaded.tor.createTorFetch(GATEWAY);
+    const second = loaded.tor.createTorFetch(GATEWAY);
+    await first(MAINNET);
+    await second(MAINNET);
+    expect(inits).toHaveLength(2);
+    // The harness shares boot reads by provider: one provider, one set of reads.
+    expect(inits[1].preExisting.rpcProvider).toBe(inits[0].preExisting.rpcProvider);
+    first.close();
+    second.close();
+    const before = deadlines.length;
+    const read = inits[0].preExisting.rpcProvider.request({ method: 'eth_chainId' }).then(() => null, (error: unknown) => error);
+    expect(deadlines.length).toBe(before + 1);
+    deadlines[before].abort();
     expect(await read).toBeInstanceOf(Error);
-    expect(signals[0].aborted).toBe(true);
   } finally {
     globalThis.fetch = realFetch;
   }
@@ -820,6 +829,8 @@ test('on a device the provider and the Test name Tor, not tor-js', () => {
   }
   const deviceTor = load('services/tor-fetch.ts', { require(name: string) {
     if (name === '@/config/tor') return device;
+    if (name === '@/services/tor-errors') return load('services/tor-errors.ts', {});
+    if (name === '@/services/tor-groups') return load('services/tor-groups.ts', { require: () => viem });
     if (name === '@/services/abort-signal') return abortSignal;
     if (name === '@/services/egress-policy') return policy;
     throw new Error(`Unexpected dependency ${name}`);
@@ -930,5 +941,155 @@ describe('a proxy address is refused with its own reason', () => {
     // address carries no scheme, so the two cannot be confused.
     const gateway = `127.0.0.1:12298:u${Buffer.from([0x12, 0x20, ...new Array(32).fill(0)]).toString('base64url')}`;
     expect(settings.validateTorGateway(gateway)).toEqual({ ok: true, url: gateway });
+  });
+});
+
+describe('isolation groups over the worker pool', () => {
+  const ACCOUNT = '0x2222222222222222222222222222222222222222';
+  // A worker that records which instance served each call.
+  function pooled() {
+    const workers: { id: number; closed: boolean; served: string[] }[] = [];
+    const module = { AnonRpcWorker: class {
+      ready = Promise.resolve();
+      record = { id: workers.length, closed: false, served: [] as string[] };
+      constructor() { workers.push(this.record); }
+      close() { this.record.closed = true; }
+      // A URL ending in /hang waits until its caller gives up.
+      fetch = async (url: string, init?: RequestInit) => {
+        this.record.served.push(url);
+        if (url.endsWith('/hang')) {
+          await new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true }));
+        }
+        // A URL ending in /quote answers like a relayer quote.
+        if (url.endsWith('/quote')) return Response.json({ feeCommitment: { signedRelayerCommitment: COMMITMENT } });
+        return Response.json({ result: '0x1' });
+      };
+    } };
+    return { workers, importer: () => module, servedBy: (url: string) => workers.filter(w => w.served.includes(url)).map(w => w.id) };
+  }
+  const COMMITMENT = `0x${'5e'.repeat(65)}`;
+
+  test('a call naming an account never shares a worker with public reads', async () => {
+    const { importer, servedBy } = pooled();
+    const loaded = transport(true, importer, { cores: 12 });
+    loaded.groups.setTorAccounts([ACCOUNT]);
+    await loaded.tor.torFetchFor('rpc', '{"method":"eth_blockNumber"}')!('https://rpc.example/public', { method: 'POST', body: '{}' });
+    await loaded.tor.torFetchFor('rpc', `{"params":["${ACCOUNT}"]}`)!('https://rpc.example/account', { method: 'POST', body: '{}' });
+    await loaded.tor.torFetchFor('rpc', '{"method":"eth_chainId"}')!('https://rpc.example/public-2', { method: 'POST', body: '{}' });
+    const [publicWorker] = servedBy('https://rpc.example/public');
+    expect(servedBy('https://rpc.example/public-2')).toEqual([publicWorker]);
+    expect(servedBy('https://rpc.example/account')).not.toEqual([publicWorker]);
+    expect(servedBy('https://rpc.example/account')).toHaveLength(1);
+  });
+
+  test('ending an operation closes its worker, and the next operation starts another', async () => {
+    const { importer, workers, servedBy } = pooled();
+    const loaded = transport(true, importer, { cores: 12 });
+    const endFirst = loaded.tor.beginTorOperationScope();
+    await loaded.tor.torFetchFor('relayer', 'https://relayer.example/v1/quote')!('https://relayer.example/first', {});
+    const [first] = servedBy('https://relayer.example/first');
+    endFirst();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(workers[first].closed).toBe(true);
+    const endSecond = loaded.tor.beginTorOperationScope();
+    await loaded.tor.torFetchFor('relayer', 'https://relayer.example/v1/quote')!('https://relayer.example/second', {});
+    expect(servedBy('https://relayer.example/second')).not.toContain(first);
+    endSecond();
+  });
+
+  test('a relay sent after its operation ended goes over a worker of its own, never the public one or the next operation\'s', async () => {
+    const { importer, servedBy } = pooled();
+    const loaded = transport(true, importer, { cores: 12 });
+    const endFirst = loaded.tor.beginTorOperationScope();
+    const quote = await loaded.tor.torFetchFor('relayer', 'https://relayer.example/v1/quote\n{"amount":"1"}')!('https://relayer.example/quote', { method: 'POST', body: '{"amount":"1"}' });
+    expect((await quote.json()).feeCommitment.signedRelayerCommitment).toBe(COMMITMENT);
+    // The modal closes while the SDK is still proving.
+    endFirst();
+    await loaded.tor.torFetchFor('relayer', 'https://relayer.example/v1/details')!('https://relayer.example/details', {});
+    const endSecond = loaded.tor.beginTorOperationScope();
+    await loaded.tor.torFetchFor('relayer', 'https://relayer.example/v1/quote\n{"amount":"2"}')!('https://relayer.example/second', { method: 'POST', body: '{"amount":"2"}' });
+    const relay = `{"signedFeeCommitment":{"signedRelayerCommitment":"${COMMITMENT}"}}`;
+    await loaded.tor.torFetchFor('relayer', `https://relayer.example/v1/relay\n${relay}`)!('https://relayer.example/relay', { method: 'POST', body: relay });
+    const [relayWorker] = servedBy('https://relayer.example/relay');
+    expect(relayWorker).toBeDefined();
+    expect([...servedBy('https://relayer.example/quote'), ...servedBy('https://relayer.example/details'), ...servedBy('https://relayer.example/second')]).not.toContain(relayWorker);
+    endSecond();
+  });
+
+  test('ending an operation fails its pending request and any later one through a sender it handed out', async () => {
+    const { importer, servedBy } = pooled();
+    const loaded = transport(true, importer, { cores: 12 });
+    const end = loaded.tor.beginTorOperationScope();
+    const send = loaded.tor.torFetchFor('relayer', 'https://relayer.example/v1/quote')!;
+    const pending = send('https://relayer.example/hang', {}).then(() => null, (error: unknown) => error);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    end();
+    expect(String(await pending)).toContain('has ended');
+    expect(String(await send('https://relayer.example/later', {}).catch((error: unknown) => error))).toContain('has ended');
+    expect(servedBy('https://relayer.example/later')).toEqual([]);
+  });
+
+  test('a request that identifies the user outside an operation gets a worker of its own, closed once it is read', async () => {
+    const { importer, workers, servedBy } = pooled();
+    const loaded = transport(true, importer, { cores: 12 });
+    const first = await loaded.tor.torFetchFor('asp', 'https://asp.example/', { identifying: true })!('https://asp.example/label/1', {});
+    expect(await first.json()).toEqual({ result: '0x1' });
+    await loaded.tor.torFetchFor('asp', 'https://asp.example/', { identifying: true })!('https://asp.example/label/2', {});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const [a] = servedBy('https://asp.example/label/1');
+    const [b] = servedBy('https://asp.example/label/2');
+    expect(a).not.toBe(b);
+    expect(workers[a].closed).toBe(true);
+    expect(workers[b].closed).toBe(true);
+  });
+
+  test('the worker budget merges public services as it shrinks; identity groups keep their own', async () => {
+    for (const [cores, shared] of [[12, false], [2, true]] as const) {
+      const { importer, servedBy } = pooled();
+      const loaded = transport(true, importer, { cores });
+      await loaded.tor.torFetchFor('asp', 'https://asp.example/')!('https://asp.example/leaves', {});
+      await loaded.tor.torFetchFor('web', 'https://prices.example/')!('https://prices.example/usd', {});
+      expect(servedBy('https://asp.example/leaves')[0] === servedBy('https://prices.example/usd')[0]).toBe(shared);
+    }
+  });
+
+  test('on a device one Arti client carries every group, each under its own isolation key', async () => {
+    const calls: { url: string; isolationKey?: string }[] = [];
+    let started: unknown;
+    const module = { ReplacingWorker: class {
+      constructor(options: { start: unknown }) { started = options.start; }
+      close() {}
+      fetch = async (url: string, init?: RequestInit & { isolationKey?: string }) => {
+        calls.push({ url, isolationKey: init?.isolationKey });
+        return Response.json({ result: '0x1' });
+      };
+    } };
+    const loaded = transport(true, () => module, { device: true });
+    loaded.groups.setTorAccounts([ACCOUNT]);
+    await loaded.tor.torFetchFor('rpc', '')!('https://rpc.example/a', {});
+    await loaded.tor.torFetchFor('rpc', ACCOUNT)!('https://rpc.example/b', {});
+    expect(started).toEqual({ tor: {} });
+    expect(calls).toEqual([
+      { url: 'https://rpc.example/a', isolationKey: 'public:rpc' },
+      { url: 'https://rpc.example/b', isolationKey: `account:${ACCOUNT.slice(2)}` },
+    ]);
+  });
+
+  test('routedFetch sends over anon-rpc while Tor is in force, and direct only when it is off', async () => {
+    const realFetch = globalThis.fetch;
+    const direct: string[] = [];
+    globalThis.fetch = (async (url: string) => { direct.push(String(url)); return Response.json({}); }) as typeof fetch;
+    try {
+      const { importer, servedBy } = pooled();
+      const on = transport(true, importer, { cores: 12 });
+      await on.tor.routedFetch('web')('https://prices.example/on', {});
+      expect(servedBy('https://prices.example/on')).toHaveLength(1);
+      const off = transport(false, importer);
+      await off.tor.routedFetch('web')('https://prices.example/off', {});
+      expect(direct).toEqual(['https://prices.example/off']);
+      expect(off.imports()).toBe(0);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 });

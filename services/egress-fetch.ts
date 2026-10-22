@@ -1,6 +1,7 @@
 import { throwIfAborted } from '@/services/abort-signal';
 import { assertEgressAllowed, EgressRefusedError, type EgressIntent, type EgressParty } from '@/services/egress-policy';
 import { AspBackoffError, createAspBackoff, createAspPacer, responseIsRateLimit, type AspProbe } from '@/services/asp-backoff';
+import { torFetchFor } from '@/services/tor-fetch';
 
 /** Match URL origins and path boundaries, never string prefixes of hostnames. */
 export function configuredEgressPath(party: EgressParty, baseUrl: string, url: string): string {
@@ -54,6 +55,14 @@ export function createEgressFetch(
       if (!probe) backoff.assertOpen();
     }
     let sentAt = 0;
+    // Over anon-rpc when Tor is in force, on the worker of the group this
+    // request belongs to: an account it names, the operation in progress for
+    // relayer calls and targeted ASP queries, or the public one
+    // (services/tor-groups.ts). Chosen now, when the request is made: the ASP
+    // pacer may send it after the operation that made it has ended.
+    const send = torFetchFor(party, `${url}\n${typeof init.body === 'string' ? init.body : ''}`, {
+      identifying: intent !== undefined,
+    }) ?? fetch;
     const dispatch = () => {
       if (party === 'asp') {
         if (stopped || generation !== requestGeneration) throw new Error('ASP feeds stopped');
@@ -65,7 +74,7 @@ export function createEgressFetch(
       sentAt = backoff.now();
       // Redirects would send another request without consulting the policy.
       // These APIs use neither cookies nor the page URL as authentication.
-      return fetch(url, { ...init, headers, redirect: 'error', credentials: 'omit', referrerPolicy: 'no-referrer' });
+      return send(url, { ...init, headers, redirect: 'error', credentials: 'omit', referrerPolicy: 'no-referrer' });
     };
     // Policy first, backoff before queueing, and again at the actual send.
     const response = await (party === 'asp' ? pacer.run(dispatch, init.signal) : dispatch());

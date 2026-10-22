@@ -43,6 +43,10 @@ import {
 } from '@/config/tor';
 import { abortReason, anySignal, composeSignals, throwIfAborted, timeoutSignal } from '@/services/abort-signal';
 import { assertEgressAllowed } from '@/services/egress-policy';
+import { TorUnavailableError } from '@/services/tor-errors';
+import { beginTorOperation, noteTorQuotes, torGroupFor, type TorParty, type TorSubject } from '@/services/tor-groups';
+
+export { TorUnavailableError };
 
 /** The subset of the anon-rpc harness this app uses. */
 type TorClientLike = {
@@ -62,36 +66,37 @@ type RpcProviderLike = { request: (args: { method: string; params?: unknown[] })
 /** The harness's knownWorker() entry: where a provider's specifier lives. */
 type KnownWorkerLike = { specifier: string; specifierChainId: number };
 
-/** The harness's ReplacingWorker, as this app constructs it. */
+/** The harness's ReplacingWorker, or a WorkerPool group: a fetch over one route at a time. */
 type ReplacingWorkerLike = TorClientLike;
 
+/** How the harness starts each worker: a function on the web, Arti's options on a device. */
+type WorkerStart = ((signal: AbortSignal) => Promise<TorClientLike & { ready: Promise<void> }>) | { tor: Record<string, never> };
+
 type ReplacingWorkerFactory = new (options: {
-  start: (signal: AbortSignal) => Promise<TorClientLike & { ready: Promise<void> }>;
+  start: WorkerStart;
   callTimeoutMs?: number;
+  readyTimeoutMs?: number;
 }) => ReplacingWorkerLike;
+
+type WorkerPoolFactory = new (options: {
+  start: WorkerStart;
+  callTimeoutMs?: number;
+  readyTimeoutMs?: number;
+  maxWorkers: number;
+  spare?: number;
+  idleCloseMs?: number;
+}) => { group: (key: string) => ReplacingWorkerLike; close: () => void };
 
 type HarnessModule = {
   AnonRpcWorker?: unknown;
   ReplacingWorker?: unknown;
+  WorkerPool?: unknown;
   knownWorker?: (id: TorProviderId) => KnownWorkerLike;
   knownWorkerInit?: (id: TorProviderId, options: { rpcProvider: RpcProviderLike; config?: unknown }) => object;
 };
 
-/**
- * One client per page load, shared by every transport.
- *
- * The promise itself is cached, not its result, so several transports starting
- * at once wait on a single bootstrap rather than each building a circuit.
- */
-let activeFetch: ReturnType<typeof createTorFetch> | null = null;
-
-/** Thrown when Tor cannot be used, so the caller fails rather than leaks. */
-export class TorUnavailableError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = 'TorUnavailableError';
-  }
-}
+/** A fetch over Tor. */
+export type TorFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 // Race a wait that takes no signal (an import, a worker's `ready`, a provider
 // read) against one, rejecting with the signal's own reason; harness calls get
@@ -119,10 +124,12 @@ function withAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
  * harness checks this endpoint's eth_chainId against the specifier's chain
  * before it reads.
  *
- * Takes the bootstrap's signal: the harness stops booting on close() but
- * cannot cancel a read it has handed to this provider, so closing ends it here.
+ * One provider per endpoint for the page: the harness shares a page's boot
+ * reads between workers by provider, so every worker after the first starts
+ * without reading anything direct. A read the harness no longer waits for
+ * ends at TOR_PROBE_TIMEOUT_MS.
  */
-async function bootstrapProvider(known: KnownWorkerLike, signal: AbortSignal) {
+async function bootstrapProvider(known: KnownWorkerLike): Promise<RpcProviderLike> {
   const { getChainConfig } = await import('@/config/chains');
   let url = getChainConfig(known.specifierChainId)?.rpcUrl;
   if (!url && (known.specifierChainId === 1 || known.specifierChainId === 11155111)) {
@@ -133,19 +140,32 @@ async function bootstrapProvider(known: KnownWorkerLike, signal: AbortSignal) {
   }
   if (!url) throw new TorUnavailableError('No endpoint to read the anon-rpc client specifier from.');
   const endpoint = url;
+  let provider = bootstrapProviders.get(endpoint);
+  if (!provider) bootstrapProviders.set(endpoint, provider = directProvider(endpoint));
+  return provider;
+}
+
+const bootstrapProviders = new Map<string, RpcProviderLike>();
+
+function directProvider(endpoint: string): RpcProviderLike {
   let id = 0;
   return {
     async request({ method, params }: { method: string; params?: unknown[] }): Promise<unknown> {
       const body = JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params: params ?? [] });
       const headers = { 'content-type': 'application/json' };
       assertEgressAllowed('rpc', { method: 'POST', url: endpoint, headers, body });
-      const response = await fetch(endpoint, {
-        method: 'POST', headers, body, redirect: 'error', credentials: 'omit', referrerPolicy: 'no-referrer', signal,
-      });
-      if (!response.ok) throw new Error(`specifier read failed: HTTP ${response.status}`);
-      const reply = await response.json() as { result?: unknown; error?: { message?: string } };
-      if (reply.error) throw new Error(`specifier read failed: ${reply.error.message ?? 'RPC error'}`);
-      return reply.result;
+      const { signal, release } = composeSignals([timeoutSignal(TOR_PROBE_TIMEOUT_MS)]);
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST', headers, body, redirect: 'error', credentials: 'omit', referrerPolicy: 'no-referrer', signal,
+        });
+        if (!response.ok) throw new Error(`specifier read failed: HTTP ${response.status}`);
+        const reply = await response.json() as { result?: unknown; error?: { message?: string } };
+        if (reply.error) throw new Error(`specifier read failed: ${reply.error.message ?? 'RPC error'}`);
+        return reply.result;
+      } finally {
+        release();
+      }
     },
   };
 }
@@ -254,7 +274,7 @@ async function loadClient(
       worker = factory.tor!();
     } else {
       report('specifier');
-      const rpcProvider = await withAbort(bootstrapProvider(knownWorker!(provider.id), signal), signal);
+      const rpcProvider = await withAbort(bootstrapProvider(knownWorker!(provider.id)), signal);
       throwIfAborted(signal);
       // The harness runs a bundle only if the specifier pins this build's hash,
       // and refuses before fetching it otherwise.
@@ -284,14 +304,240 @@ async function loadClient(
 }
 
 /**
- * The Tor fetch for this page load, or null when Tor is not in force.
+ * The Tor sender for a request to `party` whose URL and body are `text`, or
+ * null when Tor is not in force.
  *
  * Null rather than a passthrough, so a caller has to decide what to do about
- * it rather than receiving something that looks like Tor and is not.
+ * it rather than receiving something that looks like Tor and is not. Each
+ * request goes over its isolation group's worker (services/tor-groups.ts),
+ * chosen when this is called.
  */
-export function torFetchIfActive(): ((input: string | URL | Request, init?: RequestInit) => Promise<Response>) | null {
+export function torFetchFor(party: TorParty, text: string, subject?: TorSubject): TorFetch | null {
   if (!TOR_IN_FORCE) return null;
-  return activeFetch ??= createTorFetch(ACTIVE_TOR_SETTINGS.gatewayUrl, ACTIVE_TOR_SETTINGS.provider);
+  const key = budgetedGroup(torGroupFor(party, text, subject));
+  // A group of its own for one request: it closes once that request is done.
+  if (key.startsWith('subject:')) return oneShotSender(key);
+  let sender = senders.get(key);
+  if (!sender) senders.set(key, sender = groupSender(key));
+  return sender;
+}
+
+/**
+ * A fetch for one party's requests: over anon-rpc, on the request's group,
+ * when Tor is in force, and the global fetch otherwise. `about` says what a
+ * request is about beyond its text, or `true` when it identifies the user
+ * without naming an account (services/tor-groups.ts). For third-party clients
+ * that take a fetch.
+ */
+export function routedFetch(
+  party: TorParty,
+  about?: (url: string, body: string) => TorSubject | boolean,
+): TorFetch {
+  return (input, init) => {
+    const url = input instanceof Request ? input.url : String(input);
+    const body = typeof init?.body === 'string' ? init.body : '';
+    const subject = about?.(url, body) ?? {};
+    const send = torFetchFor(party, `${url}\n${body}`, typeof subject === 'boolean' ? { identifying: subject } : subject);
+    return send ? send(input, init) : fetch(input, init);
+  };
+}
+
+/** The sender for public chain reads, or null when Tor is not in force. */
+export function torFetchIfActive(): TorFetch | null {
+  return torFetchFor('rpc', '');
+}
+
+/**
+ * Start an operation (see services/tor-groups.ts) and return what ends it.
+ * Ending fails the operation's requests still pending and any sent later
+ * through a sender it handed out, and closes its worker, so the next
+ * operation starts on a fresh route and the budget is free for others.
+ */
+export function beginTorOperationScope(): () => void {
+  const { key, end } = beginTorOperation();
+  const lifetime = new AbortController();
+  operationLifetimes.set(key, lifetime);
+  return () => {
+    end();
+    operationLifetimes.delete(key);
+    lifetime.abort(operationEnded());
+    senders.delete(key);
+    void groups?.then((group) => group(key).close(), () => {});
+  };
+}
+
+/** One sender per group key, each over that group's worker. */
+const senders = new Map<string, TorFetch>();
+
+/** Each operation in progress, by group key, until it ends. */
+const operationLifetimes = new Map<string, AbortController>();
+
+const operationEnded = () => new TorUnavailableError('The operation this request belonged to has ended.');
+
+/**
+ * The page's isolation groups, started on first use: a WorkerPool on the web,
+ * where each group is a worker of its own, and one Arti client on a device,
+ * where each group is an isolation key (separate circuits, connections, and
+ * TLS sessions). The promise is cached, not its result, so senders starting
+ * at once share one import; a failed import is dropped so the next call
+ * tries again.
+ */
+let groups: Promise<(key: string) => ReplacingWorkerLike> | null = null;
+
+/**
+ * How many workers the web pool keeps alive, over every group and the spare.
+ * Each Nym client's cover traffic costs about a quarter of a 4-core Android
+ * device even when idle, and four left no headroom for first calls; tor-js
+ * workers slowed past four on Android and not through six on desktop
+ * (2026-10-21/22). An idle client costs as much as a busy one, so idle groups
+ * close.
+ */
+function workerBudget(provider: TorProviderId): { maxWorkers: number; spare: number; idleCloseMs: number } {
+  const cores = typeof navigator !== 'undefined' && navigator.hardwareConcurrency > 0 ? navigator.hardwareConcurrency : 4;
+  const maxWorkers = Math.min(6, Math.max(1, Math.floor(cores / 2)));
+  return { maxWorkers, spare: maxWorkers >= 3 ? 1 : 0, idleCloseMs: provider === 'nym' ? 90_000 : 120_000 };
+}
+
+/**
+ * Public groups merged to fit the budget: with six workers each public
+ * service has its own, with four or five chain reads keep theirs and the
+ * other services share one, and below that every public service shares one.
+ * Identity groups always keep their own (a device has no budget).
+ */
+function budgetedGroup(key: string): string {
+  if (TOR_ON_DEVICE || !key.startsWith('public:')) return key;
+  const { maxWorkers } = workerBudget(ACTIVE_TOR_SETTINGS.provider);
+  if (maxWorkers >= 6) return key;
+  if (maxWorkers >= 4) return key === 'public:rpc' ? key : 'public';
+  return 'public';
+}
+
+async function startGroups(): Promise<(key: string) => ReplacingWorkerLike> {
+  const target = clientTarget(ACTIVE_TOR_SETTINGS.provider, ACTIVE_TOR_SETTINGS.gatewayUrl);
+  const module = await importHarness(new AbortController().signal);
+  const timeouts = { callTimeoutMs: TOR_ROUTE_DEADLINE_MS, readyTimeoutMs: TOR_PROBE_TIMEOUT_MS };
+  if (TOR_ON_DEVICE) {
+    const Replacing = module.ReplacingWorker as ReplacingWorkerFactory | undefined;
+    if (typeof Replacing !== 'function') {
+      throw new TorUnavailableError('The anon-rpc client does not expose the expected interface.');
+    }
+    const replacing = new Replacing({ start: { tor: {} }, ...timeouts });
+    return (key) => ({
+      fetch: (url, init) => replacing.fetch(url, { ...init, isolationKey: key } as RequestInit),
+      close: () => {},
+    });
+  }
+  const Pool = module.WorkerPool as WorkerPoolFactory | undefined;
+  if (typeof Pool !== 'function') {
+    throw new TorUnavailableError('The anon-rpc client does not expose the expected interface.');
+  }
+  const pool = new Pool({
+    start: async (retired) => ({ ...await loadClient(module, target, retired), ready: Promise.resolve() }),
+    ...timeouts,
+    ...workerBudget(target.provider.id),
+  });
+  return (key) => pool.group(key);
+}
+
+function groupSender(key: string): TorFetch {
+  // An operation's sender lives as long as the operation; one that ended
+  // before its sender was made has nothing left to send.
+  let lifetime: AbortSignal | undefined;
+  if (key.startsWith('operation:')) {
+    let operation = operationLifetimes.get(key);
+    if (!operation) {
+      operation = new AbortController();
+      operation.abort(operationEnded());
+    }
+    lifetime = operation.signal;
+  }
+  const send: TorFetch = (input, init) => sendOver(() => {
+    const pending = groups ??= startGroups();
+    return { pending, drop: () => { if (groups === pending) groups = null; } };
+  }, key, input, init, lifetime);
+  // An operation reads each answer before handing it on, so a relayer quote
+  // binds the relay that later names its commitment to this operation.
+  return lifetime ? async (input, init) => read(key, await send(input, init)) : send;
+}
+
+/**
+ * The response with its body read, after recording any relayer quote in it
+ * (services/tor-groups.ts). An operation's and a one-shot group's answers are
+ * small JSON.
+ */
+async function read(key: string, response: Response): Promise<Response> {
+  const body = await response.arrayBuffer();
+  noteTorQuotes(key, new TextDecoder().decode(body));
+  return new Response(body.byteLength > 0 ? body : null, {
+    status: response.status, statusText: response.statusText, headers: response.headers,
+  });
+}
+
+/**
+ * A sender for one request on a group of its own, which closes the group once
+ * the response is in hand. The body is read first, since closing the group
+ * ends a body still arriving; a request that identifies the user on its own
+ * expects a small answer.
+ */
+function oneShotSender(key: string): TorFetch {
+  const send = groupSender(key);
+  return async (input, init) => {
+    try {
+      return await read(key, await send(input, init));
+    } finally {
+      void groups?.then((group) => group(key).close(), () => {});
+    }
+  };
+}
+
+/**
+ * One request over a client: the request is rebuilt from its parts, since the
+ * body crosses the sandbox boundary as bytes and a JSON-RPC body is small.
+ * `clients` yields the pending client source and how to drop it when it fails
+ * to load, so the next call tries again.
+ */
+async function sendOver(
+  clients: () => { pending: Promise<(key: string) => ReplacingWorkerLike>; drop: () => void },
+  key: string,
+  input: string | URL | Request,
+  init: RequestInit | undefined,
+  lifetime?: AbortSignal,
+): Promise<Response> {
+  const request = new Request(input, init);
+  // The fetch polyfill on React Native may leave Request.signal unset.
+  const { signal, release } = composeSignals([init?.signal ?? request.signal, lifetime].filter((s): s is AbortSignal => !!s));
+  try {
+    throwIfAborted(signal);
+    const { pending, drop } = clients();
+    let client: ReplacingWorkerLike;
+    try {
+      client = (await withAbort(pending, signal))(key);
+    } catch (error) {
+      // The harness module failed to load: let the next call try again.
+      if (!signal.aborted) drop();
+      throw error;
+    }
+    // Read through arrayBuffer(), never `request.body`: React Native's Request
+    // (whatwg-fetch) has no `.body`, and gating on it sent every RPC from a
+    // device with an empty body.
+    const bytes = request.method === 'GET' || request.method === 'HEAD'
+      ? null : new Uint8Array(await withAbort(request.arrayBuffer(), signal));
+    const body = bytes && bytes.byteLength > 0 ? bytes : undefined;
+    throwIfAborted(signal);
+    // The harness ends a streamed body when this signal aborts, so a timeout
+    // still ends a probe that has its headers but not its answer.
+    return await withAbort(client.fetch(request.url, {
+      method: request.method,
+      headers: Object.fromEntries(request.headers.entries()),
+      body,
+      redirect: init?.redirect ?? request.redirect,
+      signal,
+    }), signal);
+  } finally {
+    // Where release does anything (React Native), the native client has
+    // already buffered the whole response, so no body is left to abort.
+    release();
+  }
 }
 
 /**
@@ -344,6 +590,20 @@ async function replacingClient(
   if (typeof Replacing !== 'function') {
     throw new TorUnavailableError('The anon-rpc client does not expose the expected interface.');
   }
+  if (TOR_ON_DEVICE) {
+    // The native SDK starts Arti itself: the Test can name the start and the
+    // ready, not the steps between.
+    onStep?.('starting');
+    const replacing = new Replacing({ start: { tor: {} }, callTimeoutMs: TOR_ROUTE_DEADLINE_MS, readyTimeoutMs: TOR_PROBE_TIMEOUT_MS });
+    return {
+      fetch: async (url, init) => {
+        const response = await replacing.fetch(url, init);
+        onStep?.('checking');
+        return response;
+      },
+      close: () => replacing.close(),
+    };
+  }
   return new Replacing({
     start: async (retired) => {
       const { signal: boot, release } = composeSignals([timeoutSignal(TOR_PROBE_TIMEOUT_MS), signal, retired]);
@@ -369,44 +629,13 @@ async function replacingClient(
 export function createTorFetch(gatewayUrl: string, providerId: TorProviderId = DEFAULT_TOR_PROVIDER) {
   let clients: Promise<ReplacingWorkerLike> | null = null;
   const lifetime = new AbortController();
-  const send = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-    const request = new Request(input, init);
-    // The fetch polyfill on React Native may leave Request.signal unset.
-    const { signal, release } = composeSignals([init?.signal ?? request.signal, lifetime.signal].filter((s): s is AbortSignal => !!s));
-    try {
-      throwIfAborted(signal);
-      const pending = clients ??= replacingClient(gatewayUrl, providerId, lifetime.signal);
-      let replacing: ReplacingWorkerLike;
-      try {
-        replacing = await withAbort(pending, signal);
-      } catch (error) {
-        // The harness module failed to load: let the next call try again.
-        if (!signal.aborted && clients === pending) clients = null;
-        throw error;
-      }
-      // Buffered: the body crosses the sandbox boundary as bytes, and a JSON-RPC
-      // body is small. Read through arrayBuffer(), never `request.body`: React
-      // Native's Request (whatwg-fetch) has no `.body`, and gating on it sent
-      // every RPC from a device with an empty body.
-      const bytes = request.method === 'GET' || request.method === 'HEAD'
-        ? null : new Uint8Array(await withAbort(request.arrayBuffer(), signal));
-      const body = bytes && bytes.byteLength > 0 ? bytes : undefined;
-      throwIfAborted(signal);
-      // The harness ends a streamed body when this signal aborts, so a timeout
-      // still ends a probe that has its headers but not its answer.
-      return await withAbort(replacing.fetch(request.url, {
-        method: request.method,
-        headers: Object.fromEntries(request.headers.entries()),
-        body,
-        redirect: init?.redirect ?? request.redirect,
-        signal,
-      }), signal);
-    } finally {
-      // Where release does anything (React Native), the native client has
-      // already buffered the whole response, so no body is left to abort.
-      release();
-    }
-  };
+  const send: TorFetch = (input, init) => sendOver(() => {
+    const pending = clients ??= replacingClient(gatewayUrl, providerId, lifetime.signal);
+    return {
+      pending: pending.then((client) => () => client),
+      drop: () => { if (clients === pending) clients = null; },
+    };
+  }, '', input, init, lifetime.signal);
   // Draft gateways must stop consuming circuits when the form closes or the
   // address changes, including a bootstrap that has not completed yet.
   return Object.assign(send, { close() {
