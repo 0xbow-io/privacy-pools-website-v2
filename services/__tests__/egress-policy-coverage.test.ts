@@ -577,9 +577,7 @@ describe('app-owned network boundary coverage', () => {
       'hooks/use-sui-proof.ts': 2,
       'services/sdk-setup.ts': 1, // circuit artifacts, not the ASP client
       // Stellar testnet: its own SDK/Soroban/Horizon stack, like Sui's.
-      'services/stellar/stellar-account.ts': 1, // testnet relayer details, before a withdrawal
-      'services/stellar/stellar-relayer.ts': 1, // testnet relayer quote + relay
-      'services/stellar/stellar-runtime.ts': 2, // asp-v2 events + ASP data, and circuit artifacts
+      'services/stellar/stellar-runtime.ts': 1, // circuit artifacts
       'services/tor-fetch.ts': 2, // the specifier read before Tor exists, and routedFetch's direct send when Tor is off
     });
   });

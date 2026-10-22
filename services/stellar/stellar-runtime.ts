@@ -58,7 +58,7 @@ async function fetchJson<T>(url: string, timeoutMs: number): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { cache: 'no-store', signal: controller.signal });
+    const res = await routedFetch('asp')(url, { cache: 'no-store', signal: controller.signal });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     return (await res.json()) as T;
   } finally {
