@@ -6,6 +6,7 @@
 // typed, within slippage).
 import { LIFI_API_KEY, NATIVE_ASSET_ADDRESS } from '@/config/intent-swaps';
 import { contractCallDeniedBridges } from '@/services/lifi-native-delivery';
+import { routedFetch } from '@/services/tor-fetch';
 
 // LiFi uses the zero address for native, our config uses the 0xeee sentinel.
 const LIFI_NATIVE = '0x0000000000000000000000000000000000000000';
@@ -42,7 +43,7 @@ export async function fetchLifiExactInQuote(params: {
     fromAddress: params.fromAddress,
   });
   try {
-    const res = await fetch(`https://li.quest/v1/quote?${qs.toString()}`, {
+    const res = await routedFetch('lifi')(`https://li.quest/v1/quote?${qs.toString()}`, {
       headers: LIFI_API_KEY ? { 'x-lifi-api-key': LIFI_API_KEY } : undefined,
       signal: params.signal,
     });
@@ -106,7 +107,7 @@ export async function fetchLifiContractCallDeliverable(params: {
   const toToken = toLifiToken(params.toToken);
   const deniedBridges = contractCallDeniedBridges(params.chainId, toChain, toToken);
   try {
-    const res = await fetch('https://li.quest/v1/quote/contractCalls', {
+    const res = await routedFetch('lifi')('https://li.quest/v1/quote/contractCalls', {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...(LIFI_API_KEY ? { 'x-lifi-api-key': LIFI_API_KEY } : {}) },
       signal: params.signal,

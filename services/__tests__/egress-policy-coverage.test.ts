@@ -578,8 +578,6 @@ describe('app-owned network boundary coverage', () => {
       'hooks/use-sui-proof.ts': 2,
       'hooks/use-sui-relay.ts': 2,
       'services/fx-rate.ts': 1,
-      'services/lifi-quote.ts': 2,
-      'services/lifi-token-list.ts': 1, // whole-chain token list, names no wallet
       'services/price-service.ts': 1,
       'services/sdk-setup.ts': 1, // circuit artifacts, not the ASP client
       // Stellar testnet: its own SDK/Soroban/Horizon stack, like Sui's.
