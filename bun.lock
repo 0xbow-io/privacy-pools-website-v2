@@ -20,7 +20,7 @@
         "@noble/ciphers": "2.1.1",
         "@noble/curves": "2.0.1",
         "@noble/hashes": "2.0.1",
-        "@privacy-pools-v2/sdk": "file:./vendor/privacy-pools-v2-sdk-1.0.2.tgz",
+        "@privacy-pools-v2/sdk": "file:./vendor/privacy-pools-v2-sdk-1.0.3-prerelease.00f84368.tgz",
         "@privacy-pools-v2/stellar-sdk": "file:./vendor/privacy-pools-v2-stellar-sdk-0.0.0-prerelease.c81ba9d5.tgz",
         "@react-native-async-storage/async-storage": "2.2.0",
         "@react-native-masked-view/masked-view": "0.3.2",
@@ -575,7 +575,6 @@
 
     "@kpstreams/core": ["@kpstreams/core@0.2.1", "", {}, "sha512-cx82IpcAG2OoteTrUbHECIm2jc5rJ0+O8qB7cKAXdvkN5oje4aOIiF8nb7nEk+LSMISz8Zz7znrj+gzSXEBKuw=="],
 
-    "@lifi/sdk": ["@lifi/sdk@4.1.0", "", { "dependencies": { "@lifi/types": "17.85.0" } }, "sha512-rLjP/JXBC7syLimGNZfZmjPUxMpXozhX250IP0UwqnUB7K1lunvQA0NTGC4n6KcsMAHU210XkiTqpbjtFG4q3g=="],
 
     "@lifi/types": ["@lifi/types@17.85.0", "", {}, "sha512-EueQyqhyvZbHygkyxj9EPAhUwn69ViRn9zJ56UnZlXsHlOZ/NdNVWxUwrVFVuRt/8qkdZH35R/1vE+SOxFHCNw=="],
 
@@ -697,7 +696,7 @@
 
     "@pinojs/redact": ["@pinojs/redact@0.4.0", "", {}, "sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg=="],
 
-    "@privacy-pools-v2/sdk": ["@privacy-pools-v2/sdk@./vendor/privacy-pools-v2-sdk-1.0.2.tgz", { "dependencies": { "@ethereumjs/rlp": "10.1.3", "@lifi/sdk": "^4.0.0", "@lifi/types": "^17.0.0", "@noble/ciphers": "2.1.1", "@noble/curves": "2.0.1", "@noble/hashes": "2.0.1", "@zk-kit/lean-imt": "2.2.4", "circomlibjs": "0.1.7", "multiformats": "^14.0.0", "pino": "^9.6.0", "pino-pretty": "^13.1.3", "snarkjs": "0.7.5", "viem": "2.45.3", "zod": "^4.3.6" } }, "sha512-ERu5DcDy8Bb0ap1f+2BxU/qALz4rn5mjJlqzN98me62xPHvTbI6W+r/X2LHNbQpaZNHLgXEn2ir528WxN7W+sQ=="],
+    "@privacy-pools-v2/sdk": ["@privacy-pools-v2/sdk@./vendor/privacy-pools-v2-sdk-1.0.3-prerelease.00f84368.tgz", { "dependencies": { "@ethereumjs/rlp": "10.1.3", "@lifi/types": "^17.0.0", "@noble/ciphers": "2.1.1", "@noble/curves": "2.0.1", "@noble/hashes": "2.0.1", "@zk-kit/lean-imt": "2.2.4", "circomlibjs": "0.1.7", "multiformats": "^14.0.0", "pino": "^9.6.0", "pino-pretty": "^13.1.3", "snarkjs": "0.7.5", "viem": "2.45.3", "zod": "^4.3.6" } }, "sha512-KexgS64Qzy53sRXUSjgnR01WMBtgqIv1lzePWB6wr6RruAifmGSPwmgsNt4nk1RRgQdxBCKbqKybJfc2XzgkEQ=="],
 
     "@privacy-pools-v2/stellar-sdk": ["@privacy-pools-v2/stellar-sdk@./vendor/privacy-pools-v2-stellar-sdk-0.0.0-prerelease.c81ba9d5.tgz", { "dependencies": { "@ethereumjs/rlp": "10.1.3", "@noble/ciphers": "2.1.1", "@noble/curves": "2.0.1", "@noble/hashes": "2.0.1", "@stellar/freighter-api": "^6.0.1", "@stellar/stellar-sdk": "^14.6.1", "@zk-kit/lean-imt": "2.2.4", "circomlibjs": "0.1.7", "multiformats": "^14.0.0", "pino": "^9.6.0", "pino-pretty": "^13.1.3", "snarkjs": "0.7.5", "zod": "^4.3.6" } }, "sha512-7UgWeNxLqz3bZVvhpC8NTkoySoYyiNxmD5mMfpe9d94QbTn4iNDBUrMhPMyEt0HC5aq9J7yULOWjAbiDaOSYrw=="],
 
