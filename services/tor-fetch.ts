@@ -12,7 +12,7 @@
  * (and names a gateway if it needs one). The client is never in our bundle:
  * the harness fetches it from the specifier's resolvers.
  *
- * ONE READ GOES OUT DIRECT. Before the client exists, the harness checks the
+ * ONE READ GOES OUT DIRECT. Before each client starts, the harness checks the
  * chain and reads the specifier (eth_chainId, then two eth_calls to a public
  * contract) through the bootstrap provider below. They show that this browser
  * is starting an anon-rpc client and nothing about the user, and they still
@@ -62,8 +62,17 @@ type RpcProviderLike = { request: (args: { method: string; params?: unknown[] })
 /** The harness's knownWorker() entry: where a provider's specifier lives. */
 type KnownWorkerLike = { specifier: string; specifierChainId: number };
 
+/** The harness's ReplacingWorker, as this app constructs it. */
+type ReplacingWorkerLike = TorClientLike;
+
+type ReplacingWorkerFactory = new (options: {
+  start: (signal: AbortSignal) => Promise<TorClientLike & { ready: Promise<void> }>;
+  callTimeoutMs?: number;
+}) => ReplacingWorkerLike;
+
 type HarnessModule = {
   AnonRpcWorker?: unknown;
+  ReplacingWorker?: unknown;
   knownWorker?: (id: TorProviderId) => KnownWorkerLike;
   knownWorkerInit?: (id: TorProviderId, options: { rpcProvider: RpcProviderLike; config?: unknown }) => unknown;
 };
@@ -84,8 +93,9 @@ export class TorUnavailableError extends Error {
   }
 }
 
-// A call made before the worker is ready is buffered, not cancelled. Race that
-// wait here too, so a timed-out probe or RPC cannot send its request later.
+// Race a wait that takes no signal (an import, a worker's `ready`, a provider
+// read) against one, rejecting with the signal's own reason; harness calls get
+// it too, so every caller sees the reason it aborted with.
 function withAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
     const abort = () => reject(abortReason(signal));
@@ -207,30 +217,14 @@ function followWorkerLog(worker: AnonRpcWorkerLike, report: (step: TorProbeStep)
   return () => stop.abort();
 }
 
-async function loadClient(
-  gatewayUrl: string,
-  signal = timeoutSignal(TOR_PROBE_TIMEOUT_MS),
-  providerId: TorProviderId = DEFAULT_TOR_PROVIDER,
-  onStep?: (step: TorProbeStep) => void,
-): Promise<TorClientLike> {
-  let reached = -1;
-  const report = (step: TorProbeStep) => {
-    const at = STEP_ORDER.indexOf(step);
-    if (at > reached) { reached = at; onStep?.(step); }
-  };
-  const provider = torProvider(providerId);
-  if (!provider) throw new TorUnavailableError('That anon-rpc provider is not available in this build.');
-  const gateway = validateTorGatewayFor(provider.id, gatewayUrl);
-  if (!gateway.ok) throw new TorUnavailableError(gateway.message);
-  report('loading');
-  let module: HarnessModule;
+async function importHarness(signal: AbortSignal): Promise<HarnessModule> {
   try {
     // The only two references in the repo, both bare dynamic imports, so a
     // user who never turns anon-rpc on never loads either. On a device the
     // client is Arti compiled into the app (@0xbow/anon-rpc-rs-react-native,
     // AnonRpcWorker.tor()): same worker shape, no gateway, no specifier, no
     // bundle.
-    module = await withAbort<HarnessModule>(
+    return await withAbort<HarnessModule>(
       TOR_ON_DEVICE ? import('@0xbow/anon-rpc-rs-react-native') : import('@0xbow/anon-rpc-rs-browser-harness'),
       signal,
     );
@@ -238,6 +232,29 @@ async function loadClient(
     console.warn('[anon-rpc] client load failed', cause);
     throw new TorUnavailableError('Could not load the anon-rpc client.', { cause });
   }
+}
+
+/** The provider and its gateway, checked before anything loads. */
+function clientTarget(providerId: TorProviderId, gatewayUrl: string): { provider: TorProvider; gatewayUrl: string } {
+  const provider = torProvider(providerId);
+  if (!provider) throw new TorUnavailableError('That anon-rpc provider is not available in this build.');
+  const gateway = validateTorGatewayFor(provider.id, gatewayUrl);
+  if (!gateway.ok) throw new TorUnavailableError(gateway.message);
+  return { provider, gatewayUrl: gateway.url };
+}
+
+/** One client, started and ready; `onStep` hears its steps after 'loading'. */
+async function loadClient(
+  module: HarnessModule,
+  { provider, gatewayUrl }: ReturnType<typeof clientTarget>,
+  signal: AbortSignal,
+  onStep?: (step: TorProbeStep) => void,
+): Promise<TorClientLike> {
+  let reached = STEP_ORDER.indexOf('loading');
+  const report = (step: TorProbeStep) => {
+    const at = STEP_ORDER.indexOf(step);
+    if (at > reached) { reached = at; onStep?.(step); }
+  };
 
   const factory = module.AnonRpcWorker as
     | ((new (init: unknown) => AnonRpcWorkerLike) & { tor?: () => AnonRpcWorkerLike })
@@ -258,7 +275,7 @@ async function loadClient(
       report('specifier');
       const rpcProvider = await withAbort(bootstrapProvider(provider, knownWorker!(provider.id), signal), signal);
       throwIfAborted(signal);
-      worker = new factory(knownWorkerInit!(provider.id, { rpcProvider, config: provider.workerConfig(gateway.url) }));
+      worker = new factory(knownWorkerInit!(provider.id, { rpcProvider, config: provider.workerConfig(gatewayUrl) }));
     }
     // Only a Test follows the log: the app's own client leaves it alone.
     if (onStep) unfollow = followWorkerLog(worker, report, signal);
@@ -305,9 +322,63 @@ export function rpcTimeoutMs(configured: number | undefined): number | undefined
   return TOR_IN_FORCE ? Math.max(configured ?? 0, TOR_RPC_TIMEOUT_MS) : configured;
 }
 
-/** Draft probes must use the selected gateway before settings take effect on reload. */
+/**
+ * Clients for one sender: the harness's ReplacingWorker starts the first on
+ * the first call and a new one, which picks a new route, once the one in use
+ * stops carrying calls. A Nym client keeps the route it picks at boot, and 7
+ * of 79 boots (2026-10-19) drew one that failed every call: an exit that
+ * accepted the connection and then carried nothing, or a route on which every
+ * TLS handshake to the endpoint broke off. A worker that has failed stays
+ * failed too (anon-rpc §5, §7).
+ *
+ * A call that fails counts against the route, and so does one still waiting
+ * TOR_ROUTE_DEADLINE_MS after its client is ready, since a route that hangs is
+ * as dead as one that fails. One its caller aborts counts for nothing, which
+ * is why that deadline falls inside the app's own timeout (rpcTimeoutMs). An
+ * answer of any status shows the route works. A client that fails to start
+ * is dropped, so the next call tries again rather than the failure staying
+ * pinned for the rest of the session: a gateway down at page load may be up.
+ *
+ * `onStep` follows each client's start, for a Test, which also learns when a
+ * client is ready ('checking').
+ */
+async function replacingClient(
+  gatewayUrl: string,
+  providerId: TorProviderId,
+  signal: AbortSignal,
+  onStep?: (step: TorProbeStep) => void,
+): Promise<ReplacingWorkerLike> {
+  const target = clientTarget(providerId, gatewayUrl);
+  onStep?.('loading');
+  const module = await importHarness(signal);
+  const Replacing = module.ReplacingWorker as ReplacingWorkerFactory | undefined;
+  if (typeof Replacing !== 'function') {
+    throw new TorUnavailableError('The anon-rpc client does not expose the expected interface.');
+  }
+  return new Replacing({
+    start: async (retired) => {
+      const { signal: boot, release } = composeSignals([timeoutSignal(TOR_PROBE_TIMEOUT_MS), signal, retired]);
+      try {
+        const client = await loadClient(module, target, boot, onStep);
+        onStep?.('checking');
+        throwIfAborted(boot);
+        return { ...client, ready: Promise.resolve() };
+      } finally {
+        release();
+      }
+    },
+    callTimeoutMs: TOR_ROUTE_DEADLINE_MS,
+  });
+}
+
+/**
+ * Draft probes must use the selected gateway before settings take effect on reload.
+ *
+ * Its clients come and go as replacingClient describes. Closing this sender
+ * closes the one in use and counts for nothing.
+ */
 export function createTorFetch(gatewayUrl: string, providerId: TorProviderId = DEFAULT_TOR_PROVIDER) {
-  let clientPromise: Promise<TorClientLike> | null = null;
+  let clients: Promise<ReplacingWorkerLike> | null = null;
   const lifetime = new AbortController();
   const send = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const request = new Request(input, init);
@@ -315,15 +386,13 @@ export function createTorFetch(gatewayUrl: string, providerId: TorProviderId = D
     const { signal, release } = composeSignals([init?.signal ?? request.signal, lifetime.signal].filter((s): s is AbortSignal => !!s));
     try {
       throwIfAborted(signal);
-      clientPromise ??= loadClient(gatewayUrl, anySignal([timeoutSignal(TOR_PROBE_TIMEOUT_MS), lifetime.signal]), providerId);
-      const pending = clientPromise;
-      let client: TorClientLike;
+      const pending = clients ??= replacingClient(gatewayUrl, providerId, lifetime.signal);
+      let replacing: ReplacingWorkerLike;
       try {
-        client = await withAbort(pending, signal);
+        replacing = await withAbort(pending, signal);
       } catch (error) {
-        // Let the next call try again rather than pinning the failure for the
-        // rest of the session: a gateway that was down at page load may be up.
-        if (!signal.aborted && clientPromise === pending) clientPromise = null;
+        // The harness module failed to load: let the next call try again.
+        if (!signal.aborted && clients === pending) clients = null;
         throw error;
       }
       // Buffered: the body crosses the sandbox boundary as bytes, and a JSON-RPC
@@ -336,7 +405,7 @@ export function createTorFetch(gatewayUrl: string, providerId: TorProviderId = D
       throwIfAborted(signal);
       // The harness ends a streamed body when this signal aborts, so a timeout
       // still ends a probe that has its headers but not its answer.
-      return await withAbort(client.fetch(request.url, {
+      return await withAbort(replacing.fetch(request.url, {
         method: request.method,
         headers: Object.fromEntries(request.headers.entries()),
         body,
@@ -352,7 +421,7 @@ export function createTorFetch(gatewayUrl: string, providerId: TorProviderId = D
   // address changes, including a bootstrap that has not completed yet.
   return Object.assign(send, { close() {
     lifetime.abort(new TorUnavailableError('The anon-rpc connection was closed.'));
-    void clientPromise?.then(client => client.close(), () => {});
+    void clients?.then(client => client.close(), () => {});
   } });
 }
 
@@ -367,16 +436,14 @@ export async function probeTorGateway(
   const { signal, release } = composeSignals([
     timeoutSignal(timeoutMs), ...(callerSignal ? [callerSignal] : []),
   ]);
-  let client: TorClientLike | undefined;
+  let clients: ReplacingWorkerLike | undefined;
   try {
-    client = await loadClient(gatewayUrl, signal, providerId, onStep);
-    onStep?.('checking');
-    throwIfAborted(signal);
-    if (providerId !== 'tor-js') return await probeMixnet(client, signal);
+    clients = await replacingClient(gatewayUrl, providerId, signal, onStep);
+    if (providerId !== 'tor-js') return await probeMixnet(clients, signal);
     // check.torproject.org is the canonical "am I on Tor" endpoint and is the
     // library's own example, so it exercises a real circuit rather than just
     // the gateway handshake.
-    const response = await withAbort(client.fetch('https://check.torproject.org/api/ip', { signal }), signal);
+    const response = await probeFetch(clients, 'https://check.torproject.org/api/ip', {}, signal);
     if (!response.ok) return { ok: false, message: 'The Tor connection answered, but the check did not complete.' };
     const verdict = await withAbort(response.json(), signal);
     if (verdict?.IsTor !== true) return { ok: false, message: 'The connection check did not confirm a Tor exit.' };
@@ -389,7 +456,7 @@ export async function probeTorGateway(
           : 'Could not reach the anon-rpc network.',
     };
   } finally {
-    client?.close();
+    clients?.close();
     release();
   }
 }
@@ -402,11 +469,11 @@ export async function probeTorGateway(
  */
 export const MIXNET_PROBE_URL = 'https://ethereum-rpc.publicnode.com';
 
-async function probeMixnet(client: TorClientLike, signal: AbortSignal): Promise<{ ok: true } | { ok: false; message: string }> {
+async function probeMixnet(clients: ReplacingWorkerLike, signal: AbortSignal): Promise<{ ok: true } | { ok: false; message: string }> {
   const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] });
   const headers = { 'content-type': 'application/json' };
   assertEgressAllowed('rpc', { method: 'POST', url: MIXNET_PROBE_URL, headers, body });
-  const response = await withAbort(client.fetch(MIXNET_PROBE_URL, { method: 'POST', headers, body, signal }), signal);
+  const response = await probeFetch(clients, MIXNET_PROBE_URL, { method: 'POST', headers, body }, signal);
   if (!response.ok) return { ok: false, message: 'The network answered, but the call did not complete.' };
   const reply = await withAbort(response.json(), signal) as { jsonrpc?: unknown; id?: unknown; result?: unknown; error?: unknown } | null;
   if (reply?.jsonrpc !== '2.0' || reply.id !== 1 || 'error' in reply || reply.result !== '0x1') {
@@ -416,15 +483,53 @@ async function probeMixnet(client: TorClientLike, signal: AbortSignal): Promise<
 }
 
 /**
+ * A Test's request, retried after a transport failure while its deadline
+ * lasts; a client that fails to start ends the Test.
+ *
+ * A client that fails its first call is likely to fail every call, and
+ * `clients` replaces it at that failure (see replacingClient), so the retry
+ * goes out on a new route. Reporting the first failure would call a working
+ * network unreachable. An attempt unanswered TOR_ROUTE_DEADLINE_MS after its
+ * client is ready has failed too, as it would in the app. An answer, valid or
+ * not, is never retried, and its body is read under the Test's own deadline.
+ */
+async function probeFetch(clients: ReplacingWorkerLike, url: string, init: RequestInit, signal: AbortSignal): Promise<Response> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await withAbort(clients.fetch(url, { ...init, signal }), signal);
+    } catch (error) {
+      // A client that could not start is not retried: a gateway that is down
+      // or a pin the chain does not match fails the same way again.
+      if (signal.aborted || attempt >= PROBE_ATTEMPTS || error instanceof TorUnavailableError) throw error;
+    }
+  }
+}
+
+const PROBE_ATTEMPTS = 3;
+
+/**
  * Building a circuit is slow; this is patience, not a health check.
  *
- * A cold start took 52s on the anon-rpc demo gateway (2026-09-30), because a
- * worker blob-spawned in the null-origin sandbox is not a secure context:
- * crypto.subtle is missing and tor-js falls back from its fast bootstrap to
- * downloading microdescriptors. Later starts reuse the worker's cached
- * directory.
+ * On Android Chrome a cold tor-js start answered its first call 28 to 66 s
+ * after page load, most of it the directory download from the demo gateway,
+ * which varied from 3 to 48 s (2026-10-21). Later starts read the worker's
+ * stored directory instead, in 2 to 5 s.
+ *
+ * A Test also has to outlast one dead route and the client that replaces it.
+ * On Android Chrome a Nym client on a dead route failed its first call 72 to
+ * 75 s after the Test began, one that hangs is given up at
+ * TOR_ROUTE_DEADLINE_MS, and a new client answered in a median 29 s and at
+ * most 61 s (2026-10-19).
  */
-export const TOR_PROBE_TIMEOUT_MS = 120_000;
+export const TOR_PROBE_TIMEOUT_MS = 180_000;
 
 /** See rpcTimeoutMs. The slowest call that still answered took 52 s. */
 export const TOR_RPC_TIMEOUT_MS = 90_000;
+
+/**
+ * How long a call may go unanswered once its client is ready before it counts
+ * against the client's route (see replacingClient). Inside TOR_RPC_TIMEOUT_MS,
+ * so it ends a hung call before the app's own timeout, which counts for
+ * nothing, gives up on it.
+ */
+export const TOR_ROUTE_DEADLINE_MS = 85_000;
