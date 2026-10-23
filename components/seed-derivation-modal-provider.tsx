@@ -314,6 +314,8 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
               </View>
               <Pressable
                 className="h-[36px] w-[36px] items-center justify-center rounded-control border border-border-light"
+                accessibilityRole="button"
+                accessibilityLabel="Close account unlock"
                 onPress={closeSeedDerivationModal}
                 disabled={pending && !slowSign}
               >
