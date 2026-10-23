@@ -86,6 +86,9 @@ export function PoolPageStatsCard({
         <Text className="font-pp-bold text-[13px] leading-[16px] text-text">Statistics</Text>
       </View>
       <StatRows items={items} />
+      <Text className="px-[16px] pb-[8px] font-pp-regular text-[11px] leading-[16px] text-text-muted">
+        Activity counts are not an anonymity score. Amounts and timing also matter.
+      </Text>
       <View className="h-[6px]" />
     </Card>
   );
