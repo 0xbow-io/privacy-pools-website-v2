@@ -11,7 +11,7 @@ import { shieldHeadroomRoomText } from '@/services/shield-headroom-copy';
 import { policedHttp } from '@/services/egress-transport';
 import { UNSAVED_CLAIM_WARNING } from '@/services/unsaved-claim-warning-copy';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { WEB_NO_OUTLINE } from '@/components/ui/web-style-shims';
+import { CARD_SHADOW, WEB_NO_OUTLINE } from '@/components/ui/web-style-shims';
 import { HoverHint } from '@/components/ui/hover-hint';
 import { ActivityIndicator, Animated, Easing, Linking, Platform, Pressable, ScrollView as RNScrollView, Text, TextInput, useWindowDimensions, View, type ViewStyle } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -2995,7 +2995,6 @@ export function ActionHub({
   const cardSurface = {
     backgroundColor: colors.cardBackground,
     borderColor: colors.border,
-    shadowColor: colorScheme === 'dark' ? Glow.dark : Glow.light,
   };
 
   const renderZone = (a: Action) => {
@@ -4328,7 +4327,8 @@ export function ActionHub({
       className="w-full overflow-hidden rounded-card border"
       style={[
         cardSurface,
-        { shadowOpacity: colorScheme === 'dark' ? 0 : 0.08, shadowRadius: 24, shadowOffset: { width: 0, height: 8 }, elevation: colorScheme === 'dark' ? 0 : 4 },
+        // The shared soft shadow every card and dropdown wears.
+        CARD_SHADOW,
         WEB ? {
           display: 'grid', gridTemplateRows: 'max-content',
           height: cardHeight === undefined ? undefined : cardHeight + 2,

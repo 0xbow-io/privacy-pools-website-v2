@@ -40,6 +40,7 @@ import {
   type SelectAssetInput,
 } from '@/components/home/explore-panel-context';
 import { getUiParam, installUiUrlGuard, notifyUiUrl, subscribeUiUrl } from '@/components/ui-url-events';
+import { CARD_SHADOW } from '@/components/ui/web-style-shims';
 
 // Keep the editorial content out of the initial transaction bundle.
 const FrontPage = lazy(() =>
@@ -818,6 +819,8 @@ export function HomeScreen() {
                   ? 'gap-[14px] p-[4px]'
                   : 'gap-[14px] rounded-card border border-border bg-card-background p-[16px]'
               }
+              // nw-keep(platform-css): the shared soft card shadow, on the sections drawn as a card
+              style={panelSection === 'mine' ? undefined : CARD_SHADOW}
             >
               <View className="flex-row items-start justify-between gap-[12px]">
                 {panelSection === 'mine' ? <View className="flex-1" /> : <PanelHeading section={panelSection} />}
