@@ -5,10 +5,11 @@
 // so `/chains/ethereum/eth` is the ppETH pool and the emptied plain pool
 // lives at `/chains/ethereum/eth-legacy` (services/pool-slug.ts has the rule).
 // Kept out of config/chains.ts because config/tokens imports it.
+import { displayTokenSymbol } from '@/services/share-display';
 import { getPoolDetailPath } from '@/config/chains';
-import { getActionableTokens, getKnownTokenMetadata } from '@/config/tokens';
+import { getActionableTokens } from '@/config/tokens';
 import type { TokenMetadata } from '@/config/environments';
-import { getConfiguredNativeYieldDeployment, getConfiguredYieldDeployments, isConfiguredYieldUnderlying } from '@/config/yield';
+import { getConfiguredNativeYieldDeployment, isConfiguredYieldUnderlying } from '@/config/yield';
 import { isSupersededPlainPool, poolLabel, poolSlug, poolSymbolFromSlug, type PoolSlugContext } from '@/services/pool-slug';
 
 /**
@@ -28,15 +29,20 @@ export function isLegacyPlainToken(token: Pick<TokenMetadata, 'address' | 'isNat
 }
 
 export function poolSlugContext(chainId: number): PoolSlugContext {
-  const shareSymbols = getConfiguredYieldDeployments(chainId).map((d) =>
-    (getKnownTokenMetadata(d.ppUSDC, chainId)?.symbol ?? `pp${d.underlyingSymbol}`).toUpperCase(),
-  );
+  // Existing pools remain addressable when new yield deposits are disabled.
+  // The registry describes pool identity; the yield flag only gates actions.
+  const shareSymbols = getActionableTokens(chainId)
+    .filter((token) => token.yieldShare)
+    .map((token) => token.symbol.toUpperCase());
   const openPlainSymbols: string[] = [];
   const legacyPlainSymbols: string[] = [];
   for (const token of getActionableTokens(chainId)) {
     const upper = token.symbol.toUpperCase();
     if (shareSymbols.includes(upper)) continue;
-    (isLegacyPlainToken(token, chainId) ? legacyPlainSymbols : openPlainSymbols).push(upper);
+    // Directory identity must not change when deposits are disabled. A known
+    // share is the canonical pool; the underlying keeps its legacy URL.
+    const replaced = shareSymbols.some((share) => displayTokenSymbol(share).toUpperCase() === upper);
+    (replaced || isLegacyPlainToken(token, chainId) ? legacyPlainSymbols : openPlainSymbols).push(upper);
   }
   return { shareSymbols, openPlainSymbols, legacyPlainSymbols };
 }

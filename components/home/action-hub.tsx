@@ -2733,7 +2733,7 @@ export function ActionHub({
           // back pay-token input stays at or under what was typed, and the
           // consent card still shows the exact figures before signing.
           if (!crossPayAllowed) {
-            toast({ title: `Converting ${displayTokenSymbol(payMeta.symbol)} isn't available on this network.`, variant: 'destructive' });
+            toast({ title: shieldPoolClosed ? 'Deposits into this pool are currently unavailable.' : `Converting ${displayTokenSymbol(payMeta.symbol)} isn't available on this network.`, variant: 'destructive' });
             return;
           }
           if (shieldQuote.status !== 'ok' || !shieldQuote.toAmountMin || !payTokenAddr) {
@@ -3930,7 +3930,7 @@ export function ActionHub({
       )}
       {a === 'shield' && !shieldBusy && crossPayShield && !shieldPricing && !(landing && !walletConnected && shieldPool && displayTokenSymbol(shieldPool.symbol) === payMeta.symbol) && !(crossPayAllowed && shieldQuote.status === 'ok') && (
         <Text className={`font-pp-sans text-[12px] leading-[17px] ${shieldQuote.status === 'none' ? 'text-warning' : 'text-text-secondary'}`}>
-          {!crossPayAllowed
+          {shieldPoolClosed ? 'Deposits into this pool are currently unavailable.' : !crossPayAllowed
             /* displayTokenSymbol, not the raw pool symbol: a share pool's symbol is
                ppUSDT, and "Pick ppUSDT" sends the user after an asset no
                wallet holds — shares live in the pool as notes. The depositable
