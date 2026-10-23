@@ -247,7 +247,7 @@ export function TokenSelectSheet({
   onSelectNetwork,
   onClose,
   title = 'Select a token',
-  balanceMode = 'wallet',
+  balanceMode = 'none',
   allowCustomSelection = false,
   hideZeroBalances = false,
 }: {
@@ -285,13 +285,18 @@ export function TokenSelectSheet({
    * for a list where the viewer's own holdings are irrelevant to the choice
    * (a payment request: the PAYER fulfils it, so the creator's balance says
    * nothing about whether the asset can be requested).
+   *
+   * Defaults to 'none' because 'wallet' reads the connected wallet's balances
+   * when the sheet opens. On a withdraw or send, that read tells the RPC
+   * provider which public wallet is about to exit privately. Only a picker
+   * that pays FROM the wallet (a deposit) opts in.
    */
   balanceMode?: 'wallet' | 'shielded' | 'none';
   /**
    * Whether a PASTED (non-catalog) row may be OFFERED and selected.
    *
    * Default false, and it has to be. This used to be keyed off wallet mode as
-   * well, and since `balanceMode` defaults to 'wallet' that made pasted rows
+   * well, and since `balanceMode` defaulted to 'wallet' that made pasted rows
    * clickable in every destination picker - the swap-output picker, the Shield
    * destination pool sheet, Transfer "Receive as" - not just the pay sheet it
    * was meant for. Those callbacks mostly fail closed, but "mostly" is not a
@@ -529,10 +534,9 @@ export function TokenSelectSheet({
   // Gated on the caller's opt-in rather than on `balanceMode`. Those were the
   // same thing while the pay sheet was the only picker that could adopt an
   // arbitrary token, but Withdraw's "Receive as" can too: LiFi routes to any
-  // ERC-20 and hands it to the user's wallet, and that picker ranks by the
-  // SHIELDED holding it is spending. Keying the paste row off the ranking mode
-  // made those two questions one, so a caller could not answer them
-  // differently (Mike, 2026-09-22: "I should be able to select any random
+  // ERC-20 and hands it to the user's wallet, and that picker shows no wallet
+  // balances. Keying the paste row off the balance mode made those two
+  // questions one, so a caller could not answer them differently (Mike, 2026-09-22: "I should be able to select any random
   // Ethereum ERC-20 on withdrawal, no?").
   //
   // `allowCustomSelection` still defaults false, so every picker that has not
@@ -559,7 +563,8 @@ export function TokenSelectSheet({
     functionName: 'balanceOf',
     args: evmAddress ? [evmAddress] : undefined,
     chainId,
-    query: { enabled: customEnabled && !!evmAddress },
+    // The wallet's own balance of the paste names the wallet: wallet mode only.
+    query: { enabled: customEnabled && !!evmAddress && balanceMode === 'wallet' },
   });
 
   // A non-token address (or a proxy that reverts) fails the reads instead of

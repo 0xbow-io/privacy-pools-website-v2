@@ -4862,6 +4862,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
           activeNetworkId={chainId}
           chainId={chainId}
           isSui={false}
+          balanceMode="wallet"
           onSelectToken={(t) => {
             const token = payTokenOptions.find((x) => x.address === t.address);
             if (token) setPayToken(token);

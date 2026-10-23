@@ -1708,6 +1708,8 @@ export function ActionHub({
       // every destination picker keeps its zero rows - what you receive has no
       // reason to be something you already hold.
       hideZeroBalances: action === 'shield',
+      // Pays FROM the wallet, so its balances are the subject (see the sheet's default).
+      balanceMode: 'wallet',
       networks: supportedChainIds
         .filter((id) => getChainConfig(id)?.chainType === 'evm' || id === chainId)
         .map((id) => ({ id, name: getChainConfig(id)?.displayName ?? `Chain ${id}` })),
