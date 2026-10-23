@@ -41,6 +41,7 @@ import { useAllChainsPriceMap } from '@/hooks/use-all-chains-price-map';
 import { priceFromMap } from '@/services/price-map-merge';
 import { useBackHandler } from '@/hooks/use-back-handler';
 import { splitNetworkChips } from '@/services/widget-chain-lists';
+import { isListedTokenAddressOnChain } from '@/services/token-sheet-address';
 
 /**
  * Full-screen (narrow) / centered-card (desktop) token picker, Uniswap-shaped:
@@ -526,8 +527,9 @@ export function TokenSelectSheet({
 
   const query = search.trim();
   const isAddressQuery = ADDRESS_RE.test(query);
-  const alreadyListed =
-    isAddressQuery && tokens.some((t) => t.address.toLowerCase() === query.toLowerCase());
+  const customChainId = activeNetworkId ?? chainId;
+  const alreadyListed = isAddressQuery
+    && isListedTokenAddressOnChain(tokens, query, customChainId, chainId);
   // EVM-only: a Move coin type is not an 0x-address, so there is nothing to
   // resolve with erc20Abi on Sui.
   //
@@ -543,6 +545,7 @@ export function TokenSelectSheet({
   // opted in is unchanged, including the ones the note below names.
   const customEnabled = !isSui && allowCustomSelection && isAddressQuery && !alreadyListed;
   const customAddress = customEnabled ? (query as ViemAddress) : undefined;
+  // A paste is read on the network being browsed, and the row carries it.
 
   const {
     data: customMeta,
@@ -550,9 +553,9 @@ export function TokenSelectSheet({
     isError: customReadError,
   } = useReadContracts({
     contracts: [
-      { address: customAddress, abi: erc20Abi, functionName: 'symbol', chainId },
-      { address: customAddress, abi: erc20Abi, functionName: 'name', chainId },
-      { address: customAddress, abi: erc20Abi, functionName: 'decimals', chainId },
+      { address: customAddress, abi: erc20Abi, functionName: 'symbol', chainId: customChainId },
+      { address: customAddress, abi: erc20Abi, functionName: 'name', chainId: customChainId },
+      { address: customAddress, abi: erc20Abi, functionName: 'decimals', chainId: customChainId },
     ],
     query: { enabled: customEnabled },
   });
@@ -562,7 +565,7 @@ export function TokenSelectSheet({
     abi: erc20Abi,
     functionName: 'balanceOf',
     args: evmAddress ? [evmAddress] : undefined,
-    chainId,
+    chainId: customChainId,
     // The wallet's own balance of the paste names the wallet: wallet mode only.
     query: { enabled: customEnabled && !!evmAddress && balanceMode === 'wallet' },
   });
@@ -583,8 +586,9 @@ export function TokenSelectSheet({
       address: query,
       decimals,
       isNative: false,
+      chainId: customChainId,
     };
-  }, [customEnabled, customMeta, query]);
+  }, [customEnabled, customMeta, query, customChainId]);
 
   const customFailed = customEnabled && !customLoading && (customReadError || (!!customMeta && !customToken));
 
@@ -718,6 +722,8 @@ export function TokenSelectSheet({
     balanceMode,
     selectedAddress,
     selectedChainId,
+    activeNetworkId,
+    chainId,
   ]);
 
   // Rows the list actually renders, plus how many are being withheld: the
