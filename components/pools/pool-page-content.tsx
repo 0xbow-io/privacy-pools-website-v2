@@ -12,9 +12,9 @@ import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { poolVisible } from '@/services/pool-visibility-rule';
 import { isSupersededLegacyPool, poolDisplayLabel, poolSymbolFromRoute } from '@/config/pool-paths';
-import { Fragment, useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { ScrollView, View, Text, Pressable, Platform, useWindowDimensions } from 'react-native';
-import { myActivityCells, poolCardsRowClassName } from '@/services/pool-my-activity';
+import { myActivityCells } from '@/services/pool-my-activity';
 import { useIsFocused, useLocalSearchParams, useRouter } from 'expo-router';
 import { useAccount } from 'wagmi';
 import { usePoolSession } from '@/hooks/use-pool-session';
@@ -506,7 +506,7 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
   });
 
   // Pool-SCOPED statistics (asp-v2 PR #92 per-asset endpoint). Review P1: the
-  // card must never read median/transfers from the global payload — that is
+  // card must never read transfers from the global payload — that is
   // the protocol-wide aggregate and would render the same figure on every
   // pool page. 404s today; every dependent row is omitted until it deploys.
   const { assetStats } = useAssetStatistics({
@@ -666,20 +666,13 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
           className={`gap-[20px] overflow-visible${splitLayout ? ' flex-1' : ' w-full'}`}
           onLayout={splitLayout ? (e) => setDataColumnWidth(e.nativeEvent.layout.width) : undefined}
         >
-          {/* Desktop: `items-stretch` so the balance card and the Statistics
-              card share one height (the taller sets it; the balance card's
-              `flex-1` centred body absorbs the slack). Mobile stays stacked
-              and content-height. */}
-          <View className={`${poolCardsRowClassName(isMobile)} gap-[20px] overflow-visible z-[100]`}>
+          {/* Side by side, the two cards share one height; the balance section
+              takes any slack so My activity lines up with the bottom row. */}
+          <View className={`${isMobile ? 'flex-col items-start' : 'flex-row items-stretch'} gap-[20px] overflow-visible z-[100]`}>
             <Card
               noPadding
               testID="pool-balance-card"
-              // Mobile keeps flex-[2] (not just w-full): the original RN style
-              // was [{flex:2},{flex:undefined,width:'100%'}], and RN's flatten
-              // SKIPS the undefined, so flex:2 survived on mobile too. Dropping
-              // it to flex:0-0-auto shrank the card, so the flex-1 infoCard no
-              // longer stretched (justify-center padding), shifting content up.
-              className={`${isMobile ? 'w-full flex-[2]' : 'flex-[2]'} z-[100]`}
+              className={`${isMobile ? 'w-full' : 'flex-[2]'} z-[100]`}
               // nw-keep(forwarded-style-contract): caller-last style overrides Card's overflow:hidden (dropdown stacking) — no reliable className override path
               style={{ overflow: 'visible' }}
             >
@@ -690,62 +683,52 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
                 selectedChain={routeSelectorChain}
                 yieldApy={poolYieldActive ? poolShareYield.yield?.netApyPercent ?? YIELD_APY_PERCENT ?? undefined : undefined}
               />
-              <View className="flex-[3] items-center justify-center gap-[20px] p-[20px]">
-                <View className="items-center gap-[4px]">
-                  <Text className="text-[12px] leading-[12px] text-[#4D4D4D] font-pp-regular">
-                    My Private Balance
+              <View className={`p-[16px]${isMobile ? '' : ' flex-1'}`}>
+                <View className="items-start gap-[2px]">
+                  <Text className="font-pp-sans-medium text-[13px] leading-[18px] text-text-secondary">
+                    My private balance
                   </Text>
-                  <View className="flex-row items-center gap-[6px]">
-                    <Text testID="pool-private-balance" className="text-[24px] text-text font-pp-bold">
+                  <Text numberOfLines={1} className="font-pp-bold text-[46px] leading-[56px] tracking-[-1px] text-text">
+                    ${userPoolBalance.activeView.usd.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                  </Text>
+                  <View className="flex-row flex-wrap items-center gap-[6px]">
+                    <Text testID="pool-private-balance" className="font-pp-regular text-[13px] leading-[15px] text-text-secondary">
                       {userPoolBalance.activeView.text}
                     </Text>
                     <ShareCountHint hint={userPoolBalance.activeView.hint} testID="pool-private-balance-hint" />
                   </View>
-                  <Text className="text-[12px] leading-[12px] text-[#4D4D4D] font-pp-regular">
-                    ${userPoolBalance.activeView.usd.toLocaleString('en-US', { maximumFractionDigits: 2 })}
-                  </Text>
-                </View>
-                <View className="items-center gap-[4px]">
-                  <Text className="text-[12px] leading-[12px] text-[#4D4D4D] font-pp-regular">
-                    Pending Balance
-                  </Text>
-                  <View className="flex-row items-center gap-[4px]">
-                    <Text className="text-[12px] leading-[12px] text-[#4D4D4D] font-pp-bold">
-                      {userPoolBalance.pendingView.text}
-                    </Text>
-                    <ShareCountHint hint={userPoolBalance.pendingView.hint} testID="pool-pending-balance-hint" />
-                  </View>
+                  {userPoolBalance.pendingNum > 0 && (
+                    <View className="flex-row flex-wrap items-center gap-[4px] pt-[4px]">
+                      <Text className="font-pp-regular text-[12px] leading-[16px] text-warning">
+                        {userPoolBalance.pendingView.text} pending
+                      </Text>
+                      <ShareCountHint hint={userPoolBalance.pendingView.hint} testID="pool-pending-balance-hint" />
+                    </View>
+                  )}
                 </View>
               </View>
-              {/* "My activity": the personal deposit / withdrawal / transfer
-                  counts for this pool. Bottom quarter of the card (flex 1 vs
-                  the balance body's flex 3). Counts are the same merged rows
-                  the transactions table shows; disconnected reads as a dash
-                  rather than a misleading 0. */}
+              {/* Personal counts use the same merged rows as the transaction list. */}
               <View
                 testID="pool-my-activity"
-                className="flex-[1] justify-center gap-[8px] border-t px-[12px] py-[10px] border-border"
+                className="gap-[12px] border-t border-border p-[16px]"
               >
-                <Text className="text-[11px] leading-[14px] text-text-secondary font-pp-regular">
+                <Text className="text-[14px] leading-[18px] text-text font-pp-bold">
                   My activity
                 </Text>
-                <View className="flex-row items-center">
-                  {myActivityCells(myPoolActivity, isConnected).map(({ label, value }, i) => (
-                    <Fragment key={label}>
-                      {i > 0 && <View className="w-[1px] self-stretch bg-border" />}
-                      <View className="flex-1 items-center gap-[4px]">
-                        <Text className="text-[11px] leading-[14px] text-text-secondary font-pp-regular">
-                          {label}
-                        </Text>
-                        <Text className="text-[14px] leading-[16px] text-text font-pp-bold">
-                          {value}
-                        </Text>
-                      </View>
-                    </Fragment>
+                <View className="flex-row gap-[12px]">
+                  {myActivityCells(myPoolActivity, isConnected).map(({ label, value }) => (
+                    <View key={label} className="min-w-0 flex-1 gap-[2px]">
+                      <Text numberOfLines={1} className="text-[12px] leading-[16px] text-text-secondary font-pp-regular">
+                        {label}
+                      </Text>
+                      <Text numberOfLines={1} className="text-[18px] leading-[24px] text-text font-pp-bold">
+                        {value}
+                      </Text>
+                    </View>
                   ))}
                 </View>
               </View>
-              <View className="relative h-[1px] self-stretch z-[-1] bg-border" />
+              {!splitLayout && <View className="h-[1px] self-stretch bg-border" />}
               {/* Desktop split screen: the shield widget in the left column
                   already offers Deposit/Withdraw/Transfer/Request for this
                   pool, so repeating them under the balance is the same control

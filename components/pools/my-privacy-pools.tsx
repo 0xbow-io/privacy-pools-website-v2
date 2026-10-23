@@ -662,9 +662,9 @@ export function MyPrivacyPools({
                 </View>
                 {(parseFloat(pool.pendingTokenExact) || 0) > 0 && (
                   <View className="flex-row items-center justify-between gap-[12px] border-t border-border-light pt-[9px]">
-                    <Text className="font-pp-regular text-[11px] text-text-muted">Pending</Text>
+                    <Text className="font-pp-regular text-[12px] leading-[16px] text-text-secondary">Pending</Text>
                     <View className="flex-row items-center gap-[4px]">
-                      <Text numberOfLines={1} className="font-pp-regular text-[11.5px] text-warning">
+                      <Text numberOfLines={1} className="font-pp-regular text-[12px] leading-[16px] text-warning">
                         {pendingText} · {pendingUsdText}
                       </Text>
                       <ShareCountHint hint={pendingView?.hint ?? null} />
@@ -717,7 +717,7 @@ export function MyPrivacyPools({
                     </View>
                     {(parseFloat(pool.pendingTokenExact) || 0) > 0 && (
                       <View className="flex-row items-center gap-[4px]">
-                        <Text numberOfLines={1} className="font-pp-regular text-[10.5px] leading-[12px] text-warning">
+                        <Text numberOfLines={1} className="font-pp-regular text-[12px] leading-[16px] text-warning">
                           {pendingText} pending
                         </Text>
                         <ShareCountHint hint={pendingView?.hint ?? null} />
