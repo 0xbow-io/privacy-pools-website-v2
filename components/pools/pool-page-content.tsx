@@ -16,7 +16,7 @@ import { Fragment, useState, useMemo, useEffect, useRef, useCallback } from 'rea
 import { ScrollView, View, Text, Pressable, Platform, useWindowDimensions } from 'react-native';
 import { myActivityCells, poolCardsRowClassName } from '@/services/pool-my-activity';
 import { useIsFocused, useLocalSearchParams, useRouter } from 'expo-router';
-import { useAccount, useSwitchChain, useChainId } from 'wagmi';
+import { useAccount } from 'wagmi';
 import { usePoolSession } from '@/hooks/use-pool-session';
 import { useQuery } from '@tanstack/react-query';
 import { Header } from '@/components/ui/header';
@@ -35,7 +35,7 @@ import {
 } from '@/components/home/explore-panel-context';
 import { PortfolioNetValue, type TimePeriod } from '@/components/portfolio/portfolio-net-value';
 import { usePortfolioHistory } from '@/hooks/use-portfolio-history';
-import { getTokenMetadata, NATIVE_ASSET_ADDRESS, getTokenMetadataBySymbol } from '@/config/tokens';
+import { getActionableTokens, getTokenMetadata, NATIVE_ASSET_ADDRESS, getTokenMetadataBySymbol } from '@/config/tokens';
 import { getSwapInputTokens } from '@/config/intent-swaps';
 import { resolveHandoffToken } from '@/services/swap-token-handoff';
 import { sameSymbol } from '@/services/symbol-match';
@@ -62,7 +62,7 @@ import { buildOutgoingDepositTxHashSet } from '@/services/outgoing-deposits-stor
 import { isInternalSpendRow, mergeMyTransactions } from '@/services/transfer-direction';
 import { anyLeg, isSwapRow } from '@/services/swap-rows';
 import { useAllChainsPriceMap } from '@/hooks/use-all-chains-price-map';
-import { defaultChainId, supportedChainIds, supportedEvmChainIds, getChainConfig, getSupportedChains, STELLAR_TESTNET_ID, SUI_TESTNET_ID } from '@/config/chains';
+import { defaultChainId, getChainConfig, getSupportedChains, STELLAR_TESTNET_ID, SUI_TESTNET_ID } from '@/config/chains';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { getConfiguredYieldDeployments, YIELD_APY_PERCENT } from '@/config/yield';
 import { useShareYield } from '@/hooks/use-share-yield';
@@ -73,7 +73,7 @@ import {
   type PoolAccount,
 } from './pool-page-shared';
 import { PoolPageHeader } from './pool-page-header';
-import { mustLeavePoolPageToSwitch } from '@/services/pool-page-chain-switch';
+import { useGlobalStatistics } from '@/hooks/use-global-statistics';
 import { PoolPageStatsCard } from './pool-page-stats-card';
 import { useAssetStatistics } from '@/hooks/use-asset-statistics';
 import { PoolPageAccountsGrid } from './pool-page-accounts-grid';
@@ -84,23 +84,6 @@ import { Transactions } from './transactions';
 // The transfer modal's prefill only accepts these three symbols (EVM); a pool
 // page for anything else simply doesn't pre-select a token.
 
-/**
- * Slug → chain id, derived from the build's chain set rather than a two-entry
- * literal. The literal knew only eth/sepolia, so on staging the Citrea option
- * resolved to undefined and was filtered straight back out of the selector.
- */
-const CHAIN_SELECTOR_TO_ID: Record<string, number> = Object.fromEntries(
-  supportedEvmChainIds
-    .map((id) => [getChainConfig(id)?.name?.toLowerCase(), id] as const)
-    .filter((entry): entry is readonly [string, number] => typeof entry[0] === 'string'),
-);
-
-const WAGMI_SUPPORTED_CHAIN_IDS = new Set(supportedChainIds);
-
-const SUPPORTED_CHAIN_OPTIONS = CHAIN_OPTIONS.filter(
-  (c) => CHAIN_SELECTOR_TO_ID[c.id] !== undefined,
-);
-
 export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string } = {}) {
   const tabClearance = useTabBarClearance();
   const focused = useIsFocused();
@@ -108,8 +91,6 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
   const { address, isConnected, status: walletStatus } = useAccount();
   const router = useRouter();
   const { identityMode } = usePoolSession();
-  const supportedChainCount = getSupportedChains().length;
-  const multiChain = supportedChainCount >= 2;
   const { connectWallet } = useSupportedWalletConnection();
   // isSui reflects the ACTIVE chain, which this page selects to be the pool's
   // chain (below). The connect gate is EVM-specific (connectWallet opens the
@@ -133,15 +114,8 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
     action();
   };
 
-  const { switchChain } = useSwitchChain();
-  // The wallet's ACTUAL chain: useAccount().chainId (the connector). Raw
-  // useChainId() is the wagmi store, which does not follow the connector, so
-  // the switch prompt below fired spuriously or not at all when they split.
-  // Disconnected, fall back to the store (switchChain then just moves it).
-  const { chainId: connectorChainId } = useAccount();
-  const storeChainId = useChainId();
-  const walletChainId = connectorChainId ?? storeChainId;
   const { data, statistics } = usePools();
+  const { assets: publicPools } = useGlobalStatistics();
   // Live USDC-per-ppUSDC: a share pool prints the USDC it is worth (Pat, 2026-09-05).
   const { rateFor } = useShareRates();
   const balanceDisplay = useBalanceDisplay();
@@ -166,34 +140,7 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
   const stackPair = width < 900;
   const { chainName: routeChainName, poolAssetName: routeAssetName, action: routeAction } = useLocalSearchParams<{ chainName: string; poolAssetName: string; action?: string }>();
   const poolAssetName = forcedPoolAsset ?? routeAssetName;
-  const defaultSelectorChain = defaultChainId === 11155111 ? 'sepolia' : 'eth';
-  // The header's chain control starts on the ROUTE's chain (/chains/citrea/...
-  // must not open showing Sepolia) and follows the route when it changes.
-  const routeSelectorChain = (routeChainName ?? '').toLowerCase();
-  const initialSelectorChain = CHAIN_SELECTOR_TO_ID[routeSelectorChain] ? routeSelectorChain : defaultSelectorChain;
-  const [selectedChain, setSelectedChain] = useState<string>(initialSelectorChain);
-  useEffect(() => { setSelectedChain(initialSelectorChain); }, [initialSelectorChain]);
-
-  const handleChainSelect = (selectorId: string) => {
-    const targetChainId = CHAIN_SELECTOR_TO_ID[selectorId];
-    // Another chain than this pool's: go home, then switch, like the header
-    // selector. Switching in place was undone by the pin effect below, with a
-    // second wallet prompt and the card left naming the other chain (DEV-453).
-    if (targetChainId && mustLeavePoolPageToSwitch({
-      targetChainId,
-      targetChainType: getChainConfig(targetChainId)?.chainType,
-      currentChainId: poolChainId,
-      pathname: '/chains/',
-    })) {
-      router.replace('/');
-      void selectChain(targetChainId);
-      return;
-    }
-    setSelectedChain(selectorId);
-    if (targetChainId && targetChainId !== walletChainId && WAGMI_SUPPORTED_CHAIN_IDS.has(targetChainId)) {
-      switchChain({ chainId: targetChainId as typeof walletChainId });
-    }
-  };
+  const routeSelectorChain = (routeChainName ?? getChainConfig(defaultChainId)?.name ?? '').toLowerCase();
 
   // The route segment is a SLUG, not a symbol: on a chain with a share pool
   // `eth` is ppETH and the emptied plain pool is `eth-legacy` (config/pool-paths).
@@ -492,24 +439,32 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
     return { deposits, withdrawals, transfers };
   }, [address, identityMode, isPoolTx, data.transactions, data.lineageRows, data.anchorTxHashes, data.internalTxHashes, notes]);
 
-  const poolOptions = useMemo<PoolOption[]>(() => {
-    return data.allPools.filter((pool) => {
-      const held = data.myPools.find((p) => p.chainId === pool.chainId && p.tokenAddress.toLowerCase() === pool.tokenAddress.toLowerCase());
-      return poolVisible({
-        superseded: isSupersededLegacyPool(pool.name, pool.chainId),
-        active: Number(held?.balanceTokenExact ?? 0),
-        pending: Number(held?.pendingTokenExact ?? 0),
-        current: pool.chainId === poolChainId && sameSymbol(pool.name, currentPoolToken),
-      });
-    }).map((pool) => ({
-      id: pool.id,
-      name: pool.name,
-      tvl: pool.poolValue,
-      icon: tokenIconFor(pool.name),
-      chainId: pool.chainId,
-      chainKey: getChainConfig(pool.chainId)?.name.toLowerCase() ?? '',
-    }));
-  }, [data.allPools, data.myPools, poolChainId, currentPoolToken]);
+  // The provider's allPools is scoped to the active chain. Browse the build's
+  // catalog instead; TVLs come from Explore's read-only all-chain feed. A
+  // superseded pool stays listed while it holds the user's funds.
+  const poolOptions = useMemo<PoolOption[]>(() => CHAIN_OPTIONS.flatMap((chain) =>
+    getActionableTokens(chain.chainId)
+      .filter((token) => {
+        const held = data.myPools.find((p) => p.chainId === chain.chainId && p.tokenAddress.toLowerCase() === token.address.toLowerCase());
+        return poolVisible({
+          superseded: isSupersededLegacyPool(token.symbol, chain.chainId),
+          active: Number(held?.balanceTokenExact ?? 0),
+          pending: Number(held?.pendingTokenExact ?? 0),
+          current: chain.chainId === poolChainId && sameSymbol(token.symbol, currentPoolToken),
+        });
+      })
+      .map((token) => {
+        const stats = publicPools.find((p) => p.chainId === chain.chainId && p.tokenAddress.toLowerCase() === token.address.toLowerCase());
+        return {
+          id: `${chain.chainId}:${token.address.toLowerCase()}`,
+          name: token.symbol,
+          tvl: stats?.tvlUsd != null ? formatUsd(stats.tvlUsd) : '',
+          icon: tokenIconFor(token.symbol),
+          chainId: chain.chainId,
+          chainKey: chain.id,
+        };
+      }),
+  ), [publicPools, data.myPools, poolChainId, currentPoolToken]);
 
   const poolAccounts = useMemo<PoolAccount[]>(() => {
     return data.myPools.map((pool, i) => ({
@@ -732,10 +687,7 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
                 poolName={poolName}
                 activePool={activePool}
                 poolOptions={poolOptions}
-                multiChain={multiChain}
-                supportedChainOptions={SUPPORTED_CHAIN_OPTIONS}
-                selectedChain={selectedChain}
-                onSelectChain={handleChainSelect}
+                selectedChain={routeSelectorChain}
                 yieldApy={poolYieldActive ? poolShareYield.yield?.netApyPercent ?? YIELD_APY_PERCENT ?? undefined : undefined}
               />
               <View className="flex-[3] items-center justify-center gap-[20px] p-[20px]">
