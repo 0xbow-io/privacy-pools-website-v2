@@ -1615,13 +1615,11 @@ export function ActionHub({
         poolAsset: true,
       }))
       : [];
-    // Wallet rows: every chain the wallet list covers while no network is
-    // picked, else just the picked one (even before the wallet has switched
-    // to it). Each is tagged with its chain, so the sheet reads its balance
-    // there and a pick switches the wallet first.
-    const walletRowChains = payNetwork !== null
-      ? [payNetwork]
-      : [chainId, ...WALLET_ROW_CHAIN_IDS.filter((id) => id !== chainId)];
+    // Wallet rows: every chain the wallet list covers, whatever network is
+    // picked, so the sheet's balance reads stay one stable set and a network
+    // pick only filters. Each is tagged with its chain, so the sheet reads its
+    // balance there and a pick switches the wallet first.
+    const walletRowChains = [chainId, ...WALLET_ROW_CHAIN_IDS.filter((id) => id !== chainId)];
     const extRows = action === 'shield' && !isSui
       ? walletRowChains.flatMap((rowChain) => {
         // A holdings-only chain (DEV-521) has no catalog here: asking for one
@@ -1644,13 +1642,11 @@ export function ActionHub({
       })
       : [];
     // Pool assets of the other EVM chains, each tagged with its chain so the
-    // sheet reads each balance on the right one: all of them with the network
-    // filter cleared, or just the picked network's while the wallet switch to
-    // it is still pending.
-    const crossChainActionable = action === 'shield' && payNetwork !== chainId
+    // sheet reads each balance on the right one. The sheet applies the
+    // network filter itself.
+    const crossChainActionable = action === 'shield'
       ? supportedChainIds
-        .filter((id) => getChainConfig(id)?.chainType === 'evm' && id !== chainId
-          && (payNetwork === null || id === payNetwork))
+        .filter((id) => getChainConfig(id)?.chainType === 'evm' && id !== chainId)
         .flatMap((id) => hubTokenCatalog('shield', id, NO_HOLDINGS).map((t) => ({
           symbol: t.symbol,
           address: t.address,
@@ -1788,15 +1784,10 @@ export function ActionHub({
           setAmount((a) => sanitizeAmountInput(a, match.decimals));
         })();
       },
-      // Keep the sheet OPEN across a network pick: selectChain commits (or
-      // prompts the wallet), chainId updates, and this publisher re-fires
-      // with the new chain's tokens — closing here read as a dead click.
-      // null = back to every chain (the default); a pick also moves the app to
-      // that chain, since paying is same-chain only.
-      onSelectNetwork: (id) => {
-        setPayNetwork(id);
-        if (id !== null) void selectChain(id);
-      },
+      // A network pick only narrows the list; null = every chain (the
+      // default). The rows above already cover the picked chain, so the app
+      // and wallet switch only when an asset from another chain is chosen.
+      onSelectNetwork: (id) => setPayNetwork(id),
       onClose: () => { setTokenSheetOpen(false); setPayNetwork(null); },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the probe version is a change signal: an open Shield sheet republishes when a yield underlying verifies

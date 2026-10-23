@@ -35,22 +35,3 @@ export function swapSourcePoolReason(
   if (inputSupported) return undefined;
   return chainReason ?? 'Not swappable yet';
 }
-
-/** The chips shown before the "•••" bubble, in this order (Mike, #276). */
-export const PINNED_NETWORK_IDS: readonly number[] = [1, 56, 8453, 4663];
-
-/**
- * Split a chip row into the pinned chips (Ethereum, BNB Chain, Base,
- * Robinhood Chain, those this sheet offers) and the rest, which sit behind
- * the "•••" bubble in list order.
- */
-export function splitNetworkChips<T extends WidgetNetwork>(
-  networks: readonly T[],
-  pinned: readonly number[] = PINNED_NETWORK_IDS,
-): { visible: T[]; overflow: T[] } {
-  const visible = pinned.flatMap((id) => networks.filter((n) => n.id === id));
-  // A sheet offering none of them (staging, Sui) keeps its plain row.
-  if (visible.length === 0) return { visible: [...networks], overflow: [] };
-  const overflow = networks.filter((n) => !pinned.includes(n.id));
-  return { visible, overflow };
-}
