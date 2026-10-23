@@ -40,7 +40,6 @@ import { getSwapInputTokens } from '@/config/intent-swaps';
 import { resolveHandoffToken } from '@/services/swap-token-handoff';
 import { sameSymbol } from '@/services/symbol-match';
 import { CHAIN_OPTIONS } from '@/components/pools/chain-selector';
-import { ChainLogo, chainLogoChainFor } from '@/components/ui/chain-logo';
 import { usePools, formatUsd } from '@/components/pools-provider';
 import { formatUnits } from 'viem';
 import { approxUnderlyingText, comingSoonDepositMessage, displayTokenSymbol } from '@/services/share-display';
@@ -519,9 +518,7 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
       // Was EthTokenIcon for every row, so an OP/Citrea/BNB pool account wore
       // Ethereum's mark (same family as the selector icons Artem reported,
       // 2026-08-28). myPools spans chains, so resolve per row.
-      chainIcon: ({ size = 16 }: { size?: number }) => (
-        <ChainLogo chain={chainLogoChainFor(pool.chainId)} size={size} />
-      ),
+      chainId: pool.chainId,
       balance: pool.balance,
       pendingValue: pool.pending,
       ethBalance: balanceDisplay(pool.balanceTokenExact, pool.name, pool.chainId, pool.tokenAddress).text,

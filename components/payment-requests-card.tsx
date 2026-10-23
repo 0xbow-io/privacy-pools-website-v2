@@ -459,7 +459,7 @@ export function PaymentRequestsCard({
                         {/* The chain rides the icon's badge, as on Activity rows; the
                             testnet pill is what tells Sepolia from Ethereum. */}
                         <View accessible accessibilityRole="image" accessibilityLabel={`${r.assetSymbol} on ${r.chainName}`}>
-                          <TokenNetworkIcon symbol={r.assetSymbol} chainId={r.chainId} size={28} badgeSize={12} />
+                          <TokenNetworkIcon symbol={r.assetSymbol} chainId={r.chainId} size={28} badgeSize={14} />
                         </View>
                         <View className="min-w-0 flex-1 gap-[3px]">
                           <View className="flex-row flex-wrap items-center gap-[8px]">

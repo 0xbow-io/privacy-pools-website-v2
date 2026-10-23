@@ -3426,7 +3426,7 @@ export function ActionHub({
               {/* Symbol only: the chain lives in the icon's badge (bigger mark
                   = bigger badge); the full pool/chain wording stays in the
                   accessibility label. */}
-              <TokenNetworkIcon symbol={tokenMeta.symbol} size={28} badgeSize={14} badgeTestnetLabel={false} chainId={chainId} />
+              <TokenNetworkIcon symbol={tokenMeta.symbol} size={28} badgeSize={16} badgeTestnetLabel={false} chainId={chainId} />
               {/* nw-keep(data-color): per-asset runtime hue */}
               <Text className="font-pp-sans-semi-bold text-[15px]" style={{ color: hue.fg }}>
                 {amountField.symbol}
@@ -3447,7 +3447,7 @@ export function ActionHub({
                 borderColor: colors.border,
               }}
             >
-              <TokenNetworkIcon symbol={payMeta.symbol} size={28} badgeSize={14} badgeTestnetLabel={false} chainId={chainId} logoUri={payMeta.logoUrl} />
+              <TokenNetworkIcon symbol={payMeta.symbol} size={28} badgeSize={16} badgeTestnetLabel={false} chainId={chainId} logoUri={payMeta.logoUrl} />
               {/* nw-keep(data-color): pill text uses the runtime per-asset hue */}
               <Text className="font-pp-sans-semi-bold text-[15px]" style={{ color: (TokenHues[colorScheme][payMeta.symbol] ?? TokenHues[colorScheme].ETH).fg }}>
                 {displayTokenSymbol(payMeta.symbol)}
@@ -3471,7 +3471,7 @@ export function ActionHub({
                 borderColor: colors.border,
               }}
             >
-              <TokenNetworkIcon symbol={requestToken.symbol} size={28} badgeSize={14} badgeTestnetLabel={false} chainId={requestToken.chainId} />
+              <TokenNetworkIcon symbol={requestToken.symbol} size={28} badgeSize={16} badgeTestnetLabel={false} chainId={requestToken.chainId} />
               {/* nw-keep(data-color): pill text uses the runtime per-asset hue */}
               <Text className="font-pp-sans-semi-bold text-[15px]" style={{ color: (TokenHues[colorScheme][requestToken.symbol] ?? TokenHues[colorScheme].ETH).fg }}>
                 {isShareSymbol(requestToken.symbol) ? requestToken.symbol : displayTokenSymbol(requestToken.symbol)}
@@ -3720,7 +3720,7 @@ export function ActionHub({
               >
                 {/* Symbol only (the row label names the chain); the chain
                     also lives in the icon's badge. */}
-                <TokenNetworkIcon symbol={shieldPool.symbol} size={28} badgeSize={14} badgeTestnetLabel={false} chainId={shieldPool.chainId} />
+                <TokenNetworkIcon symbol={shieldPool.symbol} size={28} badgeSize={16} badgeTestnetLabel={false} chainId={shieldPool.chainId} />
                 {/* nw-keep(data-color): per-asset runtime hue, falling back to ETH's */}
                 <Text className="font-pp-sans-semi-bold text-[15px]" style={{ color: (TokenHues[colorScheme][shieldPool.symbol] ?? TokenHues[colorScheme].ETH).fg }}>
                   {poolDisplayLabel(shieldPool.symbol, shieldPool.chainId)}
@@ -4028,7 +4028,7 @@ export function ActionHub({
                         next to its own amount (Pat, 2026-08-31). The badge
                         carries the DESTINATION chain, so it also says where a
                         cross-chain output lands. */}
-                    <TokenNetworkIcon symbol={swapOutToken.symbol} size={28} badgeSize={14} badgeTestnetLabel={false} chainId={swapDestChainId} />
+                    <TokenNetworkIcon symbol={swapOutToken.symbol} size={28} badgeSize={16} badgeTestnetLabel={false} chainId={swapDestChainId} />
                     {/* nw-keep(data-color): selected pill text uses the runtime hue */}
                     <Text
                       className="font-pp-sans-semi-bold text-[15px]"

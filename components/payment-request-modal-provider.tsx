@@ -12,6 +12,7 @@ import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 
 import { BalanceAmount } from '@/components/pools/balance-amount';
+import { TokenMark } from '@/components/ui/token-network-icon';
 import { sdkErrorText } from '@/services/sdk-error-amounts';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
 import { requestWalletRefusalFor } from '@/services/request-wallet-availability';
@@ -23,7 +24,6 @@ import { tokenAmountLabel, isShareSymbol, displayTokenSymbol } from '@/services/
 import { assertPaymentRequestBounds, PaymentRequestBoundsError } from '@/services/payment-request-bounds';
 import { assertDepositCap } from '@/services/deposit-cap';
 import { getPrice } from '@/services/price-service';
-import { EthTokenIcon, UsdcTokenIcon, UsdtTokenIcon } from '@/components/ui/token-icons';
 import { ENTRYPOINT_ASSETS_ABI, getVettingFeeBPS, type EntrypointAssetConfig } from '@/services/entrypoint-assets';
 import { friendlyDepositError } from '@/services/deposit-limits';
 import { useActiveEvmChain } from '@/hooks/use-active-evm-chain';
@@ -509,12 +509,6 @@ function PaymentPreviewCard({
 
 
 
-
-const TOKEN_ICONS: Record<string, (props: { size?: number }) => React.JSX.Element> = {
-  ETH: EthTokenIcon,
-  USDC: UsdcTokenIcon,
-  USDT: UsdtTokenIcon,
-};
 
 const NATIVE_ASSET_ADDRESS = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 
@@ -4137,7 +4131,6 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                       </View>
                     ) : (
                       requestableTokens.map((token) => {
-                        const Icon = TOKEN_ICONS[displayTokenSymbol(token.symbol)];
                         return (
                           <Pressable
                             key={token.address}
@@ -4149,7 +4142,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                               setAmountInput((a) => sanitizeAmountInput(a, nextDecimals));
                             }}
                           >
-                            {Icon && <Icon size={16} />}
+                            <TokenMark symbol={token.symbol} size={16} />
                             <Text className="font-pp-medium text-[13px] text-text">{poolDisplayLabel(token.symbol, chainId)}</Text>
                           </Pressable>
                         );

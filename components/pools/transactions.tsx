@@ -335,7 +335,7 @@ function AssetChainMark({ asset, chain, chainId, size = 22 }: { asset: string; c
   // Ethereum logo on BNB, FDUSD and cBTC rows.
   const AssetIcon = hasTokenMark(mark) ? undefined : ASSET_ICONS[mark];
   const SharedAsset = !AssetIcon;
-  const badge = Math.round(size * 0.46);
+  const badge = Math.round(size * 0.46) + 2;
   return (
     <View
       className="relative shrink-0"

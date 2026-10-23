@@ -815,7 +815,7 @@ export function TokenSelectSheet({
         accessibilityRole="button"
         accessibilityLabel={`${balanceMode === 'shielded' ? poolDisplayLabel(row.symbol, row.chainId) : displayTokenSymbol(row.symbol)} on ${chainNameOf(row.chainId)}`}
       >
-        <TokenNetworkIcon symbol={row.symbol} size={32} chainId={row.chainId} logoUri={row.logoUrl} />
+        <TokenNetworkIcon symbol={row.symbol} size={28} badgeSize={15} chainId={row.chainId} logoUri={row.logoUrl} />
         <View className="min-w-0 flex-1 gap-[2px]">
           <View className="flex-row flex-wrap items-center gap-[6px]">
             <Text className="font-pp-bold text-[15px] text-text" numberOfLines={1}>

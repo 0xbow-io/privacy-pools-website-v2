@@ -15,7 +15,6 @@ import { hubTokenCatalog, heldSymbolsFor, preferredHubToken, emptySpendToken } f
 import { poolDisplayLabel } from '@/config/pool-paths';
 import React, { createContext, useContext, useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import { KeySourceChangedError } from '@/components/sdk-provider';
-import { EthTokenIcon, UsdcTokenIcon, UsdtTokenIcon } from '@/components/ui/token-icons';
 import { truncateAddress } from '@/services/hex-format';
 import { isSessionInitTimeout } from '@/services/session-init-timeout';
 import { tokenAmountLabel, displayTokenSymbol, isShareSymbol } from '@/services/share-display';
@@ -78,7 +77,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { invalidateTransactionCaches } from '@/services/cache';
 import { useSuiSession } from '@/hooks/use-sui-session';
 import { selectSuiNotes, maxSuiLineageTotal, SUI_SINGLE_NOTE_ERROR } from '@/services/sui-witness/note-selection';
-import { SuiIcon } from '@/components/ui/sui-icon';
 import { IsDefaultPoolActive } from '@/config/pool-profile';
 import {
   TRANSFER_MAX_INPUTS,
@@ -125,7 +123,7 @@ import { formatShortfallAmount } from '@/services/relayed-payment-shortfall';
 import { capText, feeMovedUp, feeOverflowsCap, overCapReason, stableSendMax } from '@/services/send-amount-rules';
 import { previewNoteReceiptUrl } from '@/services/note-receipt-preview';
 import { TokenSelectSheet } from '@/components/ui/token-select-sheet';
-import { TokenNetworkIcon } from '@/components/ui/token-network-icon';
+import { TokenMark } from '@/components/ui/token-network-icon';
 import { LEARN_MORE_UNREGISTERED_LABEL, UNREGISTERED_DEPOSIT_DOCS_URL } from '@/services/recipient-registration-hint';
 import * as auditStore from '@/services/audit-store';
 import type { SentNoteDisclosure } from '@/services/audit-receipt';
@@ -137,13 +135,6 @@ import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { FeeWarning } from '@/components/fee-warning';
 import { relayedSpendBreakdown } from '@/services/fee-warning';
 import { SHIELDED_TRANSFER_GAS } from '@/services/transfer-fee-estimate';
-
-const TOKEN_ICONS: Record<string, (props: { size?: number }) => React.JSX.Element> = {
-  ETH: EthTokenIcon,
-  USDC: UsdcTokenIcon,
-  USDT: UsdtTokenIcon,
-  SUI: SuiTokenIcon,
-};
 
 // Web-only styles
 
@@ -222,18 +213,6 @@ const TRANSFER_STAGES = ['Preparing transfer', 'Generating ZK proof', 'Submittin
 
 
 
-
-function SuiTokenIcon({ size = 16 }: { size?: number }) {
-  return (
-    <View
-      className="items-center justify-center bg-[#4DA2FF]"
-      // nw-keep(measured-or-inset): icon box dims (width/height/radius) are derived from the runtime `size` prop
-      style={{ width: size, height: size, borderRadius: size / 2 }}
-    >
-      <SuiIcon width={size * 0.5} height={size * 0.62} color="#FFFFFF" />
-    </View>
-  );
-}
 
 
 function CaretDownIcon({ color = '#000000' }: { color?: string }) {
@@ -3648,7 +3627,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                     onPress={() => setTokenDropdownOpen(!tokenDropdownOpen)}
                   >
                     <View className="flex-row items-center gap-[8px] flex-1">
-                      {(() => { const Icon = TOKEN_ICONS[displayTokenSymbol(selectedSymbol)]; return Icon ? <Icon size={18} /> : null; })()}
+                      <TokenMark symbol={selectedSymbol} size={18} />
                       <Text className="text-[14px] flex-1 text-text font-pp-regular">
                         {poolDisplayLabel(selectedSymbol, activeEvmChainId)}
                       </Text>
@@ -3662,7 +3641,6 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                       style={DROPDOWN_SHADOW}
                     >
                       {(isSui ? [altSymbol] : sourceTokens.map((t) => t.symbol)).map((token, idx, arr) => {
-                        const Icon = TOKEN_ICONS[displayTokenSymbol(token)];
                         return (
                           <Pressable
                             key={token}
@@ -3680,7 +3658,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                               setTokenDropdownOpen(false);
                             }}
                           >
-                            {Icon && <Icon size={18} />}
+                            <TokenMark symbol={token} size={18} />
                             <Text className={`text-[14px] text-text ${selectedSymbol === token ? 'font-pp-medium' : 'font-pp-regular'}`}>
                               {poolDisplayLabel(token, activeEvmChainId)}
                             </Text>
