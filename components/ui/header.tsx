@@ -568,45 +568,16 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
               only, since the setting lives in localStorage and takes effect on
               a reload. Hidden once `menuActive`, so the dropdown row and this
               are never both on screen. */}
-          {!menuActive && !activeIsNonEvm && Platform.OS === 'web' && (
-            <Pressable
-              className="h-[28px] w-[28px] items-center justify-center rounded-pill bg-background-secondary"
-              // Wrapped, not passed by reference: the press event would arrive
-              // as the options argument and its properties would be read as
-              // flags.
-              onPress={() => openCustomRpcModal()}
-              testID="header-custom-rpc"
-              accessibilityRole="button"
-              accessibilityLabel={customRpcInForce ? 'Custom RPC: on' : 'Use custom RPC'}
-            >
-              {/* nw-keep(data-color): glyph color is a theme token into the vector-icon sink */}
-              <Ionicons
-                name="globe-outline"
-                size={16}
-                color={customRpcInForce ? colors.primary : colors.text}
-              />
-            </Pressable>
-          )}
-          {/* Tor, before connecting, for the same reason and one of its own.
-              The reason it shares: the actions dropdown is gated on
-              `menuActive`, so this was reachable only after connecting. The one
-              of its own: Tor decides how the FIRST request travels, and by the
-              time a wallet is connected that request has already gone. Offering
-              it only afterwards offers it too late. */}
           {!menuActive && !activeIsNonEvm && (Platform.OS === 'web' || TOR_ON_DEVICE) && (
             <Pressable
               className="h-[28px] w-[28px] items-center justify-center rounded-pill bg-background-secondary"
-              onPress={() => openCustomRpcModal({ torOnly: true })}
-              testID="header-tor"
+              onPress={() => openCustomRpcModal()}
+              testID="header-custom-rpc"
               accessibilityRole="button"
-              accessibilityLabel={TOR_IN_FORCE ? 'anon-rpc: on' : 'Connect with anon-rpc'}
+              accessibilityLabel={TOR_IN_FORCE ? 'Connection settings: anon-rpc on' : customRpcInForce ? 'Connection settings: custom RPC' : 'Connection settings'}
             >
               {/* nw-keep(data-color): glyph color is a theme token into the vector-icon sink */}
-              <Ionicons
-                name="shield-checkmark-outline"
-                size={16}
-                color={TOR_IN_FORCE ? colors.primary : colors.text}
-              />
+              <Ionicons name="globe-outline" size={16} color={TOR_IN_FORCE || customRpcInForce ? colors.primary : colors.text} />
             </Pressable>
           )}
           {/* Debug mode only: record everything the debug console logs. Next
@@ -1087,51 +1058,17 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                     <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
                   </Pressable>
                   )}
-                  {/* Own node for the selected chain (config/custom-rpc.ts).
-                      Last of the settings rows, above Sign Out. EVM only: the
-                      Sui client is built by dapp-kit from its own config, so
-                      the override cannot reach it. WEB only: the setting lives
-                      in localStorage and takes effect on a page reload, neither
-                      of which a native build has. The label is the "in force"
-                      indicator — no custom endpoint, no second state. */}
-                  {!activeIsNonEvm && Platform.OS === 'web' && (
+                  {/* One entry for the app's route and optional custom endpoints. */}
+                  {!activeIsNonEvm && (Platform.OS === 'web' || TOR_ON_DEVICE) && (
                   <Pressable
                     className="flex-row items-center gap-[10px] px-[12px] py-[10px]"
                     onPress={() => { setActionsDropdownOpen(false); openCustomRpcModal(); }}
                     testID="menu-custom-rpc"
                   >
-                    <Ionicons
-                      name="globe-outline"
-                      size={16}
-                      color={customRpcInForce ? colors.primary : colors.text}
-                    />
-                    <Text className={`flex-1 text-[14px] ${customRpcInForce ? 'font-pp-sans-semi-bold text-primary' : 'font-pp-sans text-text'}`}>
-                      {customRpcInForce ? 'Custom RPC: on' : 'Use custom RPC'}
-                    </Text>
-                  </Pressable>
-                  )}
-                  {/* Tor gets its own row rather than living inside the custom
-                      RPC form, because it is not the same decision: it changes
-                      how calls travel and works with OUR endpoints, so it needs
-                      nothing else set up. Same form underneath, opened with the
-                      endpoint fields folded away. Not gated like the custom
-                      RPC row: that override is web-only localStorage, while
-                      anon-rpc also runs on Android (SecureStore, the app
-                      restarts to apply it). Neither reaches the Sui client. */}
-                  {!activeIsNonEvm && (Platform.OS === 'web' || TOR_ON_DEVICE) && (
-                  <Pressable
-                    className="flex-row items-center gap-[10px] px-[12px] py-[10px]"
-                    onPress={() => { setActionsDropdownOpen(false); openCustomRpcModal({ torOnly: true }); }}
-                    testID="menu-tor"
-                  >
                     {/* nw-keep(data-color): glyph color is a theme token into the vector-icon sink */}
-                    <Ionicons
-                      name="shield-checkmark-outline"
-                      size={16}
-                      color={TOR_IN_FORCE ? colors.primary : colors.text}
-                    />
-                    <Text className={`flex-1 text-[14px] ${TOR_IN_FORCE ? 'font-pp-sans-semi-bold text-primary' : 'font-pp-sans text-text'}`}>
-                      {TOR_IN_FORCE ? 'anon-rpc: on' : 'Connect with anon-rpc'}
+                    <Ionicons name="globe-outline" size={16} color={TOR_IN_FORCE || customRpcInForce ? colors.primary : colors.text} />
+                    <Text className="flex-1 font-pp-sans text-[14px] text-text">
+                      {TOR_IN_FORCE ? 'Connection settings · anon-rpc on' : customRpcInForce ? 'Connection settings · custom RPC' : 'Connection settings'}
                     </Text>
                   </Pressable>
                   )}

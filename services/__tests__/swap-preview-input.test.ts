@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { projectOwnOutputs } from '../swap-rows';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { previewInputAmount, previewIsIdentity } from '../swap-preview-input';
+import { previewInputAmount, previewIsIdentity, previewOutputUsd } from '../swap-preview-input';
 import { swapOutputReviewStatus } from '../funds-state';
 
 const ROOT = join(new URL('.', import.meta.url).pathname, '..', '..');
@@ -62,4 +62,23 @@ describe('swap output review status', () => {
     // A rejected second output keeps the row at risk.
     expect(projectOwnOutputs([{ noteStatus: 'ACTIVE', leafConfirmed: true }, { noteStatus: 'REJECTED', leafConfirmed: false }], ctx)?.funds?.state).toBe('at_risk');
   });
+});
+
+
+test('preview USD prices redeemed underlying once, not destination share units', () => {
+  // An identity route from 10 ppUSDC has already redeemed to 10.017 USDC.
+  const underlying = previewInputAmount(10n * 10n ** 18n, true, { assetsPerShare: 1_001_700n, shareDecimals: 18 })!;
+  expect(previewOutputUsd(underlying, 6, 1)).toBe(10.017);
+  // A ppETH destination estimate is already ETH, not ppETH to redeem again.
+  expect(previewOutputUsd(2n * 10n ** 18n, 18, 2400)).toBe(4800);
+  expect(previewOutputUsd(underlying, 6, null)).toBeNull();
+});
+
+test('the hub prices preview outputs with the funding token and its units', () => {
+  const src = readFileSync(join(ROOT, 'components/home/action-hub.tsx'), 'utf8');
+  const at = src.indexOf('testID="hub-swap-output-usd"');
+  const block = src.slice(src.lastIndexOf('swapOutToken && swapOutUnits', at), at);
+  expect(block).toContain('previewOutputUsd(output, swapOutUnits.decimals');
+  expect(block).toContain('feePricing.tokenUsdOf(swapDestChainId, swapToFunding, swapOutUnits.symbol)');
+  expect(block).not.toContain('balanceDisplay(');
 });
