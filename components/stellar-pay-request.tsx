@@ -27,6 +27,7 @@ import { describeStellarStage, stellarErrorMessage } from '@/services/stellar/st
 import { decodeStellarPayLink, isStellarRequestExpired, type DecodedStellarRequest } from '@/services/stellar/stellar-request';
 import { selectGreedyTransferInputs, TRANSFER_MAX_INPUTS, TRANSFER_MAX_LABELS } from '@/services/transfer-note-selection';
 import type { Note as UiNote } from '@/services/sdk-types';
+import { CARD_SHADOW } from '@/components/ui/web-style-shims';
 
 function short(value: string): string {
   return value.length <= 12 ? value : `${value.slice(0, 6)}…${value.slice(-6)}`;
@@ -171,7 +172,9 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
         Private payment on Stellar testnet
       </Text>
 
-      <View className="w-full max-w-[560px] gap-[18px] rounded-card border border-border-light bg-card-background px-[24px] py-[24px]">
+      <View className="w-full max-w-[560px] gap-[18px] rounded-card border border-border-light bg-card-background px-[24px] py-[24px]"
+        // nw-keep(platform-css): the shared soft card shadow (web box-shadow, native elevation)
+        style={CARD_SHADOW}>
         {paidTx ? (
           <View className="items-center gap-[10px] py-[8px]">
             <Text className="font-pp-bold text-[16px] text-success">Payment sent ✓</Text>

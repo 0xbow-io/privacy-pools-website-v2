@@ -91,7 +91,7 @@ export function SwapPairCard({
             // nw-keep(data-color): asset tint background with the shared neutral control border
             style={{ backgroundColor: hue.bg, borderColor: colors.border }}
           >
-            <TokenNetworkIcon symbol={symbol} size={28} badgeSize={14} badgeTestnetLabel={false} chainId={chainId} />
+            <TokenNetworkIcon symbol={symbol} size={28} badgeSize={16} badgeTestnetLabel={false} chainId={chainId} />
             {/* nw-keep(data-color): pill text uses the runtime per-asset hue */}
             <Text className="font-pp-sans-semi-bold text-[15px]" style={{ color: hue.fg }}>{shown}</Text>
             {/* nw-keep(data-color): caret color is a runtime theme token (vector-icon sink) */}

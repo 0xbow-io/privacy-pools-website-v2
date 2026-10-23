@@ -35,27 +35,36 @@ export const WEB_BLUR_BACKDROP: ViewStyle & WebOnlyViewStyle = Platform.OS === '
   : {};
 
 /**
- * The one drop shadow under every dropdown menu and toast, kept light: it
- * separates the surface from the page without darkening it. Web states it as an explicit
- * box-shadow, matching the native longhands, so css-interop never has to
- * synthesize one. The Activity row menu restates the web value in its DOM
- * style (transaction-row-menu.web.tsx).
- *
- * On Android, elevation both orders siblings and draws the shadow; the
- * opacity, offset and radius longhands do not apply there. 16 sits above every
- * other elevated surface in the app (the highest is the Explore tab bar at 12;
- * modals render in their own window) while keeping the shadow modest.
+ * The soft drop shadows under cards, dropdown menus and toasts, kept light:
+ * they separate a surface from the page without darkening it. Web states each
+ * as an explicit box-shadow, matching the native longhands, so css-interop
+ * never has to synthesize one. The Activity row menu restates the dropdown
+ * value in its DOM style (transaction-row-menu.web.tsx).
+ */
+function softShadow(offsetY: number, radius: number, opacity: number, elevation: number): ViewStyle {
+  return Platform.OS === 'web'
+    ? ({ boxShadow: `0px ${offsetY}px ${radius}px rgba(0, 0, 0, ${opacity})` } as ViewStyle)
+    : {
+      elevation,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: offsetY },
+      shadowOpacity: opacity,
+      shadowRadius: radius,
+    };
+}
+
+/**
+ * Dropdowns and toasts, which float over content. On Android, elevation both
+ * orders siblings and draws the shadow; the opacity, offset and radius
+ * longhands do not apply there. 16 sits above every other elevated surface in
+ * the app (the highest is the Explore tab bar at 12; modals render in their
+ * own window).
  */
 export const DROPDOWN_SHADOW_WEB = '0px 2px 8px rgba(0, 0, 0, 0.06)';
-export const DROPDOWN_SHADOW: ViewStyle = Platform.OS === 'web'
-  ? ({ boxShadow: DROPDOWN_SHADOW_WEB } as ViewStyle)
-  : {
-    elevation: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-  };
+export const DROPDOWN_SHADOW: ViewStyle = softShadow(2, 8, 0.06, 16);
+
+/** In-page cards: a lighter version, at an Android elevation below every menu. */
+export const CARD_SHADOW: ViewStyle = softShadow(1, 6, 0.04, 2);
 
 /**
  * The drop shadow under a modal card, deeper than a menu's because the card sits

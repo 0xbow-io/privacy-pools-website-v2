@@ -2,7 +2,7 @@ import { View, Text } from 'react-native';
 import type { AssetStatistics, GlobalStatistics } from '@/services/api-types';
 import { Card } from '@/components/ui/card';
 import { formatUsd } from '@/components/pools-provider';
-import { medianDepositUsdText, resolveTransfersCount } from '@/services/global-stats';
+import { resolveTransfersCount } from '@/services/global-stats';
 import { StatRows, type StatItem } from '@/components/pools/stat-display';
 
 type Props = {
@@ -10,7 +10,7 @@ type Props = {
   statistics: GlobalStatistics | null;
   /**
    * Pool-SCOPED statistics (per-asset endpoint, asp-v2 PR #92). The ONLY
-   * legitimate source for the median and transfers rows here: `statistics` is
+   * legitimate source for the transfers row here: `statistics` is
    * the protocol-wide aggregate, and using it on a pool page silently shows
    * every pool the same number (review P1). Null until the endpoint deploys.
    */
@@ -46,13 +46,12 @@ export function PoolPageStatsCard({
   transferCount,
   assetStats = null,
 }: Props) {
-  // Median + transfers are pool-scoped rows and read ONLY from the per-asset
-  // stats (null until asp-v2 PR #92 deploys). The GLOBAL payload is never
-  // consulted for them: on a pool page it would show the protocol-wide figure
-  // under a pool-local label — the review P1. The pre-existing rows keep their
-  // pre-#92 sources, upgraded to the per-asset figure when it is available.
+  // Transfers is a pool-scoped row and reads ONLY from the per-asset stats
+  // (null until asp-v2 PR #92 deploys). The GLOBAL payload is never consulted
+  // for it: on a pool page it would show the protocol-wide figure under a
+  // pool-local label — the review P1. The other rows keep their pre-#92
+  // sources, upgraded to the per-asset figure when it is available.
   const scoped = assetStats?.allTime ?? null;
-  const medianDeposit = medianDepositUsdText(scoped);
 
   const items: StatItem[] = [
     { label: 'Pool TVL', value: tvlUsd, sub: tvlToken },
@@ -69,7 +68,6 @@ export function PoolPageStatsCard({
           ? formatUsd(parseFloat(statistics.allTime.avgDepositSizeUsd) || 0)
           : formatUsd(avgDepositUsd),
     },
-    ...(medianDeposit === null ? [] : [{ label: 'Median deposit', value: medianDeposit }]),
     {
       label: 'Withdrawals',
       value: (scoped?.totalWithdrawalsCount ?? statistics?.allTime.totalWithdrawalsCount ?? withdrawalCount).toLocaleString('en-US'),
@@ -83,7 +81,7 @@ export function PoolPageStatsCard({
   return (
     <Card noPadding className={isMobile ? 'w-full' : 'flex-1'}>
       <View className="px-[16px] pb-[6px] pt-[14px]">
-        <Text className="font-pp-bold text-[13px] leading-[16px] text-text">Statistics</Text>
+        <Text className="font-pp-bold text-[16px] leading-[20px] text-text">Statistics</Text>
       </View>
       <StatRows items={items} />
       <View className="h-[6px]" />

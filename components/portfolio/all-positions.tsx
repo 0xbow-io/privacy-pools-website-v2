@@ -11,13 +11,12 @@
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { useState } from 'react';
 import { getPoolPath } from '@/config/pool-paths';
-import { View, Text, Pressable, Image, useWindowDimensions, Platform } from 'react-native';
+import { View, Text, Pressable, useWindowDimensions, Platform } from 'react-native';
 import { DROPDOWN_SHADOW } from '@/components/ui/web-style-shims';
 import { useRouter } from 'expo-router';
 import { useShareYield } from '@/hooks/use-share-yield';
 import { formatApyPercent } from '@/services/share-yield';
 
-const WEB_OVERLAY_POSITION = Platform.select({ web: { position: 'fixed' }, default: { position: 'absolute' } }) as Record<string, string>;
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Svg, { Path, Circle, Line, Polyline } from 'react-native-svg';
 import { Card } from '@/components/ui/card';
@@ -26,13 +25,12 @@ import { PrivacyScore } from '@/components/ui/privacy-score';
 import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import { useWithdrawModal } from '@/components/withdraw-modal-provider';
-import { ChainBadge, TokenNetworkIcon } from '@/components/ui/token-network-icon';
+import { TokenNetworkIcon } from '@/components/ui/token-network-icon';
 import { useSupportedWalletConnection } from '@/hooks/use-supported-wallet-connection';
 import { useYieldFeeds } from '@/hooks/use-yield-feeds';
 import { HoverHint } from '@/components/ui/hover-hint';
 
-// Pool logos
-const WOETH_LOGO = require('@/assets/images/woeth-logo.png');
+const WEB_OVERLAY_POSITION = Platform.select({ web: { position: 'fixed' }, default: { position: 'absolute' } }) as Record<string, string>;
 
 const ROW_CHART_W = 640;
 const ROW_CHART_H = 72;
@@ -418,18 +416,7 @@ export function AllPositions({
                       : `${position.poolName} position`}
                     testID={`position-row-toggle-${position.poolName}`}
                   >
-                    {position.poolName === 'WOETH' ? (
-                      <View
-                        className="relative items-center justify-center"
-                        // nw-keep(svg-or-canvas): fixed icon box matching TokenNetworkIcon's size
-                        style={{ width: 32, height: 32 }}
-                      >
-                        <Image source={WOETH_LOGO} className="h-[32px] w-[32px] rounded-full" />
-                        <ChainBadge size={16} chainId={position.chainId} />
-                      </View>
-                    ) : (
-                      <TokenNetworkIcon symbol={position.canonicalPoolSymbol ?? position.poolName} size={32} chainId={position.chainId} />
-                    )}
+                    <TokenNetworkIcon symbol={position.canonicalPoolSymbol ?? position.poolName} size={32} chainId={position.chainId} />
                     <View className="flex-1 gap-[4px]">
                       <View className="flex-row items-center gap-[6px]">
                         <Text className="font-pp-bold text-[13px] leading-[13px] text-text">

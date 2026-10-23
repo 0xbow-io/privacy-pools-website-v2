@@ -52,21 +52,6 @@ function CheckCircleIcon({ color = '#00ACC4' }: { color?: string }) {
   );
 }
 
-function EthChainIcon({ size = 20 }: { size?: number }) {
-  return (
-    // nw-keep(svg-or-canvas): fixed Ethereum brand palette on SVG fills (not theme tokens)
-    <Svg width={size} height={size} viewBox="0 0 20 20" fill="none">
-      <Circle cx={10} cy={10} r={10} fill="#627EEA" />
-      <Path d="M10 4L10 8.5L13.5 10L10 4Z" fill="#C0CBF6" />
-      <Path d="M10 4L6.5 10L10 8.5L10 4Z" fill="white" />
-      <Path d="M10 12.5L10 16L13.5 10.75L10 12.5Z" fill="#C0CBF6" />
-      <Path d="M10 16L10 12.5L6.5 10.75L10 16Z" fill="white" />
-      <Path d="M10 11.75L13.5 10L10 8.5L10 11.75Z" fill="#8197EE" />
-      <Path d="M6.5 10L10 11.75L10 8.5L6.5 10Z" fill="#C0CBF6" />
-    </Svg>
-  );
-}
-
 export function TokenNetworkSelector({
   tokens,
   networks,
@@ -141,7 +126,7 @@ export function TokenNetworkSelector({
                   className={`flex-row items-center gap-[12px] rounded-control px-[8px] py-[10px] ${isSel ? 'bg-primary-soft' : ''}`}
                   onPress={() => onSelectToken(token)}
                 >
-                  <TokenNetworkIcon symbol={token.symbol} size={32} />
+                  <TokenNetworkIcon symbol={token.symbol} chainId={activeNetworkId} size={28} badgeSize={15} />
                   <View className="flex-1">
                     <Text className="font-pp-bold text-[15px] text-text">{displayTokenSymbol(token.symbol)}</Text>
                     <Text className="font-pp-regular text-[12px] text-text-muted">

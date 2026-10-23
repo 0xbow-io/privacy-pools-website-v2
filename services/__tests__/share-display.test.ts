@@ -18,6 +18,8 @@ describe('share display', () => {
     expect(displayTokenSymbol('USDC')).toBe('USDC');
     expect(displayTokenSymbol('ETH')).toBe('ETH');
     expect(displayTokenSymbol('cBTC')).toBe('cBTC');
+    expect(displayTokenSymbol('CBTC')).toBe('cBTC');
+    expect(displayTokenSymbol('cbtc')).toBe('cBTC');
     expect(isShareSymbol('ppUSDC')).toBe(true);
     expect(isShareSymbol('USDC')).toBe(false);
     expect(isShareSymbol(undefined)).toBe(false);

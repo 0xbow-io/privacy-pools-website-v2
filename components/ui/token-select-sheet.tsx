@@ -32,7 +32,7 @@ import { getKnownTokenMetadata } from '@/config/tokens';
 import { getConfiguredDepositRouteForPayToken } from '@/config/yield';
 import { useShareYield } from '@/hooks/use-share-yield';
 import { formatApyPercent } from '@/services/share-yield';
-import { getChainConfig, SUI_TESTNET_ID } from '@/config/chains';
+import { getChainConfig, supportedChainIds } from '@/config/chains';
 import { holdingsChainName } from '@/services/wallet-tokens';
 import { formatTokenBalance } from '@/config/tokens';
 import { usePools } from '@/components/pools-provider';
@@ -40,7 +40,7 @@ import { intentSwapsEnabledForChain } from '@/config/intent-swaps';
 import { useAllChainsPriceMap } from '@/hooks/use-all-chains-price-map';
 import { priceFromMap } from '@/services/price-map-merge';
 import { useBackHandler } from '@/hooks/use-back-handler';
-import { splitNetworkChips } from '@/services/widget-chain-lists';
+import { isListedTokenAddressOnChain } from '@/services/token-sheet-address';
 
 /**
  * Full-screen (narrow) / centered-card (desktop) token picker, Uniswap-shaped:
@@ -247,7 +247,7 @@ export function TokenSelectSheet({
   onSelectNetwork,
   onClose,
   title = 'Select a token',
-  balanceMode = 'wallet',
+  balanceMode = 'none',
   allowCustomSelection = false,
   hideZeroBalances = false,
 }: {
@@ -285,13 +285,18 @@ export function TokenSelectSheet({
    * for a list where the viewer's own holdings are irrelevant to the choice
    * (a payment request: the PAYER fulfils it, so the creator's balance says
    * nothing about whether the asset can be requested).
+   *
+   * Defaults to 'none' because 'wallet' reads the connected wallet's balances
+   * when the sheet opens. On a withdraw or send, that read tells the RPC
+   * provider which public wallet is about to exit privately. Only a picker
+   * that pays FROM the wallet (a deposit) opts in.
    */
   balanceMode?: 'wallet' | 'shielded' | 'none';
   /**
    * Whether a PASTED (non-catalog) row may be OFFERED and selected.
    *
    * Default false, and it has to be. This used to be keyed off wallet mode as
-   * well, and since `balanceMode` defaults to 'wallet' that made pasted rows
+   * well, and since `balanceMode` defaulted to 'wallet' that made pasted rows
    * clickable in every destination picker - the swap-output picker, the Shield
    * destination pool sheet, Transfer "Receive as" - not just the pay sheet it
    * was meant for. Those callbacks mostly fail closed, but "mostly" is not a
@@ -343,8 +348,6 @@ export function TokenSelectSheet({
   const [search, setSearch] = useState('');
   // Unknown / scam-shaped holdings stay out of the list until asked for.
   const [showSuspicious, setShowSuspicious] = useState(false);
-  // The "•••" overflow menu of the network chip row.
-  const [networkMenuOpen, setNetworkMenuOpen] = useState(false);
 
   // Intent swaps are the ONLY non-pool route into the pool, and they are
   // flag + processor gated (fail closed) and EVM-only. Off ⇒ a non-pool asset
@@ -521,24 +524,25 @@ export function TokenSelectSheet({
 
   const query = search.trim();
   const isAddressQuery = ADDRESS_RE.test(query);
-  const alreadyListed =
-    isAddressQuery && tokens.some((t) => t.address.toLowerCase() === query.toLowerCase());
+  const customChainId = activeNetworkId ?? chainId;
+  const alreadyListed = isAddressQuery
+    && isListedTokenAddressOnChain(tokens, query, customChainId, chainId);
   // EVM-only: a Move coin type is not an 0x-address, so there is nothing to
   // resolve with erc20Abi on Sui.
   //
   // Gated on the caller's opt-in rather than on `balanceMode`. Those were the
   // same thing while the pay sheet was the only picker that could adopt an
   // arbitrary token, but Withdraw's "Receive as" can too: LiFi routes to any
-  // ERC-20 and hands it to the user's wallet, and that picker ranks by the
-  // SHIELDED holding it is spending. Keying the paste row off the ranking mode
-  // made those two questions one, so a caller could not answer them
-  // differently (Mike, 2026-09-22: "I should be able to select any random
+  // ERC-20 and hands it to the user's wallet, and that picker shows no wallet
+  // balances. Keying the paste row off the balance mode made those two
+  // questions one, so a caller could not answer them differently (Mike, 2026-09-22: "I should be able to select any random
   // Ethereum ERC-20 on withdrawal, no?").
   //
   // `allowCustomSelection` still defaults false, so every picker that has not
   // opted in is unchanged, including the ones the note below names.
   const customEnabled = !isSui && allowCustomSelection && isAddressQuery && !alreadyListed;
   const customAddress = customEnabled ? (query as ViemAddress) : undefined;
+  // A paste is read on the network being browsed, and the row carries it.
 
   const {
     data: customMeta,
@@ -546,9 +550,9 @@ export function TokenSelectSheet({
     isError: customReadError,
   } = useReadContracts({
     contracts: [
-      { address: customAddress, abi: erc20Abi, functionName: 'symbol', chainId },
-      { address: customAddress, abi: erc20Abi, functionName: 'name', chainId },
-      { address: customAddress, abi: erc20Abi, functionName: 'decimals', chainId },
+      { address: customAddress, abi: erc20Abi, functionName: 'symbol', chainId: customChainId },
+      { address: customAddress, abi: erc20Abi, functionName: 'name', chainId: customChainId },
+      { address: customAddress, abi: erc20Abi, functionName: 'decimals', chainId: customChainId },
     ],
     query: { enabled: customEnabled },
   });
@@ -558,8 +562,9 @@ export function TokenSelectSheet({
     abi: erc20Abi,
     functionName: 'balanceOf',
     args: evmAddress ? [evmAddress] : undefined,
-    chainId,
-    query: { enabled: customEnabled && !!evmAddress },
+    chainId: customChainId,
+    // The wallet's own balance of the paste names the wallet: wallet mode only.
+    query: { enabled: customEnabled && !!evmAddress && balanceMode === 'wallet' },
   });
 
   // A non-token address (or a proxy that reverts) fails the reads instead of
@@ -578,8 +583,9 @@ export function TokenSelectSheet({
       address: query,
       decimals,
       isNative: false,
+      chainId: customChainId,
     };
-  }, [customEnabled, customMeta, query]);
+  }, [customEnabled, customMeta, query, customChainId]);
 
   const customFailed = customEnabled && !customLoading && (customReadError || (!!customMeta && !customToken));
 
@@ -713,6 +719,8 @@ export function TokenSelectSheet({
     balanceMode,
     selectedAddress,
     selectedChainId,
+    activeNetworkId,
+    chainId,
   ]);
 
   // Rows the list actually renders, plus how many are being withheld: the
@@ -815,7 +823,7 @@ export function TokenSelectSheet({
         accessibilityRole="button"
         accessibilityLabel={`${balanceMode === 'shielded' ? poolDisplayLabel(row.symbol, row.chainId) : displayTokenSymbol(row.symbol)} on ${chainNameOf(row.chainId)}`}
       >
-        <TokenNetworkIcon symbol={row.symbol} size={32} chainId={row.chainId} logoUri={row.logoUrl} />
+        <TokenNetworkIcon symbol={row.symbol} size={28} badgeSize={15} chainId={row.chainId} logoUri={row.logoUrl} />
         <View className="min-w-0 flex-1 gap-[2px]">
           <View className="flex-row flex-wrap items-center gap-[6px]">
             <Text className="font-pp-bold text-[15px] text-text" numberOfLines={1}>
@@ -938,14 +946,14 @@ export function TokenSelectSheet({
             even with a single supported network so the sheet always states
             which chain the balances and routes below belong to. */}
         {networks.length > 0 && (() => {
-          const renderChip = (net: TokenSelectSheetNetwork, inMenu = false) => {
+          const renderChip = (net: TokenSelectSheetNetwork) => {
             const active = net.id === activeNetworkId;
             if (net.unavailableReason) {
               return (
                 <View
                   key={net.id}
                   accessible
-                  className={`flex-row items-center gap-[6px] ${inMenu ? 'px-[12px] py-[8px]' : 'rounded-pill border border-border px-[10px] py-[5px]'} opacity-50`}
+                  className="flex-row items-center gap-[6px] rounded-pill border border-border px-[10px] py-[5px] opacity-50"
                   accessibilityLabel={`${net.name}: ${net.unavailableReason}`}
                   accessibilityState={{ disabled: true }}
                   testID={`token-sheet-network-unavailable-${net.id}`}
@@ -959,18 +967,16 @@ export function TokenSelectSheet({
             return (
               <Pressable
                 key={net.id}
-                className={`flex-row items-center gap-[6px] ${inMenu ? 'px-[12px] py-[8px] active:bg-background-secondary' : `rounded-pill border px-[10px] py-[5px] ${active ? 'border-tint bg-background-secondary' : 'border-border active:bg-background-secondary'}`}`}
+                className={`flex-row items-center gap-[6px] rounded-pill border px-[10px] py-[5px] ${active ? 'border-tint bg-background-secondary' : 'border-border active:bg-background-secondary'}`}
                 // Tapping the ACTIVE chip clears the filter (back to every
                 // chain) rather than re-selecting what is already selected —
                 // unless it is the ONLY chain, where the chip is just a label
                 // for the balances below and there is nothing to clear to.
                 onPress={() => {
-                  setNetworkMenuOpen(false);
                   onSelectNetwork(active && networks.length > 1 ? null : net.id);
                 }}
                 accessibilityRole="button"
                 accessibilityState={{ selected: active }}
-                testID={inMenu ? `token-sheet-network-more-${net.id}` : undefined}
               >
                 <ChainLogo chain={chainLogoChainFor(net.id)} size={16} />
                 <Text className={`font-pp-medium text-[12px] ${active ? 'text-text' : 'text-text-secondary'}`}>
@@ -979,28 +985,14 @@ export function TokenSelectSheet({
               </Pressable>
             );
           };
-          const { visible, overflow } = splitNetworkChips(networks);
-          // The picked chain is behind the bubble: the bubble reads as active.
-          const overflowActive = overflow.some((n) => n.id === activeNetworkId);
           return (
             <View className="pb-[12px]">
               <View
                 className="flex-row flex-wrap items-center gap-[8px] px-[16px]"
               >
-                {visible.map((net) => renderChip(net))}
-                {/* The chains that don't fit sit behind a bubble (Mike, #276). */}
-                {overflow.length > 0 && (
-                  <Pressable
-                    className={`items-center justify-center rounded-pill border px-[10px] py-[5px] ${networkMenuOpen || overflowActive ? 'border-tint bg-background-secondary' : 'border-border active:bg-background-secondary'}`}
-                    onPress={() => setNetworkMenuOpen((o) => !o)}
-                    accessibilityRole="button"
-                    accessibilityLabel="More networks"
-                    accessibilityState={{ expanded: networkMenuOpen, selected: overflowActive }}
-                    testID="token-sheet-network-more"
-                  >
-                    <Text className="font-pp-medium text-[12px] text-text-secondary">•••</Text>
-                  </Pressable>
-                )}
+                {[...networks]
+                  .sort((a, b) => supportedChainIds.indexOf(a.id) - supportedChainIds.indexOf(b.id))
+                  .map(renderChip)}
                 {/* Discreet clear — only while a chain is filtering a list that
                     spans several. With one network the chip states the chain and
                     there is nothing to widen to. */}
@@ -1018,15 +1010,7 @@ export function TokenSelectSheet({
                   </Pressable>
                 )}
               </View>
-              {networkMenuOpen && overflow.length > 0 && (
-                <View
-                  className="mx-[16px] mt-[8px] overflow-hidden rounded-[12px] border border-border bg-background"
-                  accessibilityLabel="More networks"
-                  testID="token-sheet-network-more-menu"
-                >
-                  {overflow.map((net) => renderChip(net, true))}
-                </View>
-              )}
+
             </View>
           );
         })()}

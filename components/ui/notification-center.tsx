@@ -77,7 +77,7 @@ function NotificationRow({ tx, colors, colorScheme }: { tx: Transaction; colors:
   const now = useNow();
   return (
     <View className="flex-row items-center gap-[10px]">
-      <TokenNetworkIcon symbol={tx.asset} chainId={tx.chainId} size={28} badgeSize={13} />
+      <TokenNetworkIcon symbol={tx.asset} chainId={tx.chainId} size={28} badgeSize={15} />
       <View className="min-w-0 flex-1 gap-[2px]">
         <View className="flex-row items-center gap-[5px]">
           {/* nw-keep(data-color): direction glyph color is per-type (theme token, or the bespoke transfer hue) into the vector-icon sink */}

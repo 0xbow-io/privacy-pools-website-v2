@@ -76,6 +76,7 @@ function currentSnapshot(): UiUrlSnapshot {
 // ---------------------------------------------------------------------------
 
 const UI_ENTRY_MARKER = '__ppv2UiParamEntry';
+const FROM_UI_ENTRY = '__ppv2FromUiParamEntry';
 
 function isObjectState(state: unknown): state is Record<string, unknown> {
   return typeof state === 'object' && state !== null && !Array.isArray(state);
@@ -114,8 +115,27 @@ export function isUiParamEntry(): boolean {
   return isObjectState(window.history.state) && window.history.state[UI_ENTRY_MARKER] === true;
 }
 
+/**
+ * Was the current page opened from home with a panel open (My balances, All
+ * activity)? The history wrapper stamps the URL it left on the new entry, so a
+ * page's own Back can return to that panel; router.back() lands on the
+ * router's bare home entry and drops it.
+ */
+export function openedFromHomePanel(): boolean {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return false;
+  const from = isObjectState(window.history.state) ? window.history.state[FROM_UI_ENTRY] : undefined;
+  if (typeof from !== 'string') return false;
+  const url = new URL(from, window.location.origin);
+  return url.pathname === '/' && url.searchParams.has('panel');
+}
+
 export function getUiParam(key: string): string | null {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
+  // Held off the URL while expo-router settles a route change (see below).
+  if (heldForRouter && window.location.pathname === heldForRouter.pathname) {
+    const held = heldForRouter.params.find(([k]) => k === key);
+    if (held) return held[1];
+  }
   return new URL(window.location.href).searchParams.get(key);
 }
 
@@ -239,6 +259,69 @@ function emitUiUrl({
 
 let guardInstalled = false;
 let last: UiUrlSnapshot | null = null;
+let rawReplaceState: History['replaceState'] | null = null;
+
+/**
+ * Managed params lifted off the URL while expo-router handles a Back/Forward
+ * that changes route onto an entry carrying them (an open home panel).
+ * expo-router keys each entry by the `id` in history.state and resets the
+ * whole navigator, remounting every screen, when the entry's URL is not the
+ * path it recorded. A panel entry shares the bare home record's id but adds
+ * `?panel=`, so it never matched. With the params lifted the URL matches,
+ * expo-router restores the screens it kept mounted, and its own follow-up
+ * replaceState carries the params back (or the fallback below does).
+ */
+let heldForRouter: { id: string; pathname: string; params: [string, string][]; state: Record<string, unknown> } | null = null;
+
+function holdManagedParamsForRouter(): void {
+  if (!rawReplaceState) return;
+  const state = window.history.state;
+  if (!isObjectState(state) || typeof state.id !== 'string') return;
+  const url = new URL(window.location.href);
+  const params = [...url.searchParams].filter(([key]) => MANAGED_PARAMS.has(key));
+  if (params.length === 0) return;
+  for (const [key] of params) url.searchParams.delete(key);
+  heldForRouter = { id: state.id, pathname: url.pathname, params, state };
+  rawReplaceState(state, '', pathOf(url));
+  // The router reads the URL synchronously in its popstate listener. Restore
+  // before the browser can traverse again, or a quick Forward permanently
+  // leaves the previous panel entry stripped. Keep the pending merge for the
+  // router's asynchronous state write.
+  const held = heldForRouter;
+  queueMicrotask(() => { if (heldForRouter === held) releaseHeldParams(); });
+}
+
+/** Put held params back on a router write to the same entry, if one is pending. */
+function withHeldParams(args: Parameters<History['replaceState']>): Parameters<History['replaceState']> {
+  const held = heldForRouter;
+  if (!held) return args;
+  // Our UI writers carry entry markers; only the router writes a bare id.
+  if (!isObjectState(args[0]) || args[0].id !== held.id
+    || Object.keys(args[0]).some((key) => key !== 'id')) {
+    heldForRouter = null;
+    return args;
+  }
+  const url = new URL(args[2] != null ? String(args[2]) : window.location.href, window.location.href);
+  if (url.pathname !== held.pathname) return args;
+  heldForRouter = null;
+  for (const [key, value] of held.params) url.searchParams.set(key, value);
+  return [{ ...held.state, ...args[0] }, args[1], pathOf(url)];
+}
+
+/** Fallback when expo-router made no write of its own to carry them back. */
+function releaseHeldParams(): void {
+  const held = heldForRouter;
+  if (!held || !rawReplaceState) return;
+  if (window.location.pathname !== held.pathname) return;
+  const state = window.history.state;
+  if (!isObjectState(state) || state.id !== held.id) return;
+  const previous = currentSnapshot();
+  const url = new URL(window.location.href);
+  for (const [key, value] of held.params) url.searchParams.set(key, value);
+  rawReplaceState({ ...held.state, ...state }, '', pathOf(url));
+  last = currentSnapshot();
+  emitUiUrl({ source: 'history', previous, current: last });
+}
 
 function snapshot() {
   last = currentSnapshot();
@@ -263,7 +346,15 @@ export function installUiUrlGuard(): void {
   // Keep the snapshot current across every history write, whoever makes it.
   const origPushState = window.history.pushState.bind(window.history);
   window.history.pushState = (...args: Parameters<History['pushState']>) => {
+    releaseHeldParams();
+    heldForRouter = null;
     const previous = currentSnapshot();
+    // A route change away from an open panel: remember it on the new entry.
+    const target = args[2] != null ? new URL(String(args[2]), window.location.href) : null;
+    if (target && target.pathname !== previous.pathname
+      && changedParamKeys('', previous.search).some((key) => MANAGED_PARAMS.has(key))) {
+      args[0] = { ...(isObjectState(args[0]) ? args[0] : {}), [FROM_UI_ENTRY]: `${previous.pathname}${previous.search}` };
+    }
     origPushState(...args);
     const current = currentSnapshot();
     last = current;
@@ -273,8 +364,15 @@ export function installUiUrlGuard(): void {
     }
   };
   const origReplaceState = window.history.replaceState.bind(window.history);
-  window.history.replaceState = (...args: Parameters<History['replaceState']>) => {
+  rawReplaceState = origReplaceState;
+  window.history.replaceState = (...rawArgs: Parameters<History['replaceState']>) => {
+    const args = withHeldParams(rawArgs);
     const previous = currentSnapshot();
+    // Keep the stamp when the router rewrites this entry's state in place.
+    const from = isObjectState(window.history.state) ? window.history.state[FROM_UI_ENTRY] : undefined;
+    if (typeof from === 'string' && !(isObjectState(args[0]) && FROM_UI_ENTRY in args[0])) {
+      args[0] = { ...(isObjectState(args[0]) ? args[0] : {}), [FROM_UI_ENTRY]: from };
+    }
     origReplaceState(...args);
     const current = currentSnapshot();
     last = current;
@@ -289,6 +387,7 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
   // index.js guarantees this registration runs before expo-router/entry.
   window.addEventListener('popstate', (e) => {
     if (!guardInstalled || last === null) return;
+    heldForRouter = null;
     const prev = last;
     const next = currentSnapshot();
     last = next;
@@ -302,5 +401,8 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
       e.stopImmediatePropagation();
     }
     emitUiUrl({ source: 'popstate', previous: prev, current: next, changedKeys: changed });
+    // A route change onto an entry carrying managed params: let expo-router
+    // match its record (see heldForRouter). Runs before its listener.
+    if (prev.pathname !== next.pathname) holdManagedParamsForRouter();
   });
 }

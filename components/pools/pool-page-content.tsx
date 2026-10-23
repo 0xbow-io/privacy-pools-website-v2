@@ -12,11 +12,11 @@ import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { poolVisible } from '@/services/pool-visibility-rule';
 import { isSupersededLegacyPool, poolDisplayLabel, poolSymbolFromRoute } from '@/config/pool-paths';
-import { Fragment, useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { ScrollView, View, Text, Pressable, Platform, useWindowDimensions } from 'react-native';
-import { myActivityCells, poolCardsRowClassName } from '@/services/pool-my-activity';
+import { myActivityCells } from '@/services/pool-my-activity';
 import { useIsFocused, useLocalSearchParams, useRouter } from 'expo-router';
-import { useAccount, useSwitchChain, useChainId } from 'wagmi';
+import { useAccount } from 'wagmi';
 import { usePoolSession } from '@/hooks/use-pool-session';
 import { useQuery } from '@tanstack/react-query';
 import { Header } from '@/components/ui/header';
@@ -35,12 +35,11 @@ import {
 } from '@/components/home/explore-panel-context';
 import { PortfolioNetValue, type TimePeriod } from '@/components/portfolio/portfolio-net-value';
 import { usePortfolioHistory } from '@/hooks/use-portfolio-history';
-import { getTokenMetadata, NATIVE_ASSET_ADDRESS, getTokenMetadataBySymbol } from '@/config/tokens';
+import { getActionableTokens, getTokenMetadata, NATIVE_ASSET_ADDRESS, getTokenMetadataBySymbol } from '@/config/tokens';
 import { getSwapInputTokens } from '@/config/intent-swaps';
 import { resolveHandoffToken } from '@/services/swap-token-handoff';
 import { sameSymbol } from '@/services/symbol-match';
 import { CHAIN_OPTIONS } from '@/components/pools/chain-selector';
-import { ChainLogo, chainLogoChainFor } from '@/components/ui/chain-logo';
 import { usePools, formatUsd } from '@/components/pools-provider';
 import { formatUnits } from 'viem';
 import { approxUnderlyingText, comingSoonDepositMessage, displayTokenSymbol } from '@/services/share-display';
@@ -63,7 +62,7 @@ import { buildOutgoingDepositTxHashSet } from '@/services/outgoing-deposits-stor
 import { isInternalSpendRow, mergeMyTransactions } from '@/services/transfer-direction';
 import { anyLeg, isSwapRow } from '@/services/swap-rows';
 import { useAllChainsPriceMap } from '@/hooks/use-all-chains-price-map';
-import { defaultChainId, supportedChainIds, supportedEvmChainIds, getChainConfig, getSupportedChains, STELLAR_TESTNET_ID, SUI_TESTNET_ID } from '@/config/chains';
+import { defaultChainId, getChainConfig, getSupportedChains, STELLAR_TESTNET_ID, SUI_TESTNET_ID } from '@/config/chains';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { getConfiguredYieldDeployments, YIELD_APY_PERCENT } from '@/config/yield';
 import { useShareYield } from '@/hooks/use-share-yield';
@@ -74,7 +73,7 @@ import {
   type PoolAccount,
 } from './pool-page-shared';
 import { PoolPageHeader } from './pool-page-header';
-import { mustLeavePoolPageToSwitch } from '@/services/pool-page-chain-switch';
+import { useGlobalStatistics } from '@/hooks/use-global-statistics';
 import { PoolPageStatsCard } from './pool-page-stats-card';
 import { useAssetStatistics } from '@/hooks/use-asset-statistics';
 import { PoolPageAccountsGrid } from './pool-page-accounts-grid';
@@ -85,23 +84,6 @@ import { Transactions } from './transactions';
 // The transfer modal's prefill only accepts these three symbols (EVM); a pool
 // page for anything else simply doesn't pre-select a token.
 
-/**
- * Slug → chain id, derived from the build's chain set rather than a two-entry
- * literal. The literal knew only eth/sepolia, so on staging the Citrea option
- * resolved to undefined and was filtered straight back out of the selector.
- */
-const CHAIN_SELECTOR_TO_ID: Record<string, number> = Object.fromEntries(
-  supportedEvmChainIds
-    .map((id) => [getChainConfig(id)?.name?.toLowerCase(), id] as const)
-    .filter((entry): entry is readonly [string, number] => typeof entry[0] === 'string'),
-);
-
-const WAGMI_SUPPORTED_CHAIN_IDS = new Set(supportedChainIds);
-
-const SUPPORTED_CHAIN_OPTIONS = CHAIN_OPTIONS.filter(
-  (c) => CHAIN_SELECTOR_TO_ID[c.id] !== undefined,
-);
-
 export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string } = {}) {
   const tabClearance = useTabBarClearance();
   const focused = useIsFocused();
@@ -109,8 +91,6 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
   const { address, isConnected, status: walletStatus } = useAccount();
   const router = useRouter();
   const { identityMode } = usePoolSession();
-  const supportedChainCount = getSupportedChains().length;
-  const multiChain = supportedChainCount >= 2;
   const { connectWallet } = useSupportedWalletConnection();
   // isSui reflects the ACTIVE chain, which this page selects to be the pool's
   // chain (below). The connect gate is EVM-specific (connectWallet opens the
@@ -134,15 +114,8 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
     action();
   };
 
-  const { switchChain } = useSwitchChain();
-  // The wallet's ACTUAL chain: useAccount().chainId (the connector). Raw
-  // useChainId() is the wagmi store, which does not follow the connector, so
-  // the switch prompt below fired spuriously or not at all when they split.
-  // Disconnected, fall back to the store (switchChain then just moves it).
-  const { chainId: connectorChainId } = useAccount();
-  const storeChainId = useChainId();
-  const walletChainId = connectorChainId ?? storeChainId;
   const { data, statistics } = usePools();
+  const { assets: publicPools } = useGlobalStatistics();
   // Live USDC-per-ppUSDC: a share pool prints the USDC it is worth (Pat, 2026-09-05).
   const { rateFor } = useShareRates();
   const balanceDisplay = useBalanceDisplay();
@@ -167,34 +140,7 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
   const stackPair = width < 900;
   const { chainName: routeChainName, poolAssetName: routeAssetName, action: routeAction } = useLocalSearchParams<{ chainName: string; poolAssetName: string; action?: string }>();
   const poolAssetName = forcedPoolAsset ?? routeAssetName;
-  const defaultSelectorChain = defaultChainId === 11155111 ? 'sepolia' : 'eth';
-  // The header's chain control starts on the ROUTE's chain (/chains/citrea/...
-  // must not open showing Sepolia) and follows the route when it changes.
-  const routeSelectorChain = (routeChainName ?? '').toLowerCase();
-  const initialSelectorChain = CHAIN_SELECTOR_TO_ID[routeSelectorChain] ? routeSelectorChain : defaultSelectorChain;
-  const [selectedChain, setSelectedChain] = useState<string>(initialSelectorChain);
-  useEffect(() => { setSelectedChain(initialSelectorChain); }, [initialSelectorChain]);
-
-  const handleChainSelect = (selectorId: string) => {
-    const targetChainId = CHAIN_SELECTOR_TO_ID[selectorId];
-    // Another chain than this pool's: go home, then switch, like the header
-    // selector. Switching in place was undone by the pin effect below, with a
-    // second wallet prompt and the card left naming the other chain (DEV-453).
-    if (targetChainId && mustLeavePoolPageToSwitch({
-      targetChainId,
-      targetChainType: getChainConfig(targetChainId)?.chainType,
-      currentChainId: poolChainId,
-      pathname: '/chains/',
-    })) {
-      router.replace('/');
-      void selectChain(targetChainId);
-      return;
-    }
-    setSelectedChain(selectorId);
-    if (targetChainId && targetChainId !== walletChainId && WAGMI_SUPPORTED_CHAIN_IDS.has(targetChainId)) {
-      switchChain({ chainId: targetChainId as typeof walletChainId });
-    }
-  };
+  const routeSelectorChain = (routeChainName ?? getChainConfig(defaultChainId)?.name ?? '').toLowerCase();
 
   // The route segment is a SLUG, not a symbol: on a chain with a share pool
   // `eth` is ppETH and the emptied plain pool is `eth-legacy` (config/pool-paths).
@@ -493,24 +439,32 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
     return { deposits, withdrawals, transfers };
   }, [address, identityMode, isPoolTx, data.transactions, data.lineageRows, data.anchorTxHashes, data.internalTxHashes, notes]);
 
-  const poolOptions = useMemo<PoolOption[]>(() => {
-    return data.allPools.filter((pool) => {
-      const held = data.myPools.find((p) => p.chainId === pool.chainId && p.tokenAddress.toLowerCase() === pool.tokenAddress.toLowerCase());
-      return poolVisible({
-        superseded: isSupersededLegacyPool(pool.name, pool.chainId),
-        active: Number(held?.balanceTokenExact ?? 0),
-        pending: Number(held?.pendingTokenExact ?? 0),
-        current: pool.chainId === poolChainId && sameSymbol(pool.name, currentPoolToken),
-      });
-    }).map((pool) => ({
-      id: pool.id,
-      name: pool.name,
-      tvl: pool.poolValue,
-      icon: tokenIconFor(pool.name),
-      chainId: pool.chainId,
-      chainKey: getChainConfig(pool.chainId)?.name.toLowerCase() ?? '',
-    }));
-  }, [data.allPools, data.myPools, poolChainId, currentPoolToken]);
+  // The provider's allPools is scoped to the active chain. Browse the build's
+  // catalog instead; TVLs come from Explore's read-only all-chain feed. A
+  // superseded pool stays listed while it holds the user's funds.
+  const poolOptions = useMemo<PoolOption[]>(() => CHAIN_OPTIONS.flatMap((chain) =>
+    getActionableTokens(chain.chainId)
+      .filter((token) => {
+        const held = data.myPools.find((p) => p.chainId === chain.chainId && p.tokenAddress.toLowerCase() === token.address.toLowerCase());
+        return poolVisible({
+          superseded: isSupersededLegacyPool(token.symbol, chain.chainId),
+          active: Number(held?.balanceTokenExact ?? 0),
+          pending: Number(held?.pendingTokenExact ?? 0),
+          current: chain.chainId === poolChainId && sameSymbol(token.symbol, currentPoolToken),
+        });
+      })
+      .map((token) => {
+        const stats = publicPools.find((p) => p.chainId === chain.chainId && p.tokenAddress.toLowerCase() === token.address.toLowerCase());
+        return {
+          id: `${chain.chainId}:${token.address.toLowerCase()}`,
+          name: token.symbol,
+          tvl: stats?.tvlUsd != null ? formatUsd(stats.tvlUsd) : '',
+          icon: tokenIconFor(token.symbol),
+          chainId: chain.chainId,
+          chainKey: chain.id,
+        };
+      }),
+  ), [publicPools, data.myPools, poolChainId, currentPoolToken]);
 
   const poolAccounts = useMemo<PoolAccount[]>(() => {
     return data.myPools.map((pool, i) => ({
@@ -519,9 +473,7 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
       // Was EthTokenIcon for every row, so an OP/Citrea/BNB pool account wore
       // Ethereum's mark (same family as the selector icons Artem reported,
       // 2026-08-28). myPools spans chains, so resolve per row.
-      chainIcon: ({ size = 16 }: { size?: number }) => (
-        <ChainLogo chain={chainLogoChainFor(pool.chainId)} size={size} />
-      ),
+      chainId: pool.chainId,
       balance: pool.balance,
       pendingValue: pool.pending,
       ethBalance: balanceDisplay(pool.balanceTokenExact, pool.name, pool.chainId, pool.tokenAddress).text,
@@ -554,7 +506,7 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
   });
 
   // Pool-SCOPED statistics (asp-v2 PR #92 per-asset endpoint). Review P1: the
-  // card must never read median/transfers from the global payload — that is
+  // card must never read transfers from the global payload — that is
   // the protocol-wide aggregate and would render the same figure on every
   // pool page. 404s today; every dependent row is omitted until it deploys.
   const { assetStats } = useAssetStatistics({
@@ -714,20 +666,13 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
           className={`gap-[20px] overflow-visible${splitLayout ? ' flex-1' : ' w-full'}`}
           onLayout={splitLayout ? (e) => setDataColumnWidth(e.nativeEvent.layout.width) : undefined}
         >
-          {/* Desktop: `items-stretch` so the balance card and the Statistics
-              card share one height (the taller sets it; the balance card's
-              `flex-1` centred body absorbs the slack). Mobile stays stacked
-              and content-height. */}
-          <View className={`${poolCardsRowClassName(isMobile)} gap-[20px] overflow-visible z-[100]`}>
+          {/* Side by side, the two cards share one height; the balance section
+              takes any slack so My activity lines up with the bottom row. */}
+          <View className={`${isMobile ? 'flex-col items-start' : 'flex-row items-stretch'} gap-[20px] overflow-visible z-[100]`}>
             <Card
               noPadding
               testID="pool-balance-card"
-              // Mobile keeps flex-[2] (not just w-full): the original RN style
-              // was [{flex:2},{flex:undefined,width:'100%'}], and RN's flatten
-              // SKIPS the undefined, so flex:2 survived on mobile too. Dropping
-              // it to flex:0-0-auto shrank the card, so the flex-1 infoCard no
-              // longer stretched (justify-center padding), shifting content up.
-              className={`${isMobile ? 'w-full flex-[2]' : 'flex-[2]'} z-[100]`}
+              className={`${isMobile ? 'w-full' : 'flex-[2]'} z-[100]`}
               // nw-keep(forwarded-style-contract): caller-last style overrides Card's overflow:hidden (dropdown stacking) — no reliable className override path
               style={{ overflow: 'visible' }}
             >
@@ -735,68 +680,55 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
                 poolName={poolName}
                 activePool={activePool}
                 poolOptions={poolOptions}
-                multiChain={multiChain}
-                supportedChainOptions={SUPPORTED_CHAIN_OPTIONS}
-                selectedChain={selectedChain}
-                onSelectChain={handleChainSelect}
+                selectedChain={routeSelectorChain}
                 yieldApy={poolYieldActive ? poolShareYield.yield?.netApyPercent ?? YIELD_APY_PERCENT ?? undefined : undefined}
               />
-              <View className="flex-[3] items-center justify-center gap-[20px] p-[20px]">
-                <View className="items-center gap-[4px]">
-                  <Text className="text-[12px] leading-[12px] text-[#4D4D4D] font-pp-regular">
-                    My Private Balance
+              <View className={`p-[16px]${isMobile ? '' : ' flex-1'}`}>
+                <View className="items-start gap-[2px]">
+                  <Text className="font-pp-sans-medium text-[13px] leading-[18px] text-text-secondary">
+                    My private balance
                   </Text>
-                  <View className="flex-row items-center gap-[6px]">
-                    <Text testID="pool-private-balance" className="text-[24px] text-text font-pp-bold">
+                  <Text numberOfLines={1} className="font-pp-bold text-[46px] leading-[56px] tracking-[-1px] text-text">
+                    ${userPoolBalance.activeView.usd.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                  </Text>
+                  <View className="flex-row flex-wrap items-center gap-[6px]">
+                    <Text testID="pool-private-balance" className="font-pp-regular text-[13px] leading-[15px] text-text-secondary">
                       {userPoolBalance.activeView.text}
                     </Text>
                     <ShareCountHint hint={userPoolBalance.activeView.hint} testID="pool-private-balance-hint" />
                   </View>
-                  <Text className="text-[12px] leading-[12px] text-[#4D4D4D] font-pp-regular">
-                    ${userPoolBalance.activeView.usd.toLocaleString('en-US', { maximumFractionDigits: 2 })}
-                  </Text>
-                </View>
-                <View className="items-center gap-[4px]">
-                  <Text className="text-[12px] leading-[12px] text-[#4D4D4D] font-pp-regular">
-                    Pending Balance
-                  </Text>
-                  <View className="flex-row items-center gap-[4px]">
-                    <Text className="text-[12px] leading-[12px] text-[#4D4D4D] font-pp-bold">
-                      {userPoolBalance.pendingView.text}
-                    </Text>
-                    <ShareCountHint hint={userPoolBalance.pendingView.hint} testID="pool-pending-balance-hint" />
-                  </View>
+                  {userPoolBalance.pendingNum > 0 && (
+                    <View className="flex-row flex-wrap items-center gap-[4px] pt-[4px]">
+                      <Text className="font-pp-regular text-[12px] leading-[16px] text-warning">
+                        {userPoolBalance.pendingView.text} pending
+                      </Text>
+                      <ShareCountHint hint={userPoolBalance.pendingView.hint} testID="pool-pending-balance-hint" />
+                    </View>
+                  )}
                 </View>
               </View>
-              {/* "My activity": the personal deposit / withdrawal / transfer
-                  counts for this pool. Bottom quarter of the card (flex 1 vs
-                  the balance body's flex 3). Counts are the same merged rows
-                  the transactions table shows; disconnected reads as a dash
-                  rather than a misleading 0. */}
+              {/* Personal counts use the same merged rows as the transaction list. */}
               <View
                 testID="pool-my-activity"
-                className="flex-[1] justify-center gap-[8px] border-t px-[12px] py-[10px] border-border"
+                className="gap-[12px] border-t border-border p-[16px]"
               >
-                <Text className="text-[11px] leading-[14px] text-text-secondary font-pp-regular">
+                <Text className="text-[14px] leading-[18px] text-text font-pp-bold">
                   My activity
                 </Text>
-                <View className="flex-row items-center">
-                  {myActivityCells(myPoolActivity, isConnected).map(({ label, value }, i) => (
-                    <Fragment key={label}>
-                      {i > 0 && <View className="w-[1px] self-stretch bg-border" />}
-                      <View className="flex-1 items-center gap-[4px]">
-                        <Text className="text-[11px] leading-[14px] text-text-secondary font-pp-regular">
-                          {label}
-                        </Text>
-                        <Text className="text-[14px] leading-[16px] text-text font-pp-bold">
-                          {value}
-                        </Text>
-                      </View>
-                    </Fragment>
+                <View className="flex-row gap-[12px]">
+                  {myActivityCells(myPoolActivity, isConnected).map(({ label, value }) => (
+                    <View key={label} className="min-w-0 flex-1 gap-[2px]">
+                      <Text numberOfLines={1} className="text-[12px] leading-[16px] text-text-secondary font-pp-regular">
+                        {label}
+                      </Text>
+                      <Text numberOfLines={1} className="text-[18px] leading-[24px] text-text font-pp-bold">
+                        {value}
+                      </Text>
+                    </View>
                   ))}
                 </View>
               </View>
-              <View className="relative h-[1px] self-stretch z-[-1] bg-border" />
+              {!splitLayout && <View className="h-[1px] self-stretch bg-border" />}
               {/* Desktop split screen: the shield widget in the left column
                   already offers Deposit/Withdraw/Transfer/Request for this
                   pool, so repeating them under the balance is the same control

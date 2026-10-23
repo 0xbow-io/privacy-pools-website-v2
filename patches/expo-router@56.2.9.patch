@@ -1,0 +1,43 @@
+diff --git a/build/fork/createMemoryHistory.js b/build/fork/createMemoryHistory.js
+index c26fcb91f4c3f81909a47077b60d646d7b4a3a0b..e9505b0bb05c0da23b16e77344920fa33a9ccdb0 100644
+--- a/build/fork/createMemoryHistory.js
++++ b/build/fork/createMemoryHistory.js
+@@ -173,6 +173,13 @@ function createMemoryHistory() {
+                     // This was triggered by `history.go(n)`, we shouldn't call the listener
+                     return;
+                 }
++                // PATCH(ppv2): follow the browser's own Back/Forward, as `go(n)` does.
++                // Left stale, the next `replace` wrote the landed-on entry over
++                // the slot it left, so a later Forward found no record for that
++                // page and rebuilt the navigator from its URL, remounting every
++                // screen.
++                const currentIndex = items.findIndex((item) => item.id === window.history.state?.id);
++                index = Math.max(currentIndex, 0);
+                 listener();
+             };
+             window.addEventListener('popstate', onPopState);
+diff --git a/build/fork/useLinking.js b/build/fork/useLinking.js
+--- a/build/fork/useLinking.js
++++ b/build/fork/useLinking.js
+@@ -160,7 +160,20 @@
+             // If it does we'll reset to that state object
+             // Otherwise, we'll handle it like a regular deep link
+             const record = history.get(index);
+-            if (record?.path === path && record?.state) {
++            // PATCH(ppv2): managed UI entries may share a router id with a
++            // record captured either before or after the panel was opened.
++            // Compare route identity on both sides, retaining every non-UI
++            // query parameter and hash. Restore the saved route keys, never a
++            // fresh navigator reconstructed from a panel URL.
++            const uiEntry = window.history.state?.__ppv2UiParamEntry ||
++                window.history.state?.__ppv2HomePanelEntry || window.history.state?.__ppv2ModalEntry;
++            const routePath = (value) => {
++                if (!uiEntry || !value) return value;
++                const url = new URL(value, window.location.origin);
++                for (const key of ['panel', 'modal', 'tx', 'connect', 'notifications']) url.searchParams.delete(key);
++                return url.pathname + url.search + url.hash;
++            };
++            if (routePath(record?.path) === routePath(path) && record?.state) {
+                 navigation.resetRoot(record.state);
+                 return;
+             }

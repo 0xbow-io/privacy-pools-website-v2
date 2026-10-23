@@ -29,22 +29,22 @@ export function StatRows({ items }: { items: StatItem[] }) {
       {items.map((item, index) => (
         <View key={item.label}>
           <View className="flex-row items-center justify-between gap-[14px] px-[16px] py-[10px]">
-            <Text numberOfLines={1} className="min-w-0 shrink font-pp-regular text-[12px] leading-[16px] text-text-muted">
+            <Text numberOfLines={1} className="min-w-0 shrink font-pp-regular text-[12px] leading-[16px] text-text-secondary">
               {item.label}
             </Text>
             <View className="shrink-0 items-end">
               {item.loading ? (
                 // Same height as the value's line so the row doesn't shift.
-                <View className="h-[19px] justify-center">
+                <View className="h-[18px] justify-center">
                   <Skeleton width={64} height={13} />
                 </View>
               ) : (
-                <Text numberOfLines={1} className="font-pp-semi-bold text-[14.5px] leading-[19px] text-text">
+                <Text numberOfLines={1} className="font-pp-bold text-[14px] leading-[18px] text-text">
                   {item.value}
                 </Text>
               )}
               {!!item.sub && (
-                <Text numberOfLines={1} className="font-pp-regular text-[11px] leading-[15px] text-text-muted">
+                <Text numberOfLines={1} className="font-pp-regular text-[12px] leading-[16px] text-text-secondary">
                   {item.sub}
                 </Text>
               )}
