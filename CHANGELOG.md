@@ -2,6 +2,18 @@
 
 All notable changes to the Privacy Pools v2 web app are documented in this file.
 
+## [1.2.1] - 2026-10-23
+
+### Fixed
+- Browser Back and Forward retain entered amounts and open Home panels.
+- Cross-chain token selections carry the chosen asset and amount to the matching pool page without putting form values in the URL.
+- Pasted token addresses are resolved on the selected network, and destination pickers no longer read public-wallet balances.
+- Pool links remain available when yield deposits are disabled, and selecting a pool tab no longer opens the Withdraw dialog.
+
+### Changed
+- Pool pages, balances and token selectors use consistent bundled chain and token logos.
+- Pool browsing combines chain and asset selection in one menu, with updated balance, activity and statistics layouts.
+
 ## [1.2.0] - 2026-10-22
 
 ### Added
