@@ -1,24 +1,11 @@
 import Svg, { Path } from 'react-native-svg';
 
-/**
- * BNB Chain mark, the official glyph — taken verbatim from the v1 website's
- * `src/assets/icons/bnb.svg` so both products draw the same logo.
- *
- * Glyph only, no circle: the chip in chain-logo.tsx owns the brand background,
- * which is what lets one mark serve every size the selector renders at. The
- * token icon (BnbMark in token-network-icon.tsx, BnbTokenIcon in
- * pools/pool-page-shared.tsx) is the other half of the pair and draws its own
- * circle, because token icons are used bare.
- */
-export function BnbIcon({ width = 18, height = 18, color = '#FFFFFF' }: { width?: number; height?: number; color?: string }) {
+/** Official BNB Chain white symbol: https://www.bnbchain.org/en/brand-guidelines */
+export function BnbIcon({ width = 18, height = 18 }: { width?: number; height?: number }) {
   return (
-    // nw-keep(svg-or-canvas): the fill below is the caller's color prop feeding a
-    // raw <Path>, which has no className path.
-    <Svg width={width} height={height} viewBox="0 0 500 500" fill="none">
-      <Path
-        d="M250 100l75 75-45 45-30-30-30 30-45-45 75-75zm-100 100l45 45-45 45-45-45 45-45zm200 0l45 45-45 45-45-45 45-45zM250 245l45 45-45 45-45-45 45-45zm0 110l75 75-75 75-75-75 30-30 45 45 45-45 30 30-75-75z"
-        fill={color}
-      />
+    // nw-keep(svg-or-canvas): official brand artwork with prop-driven dimensions.
+    <Svg width={width} height={height} viewBox="0 0 96 96" fill="none">
+      <Path d="M22.8814 14.7044L48.1429 0L73.4043 14.7044L64.117 20.1366L48.1429 10.8644L32.1687 20.1366L22.8814 14.7044ZM73.4043 33.2488L64.117 27.8166L48.1429 37.0888L32.1687 27.8166L22.8814 33.2488V44.1132L38.8555 53.3854V71.9297L48.1429 77.362L57.4302 71.9297V53.3854L73.4043 44.1132V33.2488ZM73.4043 62.6576V51.7932L64.117 57.2254V68.0898L73.4043 62.6576ZM79.9984 66.4976L64.0243 75.7698V86.6341L89.2857 71.9297V42.521L79.9984 47.9532V66.4976ZM70.7111 23.9766L79.9984 29.4088V40.2732L89.2857 34.841V23.9766L79.9984 18.5444L70.7111 23.9766ZM38.8555 79.7034V90.5678L48.1429 96L57.4302 90.5678V79.7034L48.1429 85.1356L38.8555 79.7034ZM22.8814 62.6576L32.1687 68.0898V57.2254L22.8814 51.7932V62.6576ZM38.8555 23.9766L48.1429 29.4088L57.4302 23.9766L48.1429 18.5444L38.8555 23.9766ZM16.2873 29.4088L25.5746 23.9766L16.2873 18.5444L7 23.9766V34.841L16.2873 40.2732V29.4088ZM16.2873 47.9532L7 42.521V71.9297L32.2615 86.6341V75.7698L16.2873 66.4976V47.9532Z" fill="white" />
     </Svg>
   );
 }

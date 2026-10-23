@@ -1,5 +1,10 @@
-import { describe, expect, test } from 'bun:test';
-import { safeLogoUrl } from '@/services/wallet-tokens';
+import { describe, expect, mock, test } from 'bun:test';
+
+mock.module('react-native', () => ({
+  Platform: { OS: 'web', select: (o: Record<string, unknown>) => o.web ?? o.default },
+}));
+
+const { safeLogoUrl } = await import('@/services/wallet-tokens');
 
 describe('safeLogoUrl', () => {
   test('keeps an https URL, trimmed', () => {
