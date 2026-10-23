@@ -67,7 +67,7 @@ const WEB_PANEL_HISTORY_STATE_KEY = '__ppv2HomePanelEntry';
 function getWebPanelParam() {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
   if (window.location.pathname !== '/') return undefined;
-  return new URL(window.location.href).searchParams.get('panel') ?? undefined;
+  return getUiParam('panel') ?? undefined;
 }
 
 function getHomeUrlWithPanel(panel: string) {
