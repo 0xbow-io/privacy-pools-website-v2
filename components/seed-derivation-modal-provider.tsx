@@ -9,6 +9,7 @@ import { useTheme } from '@/components/theme-provider';
 import { Colors } from '@/constants/theme';
 import { usePoolSession } from '@/hooks/use-pool-session';
 import { KeySourceChangedError } from '@/components/sdk-provider';
+import { AccountUnlockHelp } from '@/components/account-unlock-help';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import {
   peekAutoSignArm, shouldAutoSignAfterConnect, subscribeAutoSignArm, takeAutoSignArm,
@@ -325,10 +326,11 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
             <Text className="font-pp-regular text-[13px] leading-[19px] text-text-secondary">
               {passkeyActive
                 ? (isSmartWallet
-                  ? 'Smart-contract wallet detected. Use a passkey on this device to unlock your private balances and payment history.'
-                  : 'Use your passkey to unlock your private balances and payment history.')
+                  ? 'Use your wallet’s passkey to unlock its private balance.'
+                  : 'Use your passkey to unlock your private balance.')
                 : 'Sign this message to decrypt your private balances and payment history.'}
             </Text>
+            {passkeyActive ? <AccountUnlockHelp /> : null}
 
             {showBaseNotice && (
               <View className="gap-[6px] rounded-control border border-border px-[12px] py-[10px]" testID="seed-derivation-base-notice">

@@ -508,7 +508,7 @@ function RedactionChoice({ level, selected, onSelect }: { level: RedactionLevel;
  * What to export: everything since debug mode was turned on, or only the last
  * recording (Pat, 2026-09-24). Both are the same JSON shape
  * (services/debug-recording.ts) with the app state snapshots. How much is
- * removed is the user's pick (Pat, 2026-09-25): spending keys by default, and
+ * removed is the user's pick: all keys and transaction details by default, and
  * the spend-grade warning only when they choose Full.
  */
 function DebugExportDialog({ preferred, onClose }: { preferred: 'session' | 'recording'; onClose: () => void }) {
@@ -544,6 +544,9 @@ function DebugExportDialog({ preferred, onClose }: { preferred: 'session' | 'rec
     <View className="absolute inset-0 z-[999999] items-center justify-center bg-[rgba(0,0,0,0.5)] px-[16px]" testID="debug-export-dialog">
       <View className="w-full max-w-[380px] gap-[10px] rounded-card border border-border-light bg-card-background p-[16px]">
         <Text className="font-pp-bold text-[15px] text-text">Export debug log</Text>
+        <Text className="font-pp-sans text-[12px] leading-[17px] text-text-secondary">
+          Optional for support. No tx details removes keys and transaction details. Never send a note backup.
+        </Text>
         <View className="gap-[4px]" accessibilityRole="radiogroup" testID="debug-redaction-levels">
           <Text className="font-pp-sans-medium text-[12px] text-text-secondary">What to remove</Text>
           {REDACTION_LEVELS.map((l) => (
