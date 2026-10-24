@@ -132,6 +132,17 @@ describeProd('prod intent landing capabilities', () => {
     expect(swaps.crossChainReshieldSupported(56, 1)).toBe(true);
     expect(swaps.intentSwapsEnabledForChain(1)).toBe(true);
     expect(swaps.intentSwapsEnabledForChain(56)).toBe(true);
+    // DEV-588: the Swap tab offers BNB Chain like the other swap chains. Never
+    // greyed as a source, a destination from every swap chain, and a source of
+    // a cross-chain reshield to every one of them.
+    expect(swaps.swapChainUnavailableReason(56, 'source')).toBeUndefined();
+    for (const chain of [1, 10, 8453, 42161]) {
+      expect(swaps.swapChainUnavailableReason(56, 'destination', chain)).toBeUndefined();
+      expect(swaps.swapChainUnavailableReason(chain, 'destination', 56)).toBeUndefined();
+      expect(swaps.crossChainReshieldSupported(56, chain)).toBe(true);
+      expect(swaps.getSwapDestinationChains(chain)).toContain(56);
+    }
+    expect(swaps.swapChainUnavailableReason(56, 'destination', 56)).toBeUndefined();
     // 2026-10-15: the relayer serves swaps on OP, Base and Arbitrum with the
     // mainnet RelaySwaps, so notes swap and reshield from there like mainnet.
     for (const chain of [10, 8453, 42161]) {

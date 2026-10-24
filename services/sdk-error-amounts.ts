@@ -29,6 +29,7 @@
 import { formatUnits } from 'viem';
 import { FEE_COMMITMENT_EXPIRED_MESSAGE, isFeeCommitmentExpired } from '@/services/fee-commitment';
 import { isNativeSwapDepositUnavailable, NATIVE_SWAP_DEPOSIT_UNAVAILABLE_TEXT } from '@/services/native-swap-executor';
+import { isSwapValueOverRelayerCap, SWAP_VALUE_CAP_TEXT } from '@/services/swap-error-copy';
 
 import { displayTokenSymbol } from '@/services/share-display';
 
@@ -384,6 +385,7 @@ export function sdkErrorText(err: unknown, units: ErrorUnits | null | undefined,
   try {
     if (isFeeCommitmentExpired(err)) return FEE_COMMITMENT_EXPIRED_MESSAGE;
     if (isNativeSwapDepositUnavailable(err)) return NATIVE_SWAP_DEPOSIT_UNAVAILABLE_TEXT;
+    if (isSwapValueOverRelayerCap(err)) return SWAP_VALUE_CAP_TEXT;
     if (units) {
       const amounts = readErrorAmounts(err);
       if (amounts) {
