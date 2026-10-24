@@ -33,6 +33,7 @@ import {
 import type { Hex } from '@/services/sdk-types';
 import { isStellarRequestLink } from '@/services/stellar/stellar-request';
 import { StellarPayRequestScreen } from '@/components/stellar-pay-request';
+import { CARD_SHADOW } from '@/components/ui/web-style-shims';
 
 /**
  * A seller-supplied display name, rendered so it cannot be mistaken for a
@@ -425,7 +426,9 @@ function EvmPayRequestScreen() {
         Double-blind private payment on {chainName}
       </Text>
 
-      <View className="w-full max-w-[560px] gap-[18px] rounded-card border border-border-light bg-card-background px-[24px] py-[24px]">
+      <View className="w-full max-w-[560px] gap-[18px] rounded-card border border-border-light bg-card-background px-[24px] py-[24px]"
+        // nw-keep(platform-css): the shared soft card shadow (web box-shadow, native elevation)
+        style={CARD_SHADOW}>
         {/* While the pay flow runs, IT owns this card: the flow content
             renders inline into the host below instead of an overlay modal
             duplicating the same summary and buttons (QA, 2026-08-16). */}

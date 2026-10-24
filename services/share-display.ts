@@ -41,6 +41,7 @@ export function isShareSymbol(symbol: string | null | undefined): boolean {
 /** Headline symbol: the underlying for a share ("USDC" for ppUSDC), else itself. */
 export function displayTokenSymbol(symbol: string): string {
   const upper = symbol.toUpperCase();
+  if (upper === 'CBTC') return 'cBTC';
   return SHARE_UNDERLYING[upper] ?? UNDERLYING_DISPLAY[upper] ?? symbol;
 }
 

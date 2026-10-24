@@ -151,7 +151,7 @@ describeProd('prod runtime graph (child bun test, EXPO_PUBLIC_APP_ENV=prod)', ()
     expect(tokens.getTokenMetadataBySymbol('ppUSDC')?.decimals).toBe(18);
     // Shield targets: a withdraw-only asset is never offered, and defaulting to it says null.
     const shieldPools = await import('@/services/shield-pools');
-    expect(shieldPools.listShieldPools().filter((p) => p.chainId === 1).map((p) => p.symbol)).toEqual(['ETH', 'ppUSDC', 'ppUSDT', 'ppETH']);
+    expect(shieldPools.listShieldPools().filter((p) => p.chainId === 1).map((p) => p.symbol)).toEqual(['ppETH', 'ppUSDC', 'ppUSDT']);
     // Base USDT is the one open plain 6dp USDT pool: Base has no ppUSDT.
     expect(shieldPools.listShieldPools().some((p) => p.symbol === 'USDC' || (p.symbol === 'USDT' && p.decimals === 6 && p.chainId !== 8453))).toBe(false);
   });

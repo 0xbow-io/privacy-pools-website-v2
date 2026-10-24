@@ -504,7 +504,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
       <View className={`relative mx-auto h-full w-full max-w-[1280px] flex-row items-center justify-between overflow-visible ${width < 400 ? 'px-[16px]' : 'px-[20px]'} py-[16px]`}
         // nw-keep(platform-css): grid centers the nav on first paint, while allowing
         // asymmetric sides when the action cluster needs more room. No measurement pass.
-        style={Platform.OS === 'web' ? ({ display: 'grid', gridTemplateColumns: 'minmax(max-content, 1fr) auto minmax(max-content, 1fr)', columnGap: 12 } as unknown as ViewStyle) : undefined}
+        style={Platform.OS === 'web' ? ({ display: 'grid', gridTemplateColumns: 'minmax(max-content, 1fr) auto minmax(max-content, 1fr)', columnGap: width < 400 ? 4 : 12 } as unknown as ViewStyle) : undefined}
       >
         <View
           className="shrink-0 flex-row items-center"
@@ -545,7 +545,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
         {/* shrink-0: the flex nav must never squeeze the cluster — the actions
             are fixed affordances, the nav is the elastic one. */}
         <View
-          className="z-[99999] shrink-0 flex-row items-center gap-[8px]"
+          className={`z-[99999] shrink-0 flex-row items-center ${width < 400 ? 'gap-[4px]' : 'gap-[8px]'}`}
           onLayout={Platform.OS !== 'web' ? (e) => setClusterWidth(Math.round(e.nativeEvent.layout.width)) : undefined}
           // nw-keep(platform-css): align the actions to the outer edge of the grid.
           style={Platform.OS === 'web' ? ({ justifySelf: 'end' } as unknown as ViewStyle) : undefined}
@@ -635,7 +635,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                 </>
               ) : (
                 <Text className="max-w-[180px] font-pp-sans-medium text-[14px] text-button-primary-text">
-                  Connect Wallet
+                  {width < 400 ? 'Connect' : 'Connect Wallet'}
                 </Text>
               )}
               {menuActive && (

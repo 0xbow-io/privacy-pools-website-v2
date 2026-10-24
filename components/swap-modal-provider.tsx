@@ -2800,7 +2800,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                             className={`flex-row items-center gap-[6px] rounded-legacy-8 border px-[10px] py-[6px] ${selected ? 'border-tint bg-background-secondary' : 'border-border bg-transparent'}`}
                             onPress={() => editFromToken(t)}
                           >
-                            <TokenNetworkIcon symbol={t.symbol} size={16} />
+                            <TokenNetworkIcon symbol={t.symbol} chainId={chainId} size={16} />
                             <Text className={`text-[13px] text-text ${selected ? 'font-pp-bold' : 'font-pp-regular'}`}>{t.symbol === fromToken.symbol ? fromToken.symbol : displayTokenSymbol(t.symbol)}</Text>
                           </Pressable>
                         );
@@ -2821,7 +2821,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                   <View className="flex-1 flex-row items-center gap-[8px]">
                     {outputToken ? (
                       <>
-                        <TokenNetworkIcon symbol={outputToken.token.symbol} size={24} />
+                        <TokenNetworkIcon symbol={outputToken.token.symbol} chainId={outputToken.chainId} size={24} />
                         <Text className="text-[15px] text-text font-pp-regular">
                           {/* A reshield is same-chain by construction, so the
                               chain name would be the only thing on offer and

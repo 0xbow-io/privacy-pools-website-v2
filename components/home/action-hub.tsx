@@ -5,17 +5,19 @@ import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { SWAP_DEPOSIT_REFUND_NOTE } from '@/services/swap-deposit-copy';
 import { ENS_UNSUPPORTED_MESSAGE, isPotentialEnsName } from '@/services/ens';
 import { ExplorerPrivacyHint, explorerNameFromUrl } from '@/components/ui/explorer-privacy-hint';
-import { isSupersededLegacyPool, poolDisplayLabel } from '@/config/pool-paths';
+import { getPoolPath, isSupersededLegacyPool, poolDisplayLabel } from '@/config/pool-paths';
+import { mustLeavePoolPageToSwitch } from '@/services/pool-page-chain-switch';
+import { poolHubTabPath, registerPoolHubHandoff, takePoolHubHandoff, type PoolHubHandoff } from '@/services/pool-hub-handoff';
 import { presetExceedsWithdrawMax } from '@/services/withdraw-preset-guard';
 import { shieldHeadroomRoomText } from '@/services/shield-headroom-copy';
 import { policedHttp } from '@/services/egress-transport';
 import { UNSAVED_CLAIM_WARNING } from '@/services/unsaved-claim-warning-copy';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { WEB_NO_OUTLINE } from '@/components/ui/web-style-shims';
+import { CARD_SHADOW, WEB_NO_OUTLINE } from '@/components/ui/web-style-shims';
 import { HoverHint } from '@/components/ui/hover-hint';
 import { ActivityIndicator, Animated, Easing, Linking, Platform, Pressable, ScrollView as RNScrollView, Text, TextInput, useWindowDimensions, View, type ViewStyle } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useIsFocused, useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import { useIsFocused, useLocalSearchParams, useNavigation, usePathname, useRouter } from 'expo-router';
 import { useAccount, useBalance, useEstimateFeesPerGas, usePublicClient, useReadContract } from 'wagmi';
 import { useConnectWallet, useSuiClientQuery, useWallets } from '@mysten/dapp-kit';
 import { createPublicClient, erc20Abi, formatUnits, parseUnits } from 'viem';
@@ -191,6 +193,11 @@ const PICKER_TRANSITION_MS = 220;
  * (quotes, proofs, confirmations) stays in the battle-tested flows behind it —
  * this card is the calm surface that launches them, pre-filled.
  */
+/** The pool a pay token deposits into on its own chain. */
+function destinationPoolSymbol(symbol: string, payChain: number): string {
+  try { return defaultPoolFor(symbol, payChain).symbol; } catch { return getChainConfig(payChain)?.nativeCurrency.symbol ?? symbol; }
+}
+
 export function ActionHub({
   landing = false,
   onEngage,
@@ -246,6 +253,7 @@ export function ActionHub({
   // flipping tabs shouldn't stack browser history. `deposit` is accepted as
   // an alias for shield.
   const router = useRouter();
+  const pathname = usePathname();
   // The web navigator RETAINS previous stack screens: it hides them with
   // display:none but keeps rendering their children, so a pool-page hub left
   // behind on Shield still runs its effects and still sees this shared
@@ -258,14 +266,18 @@ export function ActionHub({
   // open, close or host a flow.
   const isFocused = useIsFocused();
   const navigation = useNavigation();
-  const params = useLocalSearchParams<{ action?: string | string[] }>();
+  const params = useLocalSearchParams<{ action?: string | string[]; hubAction?: string | string[]; hubHandoff?: string | string[] }>();
+  const rawHubAction = Array.isArray(params.hubAction) ? params.hubAction[0] : params.hubAction;
+  const rawHandoffId = Array.isArray(params.hubHandoff) ? params.hubHandoff[0] : params.hubHandoff;
+  const handoffId = Platform.OS === 'web' ? getUiParam('hubHandoff') : rawHandoffId ?? null;
   const rawAction = Array.isArray(params.action) ? params.action[0] : params.action;
   // expo-router hydrates search params ASYNC on a (re)mount: browser-back to
   // /?action=withdraw rendered one Shield frame first, then slid to Withdraw
   // once the params landed. The URL itself is already correct synchronously —
   // read it directly as the fallback so the first frame starts on the right tab.
-  const urlAction = Platform.OS === 'web' && rawAction === undefined ? getUiParam('action') : null;
-  const effectiveAction = rawAction ?? urlAction ?? undefined;
+  const urlAction = Platform.OS === 'web' && rawHubAction === undefined && rawAction === undefined
+    ? getUiParam('hubAction') ?? getUiParam('action') : null;
+  const effectiveAction = rawHubAction ?? rawAction ?? urlAction ?? undefined;
   const normalizedAction = effectiveAction === 'deposit' ? 'shield' : effectiveAction;
   const requestedAction: Action = ACTIONS.some((a) => a.key === normalizedAction)
     ? (normalizedAction as Action)
@@ -338,7 +350,9 @@ export function ActionHub({
     // router), so a bare setParams rebuilds the URL without it — a tab click
     // in the split view collapsed the panel. Carry the live value through.
     const livePanel = Platform.OS === 'web' && typeof window !== 'undefined' ? getUiParam('panel') : null;
-    router.setParams(livePanel ? { action: a, panel: livePanel } : { action: a });
+    router.setParams(pathname.startsWith('/chains/')
+      ? { action: undefined, hubAction: a }
+      : livePanel ? { action: a, hubAction: undefined, panel: livePanel } : { action: a, hubAction: undefined });
   };
   setActionRef.current = setAction;
   const panel = useExplorePanel();
@@ -793,6 +807,22 @@ export function ActionHub({
   const { address: connectedAddress } = useAccount();
   // The chain whose assets this form represents = the selected pool's chain.
   const chainId = activeChainId;
+  // A pool page pins its own chain, so a pick from another chain switching in
+  // place left the page naming one chain over another chain's data. There, a
+  // cross-chain pick opens the page of the pool it lands in, on the same tab,
+  // and that page selects its chain once. Returns true when it navigated.
+  const openPoolPageFor = useCallback((targetChain: number, poolSymbol: string, selection?: PoolHubHandoff['selection']): boolean => {
+    if (!mustLeavePoolPageToSwitch({
+      targetChainId: targetChain,
+      targetChainType: getChainConfig(targetChain)?.chainType,
+      currentChainId: chainId,
+      pathname,
+    })) return false;
+    const path = getPoolPath(poolSymbol, targetChain);
+    const id = selection ? registerPoolHubHandoff({ pathname: path, chainId: targetChain, selection }) : undefined;
+    router.push(poolHubTabPath(path, action, id) as Parameters<typeof router.push>[0]);
+    return true;
+  }, [chainId, pathname, action, router]);
   // Registration state of the typed recipient, checked while typing so the
   // form says what is about to happen BEFORE Shield is pressed: a deposit to
   // an unregistered address works, but it ends in a one-time claim link the
@@ -1134,6 +1164,36 @@ export function ActionHub({
    * pasted lookalike apart from the pool asset it imitates.
    */
   const [payPick, setPayPick] = useState<{ address: string; chainId: number } | null>(null);
+  // A pool page changes route before its chain can change. Apply the token or
+  // request selected on the previous page once this page owns that chain.
+  useEffect(() => {
+    if (!isFocused) return;
+    const timer = setTimeout(() => {
+      const selection = takePoolHubHandoff(pathname, chainId, handoffId);
+      if (!selection) return;
+      if (selection.kind === 'request') {
+        syncRequestForm({ tokenAddress: selection.address as `0x${string}`, tokenChainId: chainId });
+        return;
+      }
+      if (selection.external) {
+        const pasted: WalletToken = {
+          symbol: selection.symbol,
+          name: selection.name,
+          address: selection.address.toLowerCase(),
+          decimals: selection.decimals,
+          balance: 0n,
+          usdValue: null,
+        };
+        extAllowedRef.current = new Set([...extAllowedRef.current, selection.symbol]);
+        setPastedTokens((prev) => prev.some((e) => e.chainId === chainId && e.token.address === pasted.address)
+          ? prev : [...prev, { chainId, token: pasted }]);
+      }
+      setPayPick({ address: selection.address, chainId });
+      setToken(selection.symbol);
+      setAmountFor('shield', sanitizeAmountInput(selection.amount, selection.decimals));
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [isFocused, pathname, chainId, handoffId, setToken, setAmountFor, syncRequestForm]);
   // A wallet token OUTSIDE the configured pool assets, when picked as the
   // card token. Null in every other tab/state, so payMeta === tokenMeta there.
   //
@@ -1615,13 +1675,11 @@ export function ActionHub({
         poolAsset: true,
       }))
       : [];
-    // Wallet rows: every chain the wallet list covers while no network is
-    // picked, else just the picked one (even before the wallet has switched
-    // to it). Each is tagged with its chain, so the sheet reads its balance
-    // there and a pick switches the wallet first.
-    const walletRowChains = payNetwork !== null
-      ? [payNetwork]
-      : [chainId, ...WALLET_ROW_CHAIN_IDS.filter((id) => id !== chainId)];
+    // Wallet rows: every chain the wallet list covers, whatever network is
+    // picked, so the sheet's balance reads stay one stable set and a network
+    // pick only filters. Each is tagged with its chain, so the sheet reads its
+    // balance there and a pick switches the wallet first.
+    const walletRowChains = [chainId, ...WALLET_ROW_CHAIN_IDS.filter((id) => id !== chainId)];
     const extRows = action === 'shield' && !isSui
       ? walletRowChains.flatMap((rowChain) => {
         // A holdings-only chain (DEV-521) has no catalog here: asking for one
@@ -1644,13 +1702,11 @@ export function ActionHub({
       })
       : [];
     // Pool assets of the other EVM chains, each tagged with its chain so the
-    // sheet reads each balance on the right one: all of them with the network
-    // filter cleared, or just the picked network's while the wallet switch to
-    // it is still pending.
-    const crossChainActionable = action === 'shield' && payNetwork !== chainId
+    // sheet reads each balance on the right one. The sheet applies the
+    // network filter itself.
+    const crossChainActionable = action === 'shield'
       ? supportedChainIds
-        .filter((id) => getChainConfig(id)?.chainType === 'evm' && id !== chainId
-          && (payNetwork === null || id === payNetwork))
+        .filter((id) => getChainConfig(id)?.chainType === 'evm' && id !== chainId)
         .flatMap((id) => hubTokenCatalog('shield', id, NO_HOLDINGS).map((t) => ({
           symbol: t.symbol,
           address: t.address,
@@ -1708,6 +1764,8 @@ export function ActionHub({
       // every destination picker keeps its zero rows - what you receive has no
       // reason to be something you already hold.
       hideZeroBalances: action === 'shield',
+      // Pays FROM the wallet, so its balances are the subject (see the sheet's default).
+      balanceMode: 'wallet',
       networks: supportedChainIds
         .filter((id) => getChainConfig(id)?.chainType === 'evm' || id === chainId)
         .map((id) => ({ id, name: getChainConfig(id)?.displayName ?? `Chain ${id}` })),
@@ -1717,6 +1775,7 @@ export function ActionHub({
       chainId,
       isSui,
       onSelectToken: (t) => {
+        if (!isFocused) return;
         const match = sheetTokens.find(
           (x) => x.address.toLowerCase() === t.address.toLowerCase() && x.chainId === (t.chainId ?? chainId),
         ) ?? sheetTokens.find((x) => x.address.toLowerCase() === t.address.toLowerCase());
@@ -1737,7 +1796,11 @@ export function ActionHub({
           // the validity effect above bounces any symbol missing from
           // walletTokens back to a pool asset. Balance is left at 0 and unpriced
           // here; the deposit flow reads the real one itself.
-          if (isSui || !t.address || (t.chainId !== undefined && t.chainId !== chainId)) return;
+          //
+          // The sheet resolves a paste on the network being browsed, which can
+          // differ from the app's chain: switch to it first, like a listed row.
+          if (isSui || !t.address) return;
+          const pasteChain = t.chainId ?? chainId;
           const pasted: WalletToken = {
             symbol: t.symbol,
             name: t.name ?? t.symbol,
@@ -1757,19 +1820,29 @@ export function ActionHub({
           // HERE, before anything is selected, instead of being adopted and
           // then silently reset to the native asset (codex P3 on 3b6fea4). The
           // previous token and amount stay as they were.
-          if (isYieldShareOnChain(t.address, chainId)) {
+          if (isYieldShareOnChain(t.address, pasteChain)) {
             toast({ title: `This asset cannot fund a deposit. Select ${displayTokenSymbol(t.symbol)} instead.`, variant: 'warning' });
             return;
           }
-          extAllowedRef.current = new Set([...extAllowedRef.current, pasted.symbol]);
-          setPastedTokens((prev) => (
-            prev.some((e) => e.chainId === chainId && e.token.address === pasted.address)
-              ? prev
-              : [...prev, { chainId, token: pasted }]
-          ));
-          setPayPick({ address: t.address, chainId });
-          setToken(t.symbol);
-          setAmount((a) => sanitizeAmountInput(a, t.decimals));
+          void (async () => {
+            if (pasteChain !== chainId) {
+              if (openPoolPageFor(pasteChain, destinationPoolSymbol(pasted.symbol, pasteChain), {
+                kind: 'pay', symbol: pasted.symbol, address: pasted.address, decimals: pasted.decimals,
+                name: pasted.name, external: true, amount,
+              })) return;
+              const outcome = await selectChain(pasteChain);
+              if (outcome !== 'committed') return;
+            }
+            extAllowedRef.current = new Set([...extAllowedRef.current, pasted.symbol]);
+            setPastedTokens((prev) => (
+              prev.some((e) => e.chainId === pasteChain && e.token.address === pasted.address)
+                ? prev
+                : [...prev, { chainId: pasteChain, token: pasted }]
+            ));
+            setPayPick({ address: t.address, chainId: pasteChain });
+            setToken(t.symbol);
+            setAmount((a) => sanitizeAmountInput(a, t.decimals));
+          })();
           return;
         }
         void (async () => {
@@ -1777,6 +1850,10 @@ export function ActionHub({
           // to spend it (flow 1 is same-chain), so switch first and only adopt
           // the token if the switch actually commits.
           if (match.chainId !== chainId) {
+            if (openPoolPageFor(match.chainId, destinationPoolSymbol(match.symbol, match.chainId), {
+              kind: 'pay', symbol: match.symbol, address: match.address, decimals: match.decimals,
+              name: match.name ?? match.symbol, external: !('poolAsset' in match && match.poolAsset), amount,
+            })) return;
             const outcome = await selectChain(match.chainId);
             if (outcome !== 'committed') return;
           }
@@ -1786,19 +1863,14 @@ export function ActionHub({
           setAmount((a) => sanitizeAmountInput(a, match.decimals));
         })();
       },
-      // Keep the sheet OPEN across a network pick: selectChain commits (or
-      // prompts the wallet), chainId updates, and this publisher re-fires
-      // with the new chain's tokens — closing here read as a dead click.
-      // null = back to every chain (the default); a pick also moves the app to
-      // that chain, since paying is same-chain only.
-      onSelectNetwork: (id) => {
-        setPayNetwork(id);
-        if (id !== null) void selectChain(id);
-      },
+      // A network pick only narrows the list; null = every chain (the
+      // default). The rows above already cover the picked chain, so the app
+      // and wallet switch only when an asset from another chain is chosen.
+      onSelectNetwork: (id) => setPayNetwork(id),
       onClose: () => { setTokenSheetOpen(false); setPayNetwork(null); },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the probe version is a change signal: an open Shield sheet republishes when a yield underlying verifies
-  }, [tokenSheetOpen, chainId, isSui, tokenMeta.symbol, setToken, selectChain, action, walletAndPasted, walletTokensOn, extPayToken, payNetwork, holdings, hubYieldProbeVersion]);
+  }, [tokenSheetOpen, chainId, isSui, isFocused, tokenMeta.symbol, setToken, selectChain, openPoolPageFor, action, walletAndPasted, walletTokensOn, extPayToken, payNetwork, holdings, hubYieldProbeVersion, amount]);
 
   // The swap-output picker shares that host: rendered here its scrim would be
   // clipped to the widget for exactly the same reason.
@@ -1836,6 +1908,7 @@ export function ActionHub({
       isSui,
       title: 'You receive',
       onSelectToken: (t) => {
+        if (!isFocused) return;
         // A row picked under "All chains" may live on another destination:
         // move the destination with it, then the default-pick effect keeps
         // this address because it is in the new chain's candidates.
@@ -1858,7 +1931,7 @@ export function ActionHub({
       onClose: () => { setSwapOutSheetAllChains(false); setSwapOutSheetOpen(false); },
     });
     return true;
-  }, [swapOutSheetOpen, swapOutSheetAllChains, swapOutToken, tokenMeta.symbol, chainId, isSui, swapDestinations, swapDestChainId]);
+  }, [swapOutSheetOpen, swapOutSheetAllChains, swapOutToken, tokenMeta.symbol, chainId, isSui, isFocused, swapDestinations, swapDeliverableDestinations, swapDestChainId]);
 
   // The pay-from picker behind the Shield tab's swap-pair card. Same host,
   // same shape; lists this build's POOLS grouped by chain. Picking a pool on
@@ -1906,6 +1979,7 @@ export function ActionHub({
       title: 'Request',
       balanceMode: 'none',
       onSelectToken: (t) => {
+        if (!isFocused) return;
         const targetChain = t.chainId ?? requestSheetNetwork ?? chainId;
         setRequestSheetOpen(false);
         setRequestSheetNetwork(null);
@@ -1916,6 +1990,7 @@ export function ActionHub({
             // before the token is written. A refused switch keeps the old
             // asset rather than creating a request the create path would
             // stamp with the wrong chain.
+            if (openPoolPageFor(targetChain, t.symbol, { kind: 'request', address: t.address })) return;
             const outcome = await selectChain(targetChain);
             if (outcome !== 'committed') return;
           }
@@ -1928,7 +2003,7 @@ export function ActionHub({
       onClose: () => { setRequestSheetOpen(false); setRequestSheetNetwork(null); },
     });
     return true;
-  }, [requestSheetOpen, requestSheetNetwork, chainId, isSui, requestToken.address, requestToken.chainId, selectChain, syncRequestForm]);
+  }, [requestSheetOpen, requestSheetNetwork, chainId, isSui, isFocused, requestToken.address, requestToken.chainId, selectChain, openPoolPageFor, syncRequestForm]);
 
   const publishPoolSheet = useCallback(() => {
     if (!poolSheetOpen) return false;
@@ -2007,6 +2082,7 @@ export function ActionHub({
       balanceMode: spendMode ? 'shielded' : 'wallet',
       title: poolSheetMode === 'withdraw' ? 'Withdraw from pool' : poolSheetMode === 'send' ? 'Send from pool' : poolSheetMode === 'swap' ? 'Swap from pool' : 'Deposit in pool',
       onSelectToken: (t) => {
+        if (!isFocused) return;
         // With the filter cleared the row itself carries the chain (the list
         // spans several), so the pick decides the target — not the sheet.
         const targetChain = t.chainId ?? sheetNetwork ?? chainId;
@@ -2031,6 +2107,7 @@ export function ActionHub({
             && identityMode !== 'key'
             && crossChainSwapDepositSupported(chainId, targetChain);
           if (targetChain !== chainId && !keepChainForCrossChainShield) {
+            if (openPoolPageFor(targetChain, t.symbol)) return;
             const outcome = await selectChain(targetChain);
             if (outcome !== 'committed') return; // refused switch = keep the old pool
             if (mode === 'shield') {
@@ -2046,7 +2123,11 @@ export function ActionHub({
             // being spent; the open inline flow re-opens under it (same as
             // the old chips did).
             setToken(t.symbol);
-            setAmount((a) => sanitizeAmountInput(a, t.decimals));
+            setAmounts((previous) => {
+              const current = previous[mode] ?? '';
+              const next = sanitizeAmountInput(current, t.decimals);
+              return next === current ? previous : { ...previous, [mode]: next };
+            });
             if (mode === 'withdraw' && withdrawInline) {
               openWithdrawModal(undefined, { tokenSymbol: t.symbol, amount: amount || undefined, inline: true });
             } else if (mode === 'send' && transferInline) {
@@ -2061,7 +2142,7 @@ export function ActionHub({
       onClose: () => { setPoolSheetOpen(false); setPoolSheetNetwork(null); },
     });
     return true;
-  }, [poolSheetOpen, poolSheetNetwork, poolSheetMode, shieldPool, payTokenAddr, chainId, isSui, selectChain, tokenMeta.symbol, amount, withdrawInline, withdrawStep, openWithdrawModal, transferInline, openTransferModal, setToken, toast, data.myPools, identityMode]);
+  }, [poolSheetOpen, poolSheetNetwork, poolSheetMode, shieldPool, payTokenAddr, chainId, isSui, isFocused, selectChain, openPoolPageFor, tokenMeta.symbol, amount, withdrawInline, withdrawStep, openWithdrawModal, transferInline, openTransferModal, setToken, toast, data.myPools, identityMode]);
 
   useEffect(() => {
     // One host, three possible sheets — whichever picker the user just tapped
@@ -2733,7 +2814,7 @@ export function ActionHub({
           // back pay-token input stays at or under what was typed, and the
           // consent card still shows the exact figures before signing.
           if (!crossPayAllowed) {
-            toast({ title: `Converting ${displayTokenSymbol(payMeta.symbol)} isn't available on this network.`, variant: 'destructive' });
+            toast({ title: shieldPoolClosed ? 'Deposits into this pool are currently unavailable.' : `Converting ${displayTokenSymbol(payMeta.symbol)} isn't available on this network.`, variant: 'destructive' });
             return;
           }
           if (shieldQuote.status !== 'ok' || !shieldQuote.toAmountMin || !payTokenAddr) {
@@ -2985,7 +3066,7 @@ export function ActionHub({
     if (transferIsOpen) closeTransferModal();
     if (requestIsOpen) closePaymentRequestModal();
     if (swapIsOpen) closeSwapModal();
-    if (action !== 'shield') router.setParams({ action: 'shield' });
+    if (action !== 'shield') router.setParams({ action: 'shield', hubAction: undefined });
   }, [
     signedIn, tabsDisabled, isFocused, action, router,
     depositFlow.inlineActive, withdrawIsOpen, transferIsOpen, requestIsOpen, swapIsOpen,
@@ -2995,7 +3076,6 @@ export function ActionHub({
   const cardSurface = {
     backgroundColor: colors.cardBackground,
     borderColor: colors.border,
-    shadowColor: colorScheme === 'dark' ? Glow.dark : Glow.light,
   };
 
   const renderZone = (a: Action) => {
@@ -3426,7 +3506,7 @@ export function ActionHub({
               {/* Symbol only: the chain lives in the icon's badge (bigger mark
                   = bigger badge); the full pool/chain wording stays in the
                   accessibility label. */}
-              <TokenNetworkIcon symbol={tokenMeta.symbol} size={28} badgeSize={14} badgeTestnetLabel={false} chainId={chainId} />
+              <TokenNetworkIcon symbol={tokenMeta.symbol} size={28} badgeSize={16} badgeTestnetLabel={false} chainId={chainId} />
               {/* nw-keep(data-color): per-asset runtime hue */}
               <Text className="font-pp-sans-semi-bold text-[15px]" style={{ color: hue.fg }}>
                 {amountField.symbol}
@@ -3447,7 +3527,7 @@ export function ActionHub({
                 borderColor: colors.border,
               }}
             >
-              <TokenNetworkIcon symbol={payMeta.symbol} size={28} badgeSize={14} badgeTestnetLabel={false} chainId={chainId} logoUri={payMeta.logoUrl} />
+              <TokenNetworkIcon symbol={payMeta.symbol} size={28} badgeSize={16} badgeTestnetLabel={false} chainId={chainId} logoUri={payMeta.logoUrl} />
               {/* nw-keep(data-color): pill text uses the runtime per-asset hue */}
               <Text className="font-pp-sans-semi-bold text-[15px]" style={{ color: (TokenHues[colorScheme][payMeta.symbol] ?? TokenHues[colorScheme].ETH).fg }}>
                 {displayTokenSymbol(payMeta.symbol)}
@@ -3471,7 +3551,7 @@ export function ActionHub({
                 borderColor: colors.border,
               }}
             >
-              <TokenNetworkIcon symbol={requestToken.symbol} size={28} badgeSize={14} badgeTestnetLabel={false} chainId={requestToken.chainId} />
+              <TokenNetworkIcon symbol={requestToken.symbol} size={28} badgeSize={16} badgeTestnetLabel={false} chainId={requestToken.chainId} />
               {/* nw-keep(data-color): pill text uses the runtime per-asset hue */}
               <Text className="font-pp-sans-semi-bold text-[15px]" style={{ color: (TokenHues[colorScheme][requestToken.symbol] ?? TokenHues[colorScheme].ETH).fg }}>
                 {isShareSymbol(requestToken.symbol) ? requestToken.symbol : displayTokenSymbol(requestToken.symbol)}
@@ -3720,7 +3800,7 @@ export function ActionHub({
               >
                 {/* Symbol only (the row label names the chain); the chain
                     also lives in the icon's badge. */}
-                <TokenNetworkIcon symbol={shieldPool.symbol} size={28} badgeSize={14} badgeTestnetLabel={false} chainId={shieldPool.chainId} />
+                <TokenNetworkIcon symbol={shieldPool.symbol} size={28} badgeSize={16} badgeTestnetLabel={false} chainId={shieldPool.chainId} />
                 {/* nw-keep(data-color): per-asset runtime hue, falling back to ETH's */}
                 <Text className="font-pp-sans-semi-bold text-[15px]" style={{ color: (TokenHues[colorScheme][shieldPool.symbol] ?? TokenHues[colorScheme].ETH).fg }}>
                   {poolDisplayLabel(shieldPool.symbol, shieldPool.chainId)}
@@ -3931,7 +4011,7 @@ export function ActionHub({
       )}
       {a === 'shield' && !shieldBusy && crossPayShield && !shieldPricing && !(landing && !walletConnected && shieldPool && displayTokenSymbol(shieldPool.symbol) === payMeta.symbol) && !(crossPayAllowed && shieldQuote.status === 'ok') && (
         <Text className={`font-pp-sans text-[12px] leading-[17px] ${shieldQuote.status === 'none' ? 'text-warning' : 'text-text-secondary'}`}>
-          {!crossPayAllowed
+          {shieldPoolClosed ? 'Deposits into this pool are currently unavailable.' : !crossPayAllowed
             /* displayTokenSymbol, not the raw pool symbol: a share pool's symbol is
                ppUSDT, and "Pick ppUSDT" sends the user after an asset no
                wallet holds — shares live in the pool as notes. The depositable
@@ -4028,7 +4108,7 @@ export function ActionHub({
                         next to its own amount (Pat, 2026-08-31). The badge
                         carries the DESTINATION chain, so it also says where a
                         cross-chain output lands. */}
-                    <TokenNetworkIcon symbol={swapOutToken.symbol} size={28} badgeSize={14} badgeTestnetLabel={false} chainId={swapDestChainId} />
+                    <TokenNetworkIcon symbol={swapOutToken.symbol} size={28} badgeSize={16} badgeTestnetLabel={false} chainId={swapDestChainId} />
                     {/* nw-keep(data-color): selected pill text uses the runtime hue */}
                     <Text
                       className="font-pp-sans-semi-bold text-[15px]"
@@ -4328,7 +4408,8 @@ export function ActionHub({
       className="w-full overflow-hidden rounded-card border"
       style={[
         cardSurface,
-        { shadowOpacity: colorScheme === 'dark' ? 0 : 0.08, shadowRadius: 24, shadowOffset: { width: 0, height: 8 }, elevation: colorScheme === 'dark' ? 0 : 4 },
+        // The shared soft shadow every card and dropdown wears.
+        CARD_SHADOW,
         WEB ? {
           display: 'grid', gridTemplateRows: 'max-content',
           height: cardHeight === undefined ? undefined : cardHeight + 2,

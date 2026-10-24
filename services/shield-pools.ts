@@ -16,8 +16,10 @@
 // single place the money can go (Pat, 2026-09-05).
 import { defaultChainId, getChainConfig, supportedChainIds } from '@/config/chains';
 import { NATIVE_ASSET_ADDRESS } from '@/config/environments';
-import { getDepositableTokens, getKnownTokenMetadata, getTokenMetadataBySymbol, type TokenMetadata } from '@/config/tokens';
+import { getActionableTokens, getDepositableTokens, getKnownTokenMetadata, getTokenMetadataBySymbol, type TokenMetadata } from '@/config/tokens';
 import { getConfiguredNativeYieldDeployment, getConfiguredYieldDepositDeploymentForUnderlying } from '@/config/yield';
+import { isSupersededLegacyPool } from '@/config/pool-paths';
+import { displayTokenSymbol } from '@/services/share-display';
 
 export interface ShieldPool {
   chainId: number;
@@ -103,12 +105,13 @@ function poolFor(chainId: number, symbol: string): ShieldPool | null {
   if (!chain || chain.chainType !== 'evm') return null;
   const meta = getTokenMetadataBySymbol(symbol, chainId);
   if (!meta) return null;
-  // The CONFIGURED route, not the vault-verified one: this decides where the
-  // destination pill POINTS and what it is called. Money still moves only
-  // through the verified gate the deposit re-reads at send time. Keying the
-  // destination on the probe meant a USDC pick landed in some other chain's
-  // pool until the probe answered (Pat, 2026-09-12).
-  const target = resolveDepositDestination(meta, chainId, getConfiguredYieldDepositDeploymentForUnderlying, getKnownTokenMetadata, getConfiguredNativeYieldDeployment);
+  // Pool identity survives a disabled yield route. Never default to the
+  // superseded pool (or another asset) just because execution is unavailable.
+  // Deposit and conversion paths still enforce their flag/probe gates.
+  const target = isSupersededLegacyPool(meta.symbol, chainId)
+    ? getActionableTokens(chainId).find((token) => token.yieldShare
+      && displayTokenSymbol(token.symbol).toUpperCase() === meta.symbol.toUpperCase())
+    : resolveDepositDestination(meta, chainId, getConfiguredYieldDepositDeploymentForUnderlying, getKnownTokenMetadata, getConfiguredNativeYieldDeployment);
   if (!target) return null;
   return {
     chainId,

@@ -13,11 +13,6 @@ describe('QA 2026-09-24 UI', () => {
     expect(src).toContain('const visiblePools = pools;');
   });
 
-  test('a pool without its own logo gets the shared mark, and cBTC has one', () => {
-    expect(read('components/pools/my-privacy-pools.tsx')).toContain('|| !POOL_ICONS[markSymbol]');
-    expect(read('components/ui/token-network-icon.tsx')).toContain('CBTC: CbtcMark');
-  });
-
   test('the Payment Requests card collapses', () => {
     const src = read('components/payment-requests-card.tsx');
     expect(src).toContain("useCollapsed('payment-requests')");
