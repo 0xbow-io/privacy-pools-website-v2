@@ -398,9 +398,7 @@ export function describeInsufficientGas(
   nativeSymbol: string,
   chainName: string,
 ): string | null {
-  const isInsufficient = /insufficient funds|enough .{0,12} in your account|exceeds the balance|insufficient balance/i
-    .test(message);
-  if (!isInsufficient) return null;
+  if (!INSUFFICIENT_GAS.test(message)) return null;
   return `You need ${nativeSymbol} on ${chainName} to pay the network fee. Add some, then register again.`;
 }
 
@@ -447,32 +445,62 @@ export function collectErrorText(err: unknown): string {
   return parts.join('\n');
 }
 
-export type RegistrationErrorKind = 'rejected' | 'pending' | 'chain-mismatch' | 'reverted' | 'raw' | 'plain';
+export type RegistrationErrorKind =
+  | 'rejected'
+  | 'pending'
+  | 'chain-mismatch'
+  | 'reverted'
+  | 'insufficient-gas'
+  | 'fee-refused'
+  | 'network'
+  | 'raw'
+  | 'plain';
+
+/** The node refused the fee the wallet signed with (DEV-589). */
+const FEE_REFUSED = /underpriced|gas price (is )?(too low|below)|fee too low|max ?fee per gas less than block base fee|minimum gas price|intrinsic gas too low/i;
+/** The wallet could not reach its node, or the node failed the request. */
+const NETWORK_FAILURE = /HTTP request failed|Failed to fetch|fetch failed|network ?error|network request failed|could not connect|ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up|request timed out|rate limit|too many requests|\b(429|502|503|504)\b/i;
+const INSUFFICIENT_GAS = /insufficient funds|enough .{0,12} in your account|exceeds the balance|insufficient balance/i;
 
 /**
  * Sorts a registration failure so only a genuine, unknown pre-send failure
  * gets the generic "try again" line. Order matters: a tx that was sent and is
  * unconfirmed is pending whatever the error says, so a retry never duplicates it.
+ *
+ * `detail` is the whole error chain (`collectErrorText`): wallets put the
+ * reason in `cause`/`details`, not always in `message`. It is matched, never shown.
  */
-export function classifyRegistrationError(message: string, sentUnconfirmed: boolean): RegistrationErrorKind {
-  if (/user rejected|user denied|user cancel/i.test(message)) return 'rejected';
-  if (sentUnconfirmed || /WaitForTransactionReceiptTimeout|Timed out while waiting for transaction/i.test(message)) return 'pending';
-  if (/ChainMismatch|current chain of the wallet|does not match the target chain|chain mismatch/i.test(message)) return 'chain-mismatch';
+export function classifyRegistrationError(message: string, sentUnconfirmed: boolean, detail = ''): RegistrationErrorKind {
+  const text = detail ? `${message}\n${detail}` : message;
+  if (/user rejected|user denied|user cancel|rejected by (the )?user|cancell?ed by (the )?user/i.test(text)) return 'rejected';
+  if (sentUnconfirmed || /WaitForTransactionReceiptTimeout|Timed out while waiting for transaction/i.test(text)) return 'pending';
+  if (/ChainMismatch|current chain of the wallet|does not match the target chain|chain mismatch/i.test(text)) return 'chain-mismatch';
   // Only a receipt-confirmed revert (our own message). A wallet preflight
   // "execution reverted" is a pre-send failure and gets the generic line.
   if (/reverted on-chain/i.test(message)) return 'reverted';
+  if (INSUFFICIENT_GAS.test(text)) return 'insufficient-gas';
+  if (FEE_REFUSED.test(text)) return 'fee-refused';
+  if (NETWORK_FAILURE.test(text)) return 'network';
   return isRawWalletError(message) ? 'raw' : 'plain';
 }
 
 /** The one line shown for a registration failure. */
-export function describeRegistrationError(message: string, sentUnconfirmed: boolean, chainName: string): string {
-  switch (classifyRegistrationError(message, sentUnconfirmed)) {
+export function describeRegistrationError(
+  message: string,
+  sentUnconfirmed: boolean,
+  chainName: string,
+  options?: { detail?: string; nativeSymbol?: string },
+): string {
+  switch (classifyRegistrationError(message, sentUnconfirmed, options?.detail)) {
     case 'rejected': return 'Transaction cancelled in your wallet.';
     case 'pending': return REGISTRATION_TX_PENDING_MESSAGE;
     case 'chain-mismatch': return `Switch your wallet to ${chainName} and try again.`;
     // Neutral on purpose: one leg may already have landed. A retry re-reads
     // what is registered and sends only what is missing.
     case 'reverted': return 'The registration transaction failed onchain. Try again to finish.';
+    case 'insufficient-gas': return `You need ${options?.nativeSymbol ?? 'gas'} on ${chainName} to pay the network fee. Add some, then register again.`;
+    case 'fee-refused': return `${chainName} refused the network fee your wallet set. Try again.`;
+    case 'network': return `Could not reach ${chainName}. Check your connection and try again.`;
     case 'raw': return WALLET_SEND_FAILED_MESSAGE;
     default: return message;
   }

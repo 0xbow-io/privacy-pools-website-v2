@@ -372,7 +372,7 @@ describe('isRawWalletError', () => {
     expect(src).toMatch(/sendRegistrationLeg\(viewingKeyCalldata\);\n\s+sentUnconfirmed = true;\n\s+sentHash = viewingKeyHash;\n\s+const vkReceipt = await publicClient\.waitForTransactionReceipt[^\n]*\n\s+sentUnconfirmed = false;/);
     // The modal routes every failure through the classifier and locks the
     // button on a pending one.
-    expect(src).toContain('classifyRegistrationError(message, sentUnconfirmed)');
+    expect(src).toContain('classifyRegistrationError(message, sentUnconfirmed, detail)');
     expect(src).toContain('if (sentUnconfirmed && sentHash) watchSentRegistration(sentHash);');
     expect(src).toContain('const txUnconfirmed = !!getPendingRegistration(');
     expect(src).toContain('disabled={pending || txUnconfirmed}');
@@ -417,6 +417,25 @@ describe('describeRegistrationError', () => {
     expect(say('Viewing-key registration reverted on-chain (tx 0xabc).')).toBe('The registration transaction failed onchain. Try again to finish.');
     // A wallet preflight revert is pre-send: generic line, never "failed onchain".
     expect(say(dump('Execution reverted for an unknown reason.'))).toBe(WALLET_SEND_FAILED_MESSAGE);
+  });
+  test('a wallet refusal says why when the error chain tells (DEV-589)', () => {
+    const bnb = (m: string, detail: string) => describeRegistrationError(m, false, 'BNB Chain', { detail, nativeSymbol: 'BNB' });
+    // The reason sits in the cause, the message is a generic dump.
+    const generic = dump('An internal error was received.');
+    expect(bnb(generic, `${generic}\ntransaction underpriced`)).toBe('BNB Chain refused the network fee your wallet set. Try again.');
+    expect(bnb(generic, `${generic}\ninsufficient funds for gas * price + value`)).toBe('You need BNB on BNB Chain to pay the network fee. Add some, then register again.');
+    expect(bnb(generic, `${generic}\nHTTP request failed.\nStatus: 503`)).toBe('Could not reach BNB Chain. Check your connection and try again.');
+    expect(bnb(generic, `${generic}\nUser rejected the request.`)).toBe('Transaction cancelled in your wallet.');
+    // Still pending once sent, whatever the cause says.
+    expect(describeRegistrationError(generic, true, 'BNB Chain', { detail: 'HTTP request failed' })).toBe(REGISTRATION_TX_PENDING_MESSAGE);
+    // Unknown cause: the generic line, never the raw text.
+    expect(bnb(generic, generic)).toBe(WALLET_SEND_FAILED_MESSAGE);
+    // Our own one-liners are not mistaken for a network failure.
+    expect(classifyRegistrationError('The connected wallet or network changed, so nothing more was sent. Switch back and use Finish setup.', false)).toBe('plain');
+    for (const line of [
+      'BNB Chain refused the network fee your wallet set. Try again.',
+      'Could not reach BNB Chain. Check your connection and try again.',
+    ]) expect(line).not.toContain('—');
   });
   test('only an unknown pre-send dump gets the generic line', () => {
     expect(say(dump('An internal error was received.'))).toBe(WALLET_SEND_FAILED_MESSAGE);
