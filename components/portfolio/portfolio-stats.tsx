@@ -1,6 +1,7 @@
 import { View, Text, useWindowDimensions } from 'react-native';
 import { Card } from '@/components/ui/card';
 import { HoverHint } from '@/components/ui/hover-hint';
+import { Skeleton } from '@/components/ui/skeleton';
 
 function getResponsiveFontSize(width: number): number {
   if (width >= 785) return 24;
@@ -29,9 +30,11 @@ type PortfolioStatsProps = {
   assetsLabel?: string;
   /**
    * Total yield earned, already USD-formatted. Null when there is no figure to
-   * show: no yield position, or one of them has no figure (services/yield-earned.ts).
+   * show: no yield position, or no row has a figure (services/yield-earned.ts).
    */
   yieldEarnedUsd?: string | null;
+  /** The rows' figures are still being computed: a shimmer, not a dash. */
+  yieldEarnedLoading?: boolean;
   hasData?: boolean;
   assets?: Asset[];
 };
@@ -66,6 +69,7 @@ export function PortfolioStats({
   assetsCount = 0,
   assetsLabel = 'No Assets here',
   yieldEarnedUsd = null,
+  yieldEarnedLoading = false,
   hasData = false,
   assets = [],
 }: PortfolioStatsProps) {
@@ -121,11 +125,17 @@ export function PortfolioStats({
                   Yield earned
                 </Text>
               </View>
-              <Text
-                className={`font-pp-bold text-[18px] leading-[18px] ${yieldEarnedUsd ? 'text-success' : 'text-text-muted'}`}
-              >
-                {yieldEarnedUsd ?? '—'}
-              </Text>
+              {yieldEarnedLoading ? (
+                <View testID="portfolio-stats-yield-earned-loading">
+                  <Skeleton width={72} height={18} />
+                </View>
+              ) : (
+                <Text
+                  className={`font-pp-bold text-[18px] leading-[18px] ${yieldEarnedUsd ? 'text-success' : 'text-text-muted'}`}
+                >
+                  {yieldEarnedUsd ?? '—'}
+                </Text>
+              )}
             </View>
             <View className="my-[10px] w-[1px] self-stretch bg-border" />
             <View className="flex-1 gap-[6px] p-[16px]">
@@ -209,14 +219,20 @@ export function PortfolioStats({
               Yield earned
             </Text>
           </View>
-          <Text
-            className={`font-pp-bold ${yieldEarnedUsd ? 'text-success' : 'text-text-muted'}`}
-            testID="portfolio-stats-yield-earned"
-            // nw-keep(measured-or-inset): headline size follows the width-driven responsive scale
-            style={{ fontSize: responsiveFontSize, lineHeight: responsiveFontSize }}
-          >
-            {yieldEarnedUsd ?? '—'}
-          </Text>
+          {yieldEarnedLoading ? (
+            <View testID="portfolio-stats-yield-earned-loading">
+              <Skeleton width={96} height={responsiveFontSize} />
+            </View>
+          ) : (
+            <Text
+              className={`font-pp-bold ${yieldEarnedUsd ? 'text-success' : 'text-text-muted'}`}
+              testID="portfolio-stats-yield-earned"
+              // nw-keep(measured-or-inset): headline size follows the width-driven responsive scale
+              style={{ fontSize: responsiveFontSize, lineHeight: responsiveFontSize }}
+            >
+              {yieldEarnedUsd ?? '—'}
+            </Text>
+          )}
         </View>
 
         {/* Divider */}

@@ -77,7 +77,7 @@ function PortfolioBody() {
   const tabClearance = useTabBarClearance();
   const { isConnected } = useAccount();
   const { sessionAddress } = useSdkContext();
-  const { positions, totalValue, totalValueFormatted, pendingValueFormatted, hasPositions, chainDisplayName, chainId, isLoading: portfolioLoading, yieldEarnedUsdFormatted } = usePortfolio();
+  const { positions, totalValue, totalValueFormatted, pendingValueFormatted, hasPositions, chainDisplayName, chainId, isLoading: portfolioLoading, yieldEarnedUsdFormatted, yieldEarnedLoading } = usePortfolio();
   // Live APY for real yield rows (feed first, env placeholder second).
   const liveApy = useResolvedYieldApy({ chainId });
   const { data: poolsData } = usePools();
@@ -178,6 +178,9 @@ function PortfolioBody() {
   // Only a real yield position fills the tile.
   const hasRealYield = positions.some((p) => p.isYield);
   const yieldEarnedTile = hasRealYield ? yieldEarnedUsdFormatted : null;
+  // Loading while the rows' figures (or the prices that value them) are on
+  // their way, so a dash only ever means "no figure".
+  const yieldEarnedTileLoading = hasRealYield && (portfolioLoading || yieldEarnedLoading);
 
   return (
     <View className="flex-1 bg-background">
@@ -221,6 +224,7 @@ function PortfolioBody() {
             pending={portfolioLoading ? '—' : pendingValueFormatted}
             assetsCount={positions.length}
             yieldEarnedUsd={portfolioLoading ? null : yieldEarnedTile}
+            yieldEarnedLoading={yieldEarnedTileLoading}
             assetsLabel={hasPositions ? positions.map((p) => p.tokenSymbol).join(', ') : 'No assets yet'}
             hasData={hasPositions}
             assets={portfolioAssets}

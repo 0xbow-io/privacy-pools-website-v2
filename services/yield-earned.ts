@@ -306,19 +306,62 @@ export function yieldEarnedDisplay(entry: YieldEarnedEntry | undefined, symbol: 
 }
 
 /**
- * The page's total, in USD, or null for "—". Every real yield row must have a
- * figure and a price: a sum that silently skips a position understates it.
+ * Reasons the hook writes while an input is still on its way. A row in one of
+ * them will get a figure on a later tick, so the total waits for it instead of
+ * printing a sum that is about to grow.
  */
-export function totalYieldEarnedUsd(
-  rows: readonly { earned: YieldEarnedDisplay | null; underlyingPriceUsd: number }[],
-): number | null {
-  if (rows.length === 0) return null;
+export const YIELD_EARNED_LOADING_REASONS: ReadonlySet<string> = new Set([
+  'computing',
+  'snapshot-not-ready',
+  'deposits-feed-loading',
+  'rate-history-loading',
+]);
+
+/** Is this entry a figure still being computed (as opposed to none at all)? */
+export function yieldEarnedEntryLoading(entry: YieldEarnedEntry | undefined): boolean {
+  return entry?.status === 'unavailable' && YIELD_EARNED_LOADING_REASONS.has(entry.reason);
+}
+
+export type YieldEarnedTotalRow = {
+  /** What the hook holds for the row; undefined when nothing computes it (another chain). */
+  entry: YieldEarnedEntry | undefined;
+  /** The row's figure, as the table prints it. */
+  earned: YieldEarnedDisplay | null;
+  underlyingPriceUsd: number;
+  /** Only pending funds on the row: it never holds the tile back. */
+  pendingOnly: boolean;
+};
+
+export type YieldEarnedTotal =
+  | { status: 'loading' }
+  | { status: 'none' }
+  | { status: 'ok'; usd: number };
+
+/**
+ * The page's total: the USD sum of the figures the rows show.
+ *
+ * - A row without a figure counts as 0: it has none to give (no compute
+ *   covers it, its feed is not served, or its bound shows). Holding the whole
+ *   tile on "—" for it hid every figure the other rows did have (QA 2026-10-24).
+ * - A held row whose figure is still being computed makes the tile loading.
+ *   A pending-only row never does.
+ * - A non-zero figure without a price cannot be valued and is left out.
+ * - "none" only when no row has a figure that could be valued.
+ */
+export function totalYieldEarnedUsd(rows: readonly YieldEarnedTotalRow[]): YieldEarnedTotal {
   let total = 0;
+  let valued = false;
+  let loading = false;
   for (const row of rows) {
-    if (!row.earned) return null;
-    if (row.earned.amount === 0) continue;
-    if (!(row.underlyingPriceUsd > 0)) return null;
-    total += row.earned.amount * row.underlyingPriceUsd;
+    if (row.earned) {
+      if (row.earned.amount === 0) { valued = true; continue; }
+      if (!(row.underlyingPriceUsd > 0)) continue;
+      total += row.earned.amount * row.underlyingPriceUsd;
+      valued = true;
+      continue;
+    }
+    if (!row.pendingOnly && yieldEarnedEntryLoading(row.entry)) loading = true;
   }
-  return total;
+  if (loading) return { status: 'loading' };
+  return valued ? { status: 'ok', usd: total } : { status: 'none' };
 }
