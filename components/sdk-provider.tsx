@@ -78,6 +78,7 @@ import { allowPaymentRequestWrites, purgePaymentRequestsOnSignOut } from '@/serv
 import { signedOutOwner } from '@/services/payment-request-signout-purge';
 import { noteManagerLimitedTo } from '@/services/batch-withdrawals';
 import { ARTIFACTS_BASE, artifactsBaseUrl } from '@/config/artifacts';
+import { assertDepositUnlock } from '@/services/deposit-unlock-guard';
 
 // Key derivation now uses the SDK's canonical HKDF scheme via
 // services/sdk-setup (buildSecretDerivationPayload +
@@ -708,7 +709,7 @@ async function resolveKeystoreIdentityStatus(
     const activeView = km.getViewingKeyPair().publicKey.toLowerCase();
     return String(v).toLowerCase() === activeView ? 'compatible' : 'partial';
   } catch {
-    return 'unknown'; // a flaky RPC must not block sign-in / deposit
+    return 'unknown'; // sign-in and discovery stay available; write guards reject unknown
   }
 }
 
@@ -2865,19 +2866,15 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     // not whether that someone was this unlock. The nullifying-key hash is
     // write-once per address, so depositing under a different unlock than the
     // one registered there mints a note that can NEVER be spent and cannot be
-    // re-registered. 'unknown' stays fail-open (a flaky RPC must not block the
-    // flow) and 'unregistered' falls through to the caller's own handling.
+    // re-registered. A failed lookup blocks writes, while 'unregistered'
+    // falls through to the caller's registration handling. Discovery stays open.
     const targetIdentity = opts?.discoveryOnly ? 'unknown' : await resolveKeystoreIdentityStatus(
       sdkSetup,
       managers.keystoreManager as IKeystoreManager,
       owner,
       targetChainId,
     );
-    if (targetIdentity === 'incompatible') {
-      throw new Error(
-        'This account is registered with a different unlock on that network. Switch unlock, or import its notes to exit.',
-      );
-    }
+    if (!opts?.discoveryOnly) assertDepositUnlock(targetIdentity);
 
     const { createPoolSession } = await getPoolSessionService();
     // Seeded from that chain's own stored export so work appends to its notes
@@ -4026,8 +4023,8 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
   // can't authorize a spend/exit (the keystore nullifying key is write-once).
   // Re-reads on-chain against the COMMITTED manager rather than trusting the
   // React `keystoreIdentityStatus` (which can lag the just-derived identity, or
-  // be stale if another tab/device registered in between). Throws only on a
-  // definitive 'incompatible'; 'unknown' (RPC fail-open) and 'unregistered' pass.
+  // be stale if another tab/device registered in between). Unknown results
+  // block a deposit; first-time registration remains available.
   // Field tracing for the balances-landing bug: session readiness flips.
   useEffect(() => {
     console.log('[PP-SESSION]', JSON.stringify({ keysReady, identityMode, sessionAddress: effectiveAddress ?? null, chainId }));
@@ -4067,9 +4064,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
       throw new Error('Network changed since sign-in. Close the modal and try the deposit again.');
     }
     setKeystoreIdentityStatus(status);
-    if (status === 'incompatible') {
-      throw new Error('This account is registered with a different unlock. Switch unlock, or import its notes to exit.');
-    }
+    assertDepositUnlock(status);
   }, [chainId]);
 
 
