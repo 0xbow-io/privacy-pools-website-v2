@@ -8,7 +8,7 @@
 // Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
 // MAX retains the original exact shares. USD edits use an exact decimal price
 // in that same boundary. No other operation converts display back.
-import { useBalanceDisplay } from '@/hooks/use-balance-display';
+import { useShareFreeBalanceDisplay } from '@/hooks/use-balance-display';
 import { useActiveEvmChain } from '@/hooks/use-active-evm-chain';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { useRef, useState } from 'react';
@@ -27,7 +27,7 @@ export function ConsolidationSummary({ total, fee, decimals, symbol }: {
   total: bigint; fee: bigint | null; decimals: number; symbol: string;
 }) {
   const chainId = useActiveEvmChain().id;
-  const balanceDisplay = useBalanceDisplay(chainId);
+  const balanceDisplay = useShareFreeBalanceDisplay(chainId);
   const net = consolidationNet(total, fee);
   const units = (value: bigint) => balanceDisplay(formatUnits(value, decimals), symbol, chainId).text;
   return (
@@ -63,7 +63,7 @@ export function ConsolidationPanel({ groups, selected, fee, decimals, symbol, er
 }) {
   // Keep the open group when its last note is unchecked; recover if a sync removes it.
   const chainId = useActiveEvmChain().id;
-  const balanceDisplay = useBalanceDisplay(chainId);
+  const balanceDisplay = useShareFreeBalanceDisplay(chainId);
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const [groupLabel, setGroupLabel] = useState(() => groups.find((g) => g.notes.some((n) => selected.includes(n.commitment)))?.label);

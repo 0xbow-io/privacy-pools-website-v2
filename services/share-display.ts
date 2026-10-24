@@ -160,6 +160,43 @@ export function shareReviewHeadline(args: {
   // A failed rate read keeps the count under its own share symbol.
   return `${format(shares, shareSymbol)} ${shareSymbol}`;
 }
+/**
+ * A preformatted share COUNT on a surface that never names the share (the Swap
+ * tab, DEV-591): "0.00999 ETH shares". The coin the user knows, and plainly a
+ * count of shares rather than an ETH figure, so it cannot read as a fee. Use it
+ * only where no rate is at hand; with a rate, show the converted underlying.
+ * Anything that is not a share is its amount and coin, as tokenAmountLabel.
+ */
+export function shareCountLabel(amount: string, symbol: string): string {
+  const coin = displayTokenSymbol(symbol);
+  return isShareSymbol(symbol) ? `${amount} ${coin} shares` : `${amount} ${coin}`;
+}
+
+/** The fields of a balance view (services/share-balance-display.ts) this rule touches. */
+type BalanceViewLike = { text: string; symbol: string; converted: boolean; hint: string | null };
+
+/**
+ * A balance view for a surface that never names the share (DEV-591). Converted:
+ * the underlying figure, with the (i) hint's share count unnamed ("0.0998
+ * shares, worth 0.1 ETH today"). Rate not known yet: the count as
+ * shareCountLabel, never under the share's own symbol. Display only, like the
+ * view it wraps: nothing here may feed an amount.
+ */
+export function underlyingOnlyView<V extends BalanceViewLike>(view: V, assetSymbol: string): V {
+  if (!isShareSymbol(assetSymbol)) return view;
+  const named = new RegExp(`\\s*\\b${assetSymbol}\\b`, 'gi');
+  if (view.converted) {
+    return { ...view, hint: view.hint ? view.hint.replace(named, '') : view.hint };
+  }
+  const coin = displayTokenSymbol(assetSymbol);
+  const count = view.text.replace(named, '').trim();
+  return {
+    ...view,
+    symbol: coin,
+    text: /^0(?:\.0*)?$/.test(count) ? `0 ${coin}` : shareCountLabel(count, assetSymbol),
+    hint: null,
+  };
+}
 
 /**
  * Preformatted raw units at a display boundary, without claiming a share is
@@ -167,4 +204,35 @@ export function shareReviewHeadline(args: {
  */
 export function tokenAmountLabel(amount: string, symbol: string): string {
   return `${amount} ${isShareSymbol(symbol) ? symbol : displayTokenSymbol(symbol)}`;
+}
+
+/**
+ * The unit a share-denominated FIELD reads under while no rate is known:
+ * "ETH shares", never the share's own name. Anything else is its coin. Display
+ * only: the field's value stays the exact share count.
+ */
+export function shareUnitLabel(symbol: string): string {
+  return isShareSymbol(symbol) ? `${displayTokenSymbol(symbol)} shares` : displayTokenSymbol(symbol);
+}
+
+/** Every share name this app knows, in free text (an error, a toast, a status line). */
+const SHARE_NAME_IN_TEXT = new RegExp(
+  `(?:(≈\\s*)?(\\d[\\d,]*(?:\\.\\d+)?)\\s+)?\\b(${Object.keys(SHARE_UNDERLYING).join('|')})\\b`,
+  'gi',
+);
+
+/**
+ * Free text with every share name taken out, for messages built from a share
+ * amount or handed up by the SDK or relayer (Send, 2026-10-24: a share name
+ * flashed in the transfer flow). "<count> <share>" goes through `amountText`
+ * when the caller has a rate-aware renderer (balance view, already share-free),
+ * else reads "0.1 ETH shares"; a bare share name reads as its coin. Display
+ * only: never parse the result back into an amount.
+ */
+export function shareFreeText(text: string, amountText?: (exact: string, symbol: string) => string): string {
+  return text.replace(SHARE_NAME_IN_TEXT, (_match, approx: string | undefined, count: string | undefined, symbol: string) => {
+    if (count == null) return displayTokenSymbol(symbol);
+    if (amountText) return amountText(count.replace(/,/g, ''), symbol);
+    return `${approx ?? ''}${shareCountLabel(count, symbol)}`;
+  });
 }

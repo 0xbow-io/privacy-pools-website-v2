@@ -1,4 +1,4 @@
-import { displayTokenSymbol, tokenAmountLabel } from '@/services/share-display';
+import { displayTokenSymbol, shareCountLabel } from '@/services/share-display';
 import { formatTokenBalance } from '@/services/token-format';
 // Pure pending→settled transition detection for the in-app status toasts.
 // No store/network/RN imports so it stays unit-testable under the bun runner;
@@ -50,7 +50,7 @@ const isOpen = (status: string): boolean => isPending(status) || isPoiRequired(s
 
 /** "0.50 ETH" / "26 USDC": the shared balance format (formatTokenBalance). */
 function formatAmount(value: number, asset: string): string {
-  return tokenAmountLabel(formatTokenBalance(value, displayTokenSymbol(asset)), asset);
+  return shareCountLabel(formatTokenBalance(value, displayTokenSymbol(asset)), asset);
 }
 
 /** Normalize a feed type string to its base form: "deposit" → "Deposit",
@@ -61,7 +61,8 @@ function baseType(type: string): string {
 }
 
 // The display boundary can supply a rate-aware label; raw transaction amounts
-// and transition memory remain in shares. Without it, keep the share symbol.
+// and transition memory remain in shares. Without it, a share reads as a
+// count ("0.10 ETH shares"), never under its own name.
 export type TransitionAmountDisplay = (tx: TransitionTx) => string;
 
 /**

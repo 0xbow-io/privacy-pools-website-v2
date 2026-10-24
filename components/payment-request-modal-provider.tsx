@@ -9,7 +9,7 @@ import { ShareCountHint } from '@/components/pools/share-count-hint';
 // Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
 // MAX retains the original exact shares. USD edits use an exact decimal price
 // in that same boundary. No other operation converts display back.
-import { useBalanceDisplay } from '@/hooks/use-balance-display';
+import { useShareFreeBalanceDisplay } from '@/hooks/use-balance-display';
 
 import { BalanceAmount } from '@/components/pools/balance-amount';
 import { TokenMark } from '@/components/ui/token-network-icon';
@@ -20,7 +20,7 @@ import { setReceiveSetup } from '@/services/receive-setup';
 import { isSupersededLegacyPool, poolDisplayLabel } from '@/config/pool-paths';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ACTIVE_ENVIRONMENT } from '@/config/environments';
-import { tokenAmountLabel, isShareSymbol, displayTokenSymbol } from '@/services/share-display';
+import { tokenAmountLabel, isShareSymbol, displayTokenSymbol, shareFreeText, shareUnitLabel } from '@/services/share-display';
 import { assertPaymentRequestBounds, PaymentRequestBoundsError } from '@/services/payment-request-bounds';
 import { assertDepositCap } from '@/services/deposit-cap';
 import { getPrice } from '@/services/price-service';
@@ -562,7 +562,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
   // chainId` switch guard below meaningful: it used to compare the wallet's
   // chain against itself and could never fire.
   const chainId = useActiveEvmChain().id;
-  const balanceDisplay = useBalanceDisplay(chainId);
+  const balanceDisplay = useShareFreeBalanceDisplay(chainId);
   const withOpLock = useOpLock();
   const queryClient = useQueryClient();
   // The COMMITTED chain of the live session (null while none) — used ONLY to
@@ -4071,17 +4071,17 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                 and the success card after it (DEV-496). */}
             {statusMessage && !payRunning && !statusBoxHidden ? (
               <View className="rounded-control border border-[#98B975] bg-[#F5FAEE] px-[12px] py-[10px]">
-                <Text className="font-pp-regular text-[13px] text-[#6E8A42]">{statusMessage}</Text>
+                <Text className="font-pp-regular text-[13px] text-[#6E8A42]">{shareFreeText(statusMessage)}</Text>
               </View>
             ) : null}
             {warningMessage ? (
               <View className="rounded-control border border-[#E1C26B] bg-[#FFF9E8] px-[12px] py-[10px]">
-                <Text className="font-pp-regular text-[13px] text-[#8A6B1F]">{warningMessage}</Text>
+                <Text className="font-pp-regular text-[13px] text-[#8A6B1F]">{shareFreeText(warningMessage)}</Text>
               </View>
             ) : null}
             {errorMessage ? (
               <View className="rounded-control border border-[#F2B8B5] bg-[#FFF4F4] px-[12px] py-[10px]">
-                <Text className="font-pp-regular text-[13px] text-danger">{errorMessage}</Text>
+                <Text className="font-pp-regular text-[13px] text-danger">{shareFreeText(errorMessage)}</Text>
               </View>
             ) : null}
 
@@ -4157,11 +4157,11 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                   {/* Same split as the token: inline, the hub's amount card owns
                       the figure and pushes it here. */}
                   {!inlineHubActive ? (<>
-                  <Text className="font-pp-semi-bold text-[12px] text-text-secondary">Amount ({requestTokenSymbol})</Text>
+                  <Text className="font-pp-semi-bold text-[12px] text-text-secondary">Amount ({shareUnitLabel(requestTokenSymbol)})</Text>
                   <TextInput
                     value={amountInput}
                     onChangeText={(text) => setAmountInput(sanitizeAmountInput(text, requestTokenDecimals))}
-                    placeholder={`${!isSui && isStablecoin(selectedToken.symbol) ? '5' : '0.01'} ${requestTokenSymbol}`}
+                    placeholder={`${!isSui && isStablecoin(selectedToken.symbol) ? '5' : '0.01'} ${shareUnitLabel(requestTokenSymbol)}`}
                     // nw-keep(data-color): placeholder color is a TextInput sink (theme token, no className path)
                     placeholderTextColor={colors.textMuted}
                     keyboardType="numeric"

@@ -4,7 +4,7 @@ import { formatUnits } from 'viem';
 import { shareAmountFromUnderlying } from '@/services/share-amount-entry';
 import { shareBalanceDisplay, shareRateSnapshotKey, shareUsdDisplayExact } from '@/services/share-balance-display';
 import { parseTokenAmount, sanitizeAmountInput } from '@/services/token-amount';
-import { displayTokenSymbol, isShareSymbol } from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol, shareUnitLabel } from '@/services/share-display';
 import type { ShareRate } from '@/services/share-rates';
 // Bun.Transpiler is not in the app's type declarations, so the typecheck gate would reject a direct use.
 type BunGlobal = { Bun: { Transpiler: new (options: { loader: 'ts' }) => { transformSync(source: string): string } } };
@@ -33,7 +33,7 @@ function fieldHarness(initialAmount = '') {
     useBalanceDisplay: () => (exact: string) => shareBalanceDisplay({ sharesExact: exact, shareSymbol: 'ppETH', rate, priceMap: {}, fallbackPrice: 0 }),
     getTokenMetadataBySymbol: () => ({ address: 'share' }),
     formatUnits, shareAmountFromUnderlying, shareRateSnapshotKey, shareUsdDisplayExact,
-    parseTokenAmount, sanitizeAmountInput, displayTokenSymbol, isShareSymbol,
+    parseTokenAmount, sanitizeAmountInput, displayTokenSymbol, isShareSymbol, shareUnitLabel,
   };
   const useField = new Function(...Object.keys(dependencies), `${body}; return useShareAmountField;`)(...Object.values(dependencies));
   const render = () => {

@@ -4,7 +4,7 @@ import { useShareRates } from '@/hooks/use-share-rates';
 import { useAllChainsPriceMap } from '@/hooks/use-all-chains-price-map';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { getTokenMetadataBySymbol } from '@/config/tokens';
-import { isShareSymbol, displayTokenSymbol } from '@/services/share-display';
+import { isShareSymbol, displayTokenSymbol, shareUnitLabel } from '@/services/share-display';
 import { shareRateSnapshotKey, shareUsdDisplayExact } from '@/services/share-balance-display';
 import { parseTokenAmount, sanitizeAmountInput } from '@/services/token-amount';
 import { shareAmountFromUnderlying } from '@/services/share-amount-entry';
@@ -66,7 +66,8 @@ export function useShareAmountField(args: { amount: string; symbol: string; chai
   const draft = pendingEdit || sameEdit ? edit : null;
   return {
     value: draft?.denomination === 'underlying' ? draft.text : rate && amount ? numericDisplay(amount) : amount,
-    symbol: rate ? displayTokenSymbol(rate.underlyingSymbol) : symbol,
+    // No rate yet: "ETH shares", never the share's own name. The value stays shares.
+    symbol: rate ? displayTokenSymbol(rate.underlyingSymbol) : isShareSymbol(symbol) ? shareUnitLabel(symbol) : symbol,
     usdAvailable,
     underlyingAvailable: !!rate,
     usdValue: draft?.denomination === 'usd' && (pendingEdit || draft.priceExact === priceExact) ? draft.text : amount ? usdDisplay(amount) : '',
