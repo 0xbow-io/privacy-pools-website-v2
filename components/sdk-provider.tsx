@@ -36,7 +36,8 @@ import { setErrorReportWallet } from '@/services/error-reports';
 import { PASSKEY_EOA_CONNECTOR_ID } from '@/services/passkey-eoa/constants';
 import { EMBEDDED_CONNECTOR_ID } from '@/services/embedded-wallet/connector';
 import { useAccount, useConfig, usePublicClient, useReconnect, useSignTypedData } from 'wagmi';
-import { COINBASE_SMART_WALLET_SIGNIN_MESSAGE, connectorIsKnownDeterministicSigner, contractWalletVerdict, isPlainEcdsaSignature, NON_DETERMINISTIC_SIGNER_MESSAGE, SMART_WALLET_SIGNIN_MESSAGE } from '@/services/signer-determinism';
+import { COINBASE_SMART_WALLET_SIGNIN_MESSAGE, connectorIsKnownDeterministicSigner, isPlainEcdsaSignature, NON_DETERMINISTIC_SIGNER_MESSAGE, SMART_WALLET_SIGNIN_MESSAGE } from '@/services/signer-determinism';
+import { decideUnlockWalletKind, isEoaOnlyWallet, readWalletCode, unlockCodeReaders } from '@/services/unlock-wallet-kind';
 import { passkeyUnlockDefault } from '@/services/passkey-policy';
 import { smartWalletPasskeyEnabled } from '@/config/smart-wallet-passkey-flag';
 import { passkeyRpIdFor } from '@/services/passkey-rp-id';
@@ -1028,13 +1029,20 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!passkeyFeatureOn || !smartWalletKey || !address || !chainPublicClient) return;
     let cancelled = false;
-    chainPublicClient.getCode({ address: address as `0x${string}` })
-      .then((code) => {
-        if (!cancelled) setSmartWalletProbe({ key: smartWalletKey, smart: contractWalletVerdict(code) === 'contract' });
+    // Same readers as the unlock (services/unlock-wallet-kind.ts): a retry, then
+    // the wallet's own provider, so one failed read does not leave this unset.
+    const connector = activeConnector;
+    readWalletCode(
+      unlockCodeReaders(chainPublicClient, connector ? () => walletProvider(connector) : null, address, chainId),
+    )
+      .then((read) => {
+        if (cancelled) return;
+        if (read) setSmartWalletProbe({ key: smartWalletKey, smart: read.verdict === 'contract' });
+        else setSmartWalletProbeFailedKey(smartWalletKey); /* fail open: see above */
       })
-      .catch(() => { if (!cancelled) setSmartWalletProbeFailedKey(smartWalletKey); /* fail open: see above */ });
+      .catch(() => { if (!cancelled) setSmartWalletProbeFailedKey(smartWalletKey); });
     return () => { cancelled = true; };
-  }, [passkeyFeatureOn, smartWalletKey, address, chainPublicClient]);
+  }, [passkeyFeatureOn, smartWalletKey, address, chainPublicClient, activeConnector, chainId]);
   // DEV-522: the auto sign-in after connect must not start a wallet signature
   // before this probe has answered, or a smart wallet gets the signature path
   // (and a WebAuthn call with no user activation) instead of the dialog.
@@ -1554,35 +1562,33 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
           // passkey. An EIP-7702 delegated EOA still signs with its own key and
           // stays on the wallet path. Fail-open on an RPC error: the SDK's
           // 65-byte check is the enforcement (services/signer-determinism.ts).
-          let smartAtUnlock: boolean;
-          // The getCode verdict on this chain, or null when the read failed.
-          let codeVerdict: ReturnType<typeof contractWalletVerdict> | null = null;
-          let codeOnChain: string | undefined;
-          try {
-            if (!chainPublicClient) throw new Error('no public client for the active chain');
-            const code = await chainPublicClient.getCode({ address: derivationAddress as `0x${string}` });
-            codeOnChain = code;
-            codeVerdict = contractWalletVerdict(code);
-            smartAtUnlock = codeVerdict === 'contract';
-          } catch (codeErr) {
-            if (!passkeyUnlockEnabled()) {
-              // Feature off: main's behaviour. The probe is advice only and the
-              // SDK's 65-byte check remains the enforcement.
-              log('warn', 'SDK', 'Contract-wallet probe failed; continuing to the signature', { detail: describeRpcError(codeErr) });
-              smartAtUnlock = false;
-            } else {
-            // No verdict from this read. Reuse the ahead probe's settled verdict for
-            // this exact address:chain; with none, guessing "EOA" would send a smart
-            // wallet to the wallet prompt and the SDK's 65-byte failure, so ask for
-            // a retry instead (codex on PR #36).
-            const ahead = smartWalletProbeRef.current;
-            if (ahead?.key !== `${String(derivationAddress).toLowerCase()}:${chainId}`) {
-              log('warn', 'SDK', 'Contract-wallet probe failed with no earlier verdict', { detail: describeRpcError(codeErr) });
-              throw new Error('Could not verify the wallet type because a network request failed. Please try again.');
-            }
-            smartAtUnlock = ahead.smart;
-            }
+          // A failed read must not lock the user out: services/unlock-wallet-kind.ts
+          // retries it, asks the wallet's own provider, reuses the ahead probe,
+          // and only then decides (2026-10-24, MetaMask on mainnet refused).
+          const unlockConnector = liveConnection() ?? activeConnectorRef.current;
+          const codeRead = await readWalletCode(
+            unlockCodeReaders(chainPublicClient, unlockConnector ? () => walletProvider(unlockConnector) : null, String(derivationAddress), chainId),
+            {
+              onFailure: ({ source, error }) => log('warn', 'SDK', 'Contract-wallet probe read failed', { source, detail: describeRpcError(error) }),
+            },
+          );
+          const walletKind = decideUnlockWalletKind({
+            read: codeRead,
+            passkeyUnlockEnabled: passkeyUnlockEnabled(),
+            key: `${String(derivationAddress).toLowerCase()}:${chainId}`,
+            ahead: smartWalletProbeRef.current,
+            eoaOnlyWallet: isEoaOnlyWallet(unlockConnector),
+          });
+          if (walletKind.kind === 'refuse') {
+            log('warn', 'SDK', 'Contract-wallet probe failed everywhere with no earlier verdict');
+            throw new Error(walletKind.message);
           }
+          if (walletKind.kind === 'assume-eoa') {
+            log('warn', 'SDK', 'Contract-wallet probe failed; continuing to the signature', { reason: walletKind.reason });
+          }
+          const smartAtUnlock = walletKind.kind === 'read' || walletKind.kind === 'ahead' ? walletKind.smart : false;
+          // The getCode verdict on this chain, or null when no read answered.
+          const codeVerdict = codeRead?.verdict ?? null;
           let coinbaseSmart = false;
           if (smartAtUnlock) {
             // A deployed Coinbase smart wallet (getCode found code) gets the Coinbase
