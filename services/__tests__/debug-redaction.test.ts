@@ -260,9 +260,9 @@ describe('Full', () => {
   });
 });
 
-describe('No spending keys (the default)', () => {
-  test('is the default', () => {
-    expect(DEFAULT_REDACTION_LEVEL).toBe('no-spending-keys');
+describe('No spending keys', () => {
+  test('support exports default to removing all keys and transaction details', () => {
+    expect(DEFAULT_REDACTION_LEVEL).toBe('no-tx-details');
   });
 
   test('removes the account key, the signature, note secrets and private keys, everywhere', () => {
@@ -459,7 +459,7 @@ describe('source guards', () => {
     for (const f of ['sessionChainNotes:', 'storedAccountExportsByChain:', 'transactions:', 'rawAmount: string;', 'txHash: string;', 'fullAddress: string;']) expect(pools).toContain(f);
   });
 
-  test('the dialog defaults to no spending keys and shows the red warning only on Full', () => {
+  test('the dialog uses the redacted default and shows the red warning only on Full', () => {
     const provider = read('components/debug-provider.tsx');
     expect(provider).toContain('useState<RedactionLevel>(DEFAULT_REDACTION_LEVEL)');
     expect(provider).toContain("{level === 'full' && (");
