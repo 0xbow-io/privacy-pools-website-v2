@@ -2715,7 +2715,7 @@ export function Transactions({
             txHash: paidRecord.txHash as `0x${string}`,
             createdAt: new Date(paidRecord.timestamp).toISOString(),
           };
-          const url = `${receiptLinkBase()}/receive/${encodePaymentReceiptPayloadForUrl(receipt)}`;
+          const url = `${receiptLinkBase()}/receive#${encodePaymentReceiptPayloadForUrl(receipt)}`;
           if (Platform.OS !== 'web' || typeof navigator === 'undefined' || !navigator.clipboard) {
             toast({ title: 'Could not copy the receipt link on this device.', variant: 'destructive' });
             return;

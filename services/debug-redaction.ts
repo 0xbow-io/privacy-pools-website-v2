@@ -152,8 +152,8 @@ const RPC_URL_PATTERNS: RegExp[] = [
   /(https?:\/\/)([^/\s:@"']+:[^/\s@"']+)(?=@)/g, // user:password@host
 ];
 
-/** The app routes whose path segment is an encoded share payload (app/<route>/[encoded].tsx). */
-const ENCODED_ROUTE = /(\/(?:pay|receive|import-note|audit|verify)\/)([^/?#\s"'\\]+)/g;
+/** The app routes whose fragment (or, in older links, path segment) is an encoded share payload. */
+const ENCODED_ROUTE = /(\/(?:pay|receive|import-note|audit|verify)(?:\?[^#\s"'\\]*)?[/#])([^/?#\s"'\\]+)/g;
 
 /**
  * A base64 / base64url token whose text starts with `{` or `[`, optionally with

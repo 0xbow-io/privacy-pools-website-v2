@@ -47,7 +47,8 @@ export function encodeNoteReceiptForUrl(receipt: NoteReceipt): string {
 
 /**
  * Pull the encoded receipt payload out of whatever the user pasted —
- * a full share URL (`https://…/import-note/<encoded>?x=y`), a bare
+ * a full share URL (`https://…/import-note#<encoded>`, older links
+ * `https://…/import-note/<encoded>?x=y`), a bare
  * `/import-note/<encoded>` path, or just the `<encoded>` fragment on
  * its own. Returns null for empty input. The result still has to pass
  * `decodeNoteReceiptFromUrl` to be considered valid.
@@ -55,9 +56,8 @@ export function encodeNoteReceiptForUrl(receipt: NoteReceipt): string {
 export function extractNoteReceiptEncoded(input: string): string | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
-  const marker = '/import-note/';
-  const markerIndex = trimmed.indexOf(marker);
-  const tail = markerIndex >= 0 ? trimmed.slice(markerIndex + marker.length) : trimmed;
+  const route = /\/import-note[/#]/.exec(trimmed);
+  const tail = route ? trimmed.slice(route.index + route[0].length) : trimmed;
   // A pasted URL may carry a trailing query, hash, slash, or whitespace;
   // the base64url payload itself contains none of those characters.
   const candidate = tail.split(/[?#/\s]/)[0];
@@ -201,9 +201,9 @@ export function buildNoteReceiptUrl(encoded: string): string {
   // PAY_URL_BASE pins the brand domain in production; falls back to
   // the running origin on previews / native (where the consumer is
   // expected to deep-link relative paths anyway).
-  if (PAY_URL_BASE) return `${PAY_URL_BASE}/import-note/${encoded}`;
+  if (PAY_URL_BASE) return `${PAY_URL_BASE}/import-note#${encoded}`;
   if (typeof window !== 'undefined' && window.location?.origin) {
-    return `${window.location.origin}/import-note/${encoded}`;
+    return `${window.location.origin}/import-note#${encoded}`;
   }
-  return `/import-note/${encoded}`;
+  return `/import-note#${encoded}`;
 }
