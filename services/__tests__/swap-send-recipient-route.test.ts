@@ -12,6 +12,7 @@ import ts from 'typescript';
 import { getAddress, isAddress } from 'viem';
 import { isSwapSendSelection } from '@/services/intent-swaps';
 import { preferredReceiveAsset } from '@/services/receive-asset-pick';
+import { PROD_YIELD_DEPLOYMENTS } from '@/config/prod-deployments';
 
 const here = new URL('.', import.meta.url).pathname;
 const read = (...parts: string[]) => readFileSync(join(here, '..', '..', ...parts), 'utf8');
@@ -638,18 +639,59 @@ describe('the receive picker follows the route', () => {
     }).outputText;
     const SHARE = `0x${'5'.repeat(40)}`;
     const PLAIN = `0x${'4'.repeat(40)}`;
-    const make = new Function('getSwapDeliveryTokens', 'getSwapOutputTokens', 'crossChainReshieldSupported', 'isConfiguredShareTarget',
+    const make = new Function('getSwapDeliveryTokens', 'getSwapOutputTokens', 'crossChainReshieldSupported', 'isConfiguredShareTarget', 'conversionDepositTarget',
       `${code}\nreturn thirdPartyReceiveTokens;`);
     const pick = make(
       () => [{ address: PLAIN }],
       () => [{ address: PLAIN }, { address: SHARE }],
       (_s: number, d: number) => d === 56,
       (a: string) => a === SHARE,
+      (a: string) => a,
     );
     expect(pick(56, 1).map((t: { address: string }) => t.address)).toEqual([PLAIN, SHARE]);
     expect(pick(10, 1).map((t: { address: string }) => t.address)).toEqual([PLAIN]);
     expect(pick(1, 1).map((t: { address: string }) => t.address)).toEqual([PLAIN]);
   });
+
+  for (const destination of [1, 56, 10, 8453, 42161]) {
+    test(`chain ${destination} offers each yield asset once, preserving its private target`, () => {
+      const fn = find((node): node is ts.FunctionDeclaration => ts.isFunctionDeclaration(node)
+        && node.name?.text === 'thirdPartyReceiveTokens');
+      const code = ts.transpileModule(fn.getText(source).replace(/^export /, ''), {
+        compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.None },
+      }).outputText;
+      const deployments = PROD_YIELD_DEPLOYMENTS[destination];
+      const native = `0x${'e'.repeat(40)}`;
+      const shares = deployments.map((d) => ({ address: d.ppUSDC, symbol: `pp${d.nativeMode ? 'ETH' : d.underlyingSymbol}`, decimals: 18 }));
+      let offeredShares = shares;
+      const delivery = deployments.map((d) => ({
+        address: d.nativeMode ? native : d.underlying,
+        symbol: d.underlyingSymbol, decimals: d.underlyingDecimals, isNative: !!d.nativeMode,
+      }));
+      // An unrelated token with the same symbol must survive: symbols are not identities.
+      const unrelated = { address: `0x${'9'.repeat(40)}`, symbol: delivery[0].symbol, decimals: 6, isNative: false };
+      delivery.push(unrelated);
+      const make = new Function('getSwapDeliveryTokens', 'getSwapOutputTokens', 'crossChainReshieldSupported', 'isConfiguredShareTarget', 'conversionDepositTarget',
+        `${code}\nreturn thirdPartyReceiveTokens;`);
+      const pick = make(
+        () => delivery, () => offeredShares, () => true,
+        (a: string) => shares.some((s) => s.address.toLowerCase() === a.toLowerCase()),
+        (a: string, cid: number, isNative: boolean) => {
+          expect(cid).toBe(destination);
+          const d = deployments.find((d) => isNative ? d.nativeMode : d.underlying.toLowerCase() === a.toLowerCase());
+          return d?.ppUSDC ?? a;
+        },
+      );
+      const rows = pick(destination, destination === 1 ? 10 : 1);
+      expect(rows).toEqual([unrelated, ...shares]);
+      for (const share of shares) expect(rows.find((r: { address: string }) => r.address === share.address)).toBe(share);
+      // A configured share that is not available on this route must not hide its underlying.
+      offeredShares = shares.slice(1);
+      expect(pick(destination, destination === 1 ? 10 : 1)).toEqual([delivery[0], unrelated, ...offeredShares]);
+      // Local sends still use their existing delivery and ordinary-private-send rules.
+      expect(pick(destination, destination)).toBe(delivery);
+    });
+  }
 
   test('the choice is made from the recipient, not from the chain alone', () => {
     const body = memo();
