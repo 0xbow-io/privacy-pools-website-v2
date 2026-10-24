@@ -28,6 +28,7 @@ import { shareBalanceDisplay } from '@/services/share-balance-display';
 import type { ShareRate } from '@/services/share-rates';
 import { noteShortfall, noteShortfallMessage } from '@/services/swap-note-shortfall';
 import { friendlySwapError } from '@/services/swap-error-copy';
+import { SWAP_APPROVAL_CHECKING, SWAP_APPROVAL_UNAVAILABLE } from '@/services/swap-note-approval';
 
 const ROOT = join(new URL('.', import.meta.url).pathname, '..', '..');
 const read = (path: string) => readFileSync(join(ROOT, path), 'utf8');
@@ -129,6 +130,11 @@ describe('what the Swap tab renders never names a share', () => {
     const view = shareBalanceDisplay({ sharesExact: '1.5', shareSymbol: 'USDC', rate: undefined, priceMap: {}, fallbackPrice: 1 });
     expect(underlyingOnlyView(view, 'USDC')).toBe(view);
   });
+
+  test('the approval states name no share', () => {
+    expect(SWAP_APPROVAL_CHECKING).not.toMatch(SHARE_NAME);
+    expect(SWAP_APPROVAL_UNAVAILABLE).not.toMatch(SHARE_NAME);
+  });
 });
 
 /** Files that make up the Swap tab, the swap modal, swap-send and the swap review/success screens. */
@@ -140,6 +146,7 @@ const SWAP_SURFACES = [
   'services/swap-error-copy.ts',
   'services/swap-flows.ts',
   'services/swap-outcome-copy.ts',
+  'services/swap-note-approval.ts',
 ];
 /** These keep the share's own symbol when no rate is known, by design (Pat, 2026-10-21). */
 const SHARE_FALLBACK_HELPERS = /\b(?:approxUnderlyingText|tokenAmountLabel|shareAmountText|shareReviewHeadline)\(/;

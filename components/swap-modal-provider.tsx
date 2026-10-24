@@ -25,6 +25,8 @@ import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import { usePools } from '@/components/pools-provider';
 import { usePoolSession } from '@/hooks/use-pool-session';
+import { useLeafGate } from '@/hooks/use-leaf-gate';
+import { useNotes } from '@/hooks/use-notes';
 import { useSeedDerivationModal } from '@/components/seed-derivation-modal-provider';
 import { useKeystoreRegistrationModal } from '@/components/keystore-registration-modal-provider';
 import { useRequireConnection } from '@/hooks/use-require-connection';
@@ -100,6 +102,7 @@ import type { SwapTokenInfo } from '@/config/intent-swaps';
 import { assertRelayerSwapProcessor } from '@/services/relayer-details';
 import { registerSwapHandoff } from '@/services/swap-handoff';
 import { noteShortfall, noteShortfallMessage } from '@/services/swap-note-shortfall';
+import { SWAP_APPROVAL_CHECKING, SWAP_APPROVAL_UNAVAILABLE, swapApprovalBlock, swapApprovalFromGate } from '@/services/swap-note-approval';
 import { OpShell } from '@/components/op-shell';
 import { FlowProgress } from '@/components/ui/flow-progress';
 import { useInlineOpsCapable } from '@/hooks/use-inline-ops-capable';
@@ -674,9 +677,33 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     if (ok) setClaimCopied(true);
     return ok;
   }, [claimUrl]);
-  // null = ASP association-set membership not resolved yet → quoting is
-  // blocked (fail closed), mirroring the withdrawal flow's spendability gate.
-  const [spendableCommitments, setSpendableCommitments] = useState<Set<string> | null>(null);
+
+  // The notes the gate checks: the session's ACTIVE notes with value, read
+  // reactively, so a sync that lands after the Swap tab opened is checked too.
+  const { notes: sessionNotes } = useNotes();
+  const swapGateNotes = useMemo(
+    () => sessionNotes.filter((n) => n.status === NoteStatus.ACTIVE && BigInt(n.value) > 0n),
+    [sessionNotes],
+  );
+  const swapLeafGate = useLeafGate(swapGateNotes, { enabled: !isSui });
+  // ASP spendability (fail closed while unresolved): an ACTIVE note can still
+  // be awaiting association-set membership, and every input of a swap needs an
+  // ASP Merkle proof. The answer is the ONE shared gate the withdraw flow and
+  // the balances read (hooks/use-leaf-gate.ts, the session's bulk association
+  // set), so no request is made here and none names a note.
+  //
+  // DEV-590: this used to be a per-open effect calling getMerkleProof once per
+  // note (a full set download each) and catching EVERY failure as "not in the
+  // set". On a fresh session the ASP backoff window or a notes sync landing
+  // after the open made long-approved notes read as "not approved yet", and a
+  // retry worked. Loading, failure and notes the answer did not cover are now
+  // distinct from a verified "not approved" (services/swap-note-approval.ts).
+  const swapApproval = useMemo(
+    () => (isSui || sessionChainId !== chainId
+      ? ({ status: 'checking' } as const)
+      : swapApprovalFromGate(swapLeafGate, swapGateNotes)),
+    [isSui, sessionChainId, chainId, swapLeafGate, swapGateNotes],
+  );
 
   // Async-quote race protection: a monotonic generation invalidated on
   // every relevant edit/close/reset; only the newest request commits state.
@@ -915,7 +942,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     && (crossChainReshield || !inlineHubActive))
     || (sameChainReshield && inlineSend));
   const customSelected = isCustomSlippage(slippage, SLIPPAGE_OPTIONS);
-  const spendabilityResolved = spendableCommitments !== null;
+  const spendabilityResolved = swapApproval.status === 'ready';
   const canReview =
     !destinationWithdrawn
     && intentSwapInputSupported(chainId, fromToken.address)
@@ -944,46 +971,6 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       Animated.timing(sheetAnim, { toValue: 1, duration: 220, useNativeDriver: Platform.OS !== 'web' }).start();
     }
   }, [isOpen, sheetAnim]);
-
-  // ASP spendability resolution (fail closed while unresolved): an ACTIVE
-  // note can still be awaiting association-set membership; every input of a
-  // swap needs an ASP Merkle proof, so quoting from an unapproved lineage
-  // would fail only after witness generation. Mirrors the withdrawal flow.
-  useEffect(() => {
-    if (!isOpen || isSui) return;
-    let cancelled = false;
-    setSpendableCommitments(null);
-    (async () => {
-      try {
-        const activeNotes = (noteManager?.getNotes({ status: NoteStatus.ACTIVE }) ?? [])
-          .filter((n) => BigInt(n.value) > 0n);
-        if (activeNotes.length === 0) {
-          if (!cancelled) setSpendableCommitments(new Set());
-          return;
-        }
-        const { createASPClient, createHashService, createMerkleService } = await import('@/services/sdk-runtime');
-        const hashService = await createHashService();
-        const merkleService = createMerkleService(hashService);
-        const aspClient = await createASPClient(chainId, merkleService);
-        const next = new Set<string>();
-        await Promise.all(activeNotes.map(async (note) => {
-          try {
-            const labelHash = hashService.hash([note.label]);
-            if (!labelHash) return;
-            await aspClient.getMerkleProof(labelHash);
-            next.add(note.commitment);
-          } catch {
-            // No ASP proof for the label yet → not spendable.
-          }
-        }));
-        if (!cancelled) setSpendableCommitments(next);
-      } catch (err) {
-        log('warn', 'Swap', 'Spendability resolution failed. Staying closed', { error: String(err) });
-        // Leave null: quoting stays blocked rather than guessing.
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [isOpen, isSui, chainId, noteManager, log]);
 
   // Fee-commitment countdown while reviewing (from the snapshot's signed
   // expiration). On expiry the quote is dead — back to input with an honest
@@ -1500,23 +1487,25 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     requestFromToken: SwapTokenInfo,
     grossWei: bigint,
   ): { notes: Note[] } | { error: string; reason: 'unresolved' | 'uncovered' } => {
-    if (!spendableCommitments) {
-      return {
-        // A distinct reason, because confirm-time callers must NOT report this
-        // as "your notes no longer cover the amount" — it is an approval-state
-        // race, and misdiagnosing it sends the user looking at their balance.
-        reason: 'unresolved',
-        error: 'Note approval state is no longer available. Review again.',
-      };
-    }
     const heldNotes = (noteManager?.getNotes({ status: NoteStatus.ACTIVE }) ?? []).filter(
       (n: Note) =>
         String(n.tokenId).toLowerCase() === requestFromToken.address.toLowerCase()
         && BigInt(n.value) > 0n,
     );
-    const activeNotes = heldNotes.filter((n: Note) => spendableCommitments.has(n.commitment));
+    // Not known yet, or not readable, is a distinct reason: confirm-time callers
+    // must NOT report it as "your notes no longer cover the amount" or as notes
+    // waiting for approval (DEV-590). It is a wait for the ASP's answer.
+    if (swapApproval.status !== 'ready') {
+      return swapApprovalBlock(swapApproval, heldNotes.map((n: Note) => n.commitment))!;
+    }
+    const approved = swapApproval.approved;
+    const activeNotes = heldNotes.filter((n: Note) => approved.has(n.commitment));
     const selection = selectSwapInputNotes(activeNotes, grossWei);
     if (!selection.covered) {
+      // A held note the answer did not cover (it synced after the check) is
+      // unknown, not unapproved: never name it as waiting (DEV-590).
+      const unknown = swapApprovalBlock(swapApproval, heldNotes.map((n: Note) => n.commitment));
+      if (unknown) return unknown;
       // Which of the three limits it is, rather than one number that could be
       // any of them. The sum is over the SAME note set each figure is about:
       // everything held, what the ASP approved, and what one proof can spend.
@@ -1538,7 +1527,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       };
     }
     return { notes: selection.notes };
-  }, [spendableCommitments, noteManager, swapView, chainId]);
+  }, [swapApproval, noteManager, swapView, chainId]);
 
   /**
    * Make room for the registration modal without losing the form.
@@ -3007,7 +2996,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                 )}
                 {!spendabilityResolved && (
                   <Text className="text-[12px] leading-[17px] text-text-muted font-pp-regular">
-                    Confirming which notes are approved to spend…
+                    {swapApproval.status === 'unavailable' ? SWAP_APPROVAL_UNAVAILABLE : SWAP_APPROVAL_CHECKING}
                   </Text>
                 )}
 
