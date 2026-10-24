@@ -19,7 +19,7 @@
  * public-feed grid (PoolsProvider re-reads it when the grid publishes). Both
  * are timed by the grid, not by the user.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { feedData, publicFeeds } from '@/services/public-feed-scheduler';
 import type { PpUsdcRateHistoryResponse, YieldDepositsResponse } from '@/services/api-types';
@@ -204,5 +204,19 @@ export function useYieldEarned(params: {
     };
   }, [session, chainId]);
 
-  return state.session === session && state.chainId === chainId ? state.results : EMPTY_YIELD_EARNED;
+  // Until the first compute for this session answers, every share it will
+  // compute reads "computing", so the portfolio can tell "not yet" from "no
+  // figure". That first compute awaits the SDK import and one exchangeRate()
+  // per share, which can take a while. Derived, no request.
+  const computing = useMemo<YieldEarnedByShare>(() => {
+    if (!session || chainId == null) return EMPTY_YIELD_EARNED;
+    const namespaces = earnedNamespaces(session);
+    if (namespaces.length === 0) return EMPTY_YIELD_EARNED;
+    return new Map(namespaces.map((ns): [string, YieldEarnedEntry] => [
+      yieldEarnedKey(chainId, ns.deployment.ppUSDC),
+      { status: 'unavailable', reason: 'computing' },
+    ]));
+  }, [session, chainId]);
+
+  return state.session === session && state.chainId === chainId ? state.results : computing;
 }
