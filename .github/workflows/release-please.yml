@@ -1,0 +1,22 @@
+# Releases are cut by merging the "Release vX.Y.Z" PR this workflow keeps open on main.
+# Every merge to main updates that PR (version bump from conventional commit titles, changelog);
+# merging it tags vX.Y.Z and publishes the GitHub release. Nothing is released without that merge.
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      # googleapis/release-please-action v5.0.0, pinned by commit
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
