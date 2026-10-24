@@ -2,6 +2,13 @@
 
 All notable changes to the Privacy Pools v2 web app are documented in this file.
 
+## [1.2.2] - 2026-10-24
+
+### Fixed
+- remove duplicate receive assets across chains
+- derive own deposit review locally when the feed carries none
+- Keep share-link payloads out of the request path
+
 ## [1.2.1] - 2026-10-23
 
 ### Fixed
