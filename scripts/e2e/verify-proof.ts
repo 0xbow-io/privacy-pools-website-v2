@@ -55,8 +55,8 @@ try {
       await item.click().catch(() => {});
       await sleep(3000);
       await unlockIfPrompted(p);
-      const body = await waitForText(p, /\/verify\//, 60_000) ?? await bodyText(p);
-      const m = body.match(/https?:\/\/[^\s"']*\/verify\/[^\s"']*/);
+      const body = await waitForText(p, /\/verify#/, 60_000) ?? await bodyText(p);
+      const m = body.match(/https?:\/\/[^\s"']*\/verify#[^\s"']*/);
       if (m) { verifyUrl = m[0]; rowKind = /Partial viewing key|viewing key/i.test(body) ? 'viewing-key bundle' : /origin/i.test(body) ? 'proof of origin' : 'proof'; console.log(`  row ${i + 1}: ${rowKind} exported`); }
       else { await p.keyboard.press('Escape').catch(() => {}); await sleep(800); }
     } else {
@@ -86,7 +86,7 @@ try {
     `heading ${heading}, kind ${kindShown}, verified banner ${verified}, value rows ${rows}, amount ${amount}`);
 
   // Tampered: flip one character deep inside the payload.
-  const idx = verifyUrl.indexOf('/verify/') + 8;
+  const idx = verifyUrl.indexOf('/verify#') + 8;
   const enc = verifyUrl.slice(idx).replace(/[?#].*$/, '');
   const mid = Math.floor(enc.length / 2);
   const flipped = enc.slice(0, mid) + (enc[mid] === 'A' ? 'B' : 'A') + enc.slice(mid + 1);
@@ -134,8 +134,8 @@ try {
         await provable.click().catch(() => {});
         await sleep(3000);
         await unlockIfPrompted(p);
-        const body = await waitForText(p, /\/verify\//, 60_000) ?? await bodyText(p);
-        const m = body.match(/https?:\/\/[^\s"']*\/verify\/[^\s"']*/);
+        const body = await waitForText(p, /\/verify#/, 60_000) ?? await bodyText(p);
+        const m = body.match(/https?:\/\/[^\s"']*\/verify#[^\s"']*/);
         if (m) { originUrl = m[0]; console.log(`  row ${i + 1}: origin proof exported`); }
         else { await p.keyboard.press('Escape').catch(() => {}); await sleep(800); }
       } else {

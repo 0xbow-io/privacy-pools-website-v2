@@ -118,14 +118,14 @@ try {
         assert.ok(saved.chains?.['11155111'], 'backup includes Sepolia recovery state');
         record('unregistered backup', true, `download saved to ${path}`);
       }
-      payUrl = await readLink(payee.page, '/pay/');
+      payUrl = await readLink(payee.page, '/pay#');
       if (!payUrl) await sleep(2000);
     }
   }
   await payee.shot('unreg-request-created');
   record('create request (unregistered)', !!payUrl, payUrl ? `link ${payUrl}` : 'no /pay/ link appeared');
   if (!payUrl) throw new Error('no pay link');
-  const shared = decodePaymentRequestPayloadFromUrl(payUrl.split('/pay/')[1]);
+  const shared = decodePaymentRequestPayloadFromUrl(payUrl.split('/pay#')[1]);
   assert.equal(shared.recipientAddress, undefined, 'unsigned request keeps the payee private');
 
   // ---- B pays it via private transfer ----------------------------------------
@@ -169,7 +169,7 @@ try {
     const leaves = Array.from(document.querySelectorAll('*')).filter((n) => n.children.length === 0);
     return {
       payCta: leaves.some((n) => /^Pay via (Private Transfer|Wallet)$/.test((n.textContent || '').trim())),
-      bogusLink: /\/receive\/|\/import-note\//.test(t),
+      bogusLink: /\/receive[/#]|\/import-note[/#]/.test(t),
     };
   });
   record('terminal paid state', !terminal.payCta && !terminal.bogusLink,

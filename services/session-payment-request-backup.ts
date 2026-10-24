@@ -26,7 +26,7 @@ export function parseSessionRequestBackup(value: unknown, owner: string): Sessio
     let matches = false;
     try {
       const url = new URL(record.payLink);
-      const encoded = url.pathname.match(/\/pay\/([A-Za-z0-9_-]+)$/)?.[1];
+      const encoded = (url.pathname + url.hash).match(/\/pay[/#]([A-Za-z0-9_-]+)$/)?.[1];
       if ((url.protocol === 'http:' || url.protocol === 'https:') && encoded) {
         const payload = decodePaymentRequestPayloadFromUrl(encoded);
         matches = payload.kind === 'ppv2-payment-request' && payload.version === 2

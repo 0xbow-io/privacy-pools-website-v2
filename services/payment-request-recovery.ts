@@ -271,7 +271,7 @@ async function importSingleRequestPayload(
       const createdAt = Date.parse(payload.createdAt);
       const payLink = /^https?:\/\//i.test(rawPayload.trim())
         ? rawPayload.trim()
-        : linkBase ? `${linkBase}/pay/${encodePaymentRequestPayloadForUrl(payload)}` : null;
+        : linkBase ? `${linkBase}/pay#${encodePaymentRequestPayloadForUrl(payload)}` : null;
       const records = parseSessionRequestBackup([{
         requestId: payload.requestId,
         chainId: payload.chainId,

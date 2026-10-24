@@ -1426,7 +1426,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         setOutputPayload(JSON.stringify(request, null, 2));
         setCreatedDraft({ amountLabel: frozenAmountLabel, amountHint: frozenView.hint });
         const stellarPayLink = canUseBrowserApis()
-          ? withStellarLinkParams(`${shareLinkBase()}/pay/${encodeStellarBlindRequest(request)}`, ACTIVE_APP_ENVIRONMENT, { stagingMainnet: STAGING_MAINNET_EXPLICIT })
+          ? withStellarLinkParams(`${shareLinkBase()}/pay#${encodeStellarBlindRequest(request)}`, ACTIVE_APP_ENVIRONMENT, { stagingMainnet: STAGING_MAINNET_EXPLICIT })
           : null;
         if (stellarPayLink) setPayLink(stellarPayLink);
         // Listed under Payment Requests (this tab, and kept in this browser
@@ -1687,7 +1687,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         setOutputPayload(JSON.stringify(request, null, 2));
         setCreatedDraft({ amountLabel: frozenAmountLabel, amountHint: frozenView.hint });
         const createdPayLink = canUseBrowserApis()
-          ? `${shareLinkBase()}/pay/${encodePaymentRequestPayloadForUrl(request)}`
+          ? `${shareLinkBase()}/pay#${encodePaymentRequestPayloadForUrl(request)}`
           : null;
         if (createdPayLink) setPayLink(createdPayLink);
         // Session-scoped listing (product call): the request must show in the
@@ -1847,7 +1847,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
 
         setCreatedDraft({ amountLabel: frozenAmountLabel, amountHint: frozenView.hint });
       if (canUseBrowserApis()) {
-        setPayLink(`${shareLinkBase()}/pay/${encodePaymentRequestPayloadForUrl(shareableRequest)}`);
+        setPayLink(`${shareLinkBase()}/pay#${encodePaymentRequestPayloadForUrl(shareableRequest)}`);
       }
       toast({
         title: shareableRequest.signature
@@ -2428,7 +2428,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         };
         setOutputPayload(JSON.stringify(receiptPayload, null, 2));
         if (canUseBrowserApis()) {
-          setReceiveLink(`${shareLinkBase()}/receive/${encodePaymentReceiptPayloadForUrl(receiptPayload)}`);
+          setReceiveLink(`${shareLinkBase()}/receive#${encodePaymentReceiptPayloadForUrl(receiptPayload)}`);
         }
         // Persist everything the receipt link needs (upsert REPLACES by
         // txHash, so the base fields ride along). Until 2026-08-25 this
@@ -3400,7 +3400,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         };
         setOutputPayload(JSON.stringify(receiptPayload, null, 2));
         if (canUseBrowserApis()) {
-          setReceiveLink(`${shareLinkBase()}/receive/${encodePaymentReceiptPayloadForUrl(receiptPayload)}`);
+          setReceiveLink(`${shareLinkBase()}/receive#${encodePaymentReceiptPayloadForUrl(receiptPayload)}`);
         }
         recordPaidRequest({
           ...paidViaTransfer,
