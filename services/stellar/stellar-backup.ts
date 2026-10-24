@@ -251,12 +251,12 @@ export function mergeStellarRequestRecords<N extends { commitment: string }, T e
   return { merged: mergeStellarExports<N, T>(live, { notes: [] as N[], syncCursor: '0x0', paymentRequests: [...records] }), added };
 }
 
-/** A restored pay link must be one of ours: a /pay/xlm. link on an origin this app shares from. */
+/** A restored pay link must be one of ours: a /pay#xlm. (or older /pay/xlm.) link on an origin this app shares from. */
 function isOwnPayLink(link: string, origins: readonly string[]): boolean {
   try {
     const url = new URL(link);
     const trusted = origins.some((o) => { try { return new URL(o).origin === url.origin; } catch { return false; } });
-    return trusted && (url.protocol === 'https:' || url.protocol === 'http:') && url.pathname.startsWith('/pay/xlm.');
+    return trusted && (url.protocol === 'https:' || url.protocol === 'http:') && /^\/pay[/#]xlm\./.test(url.pathname + url.hash);
   } catch {
     return false;
   }

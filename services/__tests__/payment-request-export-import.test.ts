@@ -52,7 +52,7 @@ test('real export/import preserves session requests alongside SDK backups', () =
       return {
         requestId: payload.requestId, chainId, owner: recipient,
         tokenAddress: token, amount: payload.amount, createdAtMs: Date.parse(payload.createdAt),
-        payLink: 'https://example.com/pay/' + encodePaymentRequestPayloadForUrl(payload), signed,
+        payLink: 'https://example.com/pay#' + encodePaymentRequestPayloadForUrl(payload), signed,
       };
     };
     const first = makeRecord(1);
@@ -128,7 +128,7 @@ test('real export/import preserves session requests alongside SDK backups', () =
     await assert.rejects(importAllPaymentRequests(first.payLink, other));
     assert.equal(listSessionPaymentRequests(other).length, 0);
     const { decodePaymentRequestPayloadFromUrl } = await import('./services/payment-request-codec');
-    const signedPayload = decodePaymentRequestPayloadFromUrl(second.payLink.split('/pay/')[1]);
+    const signedPayload = decodePaymentRequestPayloadFromUrl(second.payLink.split('/pay#')[1]);
     assert.equal((await importAllPaymentRequests(JSON.stringify(signedPayload), owner, 'https://example.com')).restored, 1);
     assert.equal(listSessionPaymentRequests(owner).find(r => r.chainId === 10).payLink, second.payLink);
     // Local state wins, even when the backup has an older date for the same request.

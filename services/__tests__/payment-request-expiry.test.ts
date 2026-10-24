@@ -158,7 +158,7 @@ describe('expiresAt round-trips', () => {
       noteSecretsMap: [[h('01'), h('99')]],
     };
     const link = buildShareLinkForRecord(CHAIN, record, 'https://x.test')!;
-    const decoded = decodePaymentRequestPayloadFromUrl(link.split('/pay/')[1]) as PaymentRequestPayloadV3;
+    const decoded = decodePaymentRequestPayloadFromUrl(link.split('/pay#')[1]) as PaymentRequestPayloadV3;
     expect(BigInt(decoded.expiresAt!)).toBe(BigInt(EXPIRES_AT));
   });
 

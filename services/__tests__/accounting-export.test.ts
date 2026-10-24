@@ -608,7 +608,7 @@ describe('accounting pipeline (golden)', () => {
     expect(csv).not.toContain(hx('9')); // internal spend suppressed
     const recvLine = lines.find((l) => l.includes(hx('3')))!;
     expect(recvLine.split(',').slice(3, 5)).toEqual(['28', 'ETH']); // 14+14 summed
-    expect(recvLine).toContain('/verify/pvkb1.'); // plural bundles → batch link
+    expect(recvLine).toContain('/verify#pvkb1.'); // plural bundles → batch link
     const wLine = lines.find((l) => l.includes(hx('6')))!;
     expect(wLine.split(',').slice(1, 7)).toEqual(['0.99', 'ETH', '', '', '0.01', 'ETH']); // folded once, fee once
 
