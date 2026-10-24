@@ -6,7 +6,7 @@ import { useShareAmountField } from '@/hooks/use-share-amount-field';
 // Display headlines use underlying through shareBalanceDisplay; shares appear
 // only in the (i) hint, in fields labelled with the share symbol, or while the
 // rate is unknown. Never print a share count under the underlying symbol.
-import { useBalanceDisplay } from '@/hooks/use-balance-display';
+import { useShareFreeBalanceDisplay } from '@/hooks/use-balance-display';
 import { BalanceAmount } from '@/components/pools/balance-amount';
 import { crossFlowsEnabled } from '@/config/intent-lockdown';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
@@ -17,7 +17,7 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 import { KeySourceChangedError } from '@/components/sdk-provider';
 import { truncateAddress } from '@/services/hex-format';
 import { isSessionInitTimeout } from '@/services/session-init-timeout';
-import { tokenAmountLabel, displayTokenSymbol, isShareSymbol } from '@/services/share-display';
+import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, shareFreeText } from '@/services/share-display';
 import { reportErrorReport } from '@/services/error-reports';
 import { classifyFailure } from '@/services/error-reports-cause';
 import { stellarErrorReportStage, type ErrorReportStage } from '@/services/error-reports-failure';
@@ -400,7 +400,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   // chainId` switch guard below meaningful: it used to compare the wallet's
   // chain against itself and could never fire.
   const chainId = useActiveEvmChain().id;
-  const balanceDisplay = useBalanceDisplay(chainId);
+  const balanceDisplay = useShareFreeBalanceDisplay(chainId);
   const withOpLock = useOpLock();
   const queryClient = useQueryClient();
   // Sui/EVM branch follows the app-wide chain SELECTION (the single routing
@@ -540,9 +540,17 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   const diagnosticTokenRef = useRef('ETH');
   // The stage the running transfer last entered, for the failure report.
   const transferPhaseRef = useRef<ErrorReportStage>('unknown');
+  // The latest share-free amount renderer, read through a ref so a rate or
+  // price refresh does not change reportTransferError's identity.
+  const errorAmountTextRef = useRef((exact: string, symbol: string) => balanceDisplay(exact, symbol, chainId).text);
+  errorAmountTextRef.current = (exact: string, symbol: string) => balanceDisplay(exact, symbol, chainId).text;
   const reportTransferError = useCallback((msg: string | null, cause?: unknown, stage?: string) => {
-    setTransferError(msg);
-    if (msg) errorToast({ title: msg, variant: 'destructive' });
+    // What the user reads never names a share, whoever wrote the message (the
+    // SDK and relayer errors carry their own units). Classification below
+    // still reads the raw message.
+    const shown = msg == null ? msg : shareFreeText(msg, (exact, symbol) => errorAmountTextRef.current(exact, symbol));
+    setTransferError(shown);
+    if (shown) errorToast({ title: shown, variant: 'destructive' });
     // The fact plus the failure CLASS, never the message. See the same block
     // in the withdraw provider. The values below ride in a separate bag that
     // only a staging build sends - services/error-reports.ts decides.
@@ -1508,8 +1516,10 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
 
   // Render error figures at the same display boundary as balances. The
   // validation memo above remains in shares and has no rate dependencies.
-  const displayAmountError = amountError?.replace(/(?:≈\s*)?(\d+(?:\.\d+)?)\s+(ppETH|ppUSDC|ppUSDT)\b/gi,
-    (_, exact: string, symbol: string) => balanceDisplay(exact, symbol, chainId).text);
+  // Every configured share, not a hand list, and the renderer is share-free:
+  // the underlying at the live rate or "0.1 ETH shares" until it loads.
+  const displayAmountError = amountError == null ? amountError
+    : shareFreeText(amountError, (exact, symbol) => balanceDisplay(exact, symbol, chainId).text);
 
   const recipientError = useMemo(() => {
     const trimmed = recipientInput.trim();

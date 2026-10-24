@@ -1,6 +1,7 @@
 import { spendableBalanceLabel } from '@/services/spendable-balance-label';
 import { useShareAmountField } from '@/hooks/use-share-amount-field';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
+import { shareUnitLabel } from '@/services/share-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { SWAP_DEPOSIT_REFUND_NOTE } from '@/services/swap-deposit-copy';
 import { ENS_UNSUPPORTED_MESSAGE, isPotentialEnsName } from '@/services/ens';
@@ -3138,7 +3139,7 @@ export function ActionHub({
     const fiatTokenLine = a === 'shield'
       ? `${amount || '0'} ${displayTokenSymbol(payMeta.symbol)}`
       : a === 'request'
-        ? `${requestAmount || '0'} ${isShareSymbol(requestToken.symbol) ? requestToken.symbol : displayTokenSymbol(requestToken.symbol)}`
+        ? `${requestAmount || '0'} ${shareUnitLabel(requestToken.symbol)}`
         : `${amountField.value || '0'} ${amountField.symbol}`;
     // A created request is frozen into its payload and its pay link: the figure
     // stays visible but inert. The PILL stays live — switching the token is the
@@ -3554,7 +3555,7 @@ export function ActionHub({
               <TokenNetworkIcon symbol={requestToken.symbol} size={28} badgeSize={16} badgeTestnetLabel={false} chainId={requestToken.chainId} />
               {/* nw-keep(data-color): pill text uses the runtime per-asset hue */}
               <Text className="font-pp-sans-semi-bold text-[15px]" style={{ color: (TokenHues[colorScheme][requestToken.symbol] ?? TokenHues[colorScheme].ETH).fg }}>
-                {isShareSymbol(requestToken.symbol) ? requestToken.symbol : displayTokenSymbol(requestToken.symbol)}
+                {poolDisplayLabel(requestToken.symbol, requestToken.chainId)}
               </Text>
               {/* Sui requests are always native SUI (the create path emits
                   0x2::sui::SUI): no sheet, so no caret. */}

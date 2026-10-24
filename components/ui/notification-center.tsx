@@ -8,7 +8,7 @@
 // Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
 // MAX retains the original exact shares. USD edits use an exact decimal price
 // in that same boundary. No other operation converts display back.
-import { useBalanceDisplay } from '@/hooks/use-balance-display';
+import { useShareFreeBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { useEffect, useMemo, useState } from 'react';
 import { rowTypeLabel } from '@/services/row-type-label';
@@ -67,7 +67,7 @@ function useNow(intervalMs = 10_000): number {
 
 
 function NotificationRow({ tx, colors, colorScheme }: { tx: Transaction; colors: (typeof Colors)['light']; colorScheme: 'light' | 'dark' }) {
-  const balanceDisplay = useBalanceDisplay(tx.chainId);
+  const balanceDisplay = useShareFreeBalanceDisplay(tx.chainId);
   const amountView = balanceDisplay(tx.tokenAmount, tx.asset, tx.chainId, tx.tokenAddress);
   const swapAmount = (leg: SwapLeg) => balanceDisplay(leg.tokenAmount, leg.asset, leg.chainId, leg.tokenAddress).text;
   const pending = tx.status === 'pending';

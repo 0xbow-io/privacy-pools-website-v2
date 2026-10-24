@@ -14,6 +14,6 @@ test('the fee-overflow error offers to send the most that fits', () => {
   expect(block).toContain('{amountError && relayFeeExceeds && relayFeeMaxSend > 0n && (');
   // It fills exactly the amount the error message names.
   expect(block).toContain('onPress={() => setAmount(formatUnits(relayFeeMaxSend, selectedDecimals))}');
-  expect(source).toContain('const displayAmountError = amountError?.replace(');
+  expect(source).toContain('shareFreeText(amountError, (exact, symbol) => balanceDisplay(exact, symbol, chainId).text)');
   expect(source).toContain('Send at most ${tokenAmountLabel(formatUnits(relayFeeMaxSend, selectedDecimals), selectedSymbol)}');
 });

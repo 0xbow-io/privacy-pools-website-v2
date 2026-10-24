@@ -1,4 +1,4 @@
-import { approxUnderlyingText } from '@/services/share-display';
+import { shareCountLabel } from '@/services/share-display';
 import { formatShortfallAmount } from '@/services/relayed-payment-shortfall';
 // How a failed transfer attempt is classified, and why it matters.
 //
@@ -171,10 +171,11 @@ export function translateSdkTransactError(
       return null;
     }
     const short = requested > available ? requested - available : 0n;
-    // A share figure reads as its coin, approximately (services/share-display.ts).
+    // A share figure is a count of the coin's shares ("0.1 ETH shares"), never
+    // the share's own name (services/share-display.ts).
     // Costs round up, what the notes hold rounds down (Mike, #282).
     const f = (v: bigint, up: boolean) =>
-      approxUnderlyingText(`${formatShortfallAmount(v, token.decimals, up, token.symbol)} ${token.symbol}`, token.symbol);
+      shareCountLabel(formatShortfallAmount(v, token.decimals, up, token.symbol), token.symbol);
     return `Your balance isn't high enough. This payment needs ${f(requested, true)}. The notes selected for it hold ${f(available, false)}. You are ${f(short, true)} short. Nothing was sent and no notes were spent.`;
   }
   if (/Too few noteAddressHashes/i.test(message)) {
