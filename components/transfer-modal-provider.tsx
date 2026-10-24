@@ -175,7 +175,8 @@ function getTokenSymbol(tokenId: string): string {
  * What a third party can receive on `destinationChainId`: every plain asset a
  * wallet payout can deliver (Withdraw), plus, across chains the reshield
  * serves, the destination's yield shares, which reshield-and-transfer-
- * crosschain delivers as a private note. Shares are never a wallet payout.
+ * crosschain delivers as a private note. Prefer that private target over its
+ * plain counterpart so each asset appears once. Shares are never a wallet payout.
  */
 export function thirdPartyReceiveTokens(destinationChainId: number, sourceChainId: number): SwapTokenInfo[] {
   const delivery = getSwapDeliveryTokens(destinationChainId);
@@ -183,7 +184,13 @@ export function thirdPartyReceiveTokens(destinationChainId: number, sourceChainI
   const seen = new Set(delivery.map((t) => t.address.toLowerCase()));
   const shares = getSwapOutputTokens(destinationChainId, sourceChainId)
     .filter((t) => isConfiguredShareTarget(t.address, destinationChainId) && !seen.has(t.address.toLowerCase()));
-  return [...delivery, ...shares];
+  const privateTargets = new Set(shares.map((t) => t.address.toLowerCase()));
+  // Use the destination's configured address mapping, not the display symbol:
+  // ppETH covers native ETH too, and unrelated tokens may share a symbol.
+  // Only an actually offered share can replace its plain delivery option.
+  return [...delivery.filter((t) => !privateTargets.has(
+    conversionDepositTarget(t.address, destinationChainId, !!t.isNative).toLowerCase(),
+  )), ...shares];
 }
 
 function truncateSecret(secret: string): string {
