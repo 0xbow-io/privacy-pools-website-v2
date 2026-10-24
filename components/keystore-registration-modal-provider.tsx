@@ -1039,20 +1039,22 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
         // "Insufficient funds" is the one the QA screenshot was full of, and
         // the raw wallet string names neither the chain nor a way forward. Say
         // what is missing and where.
-        const insufficient = describeInsufficientGas(
-          message,
-          getChainConfig(chainId)?.nativeCurrency.symbol ?? 'ETH',
-          getChainConfig(chainId)?.displayName ?? 'this network',
-        );
+        // The whole error chain: wallets put the reason (rejected, underpriced,
+        // insufficient funds, node unreachable) in `cause`/`details`, so the
+        // message alone hid it behind the generic line (DEV-589).
+        const detail = collectErrorText(err);
+        const nativeSymbol = getChainConfig(chainId)?.nativeCurrency.symbol ?? 'ETH';
+        const chainName = getChainConfig(chainId)?.displayName ?? 'this network';
+        const insufficient = describeInsufficientGas(detail, nativeSymbol, chainName);
         // Never a raw viem dump on screen: keep it in the console for
         // debugging and show one line the user can act on.
-        const kind = classifyRegistrationError(message, sentUnconfirmed);
-        if (kind !== 'plain' && kind !== 'rejected') console.warn('[KeystoreRegistration] registration failed', message);
+        const kind = classifyRegistrationError(message, sentUnconfirmed, detail);
+        if (kind !== 'plain' && kind !== 'rejected') console.warn('[KeystoreRegistration] registration failed', { chainId, kind, detail });
         // A sent tx that may still land: Register stays off until its receipt
         // is seen (or the cap passes), across close and reopen.
         if (sentUnconfirmed && sentHash) watchSentRegistration(sentHash);
         setErrorMessage(kind === 'pending' || kind === 'rejected' || !insufficient
-          ? describeRegistrationError(message, sentUnconfirmed, getChainConfig(chainId)?.displayName ?? 'this network')
+          ? describeRegistrationError(message, sentUnconfirmed, chainName, { detail, nativeSymbol })
           : insufficient);
       }
       // The gasless path cancels at a SIGNATURE prompt, so a failed run leaves

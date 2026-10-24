@@ -7,8 +7,9 @@
 //
 //   gas:       the node's estimate + 20% (a per-kind budget when it cannot estimate)
 //   EIP-1559:  tip = max(eth_maxPriorityFeePerGas, chain floor), maxFee = 2 x base fee + tip
-//   legacy:    gasPrice = eth_gasPrice as is (BNB Chain)
+//   legacy:    gasPrice = eth_gasPrice as is (a block without a base fee)
 //   unknown:   block unread -> no fee fields, the wallet prices it
+//   BNB Chain: no fee fields, the wallet prices it (DEV-589, WALLET_PRICED_CHAINS)
 //
 // `costWei` = gas x maxFee (legacy: gas x gasPrice) is what the wallet reserves
 // and is the one figure any in-app estimate or pre-check shows.
@@ -188,15 +189,27 @@ export interface FeeMarket {
 }
 
 /**
- * Chains priced as legacy whatever their blocks say. BNB Chain blocks can
- * carry `baseFeePerGas: 0`, which would otherwise read as EIP-1559.
+ * Chains whose wallet txs carry NO fee fields: the wallet prices them, as it
+ * did before DEV-542 (DEV-589).
+ *
+ * BNB Chain blocks carry `baseFeePerGas: 0`, so wallets disagree on what the
+ * chain is (MetaMask turns a dapp `gasPrice` into a type-2 tx, others sign it
+ * legacy) and each broadcasts through its own node, whose minimum gas price
+ * need not be the app RPC's `eth_gasPrice` (0.05 gwei). The forced `gasPrice`
+ * was the one BNB-only field DEV-542 added, and registering from a mobile
+ * wallet failed on BNB only after it shipped. The fee there is a fraction of a
+ * cent, so the wallet's own tier costs nothing that matters. The gas limit is
+ * still set, as on every other chain, and `costWei` is bounded at 2 x gasPrice
+ * so the pre-checks and the top-up sizing keep their headroom.
  */
-export const LEGACY_FEE_CHAINS: ReadonlySet<number> = new Set([56, 97]);
+export const WALLET_PRICED_CHAINS: ReadonlySet<number> = new Set([56, 97]);
 
 /** eth_gasPrice + latest block (one retry) + tip suggestion. */
 export async function readFeeMarket(client: FeeReadClient, chainId?: number | null): Promise<FeeMarket> {
-  if (chainId != null && LEGACY_FEE_CHAINS.has(chainId)) {
-    return { gasPriceWei: await client.getGasPrice(), eip1559: false, priorityFeeWei: null, baseFeeWei: null };
+  if (chainId != null && WALLET_PRICED_CHAINS.has(chainId)) {
+    // `eip1559: null` is the "no fee fields, the wallet prices it" plan. The
+    // gas price is still read: it bounds `costWei` for the in-app checks.
+    return { gasPriceWei: await client.getGasPrice(), eip1559: null, priorityFeeWei: null, baseFeeWei: null };
   }
   const [gasPriceWei, block] = await Promise.all([
     client.getGasPrice(),

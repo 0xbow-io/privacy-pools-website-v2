@@ -224,13 +224,21 @@ describe('wallet tx fee policy (DEV-542)', () => {
     expect(held < 840_000_000_000_000n).toBe(true);
   });
 
-  test('BNB Chain with baseFeePerGas 0 is priced legacy, never EIP-1559', async () => {
+  test('BNB Chain: no fee fields, the wallet prices it; gas limit and cost bound kept (DEV-589)', async () => {
     for (const chainId of [56, 97]) {
-      const c = client({ block: { baseFeePerGas: 0n } });
+      const c = client({ block: { baseFeePerGas: 0n }, gas: 51_084n });
       const plan = await priceWalletTx(c, TX, null, chainId);
-      expect(plan?.fees).toEqual({ gasPrice: GAS_PRICE });
-      expect('maxFeePerGas' in walletTxFields(plan)).toBe(false);
+      expect(plan?.fees).toBeNull();
+      expect(walletTxFields(plan)).toEqual({ gas: (51_084n * 12n) / 10n });
+      // Bounded at 2 x gasPrice: pre-checks and top-ups keep headroom over the wallet's tier.
+      expect(plan?.costWei).toBe(((51_084n * 12n) / 10n) * 2n * GAS_PRICE);
       expect(c.calls).not.toContain('tip');
+      expect(c.calls).not.toContain('block');
+    }
+    // Every other chain keeps the DEV-542 caps.
+    for (const chainId of [1, 10, 8453]) {
+      const plan = await priceWalletTx(client(), TX, null, chainId);
+      expect('maxFeePerGas' in walletTxFields(plan)).toBe(true);
     }
   });
 
