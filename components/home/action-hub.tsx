@@ -74,7 +74,7 @@ import { fiatEntryAvailable, formatUsdLabel, sanitizeUsdInput, shieldDestination
 import { getUiParam, pushUiParamEntry, retireUiParamEntry, rebaseUiParamEntry, subscribeUiUrl } from '@/components/ui-url-events';
 import { useShareYield } from '@/hooks/use-share-yield';
 import { useYieldVaultProbeVersion } from '@/hooks/use-yield-vault-probe';
-import { displayTokenSymbol, isShareSymbol, shareRedemptionDisclosure } from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol, shareRedemptionDisclosure, underlyingOnlyView } from '@/services/share-display';
 import { formatTokenBalance, isStablecoin } from '@/services/token-format';
 import { conversionFundingToken, targetAcceptsConversion } from '@/config/intent-targets';
 import { getYieldShareToken } from '@/services/share-yield';
@@ -3001,8 +3001,10 @@ export function ActionHub({
   const renderZone = (a: Action) => {
     const { symbol: pageTargetSymbol, chainId: pageChainId, shielded: pageShielded } = pageFigures[a];
     const pagePool = data.myPools.find((p) => p.name.toUpperCase() === pageTargetSymbol.toUpperCase() && p.chainId === pageChainId);
-    const pageBalanceView = balanceDisplay(a === 'withdraw' ? withdrawSpendableExact : pageShielded.exact, pageTargetSymbol, pageChainId, pagePool?.tokenAddress);
-    const pagePendingView = balanceDisplay(pagePool?.pendingTokenExact ?? '0', pageTargetSymbol, pageChainId, pagePool?.tokenAddress);
+    // The headline never names the share (DEV-591): the underlying at the live
+    // rate, or "0.00999 ETH shares" until it is known. Display only.
+    const pageBalanceView = underlyingOnlyView(balanceDisplay(a === 'withdraw' ? withdrawSpendableExact : pageShielded.exact, pageTargetSymbol, pageChainId, pagePool?.tokenAddress), pageTargetSymbol);
+    const pagePendingView = underlyingOnlyView(balanceDisplay(pagePool?.pendingTokenExact ?? '0', pageTargetSymbol, pageChainId, pagePool?.tokenAddress), pageTargetSymbol);
     // The single source for the CTA's dead state. It used to be written twice
     // inline (once for `disabled`, once for the opacity class), which is how a
     // condition can be added to the look and not to the behaviour.

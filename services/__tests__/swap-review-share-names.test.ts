@@ -7,14 +7,14 @@
  * "1 ppUSDC ~ 0.985932 USDT" (QA, 2026-09-22).
  *
  * The renamed figure must also stay honest. A share count is not the same
- * number as the underlying, so it carries the approximate marker; the gap is
- * the accrued rate and it understates rather than overstates. That is
- * `approxUnderlyingText`, which this asserts rather than restates.
+ * number as the underlying, so the review converts it at the live rate
+ * (`swapView`), and until the rate is known reads it as "5 USDC shares"
+ * (`shareCountLabel`), never as the share's own name (DEV-591).
  */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { approxUnderlyingText, displayTokenSymbol, isShareSymbol } from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol, shareCountLabel } from '@/services/share-display';
 
 const SOURCE = readFileSync(
   join(new URL('.', import.meta.url).pathname, '..', '..', 'components', 'swap-modal-provider.tsx'),
@@ -54,13 +54,16 @@ describe('the review renders no raw share symbol', () => {
     test(`"${label}" is renamed and marked approximate`, () => {
       const row = payoutRow(label);
       expect(row).not.toBeNull();
-      expect(row).toContain('balanceDisplay(');
+      // DEV-591: through swapView, which never names the share.
+      expect(row).toContain('swapView(');
     });
   }
 
-  test('the rate row names the underlying on both sides', () => {
-    expect(SOURCE).toContain("balanceDisplay('1', snapshot.fromToken.symbol, chainId).symbol");
-    expect(SOURCE).toContain("balanceDisplay('1', snapshot.outputToken.symbol, snapshot.destinationChainId).symbol");
+  test('the rate row names the underlying on both sides, and only between converted figures', () => {
+    expect(SOURCE).toContain("swapView('1', snapshot.fromToken.symbol, chainId).symbol");
+    expect(SOURCE).toContain("swapView('1', snapshot.outputToken.symbol, snapshot.destinationChainId).symbol");
+    expect(SOURCE).toContain("swapView('1', snapshot.fromToken.symbol, chainId).converted");
+    expect(SOURCE).toContain("swapView('1', snapshot.outputToken.symbol, snapshot.destinationChainId).converted");
   });
 });
 
@@ -72,18 +75,19 @@ describe('the rename is honest about what a share count is', () => {
   ];
 
   for (const [share, underlying] of cases) {
-    test(`${share} reads as ${underlying}, approximately`, () => {
+    test(`${share} reads as ${underlying}, never as itself`, () => {
       expect(isShareSymbol(share)).toBe(true);
       expect(displayTokenSymbol(share)).toBe(underlying);
-      const text = approxUnderlyingText(`5 ${share}`, share);
-      expect(text).toBe(`5 ${share}`);
-      expect(text).toContain(share);
+      // Without a rate the count is plainly shares of the coin (DEV-591).
+      const text = shareCountLabel('5', share);
+      expect(text).toBe(`5 ${underlying} shares`);
+      expect(text).not.toContain(share);
     });
   }
 
   test('a plain asset is left exactly as it was', () => {
     for (const plain of ['USDC', 'cBTC', 'BNB']) {
-      expect(approxUnderlyingText(`5 ${plain}`, plain)).toBe(`5 ${plain}`);
+      expect(shareCountLabel('5', plain)).toBe(`5 ${plain}`);
     }
   });
 });

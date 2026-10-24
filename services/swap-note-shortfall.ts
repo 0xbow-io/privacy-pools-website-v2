@@ -10,7 +10,7 @@
  *
  * Pure so it can be tested: the component that owns the note set cannot be.
  */
-import { approxUnderlyingText, displayTokenSymbol } from '@/services/share-display';
+import { displayTokenSymbol, shareCountLabel } from '@/services/share-display';
 import { formatTokenUnits } from '@/services/intent-swaps';
 
 export type NoteShortfallReason = 'unapproved' | 'input-cap' | 'insufficient';
@@ -50,11 +50,16 @@ export function noteShortfallMessage(
   shortfall: NoteShortfall,
   units: { symbol: string; decimals: number },
   maxInputs = 5,
+  /**
+   * Display text for a figure in the spent asset's units. The swap passes its
+   * underlying view, so a share reads as the coin at the live rate. Without it
+   * a share count reads "0.00999 ETH shares": never the share's own name
+   * (DEV-591), never a count under the bare coin name.
+   */
+  formatAmount?: (wei: bigint) => string,
 ): string {
-  // A share reads as its coin, and its amounts are share counts, so they carry
-  // the approximate marker (services/share-display.ts). Anything else is as is.
   const coin = displayTokenSymbol(units.symbol);
-  const amount = (wei: bigint) => approxUnderlyingText(`${formatTokenUnits(wei, units.decimals)} ${units.symbol}`, units.symbol);
+  const amount = formatAmount ?? ((wei: bigint) => shareCountLabel(formatTokenUnits(wei, units.decimals), units.symbol));
   if (shortfall.selectableWei <= 0n && shortfall.reason === 'unapproved') {
     return `None of your ${coin} notes are approved yet. ${amount(shortfall.withheldWei)} is waiting.`;
   }
