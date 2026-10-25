@@ -160,7 +160,6 @@ export function shareReviewHeadline(args: {
   // A failed rate read keeps the count under its own share symbol.
   return `${format(shares, shareSymbol)} ${shareSymbol}`;
 }
-
 /**
  * A preformatted share COUNT on a surface that never names the share (the Swap
  * tab, DEV-591): "0.00999 ETH shares". The coin the user knows, and plainly a
