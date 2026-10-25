@@ -4,19 +4,13 @@ import { usePathname } from 'expo-router';
 import { useMultiChainWallet } from '@/hooks/use-multi-chain-wallet';
 import { usePoolSession } from '@/hooks/use-pool-session';
 import { ExploreTabBar, type MobileNavTab } from '@/components/home/explore-tab-bar';
-import { parsePanelParam, type DrawerSection } from '@/components/home/explore-panel';
+import { parsePanelParam } from '@/components/home/explore-panel';
 import { MobileMoreDrawer } from '@/components/mobile-more-drawer';
 import { getUiParam, installUiUrlGuard, subscribeUiUrl } from '@/components/ui-url-events';
 
 import { useAppNavigation } from '@/hooks/use-app-navigation';
 import { showBottomNav } from '@/services/header-nav';
 import { NATIVE_BAR_TABS } from '@/services/native-bar-tabs';
-
-/** Bar tab → the /explore/[section] route param (PANEL_PARAMS keys). */
-const EXPLORE_ROUTE: Record<DrawerSection, string> = {
-  mine: 'balances',
-  activity: 'activity',
-};
 
 /**
  * The phone's navigation, mounted once for the whole app.
@@ -77,8 +71,11 @@ export function MobileNav() {
         return;
       }
 
-      // Signed out, the balances slot is Stats (see barTabsFor) — a real page,
-      // not an explore panel.
+      if (tab === 'portfolio') {
+        navigateTo('/portfolio');
+        return;
+      }
+
       if (tab === 'stats') {
         navigateTo('/explore');
         return;
@@ -91,14 +88,21 @@ export function MobileNav() {
         return;
       }
 
-      // Reuse the destination, including routes retained across resizes.
-      const target = `/explore/${EXPLORE_ROUTE[tab as DrawerSection]}`;
-      navigateTo(target);
+      // My balances / My activity are no longer bar tabs: both live on Portfolio.
+      navigateTo('/portfolio');
     },
     [navigateTo],
   );
 
-  if (!showBottomNav(width)) return null;
+  // On a phone the balances and activity sheets are gone from the bar, so a
+  // `?panel=balances|activity` deep link lands on Portfolio, which carries
+  // both (positions plus the collapsible "My transactions").
+  const bottomNav = showBottomNav(width);
+  useEffect(() => {
+    if (bottomNav && panel) navigateTo('/portfolio');
+  }, [bottomNav, panel, navigateTo]);
+
+  if (!bottomNav) return null;
 
   // The active pill follows the route; the More drawer overrides while open.
   const routeTab: MobileNavTab | null =
@@ -106,11 +110,9 @@ export function MobileNav() {
       ? 'stats'
       : pathname === '/' || pathname === ''
       ? 'shield'
-      : pathname === '/explore/balances'
-        ? 'mine'
-        : pathname === '/explore/activity'
-          ? 'activity'
-          : NATIVE_BAR_TABS.find((t) => t.href === pathname)?.key ?? null;
+      : pathname === '/portfolio'
+        ? 'portfolio'
+        : NATIVE_BAR_TABS.find((t) => t.href === pathname)?.key ?? null;
   const active: MobileNavTab | null = moreOpen ? 'more' : routeTab;
 
   // A legacy data sheet is open: hand the bottom of the screen over to it.

@@ -10,7 +10,7 @@ import { NATIVE_BAR_TABS } from '@/services/native-bar-tabs';
 import { TAB_BAR_TRACK_HEIGHT, tabBarBottomOffset } from '@/services/header-nav';
 
 /** The bar's tabs: Shield (home), the three data surfaces, and "More". */
-export type MobileNavTab = DrawerSection | 'shield' | 'stats' | 'card' | 'more';
+export type MobileNavTab = DrawerSection | 'shield' | 'portfolio' | 'stats' | 'card' | 'more';
 
 /** Just the data drawers — used where a DrawerSection is required. */
 export const EXPLORE_TABS: {
@@ -25,6 +25,7 @@ export const EXPLORE_TABS: {
 /** Filled counterparts revealed through the jelly pill mask. */
 const ACTIVE_ICONS: Record<Exclude<MobileNavTab, 'card'>, keyof typeof Ionicons.glyphMap> = {
   shield: 'shield',
+  portfolio: 'pie-chart',
   mine: 'wallet',
   activity: 'pulse',
   stats: 'compass',
@@ -32,23 +33,24 @@ const ACTIVE_ICONS: Record<Exclude<MobileNavTab, 'card'>, keyof typeof Ionicons.
 };
 
 /**
- * "Explore" — the /explore page. It carries the pool directory AND the protocol
- * figures, which is why the separate Explore-pools panel is gone. Stands in
- * for "My balances" while signed out (see barTabsFor), where a personal
- * balance has nothing to show.
+ * "Explore": the /explore page. It carries the pool directory AND the protocol
+ * figures, which is why the separate Explore-pools panel is gone.
  */
 const STATS_TAB = { key: 'stats' as const, icon: 'compass-outline' as const, label: 'Explore' };
 
 /**
- * Everything in the bar, in order. "More" carries the page navigation that
- * used to live in the header's hamburger, so on a phone the bottom bar is the
- * whole navigation surface and the top bar can stay clean.
+ * Everything in the bar, in order: Shield, Portfolio, Explore, More (Ameen,
+ * QA 2026-10-25). My balances and My activity left the bar: Portfolio holds
+ * the positions and, below them, the collapsible "My transactions" feed.
+ * "More" carries the remaining page navigation, so on a phone the bottom bar
+ * is the whole navigation surface and the top bar can stay clean.
  */
 const BAR_TABS: { key: MobileNavTab; icon: keyof typeof Ionicons.glyphMap; activeIcon?: keyof typeof Ionicons.glyphMap; label: string }[] = [
   // Shield first: it IS the home screen (the shield card), so the bar always
   // has a way back to `/` without reaching for the browser.
   { key: 'shield', icon: 'shield-outline', label: 'Shield' },
-  ...EXPLORE_TABS,
+  { key: 'portfolio', icon: 'pie-chart-outline', label: 'Portfolio' },
+  STATS_TAB,
   // Native app only (Card); empty on web. See services/native-bar-tabs.
   ...NATIVE_BAR_TABS,
   // "More" over "Extra": it is the long-standing convention for a tab that
@@ -56,13 +58,9 @@ const BAR_TABS: { key: MobileNavTab; icon: keyof typeof Ionicons.glyphMap; activ
   { key: 'more', icon: 'ellipsis-horizontal', label: 'More' },
 ];
 
-/**
- * The bar's tabs for a given sign-in state. Signed OUT, "My balances" has
- * nothing to show, so that slot becomes Explore — the protocol surface a
- * visitor can actually read.
- */
-export function barTabsFor(isConnected: boolean) {
-  return BAR_TABS.map((tab): (typeof BAR_TABS)[number] => (!isConnected && tab.key === 'mine' ? STATS_TAB : tab));
+/** The bar's tabs. The same set signed in or out: each one is a page. */
+export function barTabsFor(_isConnected: boolean) {
+  return BAR_TABS;
 }
 
 /**
@@ -73,7 +71,7 @@ export function barTabsFor(isConnected: boolean) {
 export function exploreTabLabel(key: MobileNavTab, isConnected: boolean): string {
   if (key === 'activity' && isConnected) return 'My activity';
   if (key === 'stats') return STATS_TAB.label;
-  return BAR_TABS.find((t) => t.key === key)?.label ?? '';
+  return BAR_TABS.find((t) => t.key === key)?.label ?? EXPLORE_TABS.find((t) => t.key === key)?.label ?? '';
 }
 
 const WEB = Platform.OS === 'web';

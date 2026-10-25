@@ -434,14 +434,19 @@ export function AllPositions({
                       {/* The holding itself — "earning" only where the position
                           actually sits in a yield venue, so a plain pool balance
                           is not mislabeled as accruing. */}
-                      <Text
-                        numberOfLines={1}
-                        className="font-pp-regular text-[11px] leading-[12px] text-text-secondary"
-                      >
-                        {position.myValueToken}
-                        {position.venueLabel ? ' earning' : ''}
-                      </Text>
-                      <ShareCountHint hint={position.shareHint ?? null} />
+                      {/* The (i) rides on the amount's line: as a column
+                          sibling it took a line of its own (Ameen, QA
+                          2026-10-25). The amount shrinks, the (i) never does. */}
+                      <View className="flex-row items-center gap-[4px]">
+                        <Text
+                          numberOfLines={1}
+                          className="shrink font-pp-regular text-[11px] leading-[12px] text-text-secondary"
+                        >
+                          {position.myValueToken}
+                          {position.venueLabel ? ' earning' : ''}
+                        </Text>
+                        <ShareCountHint hint={position.shareHint ?? null} />
+                      </View>
                       {position.pendingLabel ? (
                         <Text className="font-pp-regular text-[11px] leading-[12px] text-text-muted">
                           {position.pendingLabel}

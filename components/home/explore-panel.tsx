@@ -81,7 +81,7 @@ export function PanelSections({ section, onClose }: { section: DrawerSection; on
  * the same <Transactions /> the activity tab renders — one implementation, two
  * entry points, so the two can never disagree.
  */
-function MyTransactionsSection() {
+export function MyTransactionsSection() {
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   // DEV-369 ("transactions not shown by default"): the comment above claimed

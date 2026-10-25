@@ -20,6 +20,8 @@ import { Footer } from '@/components/ui/footer';
 import { PortfolioStats } from '@/components/portfolio/portfolio-stats';
 import { AllPositions } from '@/components/portfolio/all-positions';
 import { PointsCard } from '@/components/points/points-card';
+import { MyTransactionsSection } from '@/components/home/explore-panel';
+import { PaymentRequestsCard } from '@/components/payment-requests-card';
 import { PortfolioProvider, usePortfolio } from '@/components/portfolio-provider';
 import { usePools } from '@/components/pools-provider';
 import { useSdkContext } from '@/components/sdk-provider';
@@ -236,6 +238,10 @@ function PortfolioBody() {
             onDeposit={() => openDepositModal()}
             positions={mappedPositions}
           />
+          {/* Activity lives here rather than in its own bar tab (Ameen, QA
+              2026-10-25): the same collapsible feed My balances carries. */}
+          <PaymentRequestsCard surface="page" hideWhenEmpty />
+          <MyTransactionsSection />
           </>
           )}
           {Platform.OS === 'web' && <Footer />}
