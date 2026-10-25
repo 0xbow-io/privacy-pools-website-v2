@@ -23,7 +23,13 @@ import { getConfiguredYieldDeployments } from '@/config/yield';
 import { getKnownTokenMetadata, isStablecoin, formatTokenBalance } from '@/config/tokens';
 import { buildPortfolioPositions } from '@/services/portfolio-positions';
 import { formatUsdPrecise } from '@/services/format-fiat';
-import { totalYieldEarnedUsd, yieldEarnedDisplay, yieldEarnedKey, type YieldEarnedDisplay } from '@/services/yield-earned';
+import {
+  totalYieldEarnedUsd,
+  yieldEarnedDisplay,
+  yieldEarnedKey,
+  type YieldEarnedDisplay,
+  type YieldEarnedTotalRow,
+} from '@/services/yield-earned';
 
 // --- Types ---
 
@@ -75,10 +81,12 @@ type PortfolioContextType = {
    */
   chainId: number;
   /**
-   * Sum of every yield row's earned figure, USD-formatted, or null for "—":
-   * a total that skipped a row without a figure would understate it.
+   * USD sum of the earned figures the yield rows show, or null for "—" when no
+   * row has one (services/yield-earned.ts totalYieldEarnedUsd).
    */
   yieldEarnedUsdFormatted: string | null;
+  /** A held yield row's figure is still being computed. */
+  yieldEarnedLoading: boolean;
 };
 
 // --- Context ---
@@ -147,7 +155,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     }];
   }), [poolsData.myPools, rateFor, ratesLoading]);
 
-  const { positions, totalValue, pendingValue, pendingValueUnavailable, hasPositions, yieldEarnedUsd } = useMemo(() => {
+  const { positions, totalValue, pendingValue, pendingValueUnavailable, hasPositions, yieldEarnedTotal } = useMemo(() => {
     // Chain-qualified. Every EVM chain shares the one native sentinel address
     // 0xEeee…, so a bare address lookup priced a Citrea cBTC row in ether
     // (qwen3.8 confirmation review). The old guard answered 0 for any foreign
@@ -170,17 +178,22 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
 
     // Earned per yield row, in the underlying the row is shown in. Read from
     // PoolsProvider, which computes it on its own cadence; nothing here asks.
-    const earnedRows: { earned: YieldEarnedDisplay | null; underlyingPriceUsd: number }[] = [];
+    const earnedRows: YieldEarnedTotalRow[] = [];
     const earnedFor = (p: (typeof aggregated.positions)[number]): YieldEarnedDisplay | null => {
       if (!p.isYield) return null;
-      // A yield row with no chain has no figure; it must still count, or the
-      // tile would sum the others and silently read low.
+      // A yield row's withdrawEnabled is "holds active shares", so its absence
+      // marks a pending-only row.
+      const pendingOnly = !p.withdrawEnabled;
+      // A yield row with no chain has no figure and nothing computes one.
       if (p.chainId === undefined) {
-        earnedRows.push({ earned: null, underlyingPriceUsd: 0 });
+        earnedRows.push({ entry: undefined, earned: null, underlyingPriceUsd: 0, pendingOnly });
         return null;
       }
-      const earned = yieldEarnedDisplay(yieldEarned.get(yieldEarnedKey(p.chainId, p.tokenAddress)), p.tokenSymbol);
-      earnedRows.push({ earned, underlyingPriceUsd: priceFor('', p.tokenSymbol, p.chainId) });
+      // Only the session's chain is computed (hooks/use-yield-earned.ts): a
+      // row on another chain has no entry and counts as 0 in the total.
+      const entry = yieldEarned.get(yieldEarnedKey(p.chainId, p.tokenAddress));
+      const earned = yieldEarnedDisplay(entry, p.tokenSymbol);
+      earnedRows.push({ entry, earned, underlyingPriceUsd: priceFor('', p.tokenSymbol, p.chainId), pendingOnly });
       return earned;
     };
 
@@ -218,7 +231,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       pendingValue: aggregated.pendingValueUsd,
       pendingValueUnavailable: aggregated.pendingValueUnavailable,
       hasPositions: aggregated.hasPositions,
-      yieldEarnedUsd: totalYieldEarnedUsd(earnedRows),
+      yieldEarnedTotal: totalYieldEarnedUsd(earnedRows),
     };
   }, [poolsData.myPools, priceMap, chainId, yieldSources, yieldEarned, balanceDisplay]);
 
@@ -240,7 +253,8 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     error,
     chainDisplayName,
     chainId,
-    yieldEarnedUsdFormatted: yieldEarnedUsd == null ? null : formatUsd(yieldEarnedUsd),
+    yieldEarnedUsdFormatted: yieldEarnedTotal.status === 'ok' ? formatUsd(yieldEarnedTotal.usd) : null,
+    yieldEarnedLoading: yieldEarnedTotal.status === 'loading',
   };
 
   return (
