@@ -9,6 +9,10 @@ import { useTheme } from '@/components/theme-provider';
 import { PanelHeading, PanelSections, PANEL_PARAMS } from '@/components/home/explore-panel';
 import { Header } from '@/components/ui/header';
 import { effectiveSafeAreaInset, explorePageUsesAppHeader } from '@/services/header-nav';
+import { phonePanelTarget } from '@/services/home-navigation';
+import { useChainRouter } from '@/hooks/use-chain-router';
+import { useMultiChainWallet } from '@/hooks/use-multi-chain-wallet';
+import { usePoolSession } from '@/hooks/use-pool-session';
 
 /**
  * Full-page stack presentation of a data surface — `/explore/balances`,
@@ -37,6 +41,11 @@ export default function ExploreSectionRoute() {
   const params = useLocalSearchParams<{ section?: string | string[] }>();
   const raw = Array.isArray(params.section) ? params.section[0] : params.section;
   const section = raw ? PANEL_PARAMS[raw] ?? null : null;
+  const chainRouter = useChainRouter();
+  const nonEvm = chainRouter.isSui || chainRouter.isStellar;
+  const { isConnected } = useMultiChainWallet();
+  const { identityMode, sessionAddress } = usePoolSession();
+  const hasAccount = isConnected || (identityMode === 'key' && !!sessionAddress);
 
   const goBack = useMemo(
     () => () => {
@@ -54,8 +63,10 @@ export default function ExploreSectionRoute() {
   if (raw === 'pools') return <Redirect href="/explore" />;
   if (!section) return <Redirect href="/" />;
   // My balances / My activity left the phone bar (Ameen, QA 2026-10-25):
-  // Portfolio carries both, so the old phone links land there.
-  if (appHeader) return <Redirect href="/portfolio" />;
+  // Portfolio carries both, so the old phone links land there (except where
+  // phonePanelTarget keeps this page: Sui/Stellar, signed-out activity).
+  const phoneTarget = appHeader && raw ? phonePanelTarget(raw as 'balances' | 'activity', { nonEvm, signedIn: hasAccount }) : null;
+  if (phoneTarget) return <Redirect href={phoneTarget} />;
 
   if (appHeader) {
     return (
