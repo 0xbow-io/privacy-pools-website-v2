@@ -204,6 +204,27 @@ export interface FeeMarket {
  */
 export const WALLET_PRICED_CHAINS: ReadonlySet<number> = new Set([56, 97]);
 
+/**
+ * Whether the wallet's native balance covers a planned tx, for the pre-send
+ * gas check. A plan with no fee fields means one of two things:
+ *  - the block could not be read: nothing reliable to check, the wallet decides;
+ *  - a WALLET_PRICED_CHAINS chain (BNB): the wallet sets the fee, but `costWei`
+ *    is still a real bound (gas x 2 x gasPrice), so the check stays ON there.
+ *    Treating BNB like "unread" switched off the "not enough BNB for gas"
+ *    check (review of DEV-589).
+ */
+export function walletTxAffordable(input: {
+  plan: Pick<WalletTxPlan, 'fees' | 'costWei'>;
+  balanceWei: bigint;
+  chainId?: number | null;
+}): boolean {
+  const { plan, balanceWei, chainId } = input;
+  if (plan.costWei === null) return true;
+  const walletPriced = chainId != null && WALLET_PRICED_CHAINS.has(chainId);
+  if (plan.fees === null && !walletPriced) return true;
+  return balanceWei >= plan.costWei;
+}
+
 /** eth_gasPrice + latest block (one retry) + tip suggestion. */
 export async function readFeeMarket(client: FeeReadClient, chainId?: number | null): Promise<FeeMarket> {
   if (chainId != null && WALLET_PRICED_CHAINS.has(chainId)) {

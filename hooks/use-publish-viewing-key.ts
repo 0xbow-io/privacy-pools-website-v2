@@ -8,7 +8,7 @@ import { useDebug } from '@/components/debug-provider';
 import { isSupportedEvmChainId } from '@/config/chains';
 import { isSessionInitTimeout, withSessionInitTimeout } from '@/services/session-init-timeout';
 import { setReceiveSetup, viewingKeyTxPlan } from '@/services/receive-setup';
-import { minPriorityFeeFor, readFeeMarket, type FeeReadClient } from '@/services/wallet-tx-fees';
+import { minPriorityFeeFor, readFeeMarket, walletTxAffordable, type FeeReadClient } from '@/services/wallet-tx-fees';
 
 export const PUBLISH_PROMPT_TIMEOUT_MS = 120_000;
 
@@ -85,8 +85,8 @@ export function usePublishViewingKey(chainId: number) {
         costWei: plan.costWei,
         balanceWei,
         // What the wallet reserves for the tx as sent; the shown estimate is this same figure.
-        // No fee caps (block unread): the wallet prices the tx, so it decides.
-        affordable: plan.fees === null ? true : balanceWei >= plan.costWei,
+        // Block unread: the wallet decides. BNB (wallet priced) is still checked.
+        affordable: walletTxAffordable({ plan, balanceWei, chainId }),
         plan,
       };
     } catch (err) {
