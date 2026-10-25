@@ -30,16 +30,6 @@ import { useChainRouter } from '@/hooks/use-chain-router';
 import { useWalletUnlockGate } from '@/hooks/use-wallet-unlock-gate';
 import { useSeedDerivationModal } from '@/components/seed-derivation-modal-provider';
 
-// Token BRAND colors for the allocation bar (asset identity, not theme
-// styling — same category as the chain-logo fills).
-const TOKEN_BRAND_COLORS: Record<string, string> = {
-  ETH: '#627EEA',
-  USDC: '#2775CA',
-  USDT: '#26A17B',
-  DAI: '#F5AC37',
-  WETH: '#EC1C79',
-};
-
 /**
  * Portfolio page shares the app header and plain theme background.
  *
@@ -77,7 +67,7 @@ function PortfolioBody() {
   const tabClearance = useTabBarClearance();
   const { isConnected } = useAccount();
   const { sessionAddress } = useSdkContext();
-  const { positions, totalValue, totalValueFormatted, pendingValueFormatted, hasPositions, chainDisplayName, chainId, isLoading: portfolioLoading, yieldEarnedUsdFormatted, yieldEarnedLoading } = usePortfolio();
+  const { positions, totalValueFormatted, pendingValueFormatted, hasPositions, chainDisplayName, chainId, isLoading: portfolioLoading, yieldEarnedUsdFormatted, yieldEarnedLoading } = usePortfolio();
   // Live APY for real yield rows (feed first, env placeholder second).
   const liveApy = useResolvedYieldApy({ chainId });
   const { data: poolsData } = usePools();
@@ -88,24 +78,6 @@ function PortfolioBody() {
   const { requiresWalletUnlock, keyInitFailed, retryKeyInit } = useWalletUnlockGate();
   const { openSeedDerivationModal } = useSeedDerivationModal();
   const signedOut = requiresWalletUnlock || keyInitFailed;
-
-  // Allocation over ACTIVE spendable USD only — rows and totals share the
-  // same numerator/denominator, so the bar can never exceed 100% (codex P1).
-  const portfolioAssets = useMemo(() => {
-    if (!hasPositions || totalValue === 0) return [];
-    return positions.map((p) => {
-      // The drawn weight and the quoted share are the SAME number: a segment
-      // that names a percentage the bar was not drawn at is worse than one
-      // that names nothing (Nathaniel, QA 2026-09-21: the bar identified none
-      // of its segments at all).
-      const percentage = Math.max(1, Math.round((p.valueUsd / totalValue) * 100));
-      return {
-        color: TOKEN_BRAND_COLORS[p.tokenSymbol] || '#999999',
-        percentage,
-        label: `${p.tokenSymbol} ${percentage}% of net value`,
-      };
-    });
-  }, [positions, totalValue, hasPositions]);
 
   const mappedPositions = useMemo(
     () => {
@@ -222,12 +194,8 @@ function PortfolioBody() {
           <PortfolioStats
             netValue={portfolioLoading ? '—' : totalValueFormatted}
             pending={portfolioLoading ? '—' : pendingValueFormatted}
-            assetsCount={positions.length}
             yieldEarnedUsd={portfolioLoading ? null : yieldEarnedTile}
             yieldEarnedLoading={yieldEarnedTileLoading}
-            assetsLabel={hasPositions ? positions.map((p) => p.tokenSymbol).join(', ') : 'No assets yet'}
-            hasData={hasPositions}
-            assets={portfolioAssets}
           />
           {(isConnected || !!sessionAddress) && <PointsCard />}
           {/* The yield POSITION is a row in All positions, so the page is one
