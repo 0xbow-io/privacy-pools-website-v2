@@ -288,6 +288,13 @@ describe('display threshold', () => {
       expect(totalYieldEarnedUsd([row(usdc, 'USDC', 1), row(computing, 'USDC', 1, true)])).toEqual({ status: 'ok', usd: 0.11 });
     });
 
+    test('a feed that failed is not loading: the tile settles instead of shimmering forever', () => {
+      for (const reason of ['deposits-feed-failed', 'rate-history-failed', 'compute-failed', 'exchange-rate-read-failed']) {
+        expect(totalYieldEarnedUsd([row({ status: 'unavailable', reason }, 'USDC', 1)])).toEqual({ status: 'none' });
+        expect(totalYieldEarnedUsd([row(usdc, 'USDC', 1), row({ status: 'unavailable', reason }, 'USDT', 1)])).toEqual({ status: 'ok', usd: 0.11 });
+      }
+    });
+
     test('a missing price leaves that row out, the others still sum', () => {
       expect(totalYieldEarnedUsd([row(eth, 'ETH', 0), row(usdc, 'USDC', 1)])).toEqual({ status: 'ok', usd: 0.11 });
       expect(totalYieldEarnedUsd([row(eth, 'ETH', 0)])).toEqual({ status: 'none' });

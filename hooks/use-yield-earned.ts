@@ -131,11 +131,12 @@ export function useYieldEarned(params: {
           allUnavailable('snapshot-not-ready');
           return;
         }
-        const depositsFeed = feedValue(feedData(
-          publicFeeds.read<YieldFeedResult<YieldDepositsResponse>>(feedYieldDeposits(chainId)),
-        ));
+        const depositsState = publicFeeds.read<YieldFeedResult<YieldDepositsResponse>>(feedYieldDeposits(chainId));
+        const depositsFeed = feedValue(feedData(depositsState));
         if (depositsFeed === undefined) {
-          allUnavailable('deposits-feed-loading');
+          // A feed that failed with nothing cached is not on its way: "loading"
+          // here held the Portfolio total on a shimmer forever.
+          allUnavailable(depositsState.status === 'error' ? 'deposits-feed-failed' : 'deposits-feed-loading');
           return;
         }
 
@@ -149,9 +150,8 @@ export function useYieldEarned(params: {
         const next = new Map<string, YieldEarnedEntry>();
         for (const ns of namespaces) {
           const share = ns.deployment.ppUSDC;
-          const rateFeed = feedValue(feedData(
-            publicFeeds.read<YieldFeedResult<PpUsdcRateHistoryResponse>>(feedYieldRateHistory(chainId, share)),
-          ));
+          const rateState = publicFeeds.read<YieldFeedResult<PpUsdcRateHistoryResponse>>(feedYieldRateHistory(chainId, share));
+          const rateFeed = feedValue(feedData(rateState));
           // Computed for every share, held or not, so which shares this client
           // reads the rate of says nothing about which it holds.
           const rateSeries = rateFeed === undefined ? null : toYieldRateSeries(rateFeed, share);
@@ -160,7 +160,7 @@ export function useYieldEarned(params: {
           try {
             const result = await ns.earned.compute({ depositFacts, rateSeries, events });
             entry = rateFeed === undefined
-              ? { status: 'unavailable', reason: 'rate-history-loading' }
+              ? { status: 'unavailable', reason: rateState.status === 'error' ? 'rate-history-failed' : 'rate-history-loading' }
               : toYieldEarnedEntry(result, rateSeries?.assetDecimals ?? 0);
           } catch {
             entry = { status: 'unavailable', reason: 'exchange-rate-read-failed' };
