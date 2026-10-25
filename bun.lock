@@ -95,6 +95,7 @@
     "unrs-resolver",
   ],
   "patchedDependencies": {
+    "expo-router@56.2.9": "patches/expo-router@56.2.9.patch",
     "react-native-css-interop@0.2.6": "patches/react-native-css-interop@0.2.6.patch",
   },
   "overrides": {

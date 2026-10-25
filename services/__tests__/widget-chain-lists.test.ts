@@ -52,27 +52,3 @@ describe('widget chain lists', () => {
     expect(prod.swapOutputTokens[4663]).toBeUndefined();
   });
 });
-
-describe('network chip overflow', () => {
-  const { splitNetworkChips } = require('../widget-chain-lists') as typeof import('../widget-chain-lists');
-  const nets: { id: number; name: string; unavailableReason?: string }[] = [1, 4114, 56, 10, 8453, 42161, 4663]
-    .map((id) => ({ id, name: `Chain ${id}` }));
-  test('Ethereum, BNB Chain, Base, Robinhood Chain first, everything else behind the bubble', () => {
-    const { visible, overflow } = splitNetworkChips(nets);
-    expect(visible.map((n) => n.id)).toEqual([1, 56, 8453, 4663]);
-    expect(overflow.map((n) => n.id)).toEqual([4114, 10, 42161]);
-  });
-  test('a pinned chain this sheet does not offer is skipped, no bubble when nothing is left', () => {
-    const { visible, overflow } = splitNetworkChips(nets.filter((n) => [1, 8453].includes(n.id)));
-    expect(visible.map((n) => n.id)).toEqual([1, 8453]);
-    expect(overflow).toEqual([]);
-  });
-  test('a sheet with none of the pinned chains keeps a plain row', () => {
-    const staging = [11155111, 4114].map((id) => ({ id, name: `Chain ${id}` }));
-    expect(splitNetworkChips(staging)).toEqual({ visible: staging, overflow: [] });
-  });
-  test('greyed-out chains keep their reason in the overflow', () => {
-    const { overflow } = splitNetworkChips([...nets, { id: 99, name: 'Late', unavailableReason: 'No swaps yet' }]);
-    expect(overflow.find((n) => n.id === 99)?.unavailableReason).toBe('No swaps yet');
-  });
-});

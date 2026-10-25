@@ -39,7 +39,7 @@ import { useActiveEvmChain } from '@/hooks/use-active-evm-chain';
 import { useOpLock } from '@/hooks/use-op-lock';
 import { View, Text, Pressable, Platform, useWindowDimensions, TextInput, Animated, Easing, Linking } from 'react-native';
 import type { ViewStyle, TextStyle } from 'react-native';
-import Svg, { Path, Circle, Rect } from 'react-native-svg';
+import Svg, { Path, Rect } from 'react-native-svg';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAccount, usePublicClient, useSignTypedData } from 'wagmi';
 import { isAddress, formatUnits } from 'viem';
@@ -252,20 +252,6 @@ const NATIVE_ASSET_ADDRESS = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
  * visual-regression harness (or a reduced-motion user) to see as
  * nondeterministic.
  */
-
-function EthChainIcon({ size = 20 }: { size?: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 20 20" fill="none">
-      <Circle cx={10} cy={10} r={10} fill="#627EEA" />
-      <Path d="M10 4L10 8.5L13.5 10L10 4Z" fill="#C0CBF6" />
-      <Path d="M10 4L6.5 10L10 8.5L10 4Z" fill="white" />
-      <Path d="M10 12.5L10 16L13.5 10.75L10 12.5Z" fill="#C0CBF6" />
-      <Path d="M10 16L10 12.5L6.5 10.75L10 16Z" fill="white" />
-      <Path d="M10 11.75L13.5 10L10 8.5L10 11.75Z" fill="#8197EE" />
-      <Path d="M6.5 10L10 11.75L10 8.5L6.5 10Z" fill="#C0CBF6" />
-    </Svg>
-  );
-}
 
 function CheckboxIcon({ checked, color = '#999999' }: { checked: boolean; color?: string }) {
   if (checked) {
@@ -5268,7 +5254,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                               // nw-keep(data-color): pill border/bg follow the receive asset's runtime hue (same as the shield pool pill)
                               style={{ backgroundColor: recvHue.bg, borderColor: recvHue.fg }}
                             >
-                              <TokenNetworkIcon symbol={recvSymbol} size={28} badgeSize={14} badgeTestnetLabel={false} chainId={receiveChainId} />
+                              <TokenNetworkIcon symbol={recvSymbol} size={28} badgeSize={16} badgeTestnetLabel={false} chainId={receiveChainId} />
                               {/* nw-keep(data-color): label colour is the receive asset's runtime hue, same token as the pill border/bg above */}
                               <Text className="font-pp-sans-semi-bold text-[15px]" style={{ color: recvHue.fg }}>{recvSymbol}</Text>
                               <CaretDownIcon color={colors.text} />

@@ -1,13 +1,3 @@
-/**
- * Pure helpers behind the pool page's "My activity" block and the balance /
- * statistics card row. Kept free of react-native imports so `bun test` can pin
- * the two behaviours the layout change introduced:
- *
- *  - a visitor who is not connected sees a placeholder in every count, never
- *    a misleading 0 (the block used to be hidden entirely);
- *  - on desktop the two cards share one height (`items-stretch`), on mobile
- *    they stack at content height (`flex-col items-start`).
- */
 export const MY_ACTIVITY_COLUMNS = ['Deposits', 'Withdrawals', 'Transfers'] as const;
 export type MyActivityColumn = (typeof MY_ACTIVITY_COLUMNS)[number];
 
@@ -33,13 +23,4 @@ export function myActivityCells(counts: MyActivityCounts, isConnected: boolean):
     label,
     value: isConnected ? String(values[label]) : MY_ACTIVITY_PLACEHOLDER,
   }));
-}
-
-/**
- * Class names for the row holding the balance card and the statistics card.
- * Desktop: `items-stretch` so the taller card sets the height of both. Mobile:
- * stacked, content-height.
- */
-export function poolCardsRowClassName(isMobile: boolean): string {
-  return isMobile ? 'flex-col items-start' : 'flex-row items-stretch';
 }

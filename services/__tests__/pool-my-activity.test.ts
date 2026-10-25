@@ -3,7 +3,6 @@ import {
   MY_ACTIVITY_COLUMNS,
   MY_ACTIVITY_PLACEHOLDER,
   myActivityCells,
-  poolCardsRowClassName,
 } from '../pool-my-activity';
 
 describe('pool page "My activity" cells', () => {
@@ -25,21 +24,5 @@ describe('pool page "My activity" cells', () => {
     expect(cells).toHaveLength(MY_ACTIVITY_COLUMNS.length);
     expect(cells.every((c) => c.value === MY_ACTIVITY_PLACEHOLDER)).toBe(true);
     expect(cells.some((c) => c.value === '0')).toBe(false);
-  });
-});
-
-describe('pool page card row', () => {
-  test('desktop stretches both cards to one height', () => {
-    const cls = poolCardsRowClassName(false);
-    expect(cls).toContain('flex-row');
-    expect(cls).toContain('items-stretch');
-    expect(cls).not.toContain('items-start');
-  });
-
-  test('mobile stacks the cards at content height', () => {
-    const cls = poolCardsRowClassName(true);
-    expect(cls).toContain('flex-col');
-    expect(cls).toContain('items-start');
-    expect(cls).not.toContain('items-stretch');
   });
 });

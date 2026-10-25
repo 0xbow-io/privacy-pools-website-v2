@@ -1,12 +1,5 @@
-// Token marks for ETH, USDC and USDT.
-//
-// The transfer and payment-request modals drew these identically. Moved verbatim
-// from components/transfer-modal-provider.tsx; sizes stay a prop, defaults
-// unchanged, so callers render exactly what they rendered before.
-//
-// The symbol → icon MAP deliberately stayed with each modal: the transfer one also
-// keys a Sui mark that lives there, and the payment-request one is a different
-// shape. Only the three glyphs are shared.
+// Shared token artwork for selectors, pool details, and transaction surfaces.
+import { Image, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 
 // nw-keep(svg-or-canvas): token-glyph SVG fills are fixed brand colors baked
@@ -27,22 +20,85 @@ export function EthTokenIcon({ size = 16 }: { size?: number }) {
   );
 }
 
+/** Current blue USDC symbol from https://www.usdc.com/ (2026-10-22).
+ * Source: https://cdn.prod.website-files.com/66327d2c71b7019a2a9a1b62/67f7d439a39e389dc9758ed0_USDC-256x256.png
+ */
 export function UsdcTokenIcon({ size = 16 }: { size?: number }) {
   return (
-    <Svg width={size} height={size} viewBox="0 0 32 32" fill="none">
-      <Circle cx={16} cy={16} r={16} fill="#3E73C4" />
-      <Path d="M20.022 18.124c0-2.124-1.28-2.852-3.84-3.156-1.828-.243-2.193-.728-2.193-1.578 0-.85.61-1.396 1.828-1.396 1.097 0 1.707.364 2.011 1.275a.458.458 0 00.427.303h.975a.416.416 0 00.427-.425v-.06a3.04 3.04 0 00-2.743-2.489V9.142c0-.243-.183-.425-.487-.486h-.915c-.243 0-.426.182-.487.486v1.396c-1.829.242-2.986 1.456-2.986 2.974 0 2.002 1.218 2.791 3.778 3.095 1.707.303 2.255.668 2.255 1.639 0 .97-.853 1.638-2.011 1.638-1.585 0-2.133-.667-2.316-1.578-.06-.242-.244-.364-.427-.364h-1.036a.416.416 0 00-.426.425v.06c.243 1.518 1.219 2.61 3.23 2.914v1.457c0 .242.183.425.487.485h.915c.243 0 .426-.182.487-.485V21.34c1.829-.303 3.047-1.578 3.047-3.217z" fill="#FFF" />
-      <Path d="M12.892 24.497c-4.754-1.7-7.192-6.98-5.424-11.653.914-2.55 2.925-4.491 5.424-5.402.244-.121.365-.303.365-.607v-.85c0-.242-.121-.424-.365-.485-.061 0-.183 0-.244.06a10.895 10.895 0 00-7.13 13.717c1.096 3.4 3.717 6.01 7.13 7.102.244.121.488 0 .548-.243.061-.06.061-.122.061-.243v-.85c0-.182-.182-.424-.365-.546zm6.46-18.936c-.244-.122-.488 0-.548.242-.061.061-.061.122-.061.243v.85c0 .243.182.485.365.607 4.754 1.7 7.192 6.98 5.424 11.653-.914 2.55-2.925 4.491-5.424 5.402-.244.121-.365.303-.365.607v.85c0 .242.121.424.365.485.061 0 .183 0 .244-.06a10.895 10.895 0 007.13-13.717c-1.096-3.46-3.778-6.07-7.13-7.162z" fill="#FFF" />
-    </Svg>
+    <Image source={require('@/assets/images/tokens/usdc.png')} resizeMode="contain"
+      accessibilityIgnoresInvertColors
+      // nw-keep(svg-or-canvas): prop-driven dimensions preserve the official artwork.
+      style={{ width: size, height: size }} />
   );
 }
 
+/** Circular display artwork from https://tether.to/en/media/ (2026-10-22). */
 export function UsdtTokenIcon({ size = 16 }: { size?: number }) {
   return (
-    <Svg width={size} height={size} viewBox="0 0 20 20" fill="none">
-      <Circle cx={10} cy={10} r={10} fill="#26A17B" />
-      <Path d="M11 9.25V7.75H14V5.75H6V7.75H9V9.25C7 9.4 5.5 9.9 5.5 10.5C5.5 11.1 7 11.6 9 11.75V15H11V11.75C13 11.6 14.5 11.1 14.5 10.5C14.5 9.9 13 9.4 11 9.25ZM10 11C7.8 11 6 10.6 6 10.1C6 9.6 7.8 9.2 10 9.2C12.2 9.2 14 9.6 14 10.1C14 10.6 12.2 11 10 11Z" fill="white" />
+    <Svg width={size} height={size} viewBox="0 0 800 800" fill="none">
+      <Circle cx={400} cy={400} r={400} fill="#009393" />
+      <Path d="M400.49,428.59c68.79,0,126.28-11.63,140.33-27.17-11.93-13.18-55.08-23.56-109.88-26.4v32.83c-9.81.51-20.01.76-30.46.76s-20.65-.25-30.48-.76v-32.83c-54.78,2.84-97.95,13.22-109.88,26.4,14.07,15.54,71.57,27.17,140.36,27.17ZM522.71,274.06v45.21h-91.77v31.35c64.46,3.35,112.83,17.13,113.19,33.62v34.38c-.36,16.49-48.73,30.24-113.19,33.6v76.94h-60.93v-76.94c-64.46-3.35-112.81-17.11-113.17-33.6v-34.38c.36-16.49,48.71-30.27,113.17-33.62v-31.35h-91.77v-45.21h244.48ZM242.15,202.11h322.16c7.7,0,14.79,4.05,18.63,10.63l93.85,161.16c4.86,8.36,3.42,18.91-3.52,25.68l-258.34,252.18c-8.38,8.17-21.84,8.17-30.2,0L126.71,399.92c-7.09-6.94-8.43-17.79-3.2-26.19l100.33-161.49c3.91-6.28,10.85-10.12,18.32-10.12Z" fill="#FFF" fillRule="evenodd" />
     </Svg>
   );
 }
 
+/** Official USDG token logo: https://globaldollar.com/brand
+ * Source: https://framerusercontent.com/images/CtEQkwH2xKYB2x8WTHX8Zja9d4.png
+ */
+export function UsdgIcon({ size = 20 }: { size?: number }) {
+  return (
+    <View className="items-center justify-center rounded-full"
+      // nw-keep(data-color): background sampled from the official USDG artwork.
+      // nw-keep(svg-or-canvas): preserve the circle size while giving the inner mark breathing room.
+      style={{ width: size, height: size, backgroundColor: '#314012' }}>
+      <Image
+        source={require('@/assets/images/tokens/usdg.png')}
+        accessibilityIgnoresInvertColors
+        resizeMode="contain"
+        // nw-keep(svg-or-canvas): proportional inset preserves the official artwork.
+        style={{ width: size * 0.86, height: size * 0.86 }}
+      />
+    </View>
+  );
+}
+
+/** Official cBTC.svg from Citrea's brand kit, distinct from the chain icon.
+ * https://drive.google.com/file/d/1hGjZMSQRAweNtAIVLCZ69mLgl27P663w/view
+ */
+export function CbtcTokenIcon({ size = 20 }: { size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 1366 1366" fill="none">
+      <Path d="M1345.5,848.2c-91.2,365.9-461.9,588.6-827.8,497.4C151.9,1254.4-70.8,883.7,20.4,517.8,111.6,151.8,482.2-70.9,848.1,20.3c366,91.2,588.6,461.9,497.4,827.9h0Z" fill="#F7931A" />
+      <Path d="M925.1,555.2h0c13.6-90.8-55.6-139.7-150.2-172.3l30.7-123.1-75-18.7-29.9,119.9c-19.7-4.9-39.9-9.5-60.1-14.1l30.1-120.7-74.9-18.7-30.7,123.1c-16.3-3.7-151.1-37.4-151.1-37.4l-19.9,80.1s55.6,12.7,54.4,13.5c30.4,7.6,35.8,27.7,34.9,43.6l-84.1,337.3c-3.7,9.2-13.1,23.1-34.3,17.8.8,1.1-54.5-13.6-54.5-13.6l-37.2,85.8s133.5,33.6,151,38.1l-31,124.5,74.9,18.7,30.7-123.2c20.5,5.6,40.3,10.7,59.7,15.5l-30.6,122.6,75,18.7,31-124.3c27.7,5.2,53.8,8.9,78.3,10.2l67.4-116.8h120.5c29.4-89.8-4.8-142.1-70.7-176.4,49-11.3,85.9-43.5,95.7-110.1h0ZM753.8,795.3c-23.2,93.1-179.9,42.8-230.7,30.1l41.2-165c50.8,12.7,213.7,37.8,189.5,134.9h0ZM777,553.8c-21.1,84.7-151.6,41.7-193.9,31.1l37.3-149.6c42.3,10.5,178.6,30.2,156.6,118.5h0Z" fill="#FFFFFF" />
+      <Path d="M1043.1,999.6h-110.8c-7.4,0-14-3.8-17.2-9.8v-.2c-3.8-6.2-3.8-13.9,0-20.2l55.1-96.4,72.9,126.5h0Z" fill="#FFFFFF" />
+      <Path d="M914.6,1032.5c3.7-6.2,10.3-10,17.3-10h111.3l-72.9,126.6-55.6-96.4h0c-3.7-6.2-3.7-14,0-20.2h0Z" fill="#FFFFFF" />
+      <Path d="M950.5,861.5l-55.6,96.4c-3.7,6.2-10.3,10-17.3,10s-14-3.8-17.2-9.8l-56.1-96.5h146.2,0Z" fill="#FFFFFF" />
+      <Path d="M804.2,1160.5l55.6-96.4c3.7-6.2,10.3-10,17.3-10s14.1,4,17.2,9.8l55.7,96.5h-145.8Z" fill="#FFFFFF" />
+      <Path d="M840.3,989.6c-3.7,6.2-10.3,10-17.3,10h-111.3l72.9-126.6,55.7,96.5c3.7,6.2,3.7,13.9,0,20.1h0Z" fill="#FFFFFF" />
+      <Path d="M823,1022.5c7.4,0,14,3.8,17.2,9.8v.2c3.8,6.2,3.8,13.9,0,20.2l-55.6,96.4-72.9-126.6h111.3Z" fill="#FFFFFF" />
+    </Svg>
+  );
+}
+
+export function DaiTokenIcon({ size = 20 }: { size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 20 20" fill="none">
+      <Circle cx={10} cy={10} r={10} fill="#F5AC37" />
+      <Path d="M6 10H14M6 8H14M10 4L6 10L10 16L14 10L10 4Z" stroke="white" strokeWidth={1} />
+    </Svg>
+  );
+}
+
+export function EtcTokenIcon({ size = 20 }: { size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 20 20" fill="none">
+      <Circle cx={10} cy={10} r={10} fill="#3AB83A" />
+      <Path d="M10 4L10 8.5L13.5 10L10 4Z" fill="rgba(255,255,255,0.6)" />
+      <Path d="M10 4L6.5 10L10 8.5L10 4Z" fill="white" />
+      <Path d="M10 12.5L10 16L13.5 10.75L10 12.5Z" fill="rgba(255,255,255,0.6)" />
+      <Path d="M10 16L10 12.5L6.5 10.75L10 16Z" fill="white" />
+      <Path d="M10 11.75L13.5 10L10 8.5L10 11.75Z" fill="rgba(255,255,255,0.4)" />
+      <Path d="M6.5 10L10 11.75L10 8.5L6.5 10Z" fill="rgba(255,255,255,0.6)" />
+    </Svg>
+  );
+}

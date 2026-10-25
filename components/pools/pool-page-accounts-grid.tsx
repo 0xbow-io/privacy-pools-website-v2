@@ -1,3 +1,4 @@
+import { ChainBadge } from '@/components/ui/token-network-icon';
 import { useCallback, useState } from 'react';
 import { View, Text, Pressable, useWindowDimensions } from 'react-native';
 import { DROPDOWN_SHADOW } from '@/components/ui/web-style-shims';
@@ -43,11 +44,9 @@ export function PoolPageAccountsGrid({ poolAccounts, onDeposit, onWithdraw }: Pr
           >
             <View className="flex-row items-center gap-[8px] h-[26px] overflow-visible z-[99999]">
               <View className="flex-1 flex-row items-center gap-[8px]">
-                <View className="flex-row items-end pr-[6px]">
+                <View className="relative h-[20px] w-[20px] mr-[6px]">
                   <acct.icon size={20} />
-                  <View className="h-[12px] w-[12px] ml-[-6px] overflow-hidden rounded-inner border border-[#FFFFFF] dark:border-card-background">
-                    <acct.chainIcon size={12} />
-                  </View>
+                  <ChainBadge size={14} chainId={acct.chainId} symbol={acct.name} />
                 </View>
                 <Text className="text-[16px] leading-[16px] text-text font-pp-semi-bold">
                   {acct.name}

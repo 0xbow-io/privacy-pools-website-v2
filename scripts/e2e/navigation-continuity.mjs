@@ -69,6 +69,9 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
       await walletChoice.waitFor();
       await page.getByRole('button', { name: 'Landing Test Wallet Browser' }).click();
       await header(page).getByTestId('notification-bell').waitFor();
+      await page.getByText('Unlock your account', { exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Close account unlock', exact: true }).click();
+      await page.getByText('Unlock your account', { exact: true }).waitFor({ state: 'hidden' });
       const visible = id => page.getByTestId(id).filter({ visible: true });
       const amount = () => visible('home-action-column').locator('input:visible').first();
       await amount().fill('123');
@@ -87,9 +90,31 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
       await page.waitForFunction(() => !new URLSearchParams(location.search).has('panel'));
       await tab(page, '/explore').click();
       await page.waitForURL(url => url.pathname === '/explore');
+      for (let round = 0; round < 3; round++) {
+        await page.goBack();
+        await page.waitForURL(url => url.pathname === '/');
+        await page.waitForTimeout(300);
+        assert.equal(await page.evaluate(() => window.originalDraftForm.isConnected), true, 'Repeated Back retains Home');
+        assert.equal(await amount().inputValue(), '123', 'Real route Back preserves the draft too');
+        await page.goForward();
+        await page.waitForURL(url => url.pathname === '/explore');
+        await page.waitForTimeout(300);
+        assert.equal(await page.evaluate(() => window.originalDraftForm.isConnected), true, 'Repeated Forward retains Home');
+      }
       await page.goBack();
       await page.waitForURL(url => url.pathname === '/');
-      assert.equal(await amount().inputValue(), '123', 'Real route Back preserves the draft too');
+      await visible('home-door-mine').click();
+      await tab(page, '/explore').click();
+      await page.waitForURL(url => url.pathname === '/explore');
+      for (let round = 0; round < 3; round++) {
+        await page.goBack();
+        await page.waitForURL(url => url.pathname === '/' && url.searchParams.get('panel') === 'balances');
+        await visible('split-panel-close').waitFor();
+        assert.equal(await amount().inputValue(), '123', 'Returning to a panel retains the draft');
+        assert.equal(await page.evaluate(() => window.originalDraftForm.isConnected), true, 'Panel route return retains Home');
+        await page.goForward();
+        await page.waitForURL(url => url.pathname === '/explore');
+      }
       await page.close();
       console.log(`PASS ${name}: panel Back/Forward preserves form identity and entered amount`);
     }
@@ -107,11 +132,13 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
       await page.waitForURL(url => url.pathname === '/');
       await hub().getByTestId('hub-shield-pay-token').click();
       await page.getByTestId('token-select-sheet').getByText('BNB Chain', { exact: true }).click();
+      // A network chip filters; only an asset choice switches the app.
+      await page.getByTestId('token-select-sheet').getByText('BNB', { exact: true }).first().click();
       await hub().getByText(/^Into the \$\S+ pool on BNB Chain$/).waitFor();
       await page.waitForTimeout(700);
       assert.equal(await page.evaluate(() => window.originalPoolForm.isConnected), true, 'The inactive pool is still mounted');
       assert.ok((await hub().innerText()).includes('pool on BNB Chain'), 'Hidden Ethereum pool cannot override Home network');
-      await page.getByRole('button', { name: 'Close token selector', exact: true }).click();
+
       await page.close();
       console.log(`PASS ${name}: only the focused pool controls the selected network`);
     }
@@ -133,6 +160,9 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
         await header(page).getByText('Connect Wallet', { exact: true }).click();
         await page.getByRole('button', { name: 'Landing Test Wallet Browser' }).click();
         await header(page).getByTestId('notification-bell').waitFor();
+      await page.getByText('Unlock your account', { exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Close account unlock', exact: true }).click();
+      await page.getByText('Unlock your account', { exact: true }).waitFor({ state: 'hidden' });
       }
       await page.waitForTimeout(800); // initial entrance is intentional
       await page.route('**/_expo/static/js/web/*.js', async route => {

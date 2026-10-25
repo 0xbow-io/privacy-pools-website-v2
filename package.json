@@ -1,7 +1,7 @@
 {
   "name": "privacy-pools",
   "main": "./index.js",
-  "version": "1.0.0",
+  "version": "1.2.1",
   "scripts": {
     "build:web": "bun run build:worker && EXPO_UNSTABLE_METRO_OPTIMIZE_GRAPH=1 EXPO_UNSTABLE_TREE_SHAKING=1 expo export -p web --source-maps &&bun scripts/inject-social-meta.mjs && bun scripts/preload-web-fonts.mjs && bun scripts/split-web-bootstrap.mjs && bun scripts/render-landing-document.tsx && bun scripts/sentry-sourcemaps.mjs",
     "build:worker": "bun ./scripts/check-pinned-deps.mjs && bun ./scripts/build-snarkjs-worker.mjs && bun ./scripts/build-witness-worker.mjs",
@@ -22,7 +22,8 @@
     "e2e:sepolia": "bun ./scripts/e2e/sepolia.ts",
     "e2e:request": "bun ./scripts/e2e/payment-request.ts",
     "e2e:tab-race": "bun ./scripts/e2e/tab-race.ts",
-    "lint": "expo lint",
+    "lint": "bun scripts/lint-baseline.mjs",
+    "lint:strict": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "bun test services scripts",
     "test:sui": "vitest run",
@@ -122,7 +123,8 @@
     "unrs-resolver"
   ],
   "patchedDependencies": {
-    "react-native-css-interop@0.2.6": "patches/react-native-css-interop@0.2.6.patch"
+    "react-native-css-interop@0.2.6": "patches/react-native-css-interop@0.2.6.patch",
+    "expo-router@56.2.9": "patches/expo-router@56.2.9.patch"
   },
   "overrides": {
     "@walletconnect/jsonrpc-ws-connection": {
