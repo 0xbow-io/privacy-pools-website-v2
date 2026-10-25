@@ -59,9 +59,18 @@ describe('which limit the swap actually hit', () => {
 
   test('the figures take their decimals from the asset they are about', () => {
     // 18-decimal share: the same integers must not print as a 6-decimal amount,
-    // and without a rate the count keeps its share symbol.
+    // and without a rate the count reads as shares of the coin, never as the
+    // share's own name (DEV-591).
     const s = noteShortfall({ totalWei: u('2000000000000000000'), approvedWei: u('1000000000000000000'), selectableWei: u('1000000000000000000') });
-    expect(noteShortfallMessage(s, { symbol: 'ppUSDT', decimals: 18 })).toContain('Spendable now: 1 ppUSDT');
+    const text = noteShortfallMessage(s, { symbol: 'ppUSDT', decimals: 18 });
+    expect(text).toContain('Spendable now: 1 USDT shares');
+    expect(text).not.toContain('ppUSDT');
+  });
+
+  test('the caller can show the figures as the underlying at the live rate', () => {
+    const s = noteShortfall({ totalWei: u('9990000000000000'), approvedWei: 0n, selectableWei: 0n });
+    const text = noteShortfallMessage(s, { symbol: 'ppETH', decimals: 18 }, 5, () => '0.01 ETH');
+    expect(text).toBe('None of your ETH notes are approved yet. 0.01 ETH is waiting.');
   });
 
   test('no message uses an em dash', () => {

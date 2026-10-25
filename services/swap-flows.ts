@@ -30,7 +30,7 @@ import {
   isLifiExecutor,
   lifiAddressesKnownForChain,
 } from '@/config/lifi-addresses';
-import { displayTokenSymbol, isShareSymbol, tokenAmountLabel, approxUnderlyingText } from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol, shareCountLabel } from '@/services/share-display';
 import type { Address, Hash, Hex, SwapStatusLike } from '@/services/sdk-types';
 import { prepareSizedAgain } from '@/services/yield-sizing-race';
 
@@ -1668,7 +1668,7 @@ export function assertReshieldNoteWorthIt(
   if (noteValue * 10_000n >= minOutput * RESHIELD_MIN_NOTE_SHARE_BPS) return;
   const where = destinationName ? ` on ${destinationName}` : '';
   throw new ReshieldPreflightError(
-    `This route cannot be sized${where}: the estimate would leave ${tokenAmountLabel(formatUnitsText(noteValue, output.decimals, output.decimals), output.symbol)} of the ${tokenAmountLabel(formatUnitsText(minOutput, output.decimals), output.symbol)} swap output as your new note. Nothing was signed or spent. Try a larger amount or a different pair; if this keeps happening for this pair it is an estimate bug, not a fee.`,
+    `This route cannot be sized${where}: the estimate would leave ${shareCountLabel(formatUnitsText(noteValue, output.decimals, output.decimals), output.symbol)} of the ${shareCountLabel(formatUnitsText(minOutput, output.decimals), output.symbol)} swap output as your new note. Nothing was signed or spent. Try a larger amount or a different pair; if this keeps happening for this pair it is an estimate bug, not a fee.`,
   );
 }
 
@@ -1721,7 +1721,7 @@ export function assertReshieldRelayAmount(
   /** Units of the FROM token, so a refusal reads as an amount, not as raw base units on the Review screen. */
   units?: { decimals: number; symbol: string },
 ): void {
-  const show = (wei: bigint) => (units ? approxUnderlyingText(`${formatUnitsText(wei, units.decimals)} ${units.symbol}`, units.symbol) : wei.toString());
+  const show = (wei: bigint) => (units ? shareCountLabel(formatUnitsText(wei, units.decimals), units.symbol) : wei.toString());
   const net = hexToBigInt(quote.netAmount);
   const fee = hexToBigInt(quote.feeAmount || '0');
   if (net <= 0n) {

@@ -27,7 +27,7 @@ import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import { ChainLogo, chainLogoChainFor } from '@/components/ui/chain-logo';
 import { TokenNetworkIcon } from '@/components/ui/token-network-icon';
-import { COMING_SOON_ASSET_SUBTITLE, displayTokenSymbol, isShareSymbol, LEGACY_ASSET_SUBTITLE, shareSubtitle, wrapsIntoShareSubtitle } from '@/services/share-display';
+import { COMING_SOON_ASSET_SUBTITLE, displayTokenSymbol, isShareSymbol, LEGACY_ASSET_SUBTITLE, shareSubtitle, underlyingOnlyView, wrapsIntoShareSubtitle } from '@/services/share-display';
 import { getKnownTokenMetadata } from '@/config/tokens';
 import { getConfiguredDepositRouteForPayToken } from '@/config/yield';
 import { useShareYield } from '@/hooks/use-share-yield';
@@ -366,7 +366,9 @@ export function TokenSelectSheet({
       // omits the line rather than printing "0 private".
       if (!Number.isFinite(amount) || amount <= 0) return;
       const key = pool.tokenAddress?.toLowerCase();
-      const formatted = balanceDisplay(pool.balanceTokenExact, pool.name, pool.chainId, pool.tokenAddress);
+      // A picker never names the share (DEV-591): the underlying at the live
+      // rate, or "0.00999 ETH shares" until the rate is known.
+      const formatted = underlyingOnlyView(balanceDisplay(pool.balanceTokenExact, pool.name, pool.chainId, pool.tokenAddress), pool.name);
       // Chain-qualified keys: myPools spans chains, and a bare address/symbol
       // key let a foreign row overwrite the active chain's entry — guaranteed
       // for the shared native sentinel (kimi review, finding 3).

@@ -78,6 +78,31 @@ describe('no raw share symbol can reach a render', () => {
     expect(offenders).toEqual([]);
   });
 
+  /**
+   * DEV-591: `{t.symbol === fromToken.symbol ? fromToken.symbol : displayTokenSymbol(t.symbol)}`
+   * printed "ppETH" on the swap chip, and the rule above only sees a bare
+   * `{x.symbol}`. A JSX child whose ternary yields a raw `.symbol` is the same
+   * defect. Exempt: fields that hold an amount entered in shares, labelled with
+   * the share's own symbol by the share-amount field rule.
+   */
+  const RAW_TERNARY = /(?:^\s*|>\s*)\{[^{}]*(?:\?\s*[A-Za-z0-9_.?!()[\]]+\.symbol\s*:|\?[^{}]*:\s*[A-Za-z0-9_.?!()[\]]+\.symbol\s*\})/;
+  const TERNARY_EXEMPT = /amountField\.symbol|isShareSymbol\(requestToken\.symbol\) \? requestToken\.symbol/;
+  test('no JSX child picks a raw .symbol through a ternary', () => {
+    const offenders: string[] = [];
+    for (const dir of DIRS) {
+      for (const file of sources(join(ROOT, dir))) {
+        if (!file.endsWith('.tsx')) continue;
+        readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
+          if (RAW_TERNARY.test(line) && !TERNARY_EXEMPT.test(line)) offenders.push(`${relative(ROOT, file)}:${i + 1}: ${line.trim()}`);
+        });
+      }
+    }
+    expect(offenders).toEqual([]);
+    expect(RAW_TERNARY.test('  {t.symbol === f.symbol ? f.symbol : displayTokenSymbol(t.symbol)}')).toBe(true);
+    expect(RAW_TERNARY.test('  {ok ? displayTokenSymbol(t.symbol) : t.symbol}')).toBe(true);
+    expect(RAW_TERNARY.test('  input: { decimals: t.decimals, symbol: t.symbol },')).toBe(false);
+  });
+
   test('the guard itself catches the shapes it is for', () => {
     const hits = (line: string) => (EXEMPT_LINE.test(line) ? [] : (renderable(line).match(RAW) ?? []).filter((m) => !EXEMPT_EXPR.test(m)));
     expect(hits('return `covers ${amount} ${units.symbol}`;')).toHaveLength(1);

@@ -160,6 +160,43 @@ export function shareReviewHeadline(args: {
   // A failed rate read keeps the count under its own share symbol.
   return `${format(shares, shareSymbol)} ${shareSymbol}`;
 }
+/**
+ * A preformatted share COUNT on a surface that never names the share (the Swap
+ * tab, DEV-591): "0.00999 ETH shares". The coin the user knows, and plainly a
+ * count of shares rather than an ETH figure, so it cannot read as a fee. Use it
+ * only where no rate is at hand; with a rate, show the converted underlying.
+ * Anything that is not a share is its amount and coin, as tokenAmountLabel.
+ */
+export function shareCountLabel(amount: string, symbol: string): string {
+  const coin = displayTokenSymbol(symbol);
+  return isShareSymbol(symbol) ? `${amount} ${coin} shares` : `${amount} ${coin}`;
+}
+
+/** The fields of a balance view (services/share-balance-display.ts) this rule touches. */
+type BalanceViewLike = { text: string; symbol: string; converted: boolean; hint: string | null };
+
+/**
+ * A balance view for a surface that never names the share (DEV-591). Converted:
+ * the underlying figure, with the (i) hint's share count unnamed ("0.0998
+ * shares, worth 0.1 ETH today"). Rate not known yet: the count as
+ * shareCountLabel, never under the share's own symbol. Display only, like the
+ * view it wraps: nothing here may feed an amount.
+ */
+export function underlyingOnlyView<V extends BalanceViewLike>(view: V, assetSymbol: string): V {
+  if (!isShareSymbol(assetSymbol)) return view;
+  const named = new RegExp(`\\s*\\b${assetSymbol}\\b`, 'gi');
+  if (view.converted) {
+    return { ...view, hint: view.hint ? view.hint.replace(named, '') : view.hint };
+  }
+  const coin = displayTokenSymbol(assetSymbol);
+  const count = view.text.replace(named, '').trim();
+  return {
+    ...view,
+    symbol: coin,
+    text: /^0(?:\.0*)?$/.test(count) ? `0 ${coin}` : shareCountLabel(count, assetSymbol),
+    hint: null,
+  };
+}
 
 /**
  * Preformatted raw units at a display boundary, without claiming a share is
