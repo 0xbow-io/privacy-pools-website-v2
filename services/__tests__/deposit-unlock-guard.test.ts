@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { assertDepositUnlock } from '../deposit-unlock-guard';
+import { assertDepositUnlock, assertUnlockFor } from '../deposit-unlock-guard';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 
@@ -15,6 +15,23 @@ test('matching and first-time registrations preserve their existing paths', () =
   for (const state of ['compatible', 'partial', 'unregistered'] as const) {
     expect(() => assertDepositUnlock(state)).not.toThrow();
   }
+});
+
+test('a failed lookup passes registration and a swap source, and only a deposit says nothing was deposited', () => {
+  for (const purpose of ['register', 'spend'] as const) {
+    expect(() => assertUnlockFor('unknown', purpose)).not.toThrow();
+    expect(() => assertUnlockFor('incompatible', purpose)).toThrow('original wallet or passkey');
+  }
+  expect(() => assertUnlockFor('unknown', 'deposit')).toThrow('Nothing was deposited');
+  let message = '';
+  try { assertUnlockFor('unknown', 'swap-destination', 'Base'); } catch (e) { message = (e as Error).message; }
+  expect(message).toContain('Base');
+  expect(message).not.toContain('Nothing was deposited');
+});
+
+test('registration copy never claims a deposit', () => {
+  const registration = readFileSync(new URL('../../components/keystore-registration-modal-provider.tsx', import.meta.url), 'utf8');
+  expect(registration).not.toContain('Nothing was deposited');
 });
 
 const providerSource = ts.createSourceFile('sdk.tsx', readFileSync(new URL('../../components/sdk-provider.tsx', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
