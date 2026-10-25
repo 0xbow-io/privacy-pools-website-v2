@@ -53,6 +53,9 @@ export default function ExploreSectionRoute() {
   // than bouncing someone to the home page with no explanation.
   if (raw === 'pools') return <Redirect href="/explore" />;
   if (!section) return <Redirect href="/" />;
+  // My balances / My activity left the phone bar (Ameen, QA 2026-10-25):
+  // Portfolio carries both, so the old phone links land there.
+  if (appHeader) return <Redirect href="/portfolio" />;
 
   if (appHeader) {
     return (

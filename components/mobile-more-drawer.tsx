@@ -5,9 +5,6 @@ import { usePathname } from 'expo-router';
 import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import { NAV_MENU_ICONS, navItems } from '@/components/ui/header';
-import { useMultiChainWallet } from '@/hooks/use-multi-chain-wallet';
-import { usePoolSession } from '@/hooks/use-pool-session';
-import { useChainRouter } from '@/hooks/use-chain-router';
 import { footerLinks } from '@/components/ui/footer';
 import { isInternalHref } from '@/config/legal/routes';
 import { NewsletterModal } from '@/components/newsletter-modal';
@@ -35,12 +32,6 @@ export function MobileMoreDrawer({ visible, onClose }: { visible: boolean; onClo
   const colors = Colors[colorScheme];
   const navigateTo = useAppNavigation();
   const pathname = usePathname();
-  const { isConnected } = useMultiChainWallet();
-  const { identityMode, sessionAddress } = usePoolSession();
-  const hasAccount = isConnected || (identityMode === 'key' && !!sessionAddress);
-  const chainRouter = useChainRouter();
-  // Non-EVM chain (Sui or Stellar): the EVM-only surfaces below stay off.
-  const isSui = chainRouter.isSui || chainRouter.isStellar;
   const [pane, setPane] = useState<Pane>('main');
   const [newsletterOpen, setNewsletterOpen] = useState(false);
 
@@ -53,14 +44,10 @@ export function MobileMoreDrawer({ visible, onClose }: { visible: boolean; onClo
 
   // The drawer's page list, derived from the header's rather than copied. A
   // row that duplicates a bar tab one layer up reads as two different places,
-  // so two are filtered out:
-  //   "My Pools" always — it is `/`, which is the Shield tab.
-  //   "Explore"  while signed OUT — the bar gives that slot to Explore then
-  //              (see barTabsFor); signed in the bar has no Explore tab, so
-  //              the drawer is the way to /explore.
-  //   "Portfolio" on Sui — the page redirects there (codex on 175686e).
+  // so the bar's own pages are filtered out: "My Pools" (it is `/`, the
+  // Shield tab), "Portfolio" and "Explore" (bar tabs of their own).
   const mainItems = navItems.filter(
-    (item) => item.label !== 'My Pools' && !(!hasAccount && item.label === 'Explore') && !(isSui && item.label === 'Portfolio'),
+    (item) => item.label !== 'My Pools' && item.label !== 'Explore' && item.label !== 'Portfolio',
   );
 
   const go = (href: string) => {
