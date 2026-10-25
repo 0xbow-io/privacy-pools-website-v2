@@ -10,6 +10,8 @@ import {
   registrationOwnerUnchanged,
   planWalletTx,
   priceWalletTx,
+  readFeeMarket,
+  walletTxAffordable,
   walletTxCostWei,
   walletTxFields,
   type FeeReadClient,
@@ -224,13 +226,21 @@ describe('wallet tx fee policy (DEV-542)', () => {
     expect(held < 840_000_000_000_000n).toBe(true);
   });
 
-  test('BNB Chain with baseFeePerGas 0 is priced legacy, never EIP-1559', async () => {
+  test('BNB Chain: no fee fields, the wallet prices it; gas limit and cost bound kept (DEV-589)', async () => {
     for (const chainId of [56, 97]) {
-      const c = client({ block: { baseFeePerGas: 0n } });
+      const c = client({ block: { baseFeePerGas: 0n }, gas: 51_084n });
       const plan = await priceWalletTx(c, TX, null, chainId);
-      expect(plan?.fees).toEqual({ gasPrice: GAS_PRICE });
-      expect('maxFeePerGas' in walletTxFields(plan)).toBe(false);
+      expect(plan?.fees).toBeNull();
+      expect(walletTxFields(plan)).toEqual({ gas: (51_084n * 12n) / 10n });
+      // Bounded at 2 x gasPrice: pre-checks and top-ups keep headroom over the wallet's tier.
+      expect(plan?.costWei).toBe(((51_084n * 12n) / 10n) * 2n * GAS_PRICE);
       expect(c.calls).not.toContain('tip');
+      expect(c.calls).not.toContain('block');
+    }
+    // Every other chain keeps the DEV-542 caps.
+    for (const chainId of [1, 10, 8453]) {
+      const plan = await priceWalletTx(client(), TX, null, chainId);
+      expect('maxFeePerGas' in walletTxFields(plan)).toBe(true);
     }
   });
 
@@ -286,5 +296,31 @@ describe('wallet tx fee policy (DEV-542)', () => {
     expect(decideViewingKeyPath({ balanceWei: 5_000_000_000_000n, gasPriceWei: 10_000_000n, gasEstimate: 51_000n, chainId: 10 }).path)
       .toBe('self-register');
     expect(viewingKeyShortfallWei({ gasPriceWei: 10_000_000n, balanceWei: 0n, gasEstimate: 51_000n, chainId: 10 })).toBe(61_200n * 20_000_000n);
+  });
+
+  test('BNB Chain keeps the "not enough BNB for gas" check while the wallet prices the fee (DEV-589 review)', async () => {
+    for (const chainId of [56, 97]) {
+      // The plan the publish hook builds: same fee read, same viewing-key plan.
+      const market = await readFeeMarket(client({ block: { baseFeePerGas: 0n } }), chainId);
+      const plan = viewingKeyTxPlan({ ...market, gasEstimate: 51_084n });
+      expect(plan.fees).toBeNull();
+      expect(plan.costWei > 0n).toBe(true);
+      expect(walletTxAffordable({ plan, balanceWei: 0n, chainId })).toBe(false);
+      expect(walletTxAffordable({ plan, balanceWei: plan.costWei - 1n, chainId })).toBe(false);
+      expect(walletTxAffordable({ plan, balanceWei: plan.costWei, chainId })).toBe(true);
+    }
+    // A block that could not be read (no fee fields off BNB) still leaves it to the wallet.
+    const unread = await readFeeMarket(client({ block: new Error('rpc down') }), 1);
+    const unreadPlan = viewingKeyTxPlan({ ...unread, gasEstimate: 51_084n });
+    expect(unreadPlan.fees).toBeNull();
+    expect(walletTxAffordable({ plan: unreadPlan, balanceWei: 0n, chainId: 1 })).toBe(true);
+    // Priced chains are checked as before.
+    const eth = viewingKeyTxPlan({ ...(await readFeeMarket(client(), 1)), gasEstimate: 51_084n });
+    expect(walletTxAffordable({ plan: eth, balanceWei: 0n, chainId: 1 })).toBe(false);
+    // The publish hook goes through this check, never a bare `fees === null` pass.
+    const { readFileSync } = require('node:fs') as typeof import('node:fs');
+    const hook = readFileSync(new URL('../../hooks/use-publish-viewing-key.ts', import.meta.url), 'utf8');
+    expect(hook).toContain('affordable: walletTxAffordable({ plan, balanceWei, chainId })');
+    expect(hook).not.toMatch(/fees\s*===?\s*null\s*\?\s*true/);
   });
 });
