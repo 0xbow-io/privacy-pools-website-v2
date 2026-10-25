@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { clearHomePanel, getHomeDestination, rememberHomeLocation } from '../home-navigation';
+import { clearHomePanel, getHomeDestination, phonePanelTarget, redirectPhonePanel, rememberHomeLocation } from '../home-navigation';
 
 beforeEach(() => rememberHomeLocation({ pathname: '/', search: '' }));
 
@@ -21,5 +21,28 @@ describe('home navigation memory', () => {
     rememberHomeLocation({ pathname: '/', search: '?action=request&panel=balances' });
     clearHomePanel();
     expect(getHomeDestination()).toBe('/?action=request');
+  });
+});
+
+describe('phone panel redirect', () => {
+  const evm = { nonEvm: false, signedIn: true };
+
+  test('a redirected panel is never the Shield destination', () => {
+    rememberHomeLocation({ pathname: '/', search: '?action=send&panel=balances' });
+    expect(redirectPhonePanel('balances', evm)).toBe('/portfolio');
+    expect(getHomeDestination()).toBe('/?action=send');
+    // Shield after the redirect lands home, so the redirect cannot fire again.
+    expect(redirectPhonePanel(null, evm)).toBeNull();
+  });
+
+  test('keeps the legacy surface where Portfolio cannot serve it', () => {
+    rememberHomeLocation({ pathname: '/', search: '?panel=activity' });
+    expect(redirectPhonePanel('activity', { nonEvm: false, signedIn: false })).toBeNull();
+    expect(redirectPhonePanel('balances', { nonEvm: true, signedIn: true })).toBeNull();
+    expect(getHomeDestination()).toBe('/?panel=activity');
+  });
+
+  test('signed-out balances still go to Portfolio (its sign-in card)', () => {
+    expect(phonePanelTarget('balances', { nonEvm: false, signedIn: false })).toBe('/portfolio');
   });
 });
