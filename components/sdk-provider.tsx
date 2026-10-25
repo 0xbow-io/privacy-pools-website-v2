@@ -77,6 +77,7 @@ import { getNativeMockSession } from '@/services/native-mock-data';
 import { allowPaymentRequestWrites, purgePaymentRequestsOnSignOut } from '@/services/payment-request-signout';
 import { signedOutOwner } from '@/services/payment-request-signout-purge';
 import { noteManagerLimitedTo } from '@/services/batch-withdrawals';
+import { assertDepositUnlock, assertUnlockFor, type UnlockPurpose } from '@/services/deposit-unlock-guard';
 
 // Key derivation now uses the SDK's canonical HKDF scheme via
 // services/sdk-setup (buildSecretDerivationPayload +
@@ -707,7 +708,7 @@ async function resolveKeystoreIdentityStatus(
     const activeView = km.getViewingKeyPair().publicKey.toLowerCase();
     return String(v).toLowerCase() === activeView ? 'compatible' : 'partial';
   } catch {
-    return 'unknown'; // a flaky RPC must not block sign-in / deposit
+    return 'unknown'; // sign-in and discovery stay available; write guards reject unknown
   }
 }
 
@@ -2806,6 +2807,13 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     opts?: {
       /** Read-only discovery needs no address-keyed registration checks. */
       discoveryOnly?: boolean;
+      /**
+       * What this session does on the target chain. A failed identity read
+       * blocks only a write that lands a note there (`deposit`, the default,
+       * and `swap-destination`); registration and a swap's source chain treat
+       * it as unknown for that chain. A confirmed mismatch always blocks.
+       */
+      purpose?: UnlockPurpose;
       swapSourceChain?: {
         chainId: number;
         relaySwapsAddress: Address;
@@ -2864,18 +2872,18 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     // not whether that someone was this unlock. The nullifying-key hash is
     // write-once per address, so depositing under a different unlock than the
     // one registered there mints a note that can NEVER be spent and cannot be
-    // re-registered. 'unknown' stays fail-open (a flaky RPC must not block the
-    // flow) and 'unregistered' falls through to the caller's own handling.
+    // re-registered. A failed lookup blocks only a write that lands a note on
+    // THIS chain; registration and a swap's source chain carry on, so one
+    // network's flaky read never blocks another. 'unregistered' falls through
+    // to the caller's registration handling. Discovery stays open.
     const targetIdentity = opts?.discoveryOnly ? 'unknown' : await resolveKeystoreIdentityStatus(
       sdkSetup,
       managers.keystoreManager as IKeystoreManager,
       owner,
       targetChainId,
     );
-    if (targetIdentity === 'incompatible') {
-      throw new Error(
-        'This account is registered with a different unlock on that network. Switch unlock, or import its notes to exit.',
-      );
+    if (!opts?.discoveryOnly) {
+      assertUnlockFor(targetIdentity, opts?.purpose ?? 'deposit', targetConfig?.displayName);
     }
 
     const { createPoolSession } = await getPoolSessionService();
@@ -3784,7 +3792,10 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
   /** See the context type: a far-chain session without moving the app there. */
   const sessionForChain = useCallback(async (targetChainId: number): Promise<PoolSession | null> => {
     if (!isSupportedEvmChainId(targetChainId)) return null;
-    return buildSessionForChain(targetChainId);
+    // Registration and the swap's "registered there?" lookup: a failed identity
+    // read on that chain is unknown, not a block. The swap's destination
+    // deposit is checked strictly when its own session is built.
+    return buildSessionForChain(targetChainId, { purpose: 'register' });
   }, [buildSessionForChain]);
 
   const createReshieldCrosschainSessions = useCallback(async (args: {
@@ -3796,7 +3807,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     // share targets. It is still a separate session, and the destination note is
     // still persisted against it — losing it would leave the reshielded value
     // invisible locally until a rescan found it.
-    const destination = await buildSessionForChain(args.destinationChainId);
+    const destination = await buildSessionForChain(args.destinationChainId, { purpose: 'swap-destination' });
     if (!destination) return null;
     // `yields` is the destination chain's configured share namespaces. Handing
     // them to the source session is what lets the far-side deposit fund a share
@@ -3804,6 +3815,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     // over there, which no share pool accepts. Absent on an older SDK, in which
     // case this is simply omitted and plain targets behave exactly as before.
     const source = await buildSessionForChain(chainId, {
+      purpose: 'spend',
       reshieldDestinationChainId: args.destinationChainId,
       ...(destination.yields?.length ? { reshieldDestinationYieldTargets: destination.yields } : {}),
     });
@@ -4025,8 +4037,8 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
   // can't authorize a spend/exit (the keystore nullifying key is write-once).
   // Re-reads on-chain against the COMMITTED manager rather than trusting the
   // React `keystoreIdentityStatus` (which can lag the just-derived identity, or
-  // be stale if another tab/device registered in between). Throws only on a
-  // definitive 'incompatible'; 'unknown' (RPC fail-open) and 'unregistered' pass.
+  // be stale if another tab/device registered in between). Unknown results
+  // block a deposit; first-time registration remains available.
   // Field tracing for the balances-landing bug: session readiness flips.
   useEffect(() => {
     console.log('[PP-SESSION]', JSON.stringify({ keysReady, identityMode, sessionAddress: effectiveAddress ?? null, chainId }));
@@ -4066,9 +4078,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
       throw new Error('Network changed since sign-in. Close the modal and try the deposit again.');
     }
     setKeystoreIdentityStatus(status);
-    if (status === 'incompatible') {
-      throw new Error('This account is registered with a different unlock. Switch unlock, or import its notes to exit.');
-    }
+    assertDepositUnlock(status);
   }, [chainId]);
 
 

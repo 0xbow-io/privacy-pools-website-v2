@@ -16,8 +16,8 @@ export const LEARN_MORE_UNREGISTERED_LABEL = 'Learn more about deposits to unreg
 
 /**
  * The hint for a registration state, or null when the form should say
- * nothing (idle, or a registered recipient: the healthy path needs no
- * caption, and its silence is what makes the other states read as different).
+ * nothing while the recipient field is empty. A registered address still
+ * needs the ownership disclosure: the payer's unlock cannot access its notes.
  *
  * Registration is per network, so the unregistered line names the one that was
  * checked: an address set up on BNB Chain and not on Ethereum read as "hasn't
@@ -29,6 +29,8 @@ export function recipientRegistrationHint(
   chainName?: string,
 ): { text: string; learnMore: boolean; tone: 'muted' | 'warning' } | null {
   switch (state) {
+    case 'registered':
+      return { text: 'The recipient must sign in to their account to access these funds.', learnMore: false, tone: 'muted' };
     case 'checking':
       return { text: 'Checking whether this address is registered…', learnMore: false, tone: 'muted' };
     case 'unregistered':

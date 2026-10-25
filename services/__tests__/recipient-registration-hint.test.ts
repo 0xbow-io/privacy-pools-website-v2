@@ -11,8 +11,8 @@ import {
 } from '../recipient-registration-hint';
 
 describe('recipientRegistrationHint', () => {
-  test('a registered recipient and an empty field say nothing', () => {
-    expect(recipientRegistrationHint('registered')).toBeNull();
+  test('a registered recipient explains access, while an empty field stays quiet', () => {
+    expect(recipientRegistrationHint('registered')?.text).toContain('recipient must sign in');
     expect(recipientRegistrationHint('idle')).toBeNull();
   });
 

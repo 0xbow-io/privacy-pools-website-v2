@@ -9,6 +9,7 @@ import { createSnapshotStore } from '../snapshot-cache';
 import { alignLogScanStart } from '../log-scan-alignment';
 import { OnChainNoteIndex } from '../onchain-note-index';
 import { HttpASPDataProvider } from '@privacy-pools-v2/sdk';
+import { assertUnlockFor } from '../deposit-unlock-guard';
 
 // The sweep's data gate, satisfied: every chain's held snapshot is ready.
 const feedReady = (ready: (cid: number) => boolean = () => true) => ({
@@ -697,6 +698,7 @@ test('the discovery session builder never requests address-keyed keystore status
   const owner = '0x1111111111111111111111111111111111111111';
   const managers = { address: owner, keystoreManager: {} };
   let statusReads = 0;
+  let identityStatus: 'incompatible' | 'unknown' = 'incompatible';
   const build = compile(`${providerDecl('buildSessionForChain')}; return buildSessionForChain;`, {
     useCallback: (fn: unknown) => fn, effectiveAddress: owner, log() {},
     siblingWorld: () => ({ managers }), siblingWorldUnchanged: () => true,
@@ -704,7 +706,8 @@ test('the discovery session builder never requests address-keyed keystore status
     apiClient: { getEntrypoints: async () => ({}) },
     resolveEntrypointChainConfig: () => ({ entrypoint: 'entrypoint' }), isAddress: () => true,
     getSdkSetup: async () => ({ createNoteManager: () => ({}), createCircuitArtifacts: () => ({}) }),
-    resolveKeystoreIdentityStatus: async () => { statusReads++; return 'incompatible'; },
+    resolveKeystoreIdentityStatus: async () => { statusReads++; return identityStatus; },
+    assertUnlockFor,
     getPoolSessionService: async () => ({ createPoolSession: async () => ({}) }),
     loadStoredAccountExport: () => null, CIRCUIT_ARTIFACTS_BASE_URL: '',
   });
@@ -713,6 +716,65 @@ test('the discovery session builder never requests address-keyed keystore status
   // Deposit sessions still refuse an incompatible registration.
   await expect(build(10)).rejects.toThrow('different unlock');
   expect(statusReads).toBe(1);
+  identityStatus = 'unknown';
+  await expect(build(10)).rejects.toThrow('Could not verify');
+  expect(statusReads).toBe(2);
+});
+
+// One chain's failed identity read is unknown for THAT chain only: it blocks a
+// note landing there, never registration or the source side of a swap.
+function purposeHarness(statusByChain: Record<number, 'unknown' | 'compatible' | 'unregistered' | 'incompatible'>) {
+  const owner = '0x1111111111111111111111111111111111111111';
+  const managers = { address: owner, keystoreManager: {} };
+  const reads: number[] = [];
+  const env: Record<string, unknown> = {
+    useCallback: (fn: unknown) => fn, effectiveAddress: owner, log() {},
+    siblingWorld: () => ({ managers }), siblingWorldUnchanged: () => true,
+    getChainConfig: (cid: number) => ({ displayName: `Chain ${cid}`, contracts: { fromBlock: 1n, poolAddress: 'pool', keystoreAddress: 'keys' } }),
+    apiClient: { getEntrypoints: async () => ({}) },
+    resolveEntrypointChainConfig: () => ({ entrypoint: 'entrypoint' }), isAddress: () => true,
+    getSdkSetup: async () => ({ createNoteManager: () => ({}), createCircuitArtifacts: () => ({}) }),
+    resolveKeystoreIdentityStatus: async (_s: unknown, _k: unknown, _o: unknown, cid: number) => { reads.push(cid); return statusByChain[cid]; },
+    assertUnlockFor,
+    getPoolSessionService: async () => ({ createPoolSession: async () => ({ yields: [] }) }),
+    loadStoredAccountExport: () => null, CIRCUIT_ARTIFACTS_BASE_URL: '',
+    isSupportedEvmChainId: () => true,
+    chainId: 1,
+  };
+  env.buildSessionForChain = compile(`${providerDecl('buildSessionForChain')}; return buildSessionForChain;`, env);
+  const sessionForChain = compile(`${providerDecl('sessionForChain')}; return sessionForChain;`, env);
+  const createReshieldCrosschainSessions = compile(
+    `const __import = async () => ({ crossChainReshieldSupported: () => true });
+     ${providerDecl('createReshieldCrosschainSessions').replace("import('@/config/intent-swaps')", '__import()')};
+     return createReshieldCrosschainSessions;`, env);
+  return { sessionForChain, createReshieldCrosschainSessions, reads };
+}
+
+test('a failed identity read on one chain does not block registering there or on another chain', async () => {
+  const h = purposeHarness({ 1: 'compatible', 10: 'unknown' });
+  // Registration on the chain whose read failed: the keystore's own read decides.
+  expect(await h.sessionForChain(10)).toEqual({ yields: [] });
+  expect(await h.sessionForChain(1)).toEqual({ yields: [] });
+  expect(h.reads).toEqual([10, 1]);
+  // A confirmed mismatch still blocks registration on that chain.
+  await expect(purposeHarness({ 10: 'incompatible' }).sessionForChain(10)).rejects.toThrow('different unlock');
+});
+
+test('a cross-chain swap ignores a failed read on its source chain, and blocks only on the destination', async () => {
+  // Source (chain 1) unreadable, destination fine: the swap proceeds.
+  const ok = purposeHarness({ 1: 'unknown', 10: 'compatible' });
+  const sessions = await ok.createReshieldCrosschainSessions({ destinationChainId: 10 });
+  expect(sessions).not.toBeNull();
+  expect(ok.reads).toEqual([10, 1]);
+  // Destination unreadable: refused, named for that chain, and no deposit copy.
+  const bad = purposeHarness({ 1: 'compatible', 10: 'unknown' });
+  const err = await bad.createReshieldCrosschainSessions({ destinationChainId: 10 }).catch((e: Error) => e);
+  expect(err).toBeInstanceOf(Error);
+  expect(err.message).toContain('Chain 10');
+  expect(err.message).not.toContain('Nothing was deposited');
+  // A confirmed mismatch on the source still blocks.
+  await expect(purposeHarness({ 1: 'incompatible', 10: 'compatible' })
+    .createReshieldCrosschainSessions({ destinationChainId: 10 })).rejects.toThrow('different unlock');
 });
 
 test('unchanged pool rows retry on the grid while discovery holds its cursor, then stop', async () => {
