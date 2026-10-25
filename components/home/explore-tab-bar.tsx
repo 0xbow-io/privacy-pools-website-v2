@@ -1,8 +1,7 @@
 import { useMemo } from 'react';
-import { Platform, View, type ViewStyle } from 'react-native';
+import { Platform, Pressable, Text, View, type ViewStyle } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { JellyTabBarHeadless } from 'react-native-jelly-tabs';
 import { Colors, Fonts, FontWeights } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import type { DrawerSection } from '@/components/home/explore-panel';
@@ -111,8 +110,8 @@ const BAR_SHADOW = {
 } as const;
 
 /**
- * Mobile bottom navigation for the three exploratory surfaces — the jelly
- * tab bar (react-native-jelly-tabs), themed from the active design variant's
+ * Mobile bottom navigation: equal-width Pressable slots (it was the jelly
+ * tab bar library before), themed from the active design variant's
  * tokens: track = card surface, pill = the variant's primary CTA pair,
  * inactive glyphs = muted text. `Colors`/`Fonts` are resolved per variant at
  * module load, so every vault theme styles the bar automatically (Classic
@@ -139,42 +138,9 @@ export function ExploreTabBar({
 
   const tabs = useMemo(() => barTabsFor(isConnected), [isConnected]);
 
-  const items = useMemo(
-    () =>
-      tabs.map((tab) => ({
-        key: tab.key,
-        label: exploreTabLabel(tab.key, isConnected),
-        // 9.5px BOLD, with real air above it (Pat, 2026-08-28: more space
-        // between icon and label, slightly larger, bold).
-        //
-        // The size is the constrained part. The old note read "9px, not 10: at
-        // 10 the signed-out bar's longest label ('Explore pools', five tabs
-        // sharing 390px) truncates to 'Explore po…'" — and BOLD is wider than
-        // medium, so it spends the same budget.
-        //
-        // Measured in-browser at 390px: the longest label, 'Explore pools',
-        // renders 63px at 9.5 bold (60px at the old 9 medium) against a 72px
-        // tab — 9px of headroom. Re-measure before raising it; the margin is
-        // one step, not two.
-        labelStyle: { fontFamily: Fonts.sansBold, fontWeight: FontWeights.sansBold, fontSize: 9.5, marginTop: 4 },
-        accessibilityLabel: exploreTabLabel(tab.key, isConnected),
-        testID: `explore-tab-${tab.key}`,
-        activeIcon: ({ color, size }: { color: string; size: number }) => (
-          // nw-keep(data-color): jelly resolves the layer color at runtime (vector-icon sink)
-          <Ionicons name={tab.activeIcon ?? ACTIVE_ICONS[tab.key as Exclude<MobileNavTab, 'card'>]} size={size} color={color} />
-        ),
-        inactiveIcon: ({ color, size }: { color: string; size: number }) => (
-          // nw-keep(data-color): jelly resolves the layer color at runtime (vector-icon sink)
-          <Ionicons name={tab.icon} size={size} color={color} />
-        ),
-      })),
-    [tabs, isConnected],
-  );
-
   // `active` can name a tab the bar no longer shows (connected, on
   // /explore/pools via the More menu): no pill rather than a wrong pill.
   const activeIndex = active ? tabs.findIndex((t) => t.key === active) : -1;
-  const selectedIndex = activeIndex >= 0 ? activeIndex : null;
 
   return (
     <View
@@ -188,30 +154,63 @@ export function ExploreTabBar({
     >
       {/* nw-keep(data-color): ambient shadow tint is the runtime theme token */}
       <View className="w-full max-w-[460px]" style={[BAR_SHADOW, { shadowColor: colors.tint }]}>
-        <JellyTabBarHeadless
-          items={items}
-          maxWidth="100%"
-          selectedIndex={selectedIndex}
-          // Selection is fully controlled: report the tap, keep the pill where
-          // our state says it is (data tabs unmount the bar for their sheet;
-          // "More" toggles its drawer).
-          onTabPress={({ index }) => {
-            onSelect(tabs[index].key);
-            return false;
-          }}
-          colors={{
-            surface: colors.cardBackground,
-            selectedSurface: colors.buttonPrimary,
-            activeContent: colors.buttonPrimaryText,
-            inactiveContent: colors.textMuted,
-          }}
-          opacity={{ surface: WEB ? 0.78 : 1 }}
-          backdrop={<WebGlassBackdrop />}
-          // Telegram-calibrated, second pass: same density, a touch more
-          // height — Telegram's bar is ~15% taller than the first cut, with
-          // slightly larger glyphs. Clearance above tracks trackHeight.
-          config={{ layout: { iconSize: 18, trackHeight: TAB_BAR_TRACK_HEIGHT, itemHeight: 44, trackInset: 2 } }}
-        />
+        {/* What you see is what you tap (Ameen, QA 2026-10-25): the jelly
+            pill inflated past its slot and its drag gesture picked the tab,
+            so a tap on the pill's visible edge landed on the neighbour. Each
+            tab is now an equal-width Pressable and the highlight is drawn
+            inside that same Pressable, so the two can never disagree. */}
+        <View
+          className="flex-row overflow-hidden rounded-[32px] p-[2px]"
+          // nw-keep(measured-or-inset): track height shared with the page clearance
+          style={{ height: TAB_BAR_TRACK_HEIGHT }}
+        >
+          <WebGlassBackdrop />
+          <View
+            pointerEvents="none"
+            className="absolute inset-0 rounded-[32px]"
+            // nw-keep(data-color): runtime theme surface, translucent on web for the glass
+            style={{ backgroundColor: colors.cardBackground, opacity: WEB ? 0.78 : 1 }}
+          />
+          {tabs.map((tab, index) => {
+            const selected = index === activeIndex;
+            const label = exploreTabLabel(tab.key, isConnected);
+            const color = selected ? colors.buttonPrimaryText : colors.textMuted;
+            return (
+              <Pressable
+                key={tab.key}
+                accessibilityRole="tab"
+                accessibilityLabel={label}
+                accessibilityState={{ selected }}
+                testID={`explore-tab-${tab.key}`}
+                onPress={() => onSelect(tab.key)}
+                className="h-full flex-1 basis-0 items-center justify-center overflow-hidden rounded-[30px]"
+              >
+                {selected ? (
+                  <View
+                    pointerEvents="none"
+                    className="absolute inset-0 rounded-[30px]"
+                    // nw-keep(data-color): the variant's primary CTA fill
+                    style={{ backgroundColor: colors.buttonPrimary }}
+                  />
+                ) : null}
+                {/* nw-keep(data-color): glyph color is a runtime theme token (vector-icon sink) */}
+                <Ionicons
+                  name={selected ? tab.activeIcon ?? ACTIVE_ICONS[tab.key as Exclude<MobileNavTab, 'card'>] : tab.icon}
+                  size={18}
+                  color={color}
+                />
+                {/* 9.5px BOLD with air above it (Pat, 2026-08-28). */}
+                <Text
+                  numberOfLines={1}
+                  // nw-keep(data-color): label color is a runtime theme token
+                  style={{ color, fontFamily: Fonts.sansBold, fontWeight: FontWeights.sansBold, fontSize: 9.5, marginTop: 4 }}
+                >
+                  {label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
     </View>
   );
