@@ -31,14 +31,15 @@ import { useDebug } from '@/components/debug-provider';
 
 import { getChainConfig } from '@/config/chains';
 import { getTokenMetadata, isStablecoin } from '@/config/tokens';
-import { isShareSymbol } from '@/services/share-display';
-import { formatShareAsUnderlying, shareExactAsUnderlying } from '@/services/share-rates';
+import { displayTokenSymbol, isShareSymbol } from '@/services/share-display';
+import { shareExactAsUnderlying } from '@/services/share-rates';
 import { useShareRates } from '@/hooks/use-share-rates';
 import { formatUnits } from 'viem';
 import type { AssetStats, AssetsStatsResponse, GlobalStatistics } from '@/services/api-types';
 import { finiteOrNull, foldRowsPerAsset } from '@/services/stats-asset-fold';
 import {
   filterRowsToChains,
+  formatCompactTokenAmount,
   formatPoolTokenAmount,
   poolChainFilterOptions,
   poolTableChains,
@@ -407,5 +408,5 @@ function shareTvlText(
     return null;
   }
   const converted = shareExactAsUnderlying(exact, rate);
-  return converted === null ? null : formatShareAsUnderlying(converted, rate);
+  return converted === null ? null : formatCompactTokenAmount(converted, displayTokenSymbol(rate.underlyingSymbol));
 }
