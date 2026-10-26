@@ -82,6 +82,7 @@ import {
 import { FULL_RESYNC_INTERVAL_MS, refreshViewingKeyRegistry, type SyncOutcome } from '@/services/viewing-key-cache';
 import {
   NULLIFYING_KEY_HASH_INTERVAL_MS,
+  NULLIFYING_KEY_HASH_RETRY_MS,
   syncNullifyingKeyHashes,
   type NullifyingKeyHashSyncOutcome,
 } from '@/services/nullifying-key-hash-cache';
@@ -319,7 +320,15 @@ export function startPublicFeeds(): void {
       publicFeeds.register<NullifyingKeyHashSyncOutcome>({
         key: feedNullifyingKeyHashRegistry(chainId),
         intervalMs: NULLIFYING_KEY_HASH_INTERVAL_MS,
-        fetch: () => syncNullifyingKeyHashes(chainId, chainKeystoreAddress),
+        // A failed pull retries on the short grid so a write waiting on a
+        // current registry is not left for a whole window. A 404 (feed not
+        // deployed on this ASP) is not retried.
+        retryMs: NULLIFYING_KEY_HASH_RETRY_MS,
+        fetch: async () => {
+          const outcome = await syncNullifyingKeyHashes(chainId, chainKeystoreAddress);
+          if (!outcome.ok && outcome.reason !== 'not-deployed') throw new Error(`nullifying-key-hashes sync failed: ${outcome.reason}`);
+          return outcome;
+        },
       });
       // Yield earned (services/yield-earned.ts). For every chain this build
       // configures a yield deployment on: the whole deposits feed, and the

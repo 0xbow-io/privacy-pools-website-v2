@@ -42,8 +42,11 @@ export function identityStatusFromRegistry(
   if (active === null) return 'unknown';
   if (n !== active) return 'incompatible';
   if (!view.viewingFresh) return 'unknown';
-  const v = view.viewingKey ? asBig(view.viewingKey) : null;
-  if (v === null || v === 0n) return 'partial';
+  if (!view.viewingKey) return 'partial';
+  const v = asBig(view.viewingKey);
+  // A malformed entry cannot answer either way.
+  if (v === null) return 'unknown';
+  if (v === 0n) return 'partial';
   return view.viewingKey!.toLowerCase() === activeViewingKey.toLowerCase() ? 'compatible' : 'partial';
 }
 

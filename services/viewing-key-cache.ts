@@ -25,6 +25,7 @@ import { envScopedStorageKey } from '@/config/app-environment';
 import * as SecureStore from 'expo-secure-store';
 import type { Address, Hex, PublicKey } from '@/services/sdk-types';
 import { ASP_URL } from '@/config/env';
+import { notifyRegistrySynced } from '@/services/keystore-registry-events';
 
 type AspKey = {
   id: string;
@@ -171,6 +172,7 @@ export async function refreshViewingKeyRegistry(chainId: number, keystoreAddress
   if (outcome.ok) {
     lastFullResyncOk.set(scope, Date.now());
     fullResyncFailed.delete(scope);
+    notifyRegistrySynced();
   } else {
     fullResyncFailed.set(scope, true);
   }
@@ -407,6 +409,8 @@ export function clearViewingKeysCache(chainId: number, keystoreAddress?: string)
  */
 export function isViewingKeyRegistryFresh(chainId: number, keystoreAddress?: string, now = Date.now()): boolean {
   const scope = cacheScope(chainId, keystoreAddress);
-  const at = lastFullResyncOk.get(scope);
-  return at !== undefined && !fullResyncFailed.get(scope) && now - at <= 2 * FULL_RESYNC_INTERVAL_MS + 60_000;
+  // The persisted stamp lets a reload inside the window answer at once; this
+  // process's own failed full pull still wins.
+  const at = Math.max(lastFullResyncOk.get(scope) ?? 0, readRegistry(chainId, keystoreAddress).lastSyncedAt);
+  return at > 0 && !fullResyncFailed.get(scope) && now - at <= 2 * FULL_RESYNC_INTERVAL_MS + 60_000;
 }

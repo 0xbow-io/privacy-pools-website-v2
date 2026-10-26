@@ -93,3 +93,49 @@ describe('nullifying-key-hash cache', () => {
     expect(cache.isNullifyingKeyRegistryFresh(1)).toBe(false);
   });
 });
+
+describe('review fixes', () => {
+  beforeEach(() => {
+    sent.length = 0;
+    cache.resetNullifyingKeyHashCacheForTests();
+    try { localStorage.clear(); } catch { /* no DOM storage under bun */ }
+  });
+
+  test('a malformed viewing-key entry is unknown, not partial', () => {
+    const view = { nullifyingKeyHash: HASH, nullifyingFresh: true, viewingKey: 'not-hex', viewingFresh: true };
+    expect(identityStatusFromRegistry(view, BigInt(HASH).toString(), VK)).toBe('unknown');
+  });
+
+  test('a malformed hash fails the sync without advancing the cursor', async () => {
+    respond = () => json({ entries: [{ id: '4', account: ALICE, nullifyingKeyHash: 'zz', lastUpdatedBlock: '0x1' }], lastSyncedId: '4', hasMore: false });
+    expect(await cache.syncNullifyingKeyHashes(1, undefined, send)).toEqual({ ok: false, reason: 'parse' });
+    respond = () => json({ entries: [], lastSyncedId: '4', hasMore: false });
+    await cache.syncNullifyingKeyHashes(1, undefined, send);
+    expect(sent[1].url.endsWith('sinceId=0')).toBe(true);
+  });
+
+  test('page progress is kept when a tick runs out of pages', async () => {
+    let n = 0;
+    respond = () => { n += 1; return json({ entries: [], lastSyncedId: String(n), hasMore: true }); };
+    expect((await cache.syncNullifyingKeyHashes(1, undefined, send)).ok).toBe(false);
+    sent.length = 0;
+    respond = () => json({ entries: [], lastSyncedId: String(n), hasMore: false });
+    await cache.syncNullifyingKeyHashes(1, undefined, send);
+    expect(sent[0].url.endsWith(`sinceId=${n}`)).toBe(true);
+  });
+
+  test('our own confirmed registration answers a registry miss, never a served entry', async () => {
+    respond = () => json({ entries: [{ id: '1', account: BOB, nullifyingKeyHash: HASH, lastUpdatedBlock: '0x1' }], lastSyncedId: '1', hasMore: false });
+    await cache.syncNullifyingKeyHashes(1, undefined, send);
+    const mine = `0x${'11'.repeat(32)}`;
+    cache.recordOwnRegistration(1, ALICE, undefined, mine, null);
+    cache.recordOwnRegistration(1, BOB, undefined, mine, null);
+    expect(cache.readRegistryView(1, ALICE).nullifyingKeyHash).toBe(mine);
+    expect(cache.readRegistryView(1, BOB).nullifyingKeyHash).toBe(HASH);
+  });
+
+  test('a write waits for the grid sync instead of fetching, bounded', async () => {
+    expect(await cache.awaitKeystoreRegistries(1, undefined, 10)).toBe(false);
+    expect(sent.length).toBe(0);
+  });
+});
