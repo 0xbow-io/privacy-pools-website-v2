@@ -322,3 +322,48 @@ describe('privacy: no amount-keyed ASP reads on user-reachable paths', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+/**
+ * Keystore reads keyed by an account: `Keystore.getNullifyingKeyHash(account)`
+ * and `Keystore.getViewingKey(account)`. Read for the user's OWN account at
+ * every sign-in, they named that account to the RPC provider (L2BEAT). The
+ * identity check now reads the bulk ASP registries
+ * (services/nullifying-key-hash-cache.ts, services/viewing-key-cache.ts).
+ *
+ * `getNullifyingKeyHash` has no legitimate caller left. `getViewingKey` still
+ * has one use: the RPC FALLBACK of a recipient lookup, which runs only when the
+ * ASP registry is not deployed or a sync failed (services/viewing-key-cache.ts
+ * lookupViewingKey), and the relayed-transfer builder that is handed that
+ * lookup. Those files are listed below; the user's own account must never be
+ * read this way anywhere.
+ */
+const KEYSTORE_ACCOUNT_READS = /\b(getNullifyingKeyHash|getViewingKey)\s*\(/;
+const RECIPIENT_FALLBACK_FILES = new Set([
+  'services/viewing-key-cache.ts',
+  'services/relayed-transfer.ts',
+  'components/transfer-modal-provider.tsx',
+  'components/deposit-modal-provider.tsx',
+  'components/payment-request-modal-provider.tsx',
+]);
+
+describe('privacy: no per-account keystore reads for the session account', () => {
+  test('getNullifyingKeyHash is never called, getViewingKey only as a recipient fallback', () => {
+    const offenders: string[] = [];
+    for (const dir of SCANNED_DIRS) {
+      for (const file of walk(join(ROOT, dir))) {
+        const rel = relative(ROOT, file);
+        if (ALLOW_PREFIXES.some((p) => rel.startsWith(p))) continue;
+        const source = readFileSync(file, 'utf8');
+        source.split('\n').forEach((line, i) => {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
+          const m = KEYSTORE_ACCOUNT_READS.exec(line);
+          if (!m) return;
+          if (m[1] === 'getViewingKey' && RECIPIENT_FALLBACK_FILES.has(rel)) return;
+          offenders.push(`${rel}:${i + 1}: ${trimmed}`);
+        });
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});

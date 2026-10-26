@@ -399,3 +399,14 @@ export function clearViewingKeysCache(chainId: number, keystoreAddress?: string)
   }
   aspUnavailable.delete(cacheScope(chainId, keystoreAddress));
 }
+
+/**
+ * True when the grid's full re-pull for this scope succeeded within the last two
+ * windows and has not failed since, so the local map can stand in for the chain
+ * (a hit is current, a miss means unregistered). Pure local state, no request.
+ */
+export function isViewingKeyRegistryFresh(chainId: number, keystoreAddress?: string, now = Date.now()): boolean {
+  const scope = cacheScope(chainId, keystoreAddress);
+  const at = lastFullResyncOk.get(scope);
+  return at !== undefined && !fullResyncFailed.get(scope) && now - at <= 2 * FULL_RESYNC_INTERVAL_MS + 60_000;
+}

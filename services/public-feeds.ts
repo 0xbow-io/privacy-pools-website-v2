@@ -80,6 +80,11 @@ import {
   refreshPoolLeaves,
 } from '@/services/snapshot-source';
 import { FULL_RESYNC_INTERVAL_MS, refreshViewingKeyRegistry, type SyncOutcome } from '@/services/viewing-key-cache';
+import {
+  NULLIFYING_KEY_HASH_INTERVAL_MS,
+  syncNullifyingKeyHashes,
+  type NullifyingKeyHashSyncOutcome,
+} from '@/services/nullifying-key-hash-cache';
 import { ASP_URL, LEGACY_CONFIG } from '@/config/env';
 import {
   feedLifiVerifiedTokens,
@@ -115,6 +120,7 @@ export const FEED_ENTRYPOINTS = 'entrypoints';
 export const feedTokenPrices = (chainId: number | string) => `token-prices:${chainId}`;
 export const feedPriceMap = (chainId: number | string) => `price-map:${chainId}`;
 export const feedViewingKeyRegistry = (chainId: number | string) => `viewing-key-registry:${chainId}`;
+export const feedNullifyingKeyHashRegistry = (chainId: number | string) => `nullifying-key-hash-registry:${chainId}`;
 
 let registered = false;
 let unsubscribeBackoff: (() => void) | undefined;
@@ -305,6 +311,15 @@ export function startPublicFeeds(): void {
         key: feedViewingKeyRegistry(chainId),
         intervalMs: FULL_RESYNC_INTERVAL_MS,
         fetch: () => refreshViewingKeyRegistry(chainId, chainKeystoreAddress),
+      });
+      // The nullifying-key-hash registry (services/nullifying-key-hash-cache.ts).
+      // The keystore identity check at sign-in and before a deposit reads this
+      // local copy instead of asking the chain RPC about the user's own
+      // account; pulled here so its timing is the grid's, not the sign-in's.
+      publicFeeds.register<NullifyingKeyHashSyncOutcome>({
+        key: feedNullifyingKeyHashRegistry(chainId),
+        intervalMs: NULLIFYING_KEY_HASH_INTERVAL_MS,
+        fetch: () => syncNullifyingKeyHashes(chainId, chainKeystoreAddress),
       });
       // Yield earned (services/yield-earned.ts). For every chain this build
       // configures a yield deployment on: the whole deposits feed, and the
