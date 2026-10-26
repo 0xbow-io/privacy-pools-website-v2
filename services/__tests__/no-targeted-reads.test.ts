@@ -321,6 +321,12 @@ describe('privacy: no amount-keyed ASP reads on user-reachable paths', () => {
     expect(scanned).toBeGreaterThan(0);
     expect(offenders).toEqual([]);
   });
+
+  test('the recipient exemption is per call, not per file', () => {
+    const exempt = (rel: string, line: string) => (RECIPIENT_FALLBACK_CALLS[rel] ?? []).some((re) => re.test(line.trim()));
+    expect(exempt('components/deposit-modal-provider.tsx', '{ getViewingKey: (a) => ks.getViewingKey(a) },')).toBe(true);
+    expect(exempt('components/deposit-modal-provider.tsx', 'const v = await ks.getViewingKey(sessionAddress);')).toBe(false);
+  });
 });
 
 /**
@@ -338,13 +344,22 @@ describe('privacy: no amount-keyed ASP reads on user-reachable paths', () => {
  * read this way anywhere.
  */
 const KEYSTORE_ACCOUNT_READS = /\b(getNullifyingKeyHash|getViewingKey)\s*\(/;
-const RECIPIENT_FALLBACK_FILES = new Set([
-  'services/viewing-key-cache.ts',
-  'services/relayed-transfer.ts',
-  'components/transfer-modal-provider.tsx',
-  'components/deposit-modal-provider.tsx',
-  'components/payment-request-modal-provider.tsx',
-]);
+// Exactly the recipient-lookup call shapes, per file: a new getViewingKey call
+// in one of these files (say on the session account) is still an offender.
+const RECIPIENT_FALLBACK_CALLS: Record<string, RegExp[]> = {
+  'services/viewing-key-cache.ts': [
+    /^const key = await rpcFallback\.getViewingKey\(account\);$/,
+    // The RpcFallback interface declaration, not a call.
+    /^getViewingKey\(account: Address\): Promise<Hex \| string>;$/,
+  ],
+  'services/relayed-transfer.ts': [
+    /^const publicViewingKey = await deps\.getViewingKey\(spec\.evmAddress\);$/,
+    /^getViewingKey: async \(evmAddress\) => \(await keystore\.getViewingKey\(evmAddress\)\) as Hex,$/,
+  ],
+  'components/transfer-modal-provider.tsx': [/^\{ getViewingKey: \(a\) => ks\.getViewingKey\(a\) \},$/],
+  'components/deposit-modal-provider.tsx': [/^\{ getViewingKey: \(a\) => ks\.getViewingKey\(a\) \},$/],
+  'components/payment-request-modal-provider.tsx': [/^\{ getViewingKey: \(account\) => ks\.getViewingKey\(account\) \},$/],
+};
 
 describe('privacy: no per-account keystore reads for the session account', () => {
   test('getNullifyingKeyHash is never called, getViewingKey only as a recipient fallback', () => {
@@ -359,7 +374,7 @@ describe('privacy: no per-account keystore reads for the session account', () =>
           if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
           const m = KEYSTORE_ACCOUNT_READS.exec(line);
           if (!m) return;
-          if (m[1] === 'getViewingKey' && RECIPIENT_FALLBACK_FILES.has(rel)) return;
+          if (m[1] === 'getViewingKey' && (RECIPIENT_FALLBACK_CALLS[rel] ?? []).some((re) => re.test(trimmed))) return;
           offenders.push(`${rel}:${i + 1}: ${trimmed}`);
         });
       }

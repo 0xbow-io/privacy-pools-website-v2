@@ -11,6 +11,7 @@ import { getChainConfig } from '@/config/chains';
 import { LEGACY_CONFIG } from '@/config/env';
 import { buildViewingKeyOverview, VIEWING_KEY_FACTS } from '@/services/viewing-key-overview';
 import { getCachedViewingKey, isViewingKeyRegistryFresh } from '@/services/viewing-key-cache';
+import { onRegistrySynced } from '@/services/keystore-registry-events';
 import { useAccounting } from '@/components/accounting-modal-provider';
 
 /**
@@ -77,27 +78,23 @@ export function ViewingKeyModalProvider({ children }: { children: React.ReactNod
   // precheck's cache uses (the bulk ASP viewing-key registry).
   useEffect(() => {
     if (!isOpen || !viewingKeyOwner || !derivedViewingPublicKey) return;
-    let cancelled = false;
     setOnChainViewingKey(undefined);
-    (async () => {
-      try {
-        const cfg = getChainConfig(activeEvmChainId);
-        if (!cfg?.contracts) return;
-        // Same keystore the sign-in scheme detection reads (legacy pin first).
-        const keystoreAddr = LEGACY_CONFIG?.keystore ?? cfg.contracts.keystoreAddress;
-        // The bulk ASP registry copy, never a per-account RPC read. Stale reads as unknown (null).
-        if (!isViewingKeyRegistryFresh(activeEvmChainId, keystoreAddr)) {
-          if (!cancelled) setOnChainViewingKey(null);
-          return;
-        }
-        const key = getCachedViewingKey(activeEvmChainId, viewingKeyOwner, keystoreAddr) ?? `0x${'0'.repeat(64)}`;
-        if (!cancelled) setOnChainViewingKey(String(key));
-      } catch (err) {
-        console.warn('[ViewingKey] on-chain viewing key read failed', err instanceof Error ? err.message : String(err));
-        if (!cancelled) setOnChainViewingKey(null);
+    const cfg = getChainConfig(activeEvmChainId);
+    if (!cfg?.contracts) return;
+    // Same keystore the sign-in scheme detection reads (legacy pin first).
+    const keystoreAddr = LEGACY_CONFIG?.keystore ?? cfg.contracts.keystoreAddress;
+    // The bulk ASP registry copy, never a per-account RPC read. Stale reads as
+    // unknown (null) and re-reads when the grid lands the next sync, so the
+    // modal does not stay on "could not read" once the data is there.
+    const read = () => {
+      if (!isViewingKeyRegistryFresh(activeEvmChainId, keystoreAddr)) {
+        setOnChainViewingKey(null);
+        return;
       }
-    })();
-    return () => { cancelled = true; };
+      setOnChainViewingKey(String(getCachedViewingKey(activeEvmChainId, viewingKeyOwner, keystoreAddr) ?? `0x${'0'.repeat(64)}`));
+    };
+    read();
+    return onRegistrySynced(read);
   }, [isOpen, viewingKeyOwner, derivedViewingPublicKey, activeEvmChainId]);
 
   const copy = useCallback(async (text: string) => {
