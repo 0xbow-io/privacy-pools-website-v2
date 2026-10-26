@@ -103,9 +103,10 @@ export type TorProvider = {
   /**
    * The worker's own config (anon-rpc §7.1). tor-js takes the user's gateway;
    * the others take none, which the harness passes as undefined, as the
-   * anon-rpc demo does for an entry without an exampleConfig.
+   * anon-rpc demo does for an entry without an exampleConfig. The harness
+   * takes only a plain value (anon-rpc §9.4).
    */
-  workerConfig: (gatewayUrl: string) => unknown;
+  workerConfig: (gatewayUrl: string) => { gateways: string[] } | undefined;
 };
 
 /**

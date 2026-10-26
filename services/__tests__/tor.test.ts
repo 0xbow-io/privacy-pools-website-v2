@@ -1059,8 +1059,8 @@ describe('isolation groups over the worker pool', () => {
     const module = { ReplacingWorker: class {
       constructor(options: { start: unknown }) { started = options.start; }
       close() {}
-      fetch = async (url: string, init?: RequestInit & { isolationKey?: string }) => {
-        calls.push({ url, isolationKey: init?.isolationKey });
+      fetch = async (url: string, init?: RequestInit & { anonOptions?: { isolationKey?: string } }) => {
+        calls.push({ url, isolationKey: init?.anonOptions?.isolationKey });
         return Response.json({ result: '0x1' });
       };
     } };
