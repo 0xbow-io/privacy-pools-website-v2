@@ -88,6 +88,7 @@ import { useStellarBalance } from '@/hooks/use-stellar-balance';
 import { fetchSuiApprovedSet } from '@/services/sui-witness/asp-labels';
 import { calculateLabelHash } from '@/services/sui-witness/crypto';
 import { getKnownTokenMetadata, getTokenMetadata, resolveTokenMetadata, formatTokenBalance, NATIVE_ASSET_ADDRESS, isStablecoin } from '@/config/tokens';
+import { formatCompactTokenAmount } from '@/services/explore-pools';
 import { useDebug } from '@/components/debug-provider';
 import { formatUsd } from '@/services/format-fiat';
 import { useTxActivity } from '@/components/tx-activity-provider';
@@ -408,11 +409,8 @@ const TOKEN_COLORS: Record<string, string> = {
 // here so the stats cards and pool pages keep their existing import path.
 export { formatUsd };
 
-function formatTokenAmount(value: number, symbol: string): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M ${symbol}`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(2)}K ${symbol}`;
-  return `${formatTokenBalance(value, symbol)} ${symbol}`;
-}
+// Same pool-size shape as Explore (services/explore-pools.ts).
+const formatTokenAmount = formatCompactTokenAmount;
 
 function computeChange24h(stats: GlobalStatistics | undefined): string {
   if (!stats) return '+0.0%';

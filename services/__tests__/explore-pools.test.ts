@@ -254,4 +254,11 @@ describe('formatCompactTokenAmount', () => {
     expect(formatCompactTokenAmount(55414.12, 'USDC')).toBe('55.41K USDC');
     expect(formatCompactTokenAmount(12.02698, 'ETH')).toBe('12.02698 ETH');
   });
+
+  test('picks the unit from the rounded figure', () => {
+    expect(formatCompactTokenAmount(999.996, 'ETH')).toBe('1.00K ETH');
+    expect(formatCompactTokenAmount(999_996, 'USDC')).toBe('1.00M USDC');
+    expect(formatCompactTokenAmount(999.99, 'ETH')).toBe('999.99 ETH');
+    expect(formatCompactTokenAmount(999_990, 'USDC')).toBe('999.99K USDC');
+  });
 });

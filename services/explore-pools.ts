@@ -223,9 +223,13 @@ export function formatPoolTokenAmount(
  * Display only: "134.36539 ETH" beside "55414.12 USDC" read as noise.
  */
 export function formatCompactTokenAmount(value: number, symbol: string): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M ${symbol}`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(2)}K ${symbol}`;
-  if (value >= 100) return `${formatTokenBalance(Math.round(value * 100) / 100, symbol)} ${symbol}`;
+  // The unit is picked from the ROUNDED figure, so 999.996 reads 1.00K and
+  // 999,996 reads 1.00M, never "1000.00" of the smaller unit.
+  const thousands = Math.round(value / 10) / 100;
+  if (thousands >= 1_000) return `${(value / 1_000_000).toFixed(2)}M ${symbol}`;
+  const cents = Math.round(value * 100) / 100;
+  if (cents >= 1_000) return `${thousands.toFixed(2)}K ${symbol}`;
+  if (cents >= 100) return `${formatTokenBalance(cents, symbol)} ${symbol}`;
   return `${formatTokenBalance(value, symbol)} ${symbol}`;
 }
 
