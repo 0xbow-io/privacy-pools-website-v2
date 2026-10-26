@@ -247,6 +247,14 @@ function clientTarget(providerId: TorProviderId, gatewayUrl: string): { provider
   return { provider, gatewayUrl: gateway.url };
 }
 
+/**
+ * Providers whose specifier pins a bundle this build does not accept, and the
+ * error each start then fails with. No retry gets past the pin until the
+ * specifier or the build changes, so a refused provider starts nothing more
+ * this session: no specifier read, no worker, no log line per call.
+ */
+const pinRefusals = new Map<TorProviderId, TorUnavailableError>();
+
 /** One client, started and ready; `onStep` hears its steps after 'loading'. */
 async function loadClient(
   module: HarnessModule,
@@ -269,6 +277,8 @@ async function loadClient(
     throw new TorUnavailableError('The anon-rpc client does not expose the expected interface.');
   }
 
+  const refusal = pinRefusals.get(provider.id);
+  if (refusal) throw refusal;
   let worker: AnonRpcWorkerLike | undefined;
   let unfollow: (() => void) | undefined;
   try {
@@ -294,12 +304,16 @@ async function loadClient(
     return { fetch: (url, init) => started.fetch(url, init), close: () => started.close() };
   } catch (cause) {
     worker?.close();
+    if ((cause as { name?: unknown } | null)?.name === 'WorkerHashMismatchError') {
+      if (!pinRefusals.has(provider.id)) {
+        pinRefusals.set(provider.id, new TorUnavailableError('The anon-rpc client named on-chain is not the one this build accepts.', { cause }));
+        console.warn(`[anon-rpc] the ${provider.id} specifier pins a bundle this build does not accept; ${provider.id} stays off until reload`, cause);
+      }
+      throw pinRefusals.get(provider.id)!;
+    }
     // Loud, so a device failure names its cause instead of only the message.
     console.warn('[anon-rpc] client start failed', cause);
     if (cause instanceof TorUnavailableError) throw cause;
-    if ((cause as { name?: unknown } | null)?.name === 'WorkerHashMismatchError') {
-      throw new TorUnavailableError('The anon-rpc client named on-chain is not the one this build accepts.', { cause });
-    }
     throw new TorUnavailableError('Could not start the anon-rpc client.', { cause });
   } finally {
     unfollow?.();
@@ -454,10 +468,14 @@ function groupSender(key: string): TorFetch {
     }
     lifetime = operation.signal;
   }
-  const send: TorFetch = (input, init) => sendOver(() => {
-    const pending = groups ??= startGroups();
-    return { pending, drop: () => { if (groups === pending) groups = null; } };
-  }, key, input, init, lifetime);
+  const send: TorFetch = (input, init) => {
+    const refusal = pinRefusals.get(ACTIVE_TOR_SETTINGS.provider);
+    if (refusal) return Promise.reject(refusal);
+    return sendOver(() => {
+      const pending = groups ??= startGroups();
+      return { pending, drop: () => { if (groups === pending) groups = null; } };
+    }, key, input, init, lifetime);
+  };
   // An operation reads each answer before handing it on, so a relayer quote
   // binds the relay that later names its commitment to this operation.
   return lifetime ? async (input, init) => read(key, await send(input, init)) : send;
@@ -576,6 +594,8 @@ export function rpcTimeoutMs(configured: number | undefined): number | undefined
  * answer of any status shows the route works. A client that fails to start
  * is dropped, so the next call tries again rather than the failure staying
  * pinned for the rest of the session: a gateway down at page load may be up.
+ * A specifier that pins a bundle this build refuses is the exception: no
+ * retry passes the pin, so the provider stays refused (pinRefusals).
  *
  * `onStep` follows each client's start, for a Test, which also learns when a
  * client is ready ('checking').

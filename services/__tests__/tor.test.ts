@@ -662,6 +662,45 @@ for (const provider of settings.TOR_PROVIDERS) test(`${provider.id}: a rejected 
   }
 });
 
+test('a rejected pin is final for the session: later calls fail at once without reading the specifier again', async () => {
+  const calls: string[] = [];
+  let started = 0;
+  const warn = console.warn;
+  const warnings: unknown[] = [];
+  console.warn = (...args: unknown[]) => { warnings.push(args[0]); };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string) => {
+    calls.push(url);
+    return Response.json({ result: `0x${'ab'.repeat(32)}` });
+  }) as typeof fetch;
+  try {
+    const loaded = transport(true, () => ({ AnonRpcWorker: class {
+      ready: Promise<void>;
+      constructor(init: { address: string; preExisting: { rpcProvider: { request: (args: unknown) => Promise<unknown> } } }) {
+        started++;
+        this.ready = init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ to: init.address, data: '0x3898587d' }, 'latest'] })
+          .then(() => { throw Object.assign(new Error('specifier pins another bundle'), { name: 'WorkerHashMismatchError' }); });
+      }
+      close() {}
+      fetch = async () => Response.json({});
+    } }));
+    const send = loaded.tor.torFetchIfActive()!;
+    const message = 'The anon-rpc client named on-chain is not the one this build accepts.';
+    await expect(send(MAINNET, { method: 'POST', body: '{}' })).rejects.toThrow(message);
+    const read = calls.length;
+    for (let i = 0; i < 3; i++) {
+      await expect(send(MAINNET, { method: 'POST', body: '{}' })).rejects.toThrow(message);
+      await expect(loaded.tor.torFetchFor('relayer', `x${i}`)!(MAINNET, { method: 'POST', body: '{}' })).rejects.toThrow(message);
+    }
+    expect(started).toBe(1);
+    expect(calls.length).toBe(read);
+    expect(warnings).toHaveLength(1);
+  } finally {
+    globalThis.fetch = realFetch;
+    console.warn = warn;
+  }
+});
+
 for (const from of ['registry', 'override'] as const) test(`Nox bootstraps from the Sepolia ${from}`, async () => {
   const url = 'https://sepolia.example/';
   const options = from === 'registry' ? { chainUrls: { 11155111: url } } : { customRpcUrls: { 11155111: url } };
