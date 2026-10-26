@@ -324,6 +324,7 @@ export function startPublicFeeds(): void {
         // current registry is not left for a whole window. A 404 (feed not
         // deployed on this ASP) is not retried.
         retryMs: NULLIFYING_KEY_HASH_RETRY_MS,
+        retryOnError: true,
         fetch: async () => {
           const outcome = await syncNullifyingKeyHashes(chainId, chainKeystoreAddress);
           if (!outcome.ok && outcome.reason !== 'not-deployed') throw new Error(`nullifying-key-hashes sync failed: ${outcome.reason}`);

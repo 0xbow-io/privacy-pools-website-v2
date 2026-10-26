@@ -73,7 +73,7 @@ import { coinbaseTwoTapProof, CoinbaseConfirmNextTapError, isCoinbaseAppCannotSi
 import { BaseAppCannotSignError } from '@/services/base-app-passkey-choice';
 import { isCoinbaseWalletIdentity, isWalletConnectConnector, requestWalletSignature, resolveWalletIdentity, walletProvider, type SignatureStage, type WalletConnector } from '@/services/wallet-signature-timeout';
 import { useTxActivity } from '@/components/tx-activity-provider';
-import { getChainConfig, isSupportedEvmChainId, queryableEvmChainIds, supportedChainIds, supportedEvmChainIds } from '@/config/chains';
+import { getChainConfig, isSupportedEvmChainId, queryableEvmChainIds, supportedChainIds } from '@/config/chains';
 import { clearReceiveSetupForAddress, getReceiveSetup, receiveSetupFromIdentity, setReceiveSetup, subscribeReceiveSetup } from '@/services/receive-setup';
 import { keysBelongTo, pickStatusIdentity, readStatusWithRetry } from '@/services/keystore-status-read';
 import { LEGACY_CONFIG } from '@/config/env';
@@ -4107,9 +4107,12 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
   // from keys this session already holds, so a reopened flow does not plan the
   // registration again. No request: these are our own values.
   useEffect(() => subscribeReceiveSetup(() => {
-    const identity = pickStatusIdentity(committedSessionRef.current, derivedIdentityRef.current);
-    if (!identity?.address) return;
-    const chains = supportedEvmChainIds.filter((id) => {
+    // Only the committed session's own chain: its manager is the one that
+    // registered there, and another chain may use other keys (Sepolia legacy).
+    const committed = committedSessionRef.current;
+    if (!committed?.keystoreManager || !committed.address) return;
+    const identity = { keystoreManager: committed.keystoreManager, address: committed.address };
+    const chains = [committed.chainId].filter((id) => {
       const state = getReceiveSetup(identity.address, id);
       return state === 'partial' || state === 'complete';
     });
@@ -4133,13 +4136,20 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     if (!identity) return 'unknown';
     try {
       const sdkSetup = await getSdkSetup();
-      return await readStatusWithRetry(() => resolveKeystoreIdentityStatus(
-        sdkSetup,
-        identity.keystoreManager,
-        identity.address as `0x${string}`,
-        targetChainId,
-        REGISTRY_WAIT_MS,
-      ));
+      // One registry wait across both attempts: the retry (DEV-439, keys not
+      // ready yet) reads again without waiting a second time.
+      let waitMs = REGISTRY_WAIT_MS;
+      return await readStatusWithRetry(() => {
+        const wait = waitMs;
+        waitMs = 0;
+        return resolveKeystoreIdentityStatus(
+          sdkSetup,
+          identity.keystoreManager,
+          identity.address as `0x${string}`,
+          targetChainId,
+          wait,
+        );
+      });
     } catch {
       return 'unknown';
     }
