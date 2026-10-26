@@ -140,8 +140,8 @@ export const TOR_PROVIDERS: readonly TorProvider[] = ([
   {
     id: 'nox',
     label: 'Nox (demo)',
-    // As the specifier named it on 2026-10-15.
-    workerHash: '0xd8bef626ec8511d7a468bca5137880680ca2da20d2ea4d9c981a2a3d0c86ba1e',
+    // @hisoka-io/anon-rpc-worker 0.4.1, as the specifier named it on 2026-10-26.
+    workerHash: '0xd9fa04b080a33062680a27cad828196bfb04615a0ebc76bcbffedb6dcbe838d4',
     needsGateway: false,
     webOnly: true,
     hint: 'A Sphinx mixnet. This is a demo network: it may be slow or go away.',
