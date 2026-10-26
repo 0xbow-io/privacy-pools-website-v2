@@ -214,8 +214,18 @@ export function formatPoolTokenAmount(
   if (!Number.isFinite(raw) || raw <= 0) return null;
   const value = raw / 10 ** decimals;
   if (!Number.isFinite(value) || value <= 0) return null;
+  return formatCompactTokenAmount(value, symbol);
+}
+
+/**
+ * A pool-size figure in one shape for every pool, plain or share: M/K above a
+ * thousand, two decimals from a hundred up, the shared balance format below.
+ * Display only: "134.36539 ETH" beside "55414.12 USDC" read as noise.
+ */
+export function formatCompactTokenAmount(value: number, symbol: string): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M ${symbol}`;
   if (value >= 1_000) return `${(value / 1_000).toFixed(2)}K ${symbol}`;
+  if (value >= 100) return `${formatTokenBalance(Math.round(value * 100) / 100, symbol)} ${symbol}`;
   return `${formatTokenBalance(value, symbol)} ${symbol}`;
 }
 
