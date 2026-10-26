@@ -10,6 +10,7 @@ import { useActiveEvmChain } from '@/hooks/use-active-evm-chain';
 import { getChainConfig } from '@/config/chains';
 import { LEGACY_CONFIG } from '@/config/env';
 import { buildViewingKeyOverview, VIEWING_KEY_FACTS } from '@/services/viewing-key-overview';
+import { getCachedViewingKey, isViewingKeyRegistryFresh } from '@/services/viewing-key-cache';
 import { useAccounting } from '@/components/accounting-modal-provider';
 
 /**
@@ -73,7 +74,7 @@ export function ViewingKeyModalProvider({ children }: { children: React.ReactNod
   const closeViewingKey = useCallback(() => setIsOpen(false), []);
 
   // Read the published viewing key while open. Same lookup the transfer
-  // precheck uses (Keystore.viewingKeys(owner) via the SDK interactor).
+  // precheck's cache uses (the bulk ASP viewing-key registry).
   useEffect(() => {
     if (!isOpen || !viewingKeyOwner || !derivedViewingPublicKey) return;
     let cancelled = false;
@@ -82,12 +83,14 @@ export function ViewingKeyModalProvider({ children }: { children: React.ReactNod
       try {
         const cfg = getChainConfig(activeEvmChainId);
         if (!cfg?.contracts) return;
-        const sdkSetup = await import('@/services/sdk-runtime');
-        const rpc = sdkSetup.createRPCInteractor(activeEvmChainId, Number(cfg.contracts.fromBlock));
         // Same keystore the sign-in scheme detection reads (legacy pin first).
-        const keystoreAddr = (LEGACY_CONFIG?.keystore ?? cfg.contracts.keystoreAddress) as `0x${string}`;
-        const ks = sdkSetup.createKeystoreInteractor(rpc, keystoreAddr, cfg.contracts.keystoreFromBlock ?? cfg.contracts.fromBlock);
-        const key = await ks.getViewingKey(viewingKeyOwner);
+        const keystoreAddr = LEGACY_CONFIG?.keystore ?? cfg.contracts.keystoreAddress;
+        // The bulk ASP registry copy, never a per-account RPC read. Stale reads as unknown (null).
+        if (!isViewingKeyRegistryFresh(activeEvmChainId, keystoreAddr)) {
+          if (!cancelled) setOnChainViewingKey(null);
+          return;
+        }
+        const key = getCachedViewingKey(activeEvmChainId, viewingKeyOwner, keystoreAddr) ?? `0x${'0'.repeat(64)}`;
         if (!cancelled) setOnChainViewingKey(String(key));
       } catch (err) {
         console.warn('[ViewingKey] on-chain viewing key read failed', err instanceof Error ? err.message : String(err));

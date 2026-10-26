@@ -241,6 +241,8 @@ export const ASP_ROUTES: AspRoute[] = [
   },
   // Public keystore registry, consumed by services/viewing-key-cache.ts.
   { path: new RegExp(`^/${CHAIN}/public/viewing-keys$`), params: ['sinceId'] },
+  // Public nullifying-key-hash registry, consumed by services/nullifying-key-hash-cache.ts.
+  { path: new RegExp(`^/${CHAIN}/public/nullifying-key-hashes$`), params: ['sinceId'] },
   {
     path: new RegExp(`^/${CHAIN}/public/ppusdc-rate-history$`),
     params: ['asset', 'sinceId'],

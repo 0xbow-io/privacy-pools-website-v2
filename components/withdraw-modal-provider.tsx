@@ -11,6 +11,7 @@ import { useShareAmountField } from '@/hooks/use-share-amount-field';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { BalanceAmount } from '@/components/pools/balance-amount';
+import { getCachedNullifyingKeyHash } from '@/services/nullifying-key-hash-cache';
 import { compactPhoneLayout } from '@/services/header-nav';
 import { HoverHint } from '@/components/ui/hover-hint';
 import { crossFlowsEnabled } from '@/config/intent-lockdown';
@@ -3459,7 +3460,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         keystoreSyncFromBlock,
       );
       const keystoreLeaves = await keystoreInteractor.getKeystoreLeaves();
-      const onChainNullifyingKeyHash = await keystoreInteractor.getNullifyingKeyHash(connectedAddress as `0x${string}`);
+      // Bulk ASP registry copy, never a per-account RPC read (write-once, so a hit is current).
+      const onChainNullifyingKeyHash = getCachedNullifyingKeyHash(chainId, connectedAddress, chainKeystoreAddress);
       const privateNullifyingKey = keystoreManager.getPrivateNullifyingKey();
       const privateRevocableKey = keystoreManager.getPrivateRevocableKey();
       const nullifyingKeyHash = hashService.hash([privateNullifyingKey]);
@@ -3484,7 +3486,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
 
       if (!keystoreLeafFound) {
         throw new Error(
-          onChainNullifyingKeyHash.toLowerCase() !== nullifyingKeyHash.toLowerCase()
+          onChainNullifyingKeyHash != null && BigInt(onChainNullifyingKeyHash) !== BigInt(nullifyingKeyHash)
             ? 'Current wallet-derived keys do not match the registered keystore for this account.'
             : 'Current auth policy leaf is not present in the keystore tree.',
         );

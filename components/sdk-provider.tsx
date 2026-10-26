@@ -1,5 +1,7 @@
 import { getVerifiedPoolAssociationSetLeaves } from '@/services/public-association-set';
 import { setPendingRelayOwner } from '@/services/pending-relays-store';
+import { identityStatusFromRegistry } from '@/services/keystore-identity-status';
+import { readRegistryView } from '@/services/nullifying-key-hash-cache';
 import { canonicalizeExportTokenIds } from '@/services/canonical-token-id';
 import { createChainLimiter, feedHasData, snapshotActivityFingerprint, snapshotScanComplete, sweepChains, waitForFeed, earliestScanOptions, type ChainStepResult } from '@/services/chain-sweep';
 
@@ -682,32 +684,21 @@ async function resolveKeystoreIdentityStatus(
   addr: `0x${string}`,
   chainId: number,
 ): Promise<KeystoreIdentityStatus> {
+  // Answered from the bulk ASP registries the background grid keeps current,
+  // never from a per-account chain read: getNullifyingKeyHash(addr) /
+  // getViewingKey(addr) over the RPC named this account to the provider on
+  // every sign-in (L2BEAT). Missing or stale data is 'unknown', never
+  // 'compatible' (services/keystore-identity-status.ts).
   try {
     const chain = getChainConfig(chainId);
     if (!chain?.contracts) return 'unknown';
-    const rpc = sdkSetup.createRPCInteractor(chainId, Number(chain.contracts.fromBlock));
-    const keystoreAddr = (LEGACY_CONFIG?.keystore ?? chain.contracts.keystoreAddress) as `0x${string}`;
-    const ks = sdkSetup.createKeystoreInteractor(
-      rpc,
-      keystoreAddr,
-      chain.contracts.keystoreFromBlock ?? chain.contracts.fromBlock,
-    );
-    const n = await ks.getNullifyingKeyHash(addr);
-    if (!n || BigInt(n) === 0n) return 'unregistered';
+    const keystoreAddr = LEGACY_CONFIG?.keystore ?? chain.contracts.keystoreAddress;
+    const view = readRegistryView(chainId, addr, keystoreAddr);
     const hashService = await sdkSetup.createHashService();
-    const activeNull = String(hashService.hash([km.getPrivateNullifyingKey()])).toLowerCase();
-    if (String(n).toLowerCase() !== activeNull) return 'incompatible';
-    // A failed read falls through to 'unknown', never to 'compatible'.
-    const v = await ks.getViewingKey(addr);
-    if (!v || BigInt(v) === 0n) return 'partial';
-    // A nonzero on-chain key is not necessarily THIS session's key — a stale
-    // registration from a prior unlock reads as nonzero too. Only the exact
-    // match is 'compatible'; anything else can't be discovered by this
-    // session's viewing key, so it's still 'partial'.
-    const activeView = km.getViewingKeyPair().publicKey.toLowerCase();
-    return String(v).toLowerCase() === activeView ? 'compatible' : 'partial';
+    const activeNull = String(hashService.hash([km.getPrivateNullifyingKey()]));
+    return identityStatusFromRegistry(view, activeNull, km.getViewingKeyPair().publicKey);
   } catch {
-    return 'unknown'; // a flaky RPC must not block sign-in / deposit
+    return 'unknown'; // must not block sign-in / deposit
   }
 }
 
@@ -1709,23 +1700,21 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
           try {
             const chain = getChainConfig(chainId);
             if (chain?.contracts) {
-              const rpc = sdkSetup.createRPCInteractor(chainId, Number(chain.contracts.fromBlock));
               // Prefer the pinned legacy keystore so the detection runs
               // against the correct registration even if chains.ts is
-              // later bumped to a new keystore.
-              const keystoreAddr = (LEGACY_CONFIG?.keystore ?? chain.contracts.keystoreAddress) as `0x${string}`;
-              const ks = sdkSetup.createKeystoreInteractor(
-                rpc,
-                keystoreAddr,
-                chain.contracts.keystoreFromBlock ?? chain.contracts.fromBlock,
-              );
-              const n = await ks.getNullifyingKeyHash(derivationAddress as `0x${string}`);
-              if (n && BigInt(n) !== 0n) onNull = String(n).toLowerCase();
-              const v = await ks.getViewingKey(derivationAddress as `0x${string}`);
-              if (v && BigInt(v) !== 0n) onView = String(v).toLowerCase();
+              // later bumped to a new keystore. Read from the bulk ASP
+              // registries (local copies), never per account over the RPC.
+              const keystoreAddr = LEGACY_CONFIG?.keystore ?? chain.contracts.keystoreAddress;
+              const view = readRegistryView(chainId, derivationAddress as string, keystoreAddr);
+              if (view.nullifyingKeyHash && BigInt(view.nullifyingKeyHash) !== 0n) {
+                onNull = String(BigInt(view.nullifyingKeyHash));
+              }
+              if (view.viewingFresh && view.viewingKey && BigInt(view.viewingKey) !== 0n) {
+                onView = view.viewingKey.toLowerCase();
+              }
             }
           } catch (schemeErr) {
-            log('warn', 'SDK', 'Scheme detection (on-chain read) failed; using current keys', schemeErr);
+            log('warn', 'SDK', 'Scheme detection (registry read) failed; using current keys', schemeErr);
           }
 
           if (onNull) {
