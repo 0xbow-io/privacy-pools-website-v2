@@ -139,7 +139,7 @@ describe('Tor configuration', () => {
     expect(settings.TOR_PROVIDERS.map(p => [p.id, p.workerHash])).toEqual([
       ['tor-js', '0xe39f8c42ed72b7f580a73c46c3300f6d3ad3954bbc26e5fe075b18c48fedc8b5'],
       ['nym', '0xf13a448a8721b9d0b20da3d5b80ffe00bf4c5bb3aae812a38d3d1e3bc81fceb8'],
-      ['nox', '0xd8bef626ec8511d7a468bca5137880680ca2da20d2ea4d9c981a2a3d0c86ba1e'],
+      ['nox', '0xd9fa04b080a33062680a27cad828196bfb04615a0ebc76bcbffedb6dcbe838d4'],
     ]);
     for (const p of settings.TOR_PROVIDERS) {
       expect(p.hint).not.toContain('\u2014');
