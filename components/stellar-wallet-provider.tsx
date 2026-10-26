@@ -14,6 +14,7 @@
  * with real value (a public env var is inlined into the bundle).
  */
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Linking, Platform } from 'react-native';
 import type { StellarWalletProvider as StellarSigner } from '@privacy-pools-v2/stellar-sdk';
 
 import { STELLAR_TESTNET_NETWORK } from '@/config/stellar-deployment';
@@ -23,6 +24,11 @@ import { watchFreighter, type FreighterAccount } from '@/services/stellar/freigh
 type FreighterApi = typeof import('@stellar/freighter-api');
 
 const CONNECTED_FLAG_KEY = 'ppv2_stellar_connected';
+/**
+ * Freighter is a browser extension, and freighter-api talks to it through
+ * `window.postMessage`, which React Native lacks: only the web build can reach it.
+ */
+const FREIGHTER_REACHABLE = Platform.OS === 'web';
 const WATCH_INTERVAL_MS = 3000;
 
 export type StellarWalletStatus = 'disconnected' | 'connecting' | 'connected';
@@ -145,7 +151,7 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
   const [status, setStatus] = useState<StellarWalletStatus>('disconnected');
   const [networkPassphrase, setNetworkPassphrase] = useState<string | null>(null);
   const [isAvailable, setIsAvailable] = useState(isDevBurner);
-  const [availabilityChecked, setAvailabilityChecked] = useState(isDevBurner);
+  const [availabilityChecked, setAvailabilityChecked] = useState(isDevBurner || !FREIGHTER_REACHABLE);
   const lastErrorRef = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [signer, setSigner] = useState<StellarSigner | null>(null);
@@ -207,6 +213,7 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
         writeFlag(true);
         return burner.address;
       }
+      if (!FREIGHTER_REACHABLE) throw new Error('Freighter is not installed');
       const api = await loadFreighter();
       const installed = await isFreighterInstalled(api);
       setAvailabilityChecked(true);
@@ -246,6 +253,7 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
     let cancelled = false;
     (async () => {
       if (!isDevBurner) {
+        if (!FREIGHTER_REACHABLE) return;
         try {
           const api = await loadFreighter();
           const installed = await isFreighterInstalled(api);
@@ -339,7 +347,8 @@ export function useConnectFreighter(): () => Promise<string | null> {
     const current = walletRef.current;
     if (current.isConnected) return current.address;
     if (current.availabilityChecked && !current.isAvailable) {
-      if (typeof window !== 'undefined') window.open(FREIGHTER_URL, '_blank', 'noopener');
+      if (Platform.OS === 'web') window.open(FREIGHTER_URL, '_blank', 'noopener');
+      else Linking.openURL(FREIGHTER_URL).catch(() => {});
       return null;
     }
     const { address, error } = await current.connectDetailed();
