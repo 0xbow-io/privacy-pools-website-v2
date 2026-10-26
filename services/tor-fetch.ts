@@ -48,9 +48,12 @@ import { beginTorOperation, noteTorQuotes, torGroupFor, type TorParty, type TorS
 
 export { TorUnavailableError };
 
+/** A fetch init with the harness's per-call options (anon-rpc §9.3). */
+type AnonRequestInit = RequestInit & { anonOptions?: { isolationKey?: string } };
+
 /** The subset of the anon-rpc harness this app uses. */
 type TorClientLike = {
-  fetch: (url: string, init?: RequestInit) => Promise<Response>;
+  fetch: (url: string, init?: AnonRequestInit) => Promise<Response>;
   close: () => void;
 };
 
@@ -92,7 +95,7 @@ type HarnessModule = {
   ReplacingWorker?: unknown;
   WorkerPool?: unknown;
   knownWorker?: (id: TorProviderId) => KnownWorkerLike;
-  knownWorkerInit?: (id: TorProviderId, options: { rpcProvider: RpcProviderLike; config?: unknown }) => object;
+  knownWorkerInit?: (id: TorProviderId, options: { rpcProvider: RpcProviderLike; config?: ReturnType<TorProvider['workerConfig']> }) => object;
 };
 
 /** A fetch over Tor. */
@@ -423,7 +426,7 @@ async function startGroups(): Promise<(key: string) => ReplacingWorkerLike> {
     }
     const replacing = new Replacing({ start: { tor: {} }, ...timeouts });
     return (key) => ({
-      fetch: (url, init) => replacing.fetch(url, { ...init, isolationKey: key } as RequestInit),
+      fetch: (url, init) => replacing.fetch(url, { ...init, anonOptions: { isolationKey: key } }),
       close: () => {},
     });
   }
