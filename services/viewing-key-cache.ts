@@ -51,6 +51,9 @@ interface CachedRegistry {
   // (e.g., misconfigured deployment) and the cache might be wrong
   // about freshness — a soft hint, not a correctness boundary.
   lastSyncedAt: number;
+  // ms epoch of the last successful FULL re-pull (the grid's). Only this one
+  // makes the map complete, so only this one counts as current after a reload.
+  lastFullSyncedAt?: number;
 }
 
 const STORAGE_PREFIX = 'ppv2_viewing_keys_v1_';
@@ -107,6 +110,7 @@ function readRegistry(chainId: number, keystoreAddress?: string): CachedRegistry
       byAccount: parsed.byAccount ?? {},
       lastSyncedId: parsed.lastSyncedId ?? '0',
       lastSyncedAt: parsed.lastSyncedAt ?? 0,
+      lastFullSyncedAt: parsed.lastFullSyncedAt ?? 0,
     };
   } catch {
     return { byAccount: {}, lastSyncedId: '0', lastSyncedAt: 0 };
@@ -171,6 +175,9 @@ export async function refreshViewingKeyRegistry(chainId: number, keystoreAddress
   const outcome = await syncViewingKeys(chainId, keystoreAddress, true);
   if (outcome.ok) {
     lastFullResyncOk.set(scope, Date.now());
+    const synced = readRegistry(chainId, keystoreAddress);
+    synced.lastFullSyncedAt = Date.now();
+    writeRegistry(chainId, synced, keystoreAddress);
     fullResyncFailed.delete(scope);
     notifyRegistrySynced();
   } else {
@@ -411,6 +418,6 @@ export function isViewingKeyRegistryFresh(chainId: number, keystoreAddress?: str
   const scope = cacheScope(chainId, keystoreAddress);
   // The persisted stamp lets a reload inside the window answer at once; this
   // process's own failed full pull still wins.
-  const at = Math.max(lastFullResyncOk.get(scope) ?? 0, readRegistry(chainId, keystoreAddress).lastSyncedAt);
+  const at = Math.max(lastFullResyncOk.get(scope) ?? 0, readRegistry(chainId, keystoreAddress).lastFullSyncedAt ?? 0);
   return at > 0 && !fullResyncFailed.get(scope) && now - at <= 2 * FULL_RESYNC_INTERVAL_MS + 60_000;
 }
