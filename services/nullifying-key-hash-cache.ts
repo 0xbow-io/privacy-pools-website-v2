@@ -21,7 +21,7 @@ import { envScopedStorageKey } from '@/config/app-environment';
 import { ASP_URL } from '@/config/env';
 import type { RegistryView } from '@/services/keystore-identity-status';
 import { notifyRegistrySynced, onRegistrySynced } from '@/services/keystore-registry-events';
-import { getCachedViewingKey, isViewingKeyRegistryFresh } from '@/services/viewing-key-cache';
+import { getCachedViewingKey, isOtherKeystore, isViewingKeyRegistryFresh, registryEntrypointParam } from '@/services/viewing-key-cache';
 
 /** Grid cadence of the delta pull. */
 export const NULLIFYING_KEY_HASH_INTERVAL_MS = 5 * 60_000;
@@ -41,6 +41,7 @@ interface AspEntry {
 
 interface NullifyingKeyHashesResponse {
   entries: AspEntry[];
+  keystore?: string;
   lastSyncedId: string;
   hasMore?: boolean;
 }
@@ -132,21 +133,25 @@ function normalizeHash(value: unknown): string | null {
 
 /**
  * Pull everything past the stored cursor. Called ONLY from the background feed
- * grid. The request carries nothing but the server's own cursor.
+ * grid. The request carries nothing but the server's own cursor and the
+ * configured pool's entrypoint.
  */
 export async function syncNullifyingKeyHashes(
   chainId: number,
   keystoreAddress?: string,
   /** Injected only by tests; production always goes through the egress policy. */
   send: typeof policedFetch = policedFetch,
+  /** Injected only by tests. */
+  resolveEntrypoint?: (chainId: number) => Promise<string | undefined>,
 ): Promise<NullifyingKeyHashSyncOutcome> {
   const scope = cacheScope(chainId, keystoreAddress);
   if (aspUnavailable.has(scope)) return { ok: false, reason: 'not-deployed' };
   const registry = readRegistry(chainId, keystoreAddress);
   const next: CachedRegistry = { byAccount: { ...registry.byAccount }, lastSyncedId: registry.lastSyncedId, lastSyncedAt: registry.lastSyncedAt };
+  const entrypointParam = await registryEntrypointParam(chainId, resolveEntrypoint);
   let applied = 0;
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const url = `${ASP_URL}/${chainId}/public/nullifying-key-hashes?sinceId=${next.lastSyncedId}`;
+    const url = `${ASP_URL}/${chainId}/public/nullifying-key-hashes?sinceId=${next.lastSyncedId}${entrypointParam}`;
     let response: Response;
     try {
       response = await send('asp', ASP_URL, url, { headers: { Accept: 'application/json' } });
@@ -166,6 +171,10 @@ export async function syncNullifyingKeyHashes(
     }
     if (!payload || !Array.isArray(payload.entries) || typeof payload.lastSyncedId !== 'string' || !/^\d+$/.test(payload.lastSyncedId)) {
       return { ok: false, reason: 'parse' };
+    }
+    if (isOtherKeystore(payload.keystore, keystoreAddress)) {
+      aspUnavailable.add(scope);
+      return { ok: false, reason: 'not-deployed' };
     }
     for (const entry of payload.entries) {
       if (!entry || typeof entry.account !== 'string') return { ok: false, reason: 'parse' };
