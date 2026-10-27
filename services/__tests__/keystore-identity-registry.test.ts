@@ -17,6 +17,8 @@ const { identityStatusFromRegistry } = await import('@/services/keystore-identit
 const cache = await import('@/services/nullifying-key-hash-cache');
 const policy = await import('@/services/egress-policy');
 const { ASP_URL } = await import('@/config/env');
+const sync = (chainId: number, keystore?: string, entrypoint?: string) =>
+  cache.syncNullifyingKeyHashes(chainId, keystore, send, async () => entrypoint);
 
 const ALICE = '0x00000000000000000000000000000000000a11ce';
 const BOB = '0x0000000000000000000000000000000000000b0b';
@@ -61,7 +63,7 @@ describe('nullifying-key-hash cache', () => {
       ? json({ entries: [{ id: '3', account: ALICE.toUpperCase().replace('0X', '0x'), nullifyingKeyHash: '255', lastUpdatedBlock: '0x1' }], lastSyncedId: '3', hasMore: true })
       : json({ entries: [{ id: '9', account: BOB, nullifyingKeyHash: HASH, lastUpdatedBlock: '0x2' }], lastSyncedId: '9', hasMore: false });
     expect(cache.isNullifyingKeyRegistryFresh(1)).toBe(false);
-    const outcome = await cache.syncNullifyingKeyHashes(1, undefined, send);
+    const outcome = await sync(1);
     expect(outcome).toEqual({ ok: true, appliedEntries: 2, lastSyncedId: '9' });
     expect(sent.map((s) => s.url)).toEqual([
       `${ASP_URL}/1/public/nullifying-key-hashes?sinceId=0`,
@@ -80,16 +82,31 @@ describe('nullifying-key-hash cache', () => {
 
   test('an ASP without the feed leaves the registry stale, never fresh', async () => {
     respond = () => new Response('not found', { status: 404 });
-    expect(await cache.syncNullifyingKeyHashes(1, undefined, send)).toEqual({ ok: false, reason: 'not-deployed' });
+    expect(await sync(1)).toEqual({ ok: false, reason: 'not-deployed' });
     expect(cache.isNullifyingKeyRegistryFresh(1)).toBe(false);
     // Short-circuits afterwards: no repeated requests this session.
-    await cache.syncNullifyingKeyHashes(1, undefined, send);
+    await sync(1);
     expect(sent.length).toBe(1);
+  });
+
+  test('scopes the pull to the configured pool and never caches another keystore', async () => {
+    const KEYSTORE = '0x6d264acb9c3a7a3105c29470afe2f5f1ec203c73';
+    const LEGACY_KEYSTORE = '0x5b8883a2f8339560d8ebfeaabf93ce4e7056c4ca';
+    const ENTRYPOINT = '0xEB3E3961008952348445513E418AD6F43C23CA9A';
+    respond = () => json({ entries: [{ id: '1', account: BOB, nullifyingKeyHash: HASH, lastUpdatedBlock: '0x1' }], keystore: KEYSTORE, lastSyncedId: '1', hasMore: false });
+    expect((await sync(11155111, KEYSTORE, ENTRYPOINT)).ok).toBe(true);
+    const url = `${ASP_URL}/11155111/public/nullifying-key-hashes?sinceId=0&entrypoint=${ENTRYPOINT.toLowerCase()}`;
+    expect(sent.map((s) => s.url)).toEqual([url]);
+    expect(policy.checkAspRequest({ method: 'GET', url: url.slice(ASP_URL.length), headers: { accept: 'application/json' } }).allowed).toBe(true);
+    expect(cache.getCachedNullifyingKeyHash(11155111, BOB, KEYSTORE)).toBe(HASH);
+    // The server resolved a different keystore than the scope asked for.
+    expect(await sync(11155111, LEGACY_KEYSTORE, ENTRYPOINT)).toEqual({ ok: false, reason: 'not-deployed' });
+    expect(cache.getCachedNullifyingKeyHash(11155111, BOB, LEGACY_KEYSTORE)).toBeNull();
   });
 
   test('a malformed body is a parse failure', async () => {
     respond = () => json({ keys: [] });
-    expect(await cache.syncNullifyingKeyHashes(1, undefined, send)).toMatchObject({ ok: false, reason: 'parse' });
+    expect(await sync(1)).toMatchObject({ ok: false, reason: 'parse' });
     expect(cache.isNullifyingKeyRegistryFresh(1)).toBe(false);
   });
 });
@@ -108,25 +125,25 @@ describe('review fixes', () => {
 
   test('a malformed hash fails the sync without advancing the cursor', async () => {
     respond = () => json({ entries: [{ id: '4', account: ALICE, nullifyingKeyHash: 'zz', lastUpdatedBlock: '0x1' }], lastSyncedId: '4', hasMore: false });
-    expect(await cache.syncNullifyingKeyHashes(1, undefined, send)).toEqual({ ok: false, reason: 'parse' });
+    expect(await sync(1)).toEqual({ ok: false, reason: 'parse' });
     respond = () => json({ entries: [], lastSyncedId: '4', hasMore: false });
-    await cache.syncNullifyingKeyHashes(1, undefined, send);
+    await sync(1);
     expect(sent[1].url.endsWith('sinceId=0')).toBe(true);
   });
 
   test('page progress is kept when a tick runs out of pages', async () => {
     let n = 0;
     respond = () => { n += 1; return json({ entries: [], lastSyncedId: String(n), hasMore: true }); };
-    expect((await cache.syncNullifyingKeyHashes(1, undefined, send)).ok).toBe(false);
+    expect((await sync(1)).ok).toBe(false);
     sent.length = 0;
     respond = () => json({ entries: [], lastSyncedId: String(n), hasMore: false });
-    await cache.syncNullifyingKeyHashes(1, undefined, send);
+    await sync(1);
     expect(sent[0].url.endsWith(`sinceId=${n}`)).toBe(true);
   });
 
   test('our own confirmed registration answers a registry miss, never a served entry', async () => {
     respond = () => json({ entries: [{ id: '1', account: BOB, nullifyingKeyHash: HASH, lastUpdatedBlock: '0x1' }], lastSyncedId: '1', hasMore: false });
-    await cache.syncNullifyingKeyHashes(1, undefined, send);
+    await sync(1);
     const mine = `0x${'11'.repeat(32)}`;
     cache.recordOwnRegistration(1, ALICE, undefined, mine, null);
     cache.recordOwnRegistration(1, BOB, undefined, mine, null);
