@@ -8,11 +8,36 @@
 name: e2e-crosschain-fast
 
 # It spends REAL mainnet funds from E2E_ACCOUNT_A_PK (a 0.001 ETH swap on OP,
-# and sometimes a shield and a bridge), so it never runs on its own: only by
-# hand, `gh workflow run e2e-crosschain-fast.yml --ref <branch>`. Never on
-# pull_request, where anyone able to push a branch could run changed script
-# code with that key. Input dry_run=true quotes and stops before any transaction.
+# and sometimes a shield and a bridge, about 0.0048 ETH a run). It runs on every
+# PR and every push to dev so the OP/Base path is checked as often as the
+# Sepolia journey. Fork PRs get no secrets, so only branches of this repo spend
+# from the key. Run by hand with
+# `gh workflow run e2e-crosschain-fast.yml --ref <branch>`. Input dry_run=true
+# quotes and stops before any transaction.
 on:
+  pull_request:
+    paths:
+      - "services/**"
+      - "components/**"
+      - "hooks/**"
+      - "config/**"
+      - "scripts/e2e/**"
+      - "vendor/**"
+      - "package.json"
+      - "bun.lock"
+      - ".github/workflows/e2e-crosschain-fast.yml"
+  push:
+    branches: [dev]
+    paths:
+      - "services/**"
+      - "components/**"
+      - "hooks/**"
+      - "config/**"
+      - "scripts/e2e/**"
+      - "vendor/**"
+      - "package.json"
+      - "bun.lock"
+      - ".github/workflows/e2e-crosschain-fast.yml"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -36,6 +61,8 @@ concurrency:
 
 jobs:
   swap:
+    # Forks get no secrets, so the run could only fail. Skip it instead.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     # Above the script's worst case, below the browser run's 150: gas bridge 20
     # + approval 45 + delivery 30 + registration, proving and the note landing
