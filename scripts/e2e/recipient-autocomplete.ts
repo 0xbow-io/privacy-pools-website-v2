@@ -67,6 +67,9 @@ async function run(phase: 'empty' | 'seeded') {
     if (phase === 'empty') {
       const hasRecords = await page.evaluate(() => Object.keys(localStorage).some((k) => /withdraw_recipients|sent_transfers|ppv2_contacts/.test(k)));
       const empty = await page.getByTestId('withdraw-recipient-empty').isVisible().catch(() => false);
+      const emptyText = empty ? (await page.getByTestId('withdraw-recipient-empty').innerText()).trim() : '';
+      // The copy must actually render (it once imported as undefined on web).
+      if (empty) record('empty state has its copy', /No saved addresses yet/.test(emptyText), emptyText.replace(/\s+/g, ' '));
       const list = await page.getByTestId('withdraw-recipient-suggestions').isVisible().catch(() => false);
       // A session whose Activity rows name a payee can show rows here instead;
       // either way focus must answer with something visible.

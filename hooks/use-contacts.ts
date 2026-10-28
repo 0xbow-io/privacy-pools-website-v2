@@ -103,10 +103,10 @@ function contractAddressesOn(chainId: number | undefined): string[] {
  * Activity panel shows (feed rows attributed to me + note-lineage rows). It
  * reads the rows PoolsProvider already holds; it adds no request.
  */
-function useActivityPayouts(): PayoutRecord[] {
-  const { data } = usePools();
+function useActivityPayouts(): { records: PayoutRecord[]; loading: boolean } {
+  const { data, isLoading } = usePools();
   const { filterMineEvents } = useMyTransactionOwnership();
-  return useMemo(() => {
+  const records = useMemo(() => {
     const mine = mergeMyTransactions(
       filterMineEvents(data.transactions, { internalTxHashes: data.internalTxHashes, spendClassificationPending: data.spendClassificationPending }),
       data.lineageRows,
@@ -114,6 +114,8 @@ function useActivityPayouts(): PayoutRecord[] {
     );
     return payoutRecordsFromActivity(mine, { contractAddresses: contractAddressesOn });
   }, [data.transactions, data.lineageRows, data.internalTxHashes, data.spendClassificationPending, data.anchorTxHashes, filterMineEvents]);
+  // Not settled while the feed is loading or own spends are still being classified.
+  return { records, loading: isLoading || data.spendClassificationPending };
 }
 
 /**
@@ -125,11 +127,14 @@ export function useRecipientSuggestions(opts: {
   query: string;
   exclude?: readonly string[];
   limit?: number;
-}): { suggestions: RecipientSuggestion[]; contacts: Contact[]; refresh: () => void; ready: boolean } {
+}): { suggestions: RecipientSuggestion[]; contacts: Contact[]; refresh: () => void; ready: boolean; activityLoading: boolean } {
   const { contacts } = useContacts();
   // The snapshot is the index itself: every publish is a new Map.
   const deviceIndex = useSyncExternalStore(subscribeIndex, getIndex, getIndex);
-  const activity = useActivityPayouts();
+  // Reactive: a new Activity row set (rows arriving after focus, a sync)
+  // recomputes the list while it is open. Nothing is cached across an
+  // unsettled source; the state below says 'loading' instead of 'empty'.
+  const { records: activity, loading: activityLoading } = useActivityPayouts();
   const index = useMemo(() => withRecords(deviceIndex, activity), [deviceIndex, activity]);
   useEffect(() => { void refreshRecipientIndex(); }, []);
   const formatsKey = opts.formats.join(',');
@@ -140,5 +145,5 @@ export function useRecipientSuggestions(opts: {
   );
   const refresh = useCallback(() => { void refreshRecipientIndex(); }, []);
   // Ready once the first index build has published (it may be empty).
-  return { suggestions, contacts, refresh, ready: deviceIndex !== null };
+  return { suggestions, contacts, refresh, ready: deviceIndex !== null, activityLoading };
 }
