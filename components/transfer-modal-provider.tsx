@@ -37,7 +37,8 @@ import type { Note, Hash, Address as SdkAddress } from '@/services/sdk-types';
 import { plainTransferRelayError, relayerTransferQuotes, relayTransferParams, relayWithReprove, requestTransferQuote, transferRelayExpectation, transferRelayFee, TRANSFER_QUOTE_EXPIRED_MESSAGE } from '@/services/relayed-transfer';
 import { expectTransferRelay } from '@/services/transfer-relay-outputs';
 import { feeWithinReviewed } from '@/services/relayer-fee-jitter';
-import { recordSentTransfer } from '@/services/sent-transfers-store';
+import { recordSentTransfer as recordSentTransferOnly, type SentTransfer } from '@/services/sent-transfers-store';
+import { recordRecipientUseForActiveOwner, setActiveRecipientOwner } from '@/services/address-book-store';
 import { STELLAR_TESTNET_CONTRACTS } from '@/config/stellar-deployment';
 import { recordOwnAction } from '@/services/own-actions-store';
 import { recordWithdrawFee } from '@/services/withdraw-fees-store';
@@ -134,7 +135,14 @@ import { useNativeMockBlock } from '@/hooks/use-native-mock-block';
 import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { FeeWarning } from '@/components/fee-warning';
 import { relayedSpendBreakdown } from '@/services/fee-warning';
+import { AddressAutocomplete } from '@/components/contacts/address-autocomplete';
 import { SHIELDED_TRANSFER_GAS } from '@/services/transfer-fee-estimate';
+
+/** Every send path records the payee in the sent-transfers store AND the recipient history (backed up, feeds the autocomplete). */
+function recordSentTransfer(tx: SentTransfer): void {
+  recordSentTransferOnly(tx);
+  recordRecipientUseForActiveOwner(tx.recipient, tx.chainId);
+}
 
 // Web-only styles
 
@@ -444,6 +452,8 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
    *  captured at first render. */
   const currentIdentityRef = useRef<string | null>(null);
   const connectedAddress = (sessionAddress ?? walletAddress ?? undefined) as `0x${string}` | undefined;
+  // Recipient history is filed under the session identity (null: the device bucket).
+  useEffect(() => { setActiveRecipientOwner(sessionAddress ?? null); }, [sessionAddress]);
   // The sending account as the review shows it, per chain.
   const fromAddress = isStellar
     ? (stellarSession.wallet.isConnected ? stellarSession.wallet.address ?? undefined : undefined)
@@ -1847,6 +1857,8 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         });
         setTxHash(result.txDigest);
         setTxChainId(SUI_TESTNET_ID);
+        // Recipient history only: the Sui send keeps no sent-transfer row.
+        recordRecipientUseForActiveOwner(recipientAddress, SUI_TESTNET_ID);
         // Receipt for the recipient: the full spendable note (only their
         // keystore keys can spend it). Shown once on the success screen.
         setRecipientImportPayload(JSON.stringify({
@@ -3813,8 +3825,17 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
 
                 {/* Recipient address */}
                 <View className="w-full gap-[4px]">
+                  {/* Previous recipients + saved names, from this device only (components/contacts). */}
+                  <AddressAutocomplete
+                    value={recipientInput}
+                    onSelect={handleRecipientInputChange}
+                    formats={isStellar ? ['stellar'] : isSui ? ['sui'] : ['evm']}
+                    testID="send-recipient"
+                  >
+                    {(bind) => (
                   <View className={`w-full h-[48px] border rounded-control px-[16px] flex-row items-center justify-between bg-card-background ${recipientError ? 'border-[#E53935]' : 'border-border-light'}`}>
                     <TextInput
+                      {...bind}
                       className={`text-[14px] flex-1 p-0 m-0 font-pp-regular ${recipientInput ? 'text-text' : 'text-[#999999]'}`}
                       // nw-keep(platform-css): web-only outlineStyle:none removes the focus ring; empty on native
                       style={WEB_NO_OUTLINE}
@@ -3824,8 +3845,11 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                       onChangeText={handleRecipientInputChange}
                       autoCapitalize="none"
                       autoCorrect={false}
+                      testID="send-recipient-input"
                     />
                   </View>
+                    )}
+                  </AddressAutocomplete>
                   {isSwapSend && publicSwapPayout ? (
                     <Text className="text-[12px] leading-[16px] text-text-secondary font-pp-regular">
                       Paid to this address on-chain, so the recipient and amount are public. Continues in Withdraw. Pick a token that can be delivered privately, or send it to yourself, to keep it private.

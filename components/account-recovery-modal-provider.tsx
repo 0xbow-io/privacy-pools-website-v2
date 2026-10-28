@@ -23,7 +23,7 @@ import { modalCardShadow } from '@/components/ui/web-style-shims';
 
 import type { AccountExport } from '@/services/sdk-types';
 import { usePoolSession } from '@/hooks/use-pool-session';
-import { parseAccountBackup, prepareAccountBackup } from '@/services/wallet-backup-encryption';
+import { parseAccountBackup, prepareAccountBackup, type AddressBookImportResult } from '@/services/wallet-backup-encryption';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { STELLAR_TESTNET_ID } from '@/config/chains';
@@ -386,7 +386,8 @@ export function AccountRecoveryModalProvider({ children }: { children: React.Rea
     resetMessages();
 
     try {
-      const accountExport = await parseAccountBackup(address, chainId, importPayload, needsPassword ? password : undefined);
+      let book: AddressBookImportResult = { status: 'absent' };
+      const accountExport = await parseAccountBackup(address, chainId, importPayload, needsPassword ? password : undefined, (r) => { book = r; });
       // Re-read the LIVE session after the await: it can commit while parsing,
       // and the render-captured null would raw-save under a live session.
       const liveSession = poolSessionRef.current;
@@ -404,7 +405,15 @@ export function AccountRecoveryModalProvider({ children }: { children: React.Rea
       }
       // The "temporary until discovery lands" disclaimer is gone — discovery
       // shipped; this modal stays as a manual fallback.
-      toast({ title: `Imported ${accountExport.notes.length} note(s).` });
+      const bookResult = book as AddressBookImportResult;
+      toast({
+        title: `Imported ${accountExport.notes.length} note(s).`,
+        ...(bookResult.status === 'restored' && bookResult.added > 0
+          ? { description: `${bookResult.added} saved address${bookResult.added === 1 ? '' : 'es'} restored.` }
+          : {}),
+      });
+      // A bad address-book field never blocks the notes: say so, plainly.
+      if (bookResult.status === 'skipped') setWarningMessage(bookResult.message);
       setErrorMessage(null);
       setPassword('');
       setNeedsPassword(false);
@@ -500,6 +509,11 @@ export function AccountRecoveryModalProvider({ children }: { children: React.Rea
                           Encrypt with password
                         </Text>
                       </Pressable>
+                      )}
+                      {!isStellar && !useEncryption && (
+                        <Text className="font-pp-regular text-[12px] leading-[17px] text-text-muted" testID="backup-recipients-encrypted-only">
+                          Recipients are only saved in password-protected backups.
+                        </Text>
                       )}
                       {(useEncryption || isStellar) && (
                         <>

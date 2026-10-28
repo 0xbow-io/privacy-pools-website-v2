@@ -112,6 +112,10 @@ import { recordWithdrawFee } from '@/services/withdraw-fees-store';
 import { recordReceiveAs } from '@/services/swap-bookkeeping';
 import { recordOwnWithdrawal } from '@/services/withdraw-bookkeeping';
 import { recordWithdrawRecipient } from '@/services/withdraw-recipients-store';
+import { recordRecipientUseForActiveOwner, recordWithdrawRecipientAndHistory, setActiveRecipientOwner } from '@/services/address-book-store';
+import type { WithdrawRecipient } from '@/services/withdraw-recipients-core';
+import { explicitRecipient, RECIPIENT_REQUIRED_MESSAGE } from '@/services/explicit-recipient';
+
 import { recordSwap } from '@/services/swap-records-store';
 import { fitAmountFontSize, parseTokenAmount, sanitizeAmountInput } from '@/services/token-amount';
 import { ENS_UNSUPPORTED_MESSAGE, isPotentialEnsName, normalizeEnsName } from '@/services/ens';
@@ -205,6 +209,13 @@ import { useNativeMockBlock } from '@/hooks/use-native-mock-block';
 import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { FeeWarning } from '@/components/fee-warning';
 import { buildFeeBreakdown, gasCostUsd, quoteGas, splitRelayerFee, swapLossUsd, type FeeGasReading } from '@/services/fee-warning';
+import { AddressAutocomplete } from '@/components/contacts/address-autocomplete';
+
+/** Recipient shapes for the confirm paths (same as altRecipientPattern). */
+const STELLAR_RECIPIENT_RE = /^G[A-Z2-7]{55}$/;
+const SUI_RECIPIENT_RE = /^0x[0-9a-fA-F]{64}$/;
+/** Every withdrawal path records the recipient in the legacy store AND the recipient history (backed up, feeds the autocomplete). */
+const recordWithdrawRecipientEverywhere = (e: WithdrawRecipient) => recordWithdrawRecipientAndHistory(e, recordWithdrawRecipient as (e: never) => void);
 
 const WITHDRAW_RELAY_METHOD = /^relay(Withdrawal|RegisterAndWithdrawal|WithAnnounce)$/;
 const SWAP_EXIT_PENDING_MESSAGE = 'The relayer accepted this withdrawal, but it has not been included in a block yet. It has not failed and can still land, so these funds are held for it. Your balance and history update on their own once it settles; if it is still pending after 10 minutes, report it from the pending notice.';
@@ -626,6 +637,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // connected payer wallet; wallet when no key). Relayed flows never post
   // a wallet tx.
   const connectedAddress = (sessionAddress ?? walletAddress ?? undefined) as `0x${string}` | undefined;
+  // Recipient history is filed under the session identity (null: the device bucket).
+  useEffect(() => { setActiveRecipientOwner(sessionAddress ?? null); }, [sessionAddress]);
   const keysReadyRef = useRef(keysReady);
   keysReadyRef.current = keysReady;
   const { openSeedDerivationModal } = useSeedDerivationModal();
@@ -995,7 +1008,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   const targetError = useMemo(() => {
     const trimmed = targetInput.trim();
     if (isSui) {
-      // Recipient is optional on Sui (defaults to the connected wallet).
+      // Empty shows no error while typing; Review refuses it (services/explicit-recipient.ts).
       if (!trimmed || altRecipientPattern.test(trimmed)) return null;
       return isStellar ? 'Invalid Stellar address (G…)' : 'Invalid Sui address';
     }
@@ -1911,7 +1924,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // AND the same note selection the submit path will run (suiAmountError), so
   // review can't accept an amount that confirm must reject.
   const reviewWithdrawalDisabled = isSui
-    ? (spendabilityLoading || enteredAmount <= 0 || !!targetError || !!suiAmountError)
+    ? (spendabilityLoading || enteredAmount <= 0 || !targetAddress || !!targetError || !!suiAmountError)
     : !canReviewWithdrawal;
   // FullWithdrawalGuard (privacy spec A3): withdrawing the ENTIRE balance in one
   // transaction is trivially linkable — trip a hard warning at 100% selection.
@@ -1950,13 +1963,13 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // (the recipient the quote was actually prepared for), never live form
   // state: an edit racing an in-flight quote must not make Review show a
   // recipient the relay won't pay (codex P1). Falls back to the live
-  // derivation only while no review has been committed.
-  const reviewRecipientFallback = isSui ? altAccount : connectedAddress;
+  // derivation only while no review has been committed. Never the connected
+  // wallet: an empty field has no recipient (services/explicit-recipient.ts).
   const reviewRecipientFull = (() => {
     if (swapSnapshot) return swapSnapshot.recipient;
     if (reviewContext?.recipient) return reviewContext.recipient;
     if (targetAddress && (isSui || isAddress(targetAddress))) return targetAddress;
-    return reviewRecipientFallback ?? null;
+    return null;
   })();
   const reviewRecipientDisplay = reviewRecipientFull ? truncateAddress(reviewRecipientFull) : '–';
   /**
@@ -2202,6 +2215,12 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         reportWithdrawError(suiAmountError);
         return;
       }
+      // No default to the connected account: an empty field blocks.
+      const altRecipient = explicitRecipient(targetAddress, (a) => altRecipientPattern.test(a));
+      if (!altRecipient) {
+        reportWithdrawError(RECIPIENT_REQUIRED_MESSAGE);
+        return;
+      }
       setActiveFeeCommitment(null);
       setCountdown(0);
       reportWithdrawError(null);
@@ -2212,9 +2231,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         poolChainId: altChainId,
         sessionKey: `${altAccount.toLowerCase()}:${altChainId}`,
         epoch: modalEpochRef.current,
-        recipient: (targetAddress && altRecipientPattern.test(targetAddress))
-          ? targetAddress
-          : altAccount,
+        recipient: altRecipient,
         spendabilityKey,
       });
       setStep('review');
@@ -2234,9 +2251,12 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     // chain, tokens, amount, recipient, gas-token and slippage; every edit
     // handler invalidates the shared guard, and this handler re-checks
     // after EVERY await and immediately before committing Review.
-    const resolvedRecipient = (targetAddress && isAddress(targetAddress))
-      ? targetAddress
-      : connectedAddress;
+    // The typed or picked address only, never the connected wallet.
+    const resolvedRecipient = explicitRecipient(targetAddress, (a) => isAddress(a)) as `0x${string}` | null;
+    if (!resolvedRecipient) {
+      reportWithdrawError(RECIPIENT_REQUIRED_MESSAGE);
+      return;
+    }
     // A cross-chain exit is only ever a swap exit. Without an output asset
     // there is nothing to route, and resolveWithdrawMode would fall back to the
     // plain (same-chain) withdrawal while the card promises another network.
@@ -2843,7 +2863,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         if (selection.total < gross) {
           throw new Error(`Not enough to cover the amount plus the relayer fee within ${WITHDRAW_MAX_INPUTS} notes. Withdraw a smaller amount.`);
         }
-        const recipient = reviewContext.recipient || altAccount || '';
+        // The reviewed recipient only, never the Freighter account.
+        const recipient = explicitRecipient(reviewContext.recipient, (a) => STELLAR_RECIPIENT_RE.test(a));
+        if (!recipient) throw new Error(RECIPIENT_REQUIRED_MESSAGE);
         if (!isSameOperation()) { log('warn', 'Withdraw', 'Stale run aborted before Stellar broadcast'); return; }
         submittedRef.current = true;
         const result = await stellarSession.withdraw({
@@ -2855,6 +2877,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         });
         setTxHash(result.txHash);
         setTxChainId(STELLAR_TESTNET_ID);
+        recordRecipientUseForActiveOwner(recipient, STELLAR_TESTNET_ID);
         log('info', 'Withdraw', `Stellar withdraw submitted: ${result.txHash}`);
         if (isSameOperation()) setStep('success');
       } catch (err) {
@@ -2901,9 +2924,16 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           ownerAddress: BigInt(chosen[0].ownerAddress),
         }];
         // Recipient: the one Review committed to (the reviewed snapshot),
-        // falling back to the connected wallet. Never re-derived from live
-        // form state at confirm time (codex P1).
-        const suiRecipient = reviewContext.recipient || (suiSession.account?.address ?? '');
+        // never the connected Sui wallet and never re-derived from live form
+        // state at confirm time (codex P1).
+        const suiRecipient = explicitRecipient(reviewContext.recipient, (a) => SUI_RECIPIENT_RE.test(a));
+        if (!suiRecipient) throw new Error(RECIPIENT_REQUIRED_MESSAGE);
+        // The DIRECT path below pays the signing wallet and takes no
+        // recipient, so it may only run when that wallet IS the recipient.
+        const suiPaysSelf = suiRecipient.toLowerCase() === (suiSession.account?.address ?? '').toLowerCase();
+        if (!SUI_TESTNET_RELAYER_URL && !suiPaysSelf) {
+          throw new Error('Withdrawing to another Sui address needs the relayer, which is not set up here.');
+        }
 
         // RELAYED choice: a relayer URL is configured AND a recipient is known.
         // Binds processor = relayer + processor_data = encodePayoutRouting(...)
@@ -2926,6 +2956,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           });
           setTxHash(relayed.txDigest);
           setTxChainId(SUI_TESTNET_ID);
+          recordRecipientUseForActiveOwner(suiRecipient, SUI_TESTNET_ID);
           log('info', 'Withdraw', `Sui relayed withdraw submitted: ${relayed.txDigest}`);
           if (isSameOperation()) setStep('success');
           return;
@@ -2943,6 +2974,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         });
         setTxHash(result.txDigest);
         setTxChainId(SUI_TESTNET_ID);
+        recordRecipientUseForActiveOwner(suiRecipient, SUI_TESTNET_ID);
         log('info', 'Withdraw', `Sui direct withdraw submitted: ${result.txDigest}`);
         if (isSameOperation()) setStep('success');
       } catch (err) {
@@ -3135,7 +3167,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
             quotedOutput: activePrepared.estimatedOutput,
             recipient: snap.recipient,
             now: Date.now(),
-          }, { recordOwnAction, recordWithdrawFee, recordSwap, recordWithdrawRecipient });
+          }, { recordOwnAction, recordWithdrawFee, recordSwap, recordWithdrawRecipient: recordWithdrawRecipientEverywhere });
         } catch { /* non-fatal */ }
         if (noteManager && connectedAddress) {
           await exportAccount(session).catch((e) => log('warn', 'Withdraw', 'Post-confirm export failed; next sync will persist', e));
@@ -3208,7 +3240,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                   quotedOutput: activePrepared.estimatedOutput,
                   recipient: snap.recipient,
                   now: Date.now(),
-                }, { recordOwnAction, recordWithdrawFee, recordSwap, recordWithdrawRecipient });
+                }, { recordOwnAction, recordWithdrawFee, recordSwap, recordWithdrawRecipient: recordWithdrawRecipientEverywhere });
               } catch { /* non-fatal */ }
               setTxHash(landed);
               setTxChainId(chainId);
@@ -3247,14 +3279,12 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     // Recipient: the one Review committed to (the quote was fetched for it),
     // never re-derived from live form state at confirm time (codex P1). The
     // context gate above guarantees reviewContext is present and current.
-    const resolvedRecipient = (reviewContext?.recipient && isAddress(reviewContext.recipient))
-      ? reviewContext.recipient as `0x${string}`
-      : (targetAddress && isAddress(targetAddress))
-        ? targetAddress as `0x${string}`
-        : connectedAddress;
+    // No connected-wallet fallback (services/explicit-recipient.ts).
+    const resolvedRecipient = (explicitRecipient(reviewContext?.recipient, (a) => isAddress(a))
+      ?? explicitRecipient(targetAddress, (a) => isAddress(a))) as `0x${string}` | null;
 
     if (!resolvedRecipient) {
-      reportWithdrawError('Please enter a valid target address or connect your wallet.');
+      reportWithdrawError(RECIPIENT_REQUIRED_MESSAGE);
       submittedRef.current = false;
       setStep('error');
       return;
@@ -3799,7 +3829,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                   feeAmount: BigInt(prepared.totalFee).toString(),
                   stampOwnAction: false,
                   now: Date.now(),
-                }, { recordOwnAction, recordWithdrawFee, recordWithdrawRecipient });
+                }, { recordOwnAction, recordWithdrawFee, recordWithdrawRecipient: recordWithdrawRecipientEverywhere });
               } catch { /* non-fatal */ }
               setTxHash(txHash);
               setTxChainId(chainId);
@@ -4478,7 +4508,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                 feeAmount: pendingFee,
                 stampOwnAction: true,
                 now: Date.now(),
-              }, { recordOwnAction, recordWithdrawFee, recordWithdrawRecipient });
+              }, { recordOwnAction, recordWithdrawFee, recordWithdrawRecipient: recordWithdrawRecipientEverywhere });
             } catch { /* non-fatal */ }
             setTxHash(landed);
             setTxChainId(chainId);
@@ -4596,7 +4626,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           feeAmount: relayedFeeRaw ?? activeFeeCommitment?.feeAmount,
           stampOwnAction: true,
           now: Date.now(),
-        }, { recordOwnAction, recordWithdrawFee, recordWithdrawRecipient });
+        }, { recordOwnAction, recordWithdrawFee, recordWithdrawRecipient: recordWithdrawRecipientEverywhere });
       } catch { /* non-fatal */ }
       if (isSameOperation()) setStep('success');
 
@@ -5380,8 +5410,17 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
 
                 {/* Target Address Input */}
                 <View className="w-full gap-[4px]">
+                  {/* Previous recipients + saved names, from this device only (components/contacts). */}
+                  <AddressAutocomplete
+                    value={targetInput}
+                    onSelect={handleTargetInputChange}
+                    formats={isStellar ? ['stellar'] : isSui ? ['sui'] : ['evm']}
+                    testID="withdraw-recipient"
+                  >
+                    {(bind) => (
                   <View className={`w-full h-[40px] flex-row items-center rounded-control border px-[16px] py-[12px] gap-[12px] bg-card-background ${targetError ? 'border-[#E53935]' : 'border-border'}`}>
                     <TextInput
+                      {...bind}
                       className={`text-[14px] flex-1 p-0 m-0 font-pp-regular ${targetInput ? 'text-text' : 'text-[#999999]'}`}
                       // nw-keep(platform-css): web-only outline reset + text cursor have no className path (empty on native)
                       style={[WEB_NO_OUTLINE, Platform.OS === 'web' ? { cursor: 'text' } as unknown as TextStyle : {}]}
@@ -5391,8 +5430,11 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       onChangeText={handleTargetInputChange}
                       autoCapitalize="none"
                       autoCorrect={false}
+                      testID="withdraw-recipient-input"
                     />
                   </View>
+                    )}
+                  </AddressAutocomplete>
                   {targetError ? (
                     <Text className="text-[12px] text-[#E53935] font-pp-regular">
                       {targetError}

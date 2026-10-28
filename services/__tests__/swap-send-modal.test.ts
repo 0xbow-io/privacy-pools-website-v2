@@ -204,7 +204,7 @@ describe('leaving a swap-send that did not settle', () => {
 
 describe('cross-chain private swap-send (reshield-and-transfer-crosschain)', () => {
   test('the fallback for a send is the sender wallet, never the recipient', () => {
-    expect(estimate).toContain('fallbackForReview = (requestSendTo ? address : (trimmedRecipient || address)) as Address;');
+    expect(estimate).toContain('fallbackForReview = (requestSendTo ? address : trimmedRecipient) as Address;');
   });
 
   test('Review prices the transfer estimate, and refuses a plain output first', () => {

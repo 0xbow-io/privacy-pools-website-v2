@@ -120,6 +120,7 @@ import { ShieldElsewherePanel } from '@/components/home/shield-elsewhere-panel';
 import { SHIELD_GAS_UNITS } from '@/config/fee-warnings';
 import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { buildFeeBreakdown, gasCostUsd, type FeeGasReading } from '@/services/fee-warning';
+import { AddressAutocomplete } from '@/components/contacts/address-autocomplete';
 import { shieldElsewhere } from '@/services/shield-elsewhere';
 
 // Shared content-zone floor = the tallest tab's natural height, so every tab
@@ -3879,7 +3880,10 @@ export function ActionHub({
             </Pressable>
           </View>
           {shieldRecipientOpen ? (
+            <AddressAutocomplete value={shieldRecipient} onSelect={setShieldRecipient} formats={isStellar ? ['stellar'] : ['evm']} testID="hub-shield-recipient">
+            {(bind) => (
             <TextInput
+              {...bind}
               className={`w-full rounded-control border px-[14px] py-[11px] font-pp-regular text-[14px] text-text ${shieldRecipient && (isStellar ? !isStellarAccountAddress(shieldRecipient.trim()) : !SWAP_ADDRESS_RE.test(shieldRecipient.trim())) ? 'border-danger' : 'border-border-light'}`}
               // nw-keep(platform-css): web-only outlineStyle:'none' removes the focus ring — no className path; empty on native
               style={WEB_NO_OUTLINE}
@@ -3894,6 +3898,8 @@ export function ActionHub({
               autoCorrect={false}
               testID="hub-shield-recipient-input"
             />
+            )}
+            </AddressAutocomplete>
           ) : null}
           {/* DEV-570: no ENS on any recipient field (never looked up). */}
           {shieldRecipientOpen && !isStellar && isPotentialEnsName(shieldRecipient) ? (
@@ -4184,7 +4190,10 @@ export function ActionHub({
               </Pressable>
             </View>
             {swapRecipientOpen ? (
+              <AddressAutocomplete value={swapRecipient} onSelect={setSwapRecipient} formats={['evm']} testID="hub-swap-recipient">
+              {(bind) => (
               <TextInput
+                {...bind}
                 className={`w-full rounded-control border px-[14px] py-[11px] font-pp-regular text-[14px] text-text ${swapRecipient && swapRecipientRoute.kind === 'invalid' ? 'border-danger' : 'border-border-light'}`}
                 // nw-keep(platform-css): web-only outlineStyle:'none' removes the focus ring — no className path; empty on native
                 style={WEB_NO_OUTLINE}
@@ -4197,6 +4206,8 @@ export function ActionHub({
                 autoCorrect={false}
                 testID="hub-swap-recipient-input"
               />
+              )}
+              </AddressAutocomplete>
             ) : null}
             {/* DEV-570: no ENS on any recipient field (never looked up). */}
             {swapRecipientOpen && isPotentialEnsName(swapRecipient) ? (
