@@ -5,8 +5,13 @@ import { useTheme } from '@/components/theme-provider';
 import { shortAddress } from '@/services/address-book-core';
 import type { RecipientSuggestion } from '@/services/recipient-suggestions';
 
+export const EMPTY_TITLE = 'No saved addresses yet';
+export const EMPTY_HINT = 'Paste an address. It is remembered after you withdraw or send to it.';
+
 export type AddressSuggestionsListProps = {
   open: boolean;
+  /** Focused with nothing to suggest: show the empty state instead of nothing. */
+  empty?: boolean;
   /** Web only: the DOM node the list anchors to. */
   anchor: unknown;
   listId: string;
@@ -24,9 +29,23 @@ export type AddressSuggestionsListProps = {
  * layer over a ScrollView either clips or eats the first tap that dismisses
  * the keyboard, and rows here are big enough to hit with a thumb.
  */
-export function AddressSuggestionsList({ open, suggestions, onSelect, onEdit, onClose, testID }: AddressSuggestionsListProps) {
+export function AddressSuggestionsList({ open, empty, suggestions, onSelect, onEdit, onClose, testID }: AddressSuggestionsListProps) {
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
+  if (empty) {
+    return (
+      <Pressable onPress={onClose} className="mt-[6px] flex-row items-center gap-[10px] rounded-[14px] border border-border-light bg-menu-background px-[12px] py-[10px]" accessibilityRole="text" testID={testID ? `${testID}-empty` : undefined}>
+        <View className="h-[30px] w-[30px] items-center justify-center rounded-full bg-background-secondary">
+          {/* nw-keep(data-color): glyph is the muted text token (vector-icon sink) */}
+          <Ionicons name="people-outline" size={14} color={colors.textMuted} />
+        </View>
+        <View className="min-w-0 flex-1">
+          <Text className="font-pp-sans-medium text-[13px] text-text">{EMPTY_TITLE}</Text>
+          <Text className="font-pp-regular text-[11.5px] leading-[16px] text-text-muted">{EMPTY_HINT}</Text>
+        </View>
+      </Pressable>
+    );
+  }
   if (!open || suggestions.length === 0) return null;
   return (
     <View className="mt-[6px] overflow-hidden rounded-[14px] border border-border-light bg-menu-background" testID={testID ? `${testID}-suggestions` : undefined}>

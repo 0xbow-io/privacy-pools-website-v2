@@ -4,7 +4,7 @@ import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import { DROPDOWN_SHADOW_WEB } from '@/components/ui/web-style-shims';
 import { shortAddress } from '@/services/address-book-core';
-import type { AddressSuggestionsListProps } from '@/components/contacts/address-suggestions-list';
+import { EMPTY_HINT, EMPTY_TITLE, type AddressSuggestionsListProps } from '@/components/contacts/address-suggestions-list';
 
 /**
  * Web: a listbox portalled to <body> and anchored to the field by Floating UI,
@@ -12,11 +12,11 @@ import type { AddressSuggestionsListProps } from '@/components/contacts/address-
  * leaves the input (every mousedown is prevented), which keeps typing to
  * filter and arrow keys working; the input owns aria-activedescendant.
  */
-export function AddressSuggestionsList({ open, anchor, listId, suggestions, activeIndex, onHover, onSelect, onEdit, testID }: AddressSuggestionsListProps) {
+export function AddressSuggestionsList({ open, empty, anchor, listId, suggestions, activeIndex, onHover, onSelect, onEdit, testID }: AddressSuggestionsListProps) {
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const { refs, floatingStyles } = useFloating({
-    open,
+    open: open || !!empty,
     placement: 'bottom-start',
     // top/left positioning, so the enter animation owns `transform`.
     transform: false,
@@ -53,7 +53,43 @@ export function AddressSuggestionsList({ open, anchor, listId, suggestions, acti
     document.getElementById(`${listId}-opt-${activeIndex}`)?.scrollIntoView({ block: 'nearest' });
   }, [open, activeIndex, listId]);
 
-  if (!open || !anchor || suggestions.length === 0) return null;
+  if (!anchor) return null;
+  if (empty) {
+    return (
+      <FloatingPortal>
+        <div
+          ref={attach}
+          id={listId}
+          role="status"
+          aria-live="polite"
+          data-testid={testID ? `${testID}-empty` : undefined}
+          onMouseDown={(e) => e.preventDefault()}
+          className="flex items-center gap-[10px] rounded-[14px] border border-solid border-border-light bg-menu-background px-[12px] py-[10px]"
+          style={{
+            // nw-keep(floating-ui): Floating UI anchor position
+            ...floatingStyles,
+            // nw-keep(platform-css): web-only shadow and stacking above RN-Web modals
+            zIndex: 100000,
+            boxShadow: DROPDOWN_SHADOW_WEB,
+          }}
+        >
+          <span aria-hidden className="flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-full bg-background-secondary">
+            {/* nw-keep(svg-or-canvas): people glyph strokes read the muted theme token */}
+            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={colors.textMuted} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <circle cx={9} cy={8} r={3.5} />
+              <path d="M2.5 20c1-3.5 3.6-5.5 6.5-5.5s5.5 2 6.5 5.5" />
+              <path d="M16 4.5a3.5 3.5 0 0 1 0 7M18.5 14.8c1.6.8 2.6 2.6 3 5.2" />
+            </svg>
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="font-pp-sans-medium text-[13px] leading-[18px] text-text">{EMPTY_TITLE}</span>
+            <span className="font-pp-regular text-[11.5px] leading-[16px] text-text-muted">{EMPTY_HINT}</span>
+          </span>
+        </div>
+      </FloatingPortal>
+    );
+  }
+  if (!open || suggestions.length === 0) return null;
   return (
     <FloatingPortal>
       <div
