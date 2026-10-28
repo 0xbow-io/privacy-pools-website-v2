@@ -798,9 +798,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
    * connected wallet with no say in it, which is how a user who swapped ETH to
    * BNB found the funds in the wallet he was signed in with (Mike, 2026-09-22).
    *
-   * So the address becomes a decision. It defaults to the user's own, which is
-   * what it was before, and anyone who would rather the failure landed somewhere
-   * unlinked can say so.
+   * So the address is a decision, with no default: the field starts empty and
+   * Review waits for one (typing your own wallet is fine, it is just never
+   * assumed).
    */
   const crossChainReshield = isReshield
     && destinationChainId !== chainId
@@ -1158,7 +1158,8 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     // expanded: an address someone else typed must be visible to be checked,
     // and the collapsed state reads as "goes to my own wallet".
     const handedOffRecipient = options?.recipient?.trim();
-    setRecipient(handedOffRecipient || sessionAddress || address || '');
+    // Never pre-filled with the connected wallet (services/explicit-recipient.ts).
+    setRecipient(handedOffRecipient || '');
     setRecipientOpen(!!handedOffRecipient);
     setSendHandoff(!!handedOffRecipient && options?.mode === 'reshield');
     hubRecipientRef.current = false;
@@ -1210,7 +1211,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     // Per-attempt, like every other flag here: left set, one failed local note
     // write would tell the user every LATER reshield hadn't been recorded.
     setReshieldSyncWarning(false);
-  }, [address, sessionAddress, chainId]);
+  }, [chainId]);
 
   // Context invalidation (codex P1 on 4b2202a): this modal is STATEFUL —
   // fromToken/destinationChainId initialize once, and a review snapshot frozen
@@ -1440,14 +1441,14 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         setRecipient(typed);
         setSendHandoff(true);
       } else if (wasHub) {
-        setRecipient(sessionAddress || address || '');
+        setRecipient('');
         setSendHandoff(false);
       }
       setRecipientOpen(!!typed);
     } else if (patch.recipient !== undefined) {
-      setRecipient(patch.recipient.trim() || sessionAddress || address || '');
+      setRecipient(patch.recipient.trim());
     }
-  }, [inlineBase, invalidateQuoteRequests, fromToken, chainId, destinationChainId, isReshield, sessionAddress, address]);
+  }, [inlineBase, invalidateQuoteRequests, fromToken, chainId, destinationChainId, isReshield]);
 
   // --- Form edit helpers (every edit invalidates in-flight quotes) ---
 
@@ -1920,12 +1921,13 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
             'Swapping to another network needs a connected wallet: it is the address the destination pays out to if the far side cannot complete.',
           );
         }
-        // The address the user chose, defaulting to their own: the form
-        // pre-fills the connected wallet, so doing nothing keeps exactly the
-        // behaviour this had before the field existed.
+        // The address the user typed, never a default: the field starts empty
+        // and canReview refuses a cross-chain reshield without a valid one, so
+        // a failed far leg can no longer land in the connected wallet unasked.
         // A swap-send: the field is the recipient, so a failed far leg pays
-        // the sender's own wallet instead.
-        fallbackForReview = (requestSendTo ? address : (trimmedRecipient || address)) as Address;
+        // the sender's own wallet instead (unchanged: there is no separate
+        // field for it, and the recipient may control no address there).
+        fallbackForReview = (requestSendTo ? address : trimmedRecipient) as Address;
         const sessions = await createReshieldCrosschainSessions({ destinationChainId: requestDestination });
         if (!sessions) {
           throw new ReshieldPreflightError('Swapping to that network is not available yet.');
@@ -2914,7 +2916,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                           // Collapsing returns the destination to your wallet,
                           // so a half-typed address can never be submitted
                           // from a hidden field.
-                          if (open) editRecipient(sessionAddress ?? address ?? '');
+                          if (open) editRecipient('');
                           return !open;
                         });
                       }}
@@ -2991,6 +2993,11 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                       <Text className="text-[12px] underline text-tint font-pp-medium">{LEARN_MORE_UNREGISTERED_LABEL}</Text>
                     </Pressable>
                   </View>
+                )}
+                {showRecipientField && crossChainReshield && !crossChainSendField && trimmedRecipient === '' && (
+                  <Text className="text-[12px] leading-[17px] text-text-muted font-pp-regular" testID="swap-fallback-required">
+                    Enter the address to pay on {destinationName} if the swap cannot finish there.
+                  </Text>
                 )}
                 {showRecipientField && crossChainReshield && crossChainSendField && (
                   <Text className="text-[12px] leading-[17px] text-text-muted font-pp-regular">
