@@ -104,3 +104,13 @@ describe('focus always answers', () => {
     expect(hook).toContain('usePools()');
   });
 });
+
+describe('the React Compiler keeps the store version as a dependency', () => {
+  test('reads take the version as an argument (a `void version` line was compiled away in production)', () => {
+    const hook = src('hooks/use-contacts.ts');
+    expect(hook).not.toMatch(/void version/);
+    expect(hook).toContain('readContacts(owner, version)');
+    expect(hook).toContain('readRecipientRecords(null, version)');
+    expect(hook).toContain('readRecipientRecords(owner, version)');
+  });
+});
