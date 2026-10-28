@@ -17,6 +17,7 @@ import {
   importSummary,
   parseContactsImport,
   planContactsImport,
+  canonicalAddress,
   shortAddress,
   type ImportPlan,
 } from '@/services/address-book-core';
@@ -32,7 +33,8 @@ export function ContactsModal({ visible, onClose }: { visible: boolean; onClose:
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const { toast } = useToast();
-  const { owner, contacts, replaceAll } = useContacts();
+  const { owner, contacts, replaceAll, recipients } = useContacts();
+  const [adding, setAdding] = useState(false);
   const { width } = useWindowDimensions();
   const sheet = width <= 540;
   const [editing, setEditing] = useState<string | null>(null);
@@ -91,6 +93,16 @@ export function ContactsModal({ visible, onClose }: { visible: boolean; onClose:
     if (ok) toast({ title: `${contacts.length} contact${contacts.length === 1 ? '' : 's'} exported` });
   }, [contacts, toast]);
 
+  // Addresses you paid that have no name yet: one tap names them.
+  const unnamed = useMemo(() => {
+    const named = new Set(contacts.map((c) => canonicalAddress(c.address)?.key));
+    const q = query.trim().toLowerCase();
+    return recipients
+      .filter((r) => !named.has(canonicalAddress(r.address)?.key))
+      .filter((r) => !q || r.address.toLowerCase().includes(q))
+      .slice(0, 30);
+  }, [contacts, recipients, query]);
+
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? contacts.filter((c) => c.name.toLowerCase().includes(q) || c.address.toLowerCase().includes(q)) : contacts;
@@ -117,6 +129,17 @@ export function ContactsModal({ visible, onClose }: { visible: boolean; onClose:
           </View>
 
           <View className="shrink-0 flex-row gap-[8px] px-[20px] pb-[12px]">
+            <Pressable
+              onPress={() => { setResult(null); setAdding(true); }}
+              disabled={!owner}
+              className={`h-[38px] flex-1 flex-row items-center justify-center gap-[6px] rounded-[12px] bg-button-primary ${owner ? 'active:opacity-[0.85]' : 'opacity-[0.45]'}`}
+              accessibilityRole="button"
+              testID="contacts-add"
+            >
+              {/* nw-keep(data-color): glyph is the primary button text token (vector-icon sink) */}
+              <Ionicons name="add" size={16} color={colors.buttonPrimaryText} />
+              <Text className="font-pp-medium text-[13px] text-button-primary-text">Add</Text>
+            </Pressable>
             <Pressable
               onPress={onImport}
               disabled={!owner}
@@ -232,8 +255,8 @@ export function ContactsModal({ visible, onClose }: { visible: boolean; onClose:
           <ScrollView className="min-h-0 shrink grow-0" contentContainerClassName="px-[12px] pb-[18px]" showsVerticalScrollIndicator={false}>
             {!owner ? (
               <EmptyState icon="lock-closed-outline" title="Sign in to see your contacts" colors={colors} />
-            ) : contacts.length === 0 ? (
-              <EmptyState icon="people-outline" title="No contacts yet" hint="Name an address from any recipient field." colors={colors} />
+            ) : contacts.length === 0 && unnamed.length === 0 ? (
+              <EmptyState icon="people-outline" title="No contacts yet" hint="Add one, or name an address from any recipient field." colors={colors} />
             ) : shown.map((c) => (
               <Pressable
                 key={c.address}
@@ -254,10 +277,33 @@ export function ContactsModal({ visible, onClose }: { visible: boolean; onClose:
                 <Ionicons name="pencil-outline" size={15} color={colors.textMuted} />
               </Pressable>
             ))}
+            {owner && unnamed.length > 0 ? (
+              <>
+                <Text className="px-[8px] pb-[4px] pt-[12px] font-pp-sans-semi-bold text-[10px] tracking-[1.5px] text-text-muted">RECENT RECIPIENTS</Text>
+                {unnamed.map((r) => (
+                  <Pressable
+                    key={r.address}
+                    onPress={() => setEditing(r.address)}
+                    className="flex-row items-center gap-[12px] rounded-[12px] px-[8px] py-[9px] hover:bg-background-secondary active:bg-background-secondary"
+                    accessibilityRole="button"
+                    accessibilityLabel={`${r.address}. Add a name`}
+                    testID={`contacts-recent-${r.address}`}
+                  >
+                    <View className="h-[34px] w-[34px] items-center justify-center rounded-full bg-background-secondary">
+                      {/* nw-keep(data-color): glyph is the muted text token (vector-icon sink) */}
+                      <Ionicons name="person-outline" size={15} color={colors.textMuted} />
+                    </View>
+                    <Text numberOfLines={1} className="min-w-0 flex-1 font-pp-mono text-[12.5px] text-text">{shortAddress(r.address)}</Text>
+                    <Text className="font-pp-medium text-[12px] text-tint">Name</Text>
+                  </Pressable>
+                ))}
+              </>
+            ) : null}
           </ScrollView>
         </View>
       </View>
       {editing ? <ContactEditModal key={editing} address={editing} onClose={() => setEditing(null)} /> : null}
+      {adding ? <ContactEditModal key="add" address={null} adding onClose={() => setAdding(false)} /> : null}
     </Modal>
   );
 }

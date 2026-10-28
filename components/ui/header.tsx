@@ -621,6 +621,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
               // single "Connect Wallet" item, so go straight to the
               // picker. Connected: keep the dropdown (Copy / Sign Out).
               onPress={menuActive ? handleActionsPress : handleConnectWallet}
+              testID="header-account"
             >
               {menuActive && displayAddress ? (
                 <>

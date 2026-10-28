@@ -331,3 +331,131 @@ export function importSummary(r: Pick<ImportResult, 'added' | 'renamed' | 'skipp
   if (r.skipped > 0) parts.push(`${r.skipped} skipped`);
   return parts.join(', ');
 }
+
+// ---------------------------------------------------------------------------
+// Recipient history: the addresses this account paid (withdrawals and sends),
+// written at confirmation. Address, chain and the UTC day of the last use.
+// No tx hash, no amount, no note field: it says "I paid this address on this
+// chain around this day", never which note left.
+// ---------------------------------------------------------------------------
+
+export type RecipientRecord = {
+  address: string;
+  chainId: number;
+  /** unix ms, rounded down to the UTC day */
+  lastUsedAt: number;
+};
+
+export const MAX_RECIPIENT_RECORDS = 500;
+
+function normalizeRecipientRecord(raw: unknown): RecipientRecord | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const canon = canonicalAddress(typeof r.address === 'string' ? r.address : null);
+  const chainId = typeof r.chainId === 'number' && Number.isInteger(r.chainId) && r.chainId > 0 ? r.chainId : null;
+  const at = typeof r.lastUsedAt === 'number' && Number.isFinite(r.lastUsedAt) && r.lastUsedAt > 0 ? roundToDay(r.lastUsedAt) : null;
+  if (!canon || chainId === null || at === null) return null;
+  return { address: canon.display, chainId, lastUsedAt: at };
+}
+
+/** Stored order is oldest first, newest last; one row per address. */
+export function parseRecipientRecords(raw: unknown): RecipientRecord[] {
+  if (!Array.isArray(raw)) return [];
+  const byKey = new Map<string, RecipientRecord>();
+  for (const row of raw) {
+    const r = normalizeRecipientRecord(row);
+    if (!r) continue;
+    const key = canonicalAddress(r.address)!.key;
+    byKey.delete(key); // re-insert keeps the latest position
+    byKey.set(key, r);
+  }
+  const list = Array.from(byKey.values());
+  return list.length > MAX_RECIPIENT_RECORDS ? list.slice(list.length - MAX_RECIPIENT_RECORDS) : list;
+}
+
+/** The address moves to the newest position; oldest out past the bound. */
+export function upsertRecipientRecord(list: readonly RecipientRecord[], address: string, chainId: number, now: number): RecipientRecord[] {
+  const r = normalizeRecipientRecord({ address, chainId, lastUsedAt: now });
+  if (!r) return [...list];
+  const key = canonicalAddress(r.address)!.key;
+  const kept = list.filter((x) => canonicalAddress(x.address)?.key !== key);
+  kept.push(r);
+  return kept.length > MAX_RECIPIENT_RECORDS ? kept.slice(kept.length - MAX_RECIPIENT_RECORDS) : kept;
+}
+
+// ---------------------------------------------------------------------------
+// The address book inside an account backup. Only the PASSWORD-ENCRYPTED
+// backup carries it: recipient addresses link a user's activity, so a plain
+// file never does. A ppv2 field the SDK never reads, versioned and bounded;
+// older backups lack it and older app versions ignore it.
+// ---------------------------------------------------------------------------
+
+export const ADDRESS_BOOK_BACKUP_FIELD = 'ppv2AddressBook';
+export const ADDRESS_BOOK_BACKUP_VERSION = 1;
+
+export type AddressBookBackup = {
+  v: typeof ADDRESS_BOOK_BACKUP_VERSION;
+  contacts: Contact[];
+  recipients: RecipientRecord[];
+};
+
+export function buildAddressBookBackup(contacts: readonly Contact[], recipients: readonly RecipientRecord[]): AddressBookBackup {
+  return {
+    v: ADDRESS_BOOK_BACKUP_VERSION,
+    contacts: sortContacts(contacts).slice(0, MAX_CONTACTS).map(({ address, name, createdAt, updatedAt }) => ({ address, name, createdAt, updatedAt })),
+    recipients: parseRecipientRecords(recipients),
+  };
+}
+
+export type ParsedAddressBookBackup =
+  | { ok: true; contacts: Contact[]; recipients: RecipientRecord[] }
+  | { ok: false; error: string };
+
+/** Validate the backup field. Never throws: a bad field must not stop the notes importing. */
+export function parseAddressBookBackup(raw: unknown, now = Date.now()): ParsedAddressBookBackup {
+  if (raw === undefined || raw === null) return { ok: false, error: '' };
+  let size = 0;
+  try { size = JSON.stringify(raw).length; } catch { return { ok: false, error: 'The saved addresses in this backup could not be read.' }; }
+  if (size > MAX_IMPORT_BYTES * 2) return { ok: false, error: 'The saved addresses in this backup are too large and were skipped.' };
+  if (typeof raw !== 'object') return { ok: false, error: 'The saved addresses in this backup could not be read.' };
+  const r = raw as Record<string, unknown>;
+  if (typeof r.v !== 'number' || r.v > ADDRESS_BOOK_BACKUP_VERSION) return { ok: false, error: 'The saved addresses in this backup come from a newer version and were skipped.' };
+  if (!Array.isArray(r.contacts) || !Array.isArray(r.recipients)) return { ok: false, error: 'The saved addresses in this backup could not be read.' };
+  return { ok: true, contacts: parseContacts(r.contacts, now), recipients: parseRecipientRecords(r.recipients) };
+}
+
+export type AddressBookRestore = { contacts: Contact[]; recipients: RecipientRecord[]; added: number; kept: number };
+
+/**
+ * Merge a backup into what this device holds. Same rule as a contacts import:
+ * a name already saved here is never changed. Recipients merge by address,
+ * the latest day wins.
+ */
+export function mergeAddressBookBackup(
+  current: { contacts: readonly Contact[]; recipients: readonly RecipientRecord[] },
+  backup: { contacts: readonly Contact[]; recipients: readonly RecipientRecord[] },
+  now: number,
+): AddressBookRestore {
+  const plan = planContactsImport(current.contacts, backup.contacts);
+  const applied = applyContactsImport(current.contacts, plan, { replaceNames: false, invalid: 0, now });
+  const byKey = new Map<string, RecipientRecord>();
+  for (const r of [...backup.recipients, ...current.recipients]) {
+    const key = canonicalAddress(r.address)?.key;
+    if (!key) continue;
+    const prev = byKey.get(key);
+    if (!prev || r.lastUsedAt >= prev.lastUsedAt) { byKey.delete(key); byKey.set(key, r); }
+  }
+  const recipients = parseRecipientRecords(Array.from(byKey.values()).sort((a, b) => a.lastUsedAt - b.lastUsedAt));
+  const before = new Set(current.recipients.map((r) => canonicalAddress(r.address)?.key));
+  const newRecipients = recipients.filter((r) => !before.has(canonicalAddress(r.address)?.key)).length;
+  return { contacts: applied.list, recipients, added: applied.added + newRecipients, kept: plan.conflicts.length + plan.unchanged };
+}
+
+/** "Add address": a NEW address with a name. Refuses an invalid, unnamed or already saved one. */
+export function addNewContact(list: readonly Contact[], address: string, rawName: string, now: number): SetNameResult {
+  const canon = canonicalAddress(address);
+  if (!canon) return { list: [...list], error: 'Enter a full EVM (0x…), Sui (0x…, 64 hex) or Stellar (G…) address.' };
+  if (!cleanContactName(rawName)) return { list: [...list], error: 'Add a name.' };
+  if (list.some((c) => canonicalAddress(c.address)?.key === canon.key)) return { list: [...list], error: 'This address is already saved.' };
+  return setContactName(list, canon.display, rawName, now);
+}

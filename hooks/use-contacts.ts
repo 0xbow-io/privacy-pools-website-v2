@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useSdkContext } from '@/components/sdk-provider';
-import { setContactName, type AddressFormat, type Contact } from '@/services/address-book-core';
-import { getContactsVersion, readContacts, subscribeContacts, writeContacts } from '@/services/address-book-store';
+import { addNewContact, canonicalAddress, setContactName, type AddressFormat, type Contact, type RecipientRecord } from '@/services/address-book-core';
+import { getContactsVersion, readContacts, readRecipientRecords, subscribeContacts, writeContacts } from '@/services/address-book-store';
 import { buildRecipientIndex, payoutRecordsFromActivity, rankRecipientSuggestions, withRecords, yieldToHost, type PayoutRecord, type RecipientIndex, type RecipientSuggestion } from '@/services/recipient-suggestions';
 import { usePools } from '@/components/pools-provider';
 import { useMyTransactionOwnership } from '@/hooks/use-my-transaction-ownership';
@@ -21,6 +21,10 @@ export function useContacts(): {
   contacts: Contact[];
   setName: (address: string, name: string) => string | null;
   replaceAll: (list: readonly Contact[]) => boolean;
+  /** Addresses this account paid (owner bucket + the device bucket), newest first. */
+  recipients: RecipientRecord[];
+  /** Add a new address with a name, or report why not (invalid, already saved, list full). */
+  addContact: (address: string, name: string) => string | null;
 } {
   const { sessionAddress } = useSdkContext();
   const owner = sessionAddress ?? null;
@@ -28,6 +32,18 @@ export function useContacts(): {
   // must not be memoized on `owner` alone.
   const version = useSyncExternalStore(subscribeContacts, getContactsVersion, getContactsVersion);
   const contacts = useMemo(() => { void version; return readContacts(owner); }, [owner, version]);
+  const recipients = useMemo(() => {
+    void version;
+    const merged = new Map<string, RecipientRecord>();
+    // Device bucket first, owner bucket second: the owner's entry wins a tie.
+    for (const r of [...readRecipientRecords(null), ...(owner ? readRecipientRecords(owner) : [])]) {
+      const key = canonicalAddress(r.address)?.key;
+      if (!key) continue;
+      const prev = merged.get(key);
+      if (!prev || r.lastUsedAt >= prev.lastUsedAt) merged.set(key, r);
+    }
+    return Array.from(merged.values()).reverse().sort((a, b) => b.lastUsedAt - a.lastUsedAt);
+  }, [owner, version]);
   const setName = useCallback((address: string, name: string): string | null => {
     if (!owner) return 'Sign in to save names.';
     const r = setContactName(readContacts(owner), address, name, Date.now());
@@ -35,7 +51,13 @@ export function useContacts(): {
     return writeContacts(owner, r.list) ? null : 'Could not save on this device.';
   }, [owner]);
   const replaceAll = useCallback((list: readonly Contact[]) => (owner ? writeContacts(owner, list) : false), [owner]);
-  return { owner, contacts, setName, replaceAll };
+  const addContact = useCallback((address: string, name: string): string | null => {
+    if (!owner) return 'Sign in to save names.';
+    const r = addNewContact(readContacts(owner), address, name, Date.now());
+    if (r.error) return r.error;
+    return writeContacts(owner, r.list) ? null : 'Could not save on this device.';
+  }, [owner]);
+  return { owner, contacts, setName, replaceAll, recipients, addContact };
 }
 
 // ---------------------------------------------------------------------------
@@ -128,14 +150,16 @@ export function useRecipientSuggestions(opts: {
   exclude?: readonly string[];
   limit?: number;
 }): { suggestions: RecipientSuggestion[]; contacts: Contact[]; refresh: () => void; ready: boolean; activityLoading: boolean } {
-  const { contacts } = useContacts();
+  const { contacts, recipients } = useContacts();
   // The snapshot is the index itself: every publish is a new Map.
   const deviceIndex = useSyncExternalStore(subscribeIndex, getIndex, getIndex);
   // Reactive: a new Activity row set (rows arriving after focus, a sync)
   // recomputes the list while it is open. Nothing is cached across an
   // unsettled source; the state below says 'loading' instead of 'empty'.
   const { records: activity, loading: activityLoading } = useActivityPayouts();
-  const index = useMemo(() => withRecords(deviceIndex, activity), [deviceIndex, activity]);
+  // Recipient history: within a day, the stored order breaks ties.
+  const history = useMemo(() => recipients.map((r, i) => ({ address: r.address, timestamp: r.lastUsedAt + (recipients.length - i) })), [recipients]);
+  const index = useMemo(() => withRecords(withRecords(deviceIndex, history), activity), [deviceIndex, history, activity]);
   useEffect(() => { void refreshRecipientIndex(); }, []);
   const formatsKey = opts.formats.join(',');
   const excludeKey = (opts.exclude ?? []).join(',');

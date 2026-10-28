@@ -112,6 +112,8 @@ import { recordWithdrawFee } from '@/services/withdraw-fees-store';
 import { recordReceiveAs } from '@/services/swap-bookkeeping';
 import { recordOwnWithdrawal } from '@/services/withdraw-bookkeeping';
 import { recordWithdrawRecipient } from '@/services/withdraw-recipients-store';
+import { recordRecipientUseForActiveOwner, recordWithdrawRecipientAndHistory, setActiveRecipientOwner } from '@/services/address-book-store';
+import type { WithdrawRecipient } from '@/services/withdraw-recipients-core';
 import { explicitRecipient, RECIPIENT_REQUIRED_MESSAGE } from '@/services/explicit-recipient';
 
 import { recordSwap } from '@/services/swap-records-store';
@@ -212,6 +214,8 @@ import { AddressAutocomplete } from '@/components/contacts/address-autocomplete'
 /** Recipient shapes for the confirm paths (same as altRecipientPattern). */
 const STELLAR_RECIPIENT_RE = /^G[A-Z2-7]{55}$/;
 const SUI_RECIPIENT_RE = /^0x[0-9a-fA-F]{64}$/;
+/** Every withdrawal path records the recipient in the legacy store AND the recipient history (backed up, feeds the autocomplete). */
+const recordWithdrawRecipientEverywhere = (e: WithdrawRecipient) => recordWithdrawRecipientAndHistory(e, recordWithdrawRecipient as (e: never) => void);
 
 const WITHDRAW_RELAY_METHOD = /^relay(Withdrawal|RegisterAndWithdrawal|WithAnnounce)$/;
 const SWAP_EXIT_PENDING_MESSAGE = 'The relayer accepted this withdrawal, but it has not been included in a block yet. It has not failed and can still land, so these funds are held for it. Your balance and history update on their own once it settles; if it is still pending after 10 minutes, report it from the pending notice.';
@@ -633,6 +637,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // connected payer wallet; wallet when no key). Relayed flows never post
   // a wallet tx.
   const connectedAddress = (sessionAddress ?? walletAddress ?? undefined) as `0x${string}` | undefined;
+  // Recipient history is filed under the session identity (null: the device bucket).
+  useEffect(() => { setActiveRecipientOwner(sessionAddress ?? null); }, [sessionAddress]);
   const keysReadyRef = useRef(keysReady);
   keysReadyRef.current = keysReady;
   const { openSeedDerivationModal } = useSeedDerivationModal();
@@ -2871,6 +2877,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         });
         setTxHash(result.txHash);
         setTxChainId(STELLAR_TESTNET_ID);
+        recordRecipientUseForActiveOwner(recipient, STELLAR_TESTNET_ID);
         log('info', 'Withdraw', `Stellar withdraw submitted: ${result.txHash}`);
         if (isSameOperation()) setStep('success');
       } catch (err) {
@@ -2949,6 +2956,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           });
           setTxHash(relayed.txDigest);
           setTxChainId(SUI_TESTNET_ID);
+          recordRecipientUseForActiveOwner(suiRecipient, SUI_TESTNET_ID);
           log('info', 'Withdraw', `Sui relayed withdraw submitted: ${relayed.txDigest}`);
           if (isSameOperation()) setStep('success');
           return;
@@ -2966,6 +2974,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         });
         setTxHash(result.txDigest);
         setTxChainId(SUI_TESTNET_ID);
+        recordRecipientUseForActiveOwner(suiRecipient, SUI_TESTNET_ID);
         log('info', 'Withdraw', `Sui direct withdraw submitted: ${result.txDigest}`);
         if (isSameOperation()) setStep('success');
       } catch (err) {
@@ -3158,7 +3167,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
             quotedOutput: activePrepared.estimatedOutput,
             recipient: snap.recipient,
             now: Date.now(),
-          }, { recordOwnAction, recordWithdrawFee, recordSwap, recordWithdrawRecipient });
+          }, { recordOwnAction, recordWithdrawFee, recordSwap, recordWithdrawRecipient: recordWithdrawRecipientEverywhere });
         } catch { /* non-fatal */ }
         if (noteManager && connectedAddress) {
           await exportAccount(session).catch((e) => log('warn', 'Withdraw', 'Post-confirm export failed; next sync will persist', e));
@@ -3231,7 +3240,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                   quotedOutput: activePrepared.estimatedOutput,
                   recipient: snap.recipient,
                   now: Date.now(),
-                }, { recordOwnAction, recordWithdrawFee, recordSwap, recordWithdrawRecipient });
+                }, { recordOwnAction, recordWithdrawFee, recordSwap, recordWithdrawRecipient: recordWithdrawRecipientEverywhere });
               } catch { /* non-fatal */ }
               setTxHash(landed);
               setTxChainId(chainId);
@@ -3820,7 +3829,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                   feeAmount: BigInt(prepared.totalFee).toString(),
                   stampOwnAction: false,
                   now: Date.now(),
-                }, { recordOwnAction, recordWithdrawFee, recordWithdrawRecipient });
+                }, { recordOwnAction, recordWithdrawFee, recordWithdrawRecipient: recordWithdrawRecipientEverywhere });
               } catch { /* non-fatal */ }
               setTxHash(txHash);
               setTxChainId(chainId);
@@ -4499,7 +4508,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                 feeAmount: pendingFee,
                 stampOwnAction: true,
                 now: Date.now(),
-              }, { recordOwnAction, recordWithdrawFee, recordWithdrawRecipient });
+              }, { recordOwnAction, recordWithdrawFee, recordWithdrawRecipient: recordWithdrawRecipientEverywhere });
             } catch { /* non-fatal */ }
             setTxHash(landed);
             setTxChainId(chainId);
@@ -4617,7 +4626,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           feeAmount: relayedFeeRaw ?? activeFeeCommitment?.feeAmount,
           stampOwnAction: true,
           now: Date.now(),
-        }, { recordOwnAction, recordWithdrawFee, recordWithdrawRecipient });
+        }, { recordOwnAction, recordWithdrawFee, recordWithdrawRecipient: recordWithdrawRecipientEverywhere });
       } catch { /* non-fatal */ }
       if (isSameOperation()) setStep('success');
 

@@ -10,11 +10,23 @@ import * as SecureStore from 'expo-secure-store';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 import { envScopedStorageKey } from '@/config/app-environment';
-import { parseContacts, type Contact } from '@/services/address-book-core';
+import { parseContacts, parseRecipientRecords, upsertRecipientRecord, type Contact, type RecipientRecord } from '@/services/address-book-core';
+
+function ownerTag(owner: string): string {
+  return bytesToHex(sha256(utf8ToBytes(`ppv2-contacts:${owner.trim().toLowerCase()}`))).slice(0, 24);
+}
 
 export function contactsStorageKey(owner: string): string {
-  const tag = bytesToHex(sha256(utf8ToBytes(`ppv2-contacts:${owner.trim().toLowerCase()}`))).slice(0, 24);
-  return envScopedStorageKey(`ppv2_contacts_v1_${tag}`);
+  return envScopedStorageKey(`ppv2_contacts_v1_${ownerTag(owner)}`);
+}
+
+/**
+ * Recipient history, per owner. A payment made with no session identity (a
+ * Stellar or Sui wallet on its own) goes to the device bucket, which every
+ * owner on this device also reads.
+ */
+export function recipientsStorageKey(owner: string | null): string {
+  return envScopedStorageKey(owner ? `ppv2_recipients_v1_${ownerTag(owner)}` : 'ppv2_recipients_v1_device');
 }
 
 function storageGetItem(key: string): string | null {
@@ -77,8 +89,73 @@ export function writeContacts(owner: string, list: readonly Contact[]): boolean 
   const ok = storageSetItem(contactsStorageKey(owner), JSON.stringify(list));
   version++;
   cache.clear();
+  recipientsCache.clear();
   for (const l of listeners) {
     try { l(); } catch { /* a listener must not break the write */ }
   }
   return ok;
+}
+
+const recipientsCache = new Map<string, { version: number; list: RecipientRecord[] }>();
+
+/** Oldest first. `null` reads the device bucket. */
+export function readRecipientRecords(owner: string | null): RecipientRecord[] {
+  const key = recipientsStorageKey(owner);
+  const hit = recipientsCache.get(key);
+  if (hit && hit.version === version) return hit.list;
+  let list: RecipientRecord[] = [];
+  try {
+    const raw = storageGetItem(key);
+    list = raw ? parseRecipientRecords(JSON.parse(raw)) : [];
+  } catch {
+    list = [];
+  }
+  recipientsCache.set(key, { version, list });
+  return list;
+}
+
+export function writeRecipientRecords(owner: string | null, list: readonly RecipientRecord[]): boolean {
+  const ok = storageSetItem(recipientsStorageKey(owner), JSON.stringify(list));
+  version++;
+  cache.clear();
+  recipientsCache.clear();
+  for (const l of listeners) {
+    try { l(); } catch { /* a listener must not break the write */ }
+  }
+  return ok;
+}
+
+/**
+ * A confirmed withdrawal or send paid `address` on `chainId`. Called by every
+ * payout path at confirmation; never throws (bookkeeping must not fail a
+ * payment that already landed).
+ */
+export function recordRecipientUse(owner: string | null | undefined, address: string | null | undefined, chainId: number, now = Date.now()): void {
+  try {
+    if (!address) return;
+    const who = owner || null;
+    writeRecipientRecords(who, upsertRecipientRecord(readRecipientRecords(who), address, chainId, now));
+  } catch {
+    /* non-fatal */
+  }
+}
+
+// The session identity payments are recorded under. Set by the payment
+// providers from the same sessionAddress the contacts hook reads, so a record
+// written at confirmation lands where the autocomplete looks. Module state on
+// purpose: bookkeeping helpers run inside long-lived callbacks.
+let activeOwner: string | null = null;
+
+export function setActiveRecipientOwner(owner: string | null | undefined): void {
+  activeOwner = owner || null;
+}
+
+export function recordRecipientUseForActiveOwner(address: string | null | undefined, chainId: number): void {
+  recordRecipientUse(activeOwner, address, chainId);
+}
+
+/** Drop-in for recordWithdrawRecipient that also writes the recipient history. */
+export function recordWithdrawRecipientAndHistory(entry: { recipient: string; chainId: number } & Record<string, unknown>, record: (e: never) => void): void {
+  try { record(entry as never); } catch { /* the legacy store must not stop the history */ }
+  recordRecipientUseForActiveOwner(entry.recipient, entry.chainId);
 }

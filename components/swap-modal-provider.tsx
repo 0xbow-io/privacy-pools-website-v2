@@ -151,6 +151,7 @@ import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { FeeWarning } from '@/components/fee-warning';
 import { buildFeeBreakdown, gasCostUsd, quoteGas, splitRelayerFee, swapLossUsd, tokenUsd, type FeeGasReading } from '@/services/fee-warning';
 import { AddressAutocomplete } from '@/components/contacts/address-autocomplete';
+import { recordRecipientUseForActiveOwner } from '@/services/address-book-store';
 
 // Intent swap (withdraw-and-swap): a private note leaves the pool, swaps
 // through a LiFi route that is sealed inside the ZK proof, and the output
@@ -2253,6 +2254,8 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       // Confirmed write → refresh the shared tx/stats caches (codex round 1, P1).
       void invalidateTransactionCaches(queryClient);
       if (snap.crossChain) setDelivery({ status: 'pending' });
+      // Recipient history (backed up, feeds the autocomplete): the payout address.
+      recordRecipientUseForActiveOwner(snap.recipient, chainId);
       if (live()) setStep('success');
     } catch (err) {
       // Deliberately NOT classified as route-unavailable: confirm-phase
@@ -2510,6 +2513,8 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
             now: crossBroadcastAt ?? Date.now(),
           }, { recordOwnAction, recordWithdrawFee, recordSwap });
         } catch { /* local bookkeeping is best-effort; the swap succeeded */ }
+        // A swap-send names a payee: recipient history (backed up, feeds the autocomplete).
+        if (snap.recipient) recordRecipientUseForActiveOwner(snap.recipient, snap.destinationChainId);
         try { await refreshNotes(); } catch { /* balances refresh best-effort */ }
         void invalidateTransactionCaches(queryClient);
         if (live()) setStep('success');
@@ -2614,6 +2619,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
           now: broadcastAt ?? Date.now(),
         }, { recordOwnAction, recordWithdrawFee, recordSwap });
       } catch { /* local bookkeeping is best-effort; the swap succeeded */ }
+      if (snap.recipient) recordRecipientUseForActiveOwner(snap.recipient, chainId);
       try { await refreshNotes(); } catch { /* balances refresh best-effort */ }
       // Confirmed write → refresh the shared tx/stats caches (codex round 1, P1).
       void invalidateTransactionCaches(queryClient);

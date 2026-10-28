@@ -37,7 +37,8 @@ import type { Note, Hash, Address as SdkAddress } from '@/services/sdk-types';
 import { plainTransferRelayError, relayerTransferQuotes, relayTransferParams, relayWithReprove, requestTransferQuote, transferRelayExpectation, transferRelayFee, TRANSFER_QUOTE_EXPIRED_MESSAGE } from '@/services/relayed-transfer';
 import { expectTransferRelay } from '@/services/transfer-relay-outputs';
 import { feeWithinReviewed } from '@/services/relayer-fee-jitter';
-import { recordSentTransfer } from '@/services/sent-transfers-store';
+import { recordSentTransfer as recordSentTransferOnly, type SentTransfer } from '@/services/sent-transfers-store';
+import { recordRecipientUseForActiveOwner, setActiveRecipientOwner } from '@/services/address-book-store';
 import { STELLAR_TESTNET_CONTRACTS } from '@/config/stellar-deployment';
 import { recordOwnAction } from '@/services/own-actions-store';
 import { recordWithdrawFee } from '@/services/withdraw-fees-store';
@@ -136,6 +137,12 @@ import { FeeWarning } from '@/components/fee-warning';
 import { relayedSpendBreakdown } from '@/services/fee-warning';
 import { AddressAutocomplete } from '@/components/contacts/address-autocomplete';
 import { SHIELDED_TRANSFER_GAS } from '@/services/transfer-fee-estimate';
+
+/** Every send path records the payee in the sent-transfers store AND the recipient history (backed up, feeds the autocomplete). */
+function recordSentTransfer(tx: SentTransfer): void {
+  recordSentTransferOnly(tx);
+  recordRecipientUseForActiveOwner(tx.recipient, tx.chainId);
+}
 
 // Web-only styles
 
@@ -445,6 +452,8 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
    *  captured at first render. */
   const currentIdentityRef = useRef<string | null>(null);
   const connectedAddress = (sessionAddress ?? walletAddress ?? undefined) as `0x${string}` | undefined;
+  // Recipient history is filed under the session identity (null: the device bucket).
+  useEffect(() => { setActiveRecipientOwner(sessionAddress ?? null); }, [sessionAddress]);
   // The sending account as the review shows it, per chain.
   const fromAddress = isStellar
     ? (stellarSession.wallet.isConnected ? stellarSession.wallet.address ?? undefined : undefined)
@@ -1848,6 +1857,8 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         });
         setTxHash(result.txDigest);
         setTxChainId(SUI_TESTNET_ID);
+        // Recipient history only: the Sui send keeps no sent-transfer row.
+        recordRecipientUseForActiveOwner(recipientAddress, SUI_TESTNET_ID);
         // Receipt for the recipient: the full spendable note (only their
         // keystore keys can spend it). Shown once on the success screen.
         setRecipientImportPayload(JSON.stringify({

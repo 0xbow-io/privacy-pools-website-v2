@@ -16,15 +16,21 @@ import { copyText } from '@/services/copy-text';
  * is written to this device's contact list for the signed-in account and
  * never leaves it.
  */
-export function ContactEditModal({ address, onClose }: { address: string | null; onClose: () => void }) {
+export function ContactEditModal({ address, adding = false, onClose }: {
+  address: string | null;
+  /** "Add address": the address is typed here (validated per chain format, deduped). */
+  adding?: boolean;
+  onClose: () => void;
+}) {
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const { toast } = useToast();
-  const { contacts, setName, owner } = useContacts();
+  const { contacts, setName, addContact, owner } = useContacts();
+  const [typedAddress, setTypedAddress] = useState('');
   const { width } = useWindowDimensions();
   const sheet = width <= 540;
-  const visible = !!address;
-  const canon = canonicalAddress(address);
+  const visible = adding || !!address;
+  const canon = canonicalAddress(adding ? typedAddress : address);
   const existing = canon ? contacts.find((c) => canonicalAddress(c.address)?.key === canon.key) ?? null : null;
   // Mounted per address (callers key it), so the field seeds once from the saved name.
   const [name, setNameText] = useState(() => existing?.name ?? '');
@@ -46,12 +52,19 @@ export function ContactEditModal({ address, onClose }: { address: string | null;
   useBackHandler(visible, onClose);
 
   const save = useCallback((value: string) => {
+    if (adding) {
+      const err = addContact(typedAddress, value);
+      if (err) { setError(err); return; }
+      toast({ title: 'Address saved' });
+      onClose();
+      return;
+    }
     if (!canon) return;
     const err = setName(canon.display, value);
     if (err) { setError(err); return; }
     if (!value.trim() && existing) toast({ title: 'Name removed' });
     onClose();
-  }, [canon, setName, existing, onClose, toast]);
+  }, [adding, addContact, typedAddress, canon, setName, existing, onClose, toast]);
 
   const copy = useCallback(async () => {
     if (!canon) return;
@@ -61,8 +74,8 @@ export function ContactEditModal({ address, onClose }: { address: string | null;
     }
   }, [canon, toast]);
 
-  if (!canon) return null;
-  const dirty = name.trim() !== (existing?.name ?? '');
+  if (!canon && !adding) return null;
+  const dirty = adding ? !!name.trim() && !!typedAddress.trim() : name.trim() !== (existing?.name ?? '');
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
@@ -93,7 +106,7 @@ export function ContactEditModal({ address, onClose }: { address: string | null;
               <Ionicons name="person-outline" size={18} color={colors.primary} />
             </View>
             <Text className="flex-1 font-pp-sans-semi-bold text-[17px] text-text" accessibilityRole="header">
-              {existing ? 'Edit name' : 'Name this address'}
+              {adding ? 'Add address' : existing ? 'Edit name' : 'Name this address'}
             </Text>
             <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close" testID="contact-edit-close">
               {/* nw-keep(data-color): close glyph is the secondary text token (vector-icon sink) */}
@@ -101,6 +114,24 @@ export function ContactEditModal({ address, onClose }: { address: string | null;
             </Pressable>
           </View>
 
+          {adding ? (
+            <TextInput
+              autoFocus
+              value={typedAddress}
+              onChangeText={(t) => { setTypedAddress(t.trim()); setError(null); }}
+              placeholder="0x… or G… address"
+              // nw-keep(data-color): placeholder color is a TextInput sink (theme token, no className path)
+              placeholderTextColor={colors.textMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!!owner}
+              accessibilityLabel="Address"
+              testID="contact-add-address"
+              className={`mt-[16px] h-[46px] rounded-[12px] border px-[14px] font-pp-mono text-[13px] text-text ${typedAddress && !canon ? 'border-danger' : 'border-border-light'} ${colorScheme === 'dark' ? 'bg-[#121314]' : 'bg-[#FAFAFA]'}`}
+              // nw-keep(platform-css): web-only outline reset, the field draws its own border
+              style={WEB_NO_OUTLINE}
+            />
+          ) : canon ? (
           <Pressable
             onPress={copy}
             className="mt-[16px] flex-row items-center gap-[10px] rounded-[12px] bg-background-secondary px-[12px] py-[10px] active:opacity-[0.8]"
@@ -109,14 +140,15 @@ export function ContactEditModal({ address, onClose }: { address: string | null;
             testID="contact-edit-copy"
           >
             <Text selectable className="flex-1 font-pp-mono text-[12px] leading-[17px] text-text-secondary" testID="contact-edit-address">
-              {canon.display}
+              {canon?.display}
             </Text>
             {/* nw-keep(data-color): copy glyph switches to the success token once copied (vector-icon sink) */}
             <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={16} color={copied ? colors.success : colors.textMuted} />
           </Pressable>
+          ) : null}
 
           <TextInput
-            autoFocus
+            autoFocus={!adding}
             value={name}
             onChangeText={(t) => { setNameText(t); setError(null); }}
             onSubmitEditing={() => { if (owner) save(name); }}
@@ -142,7 +174,7 @@ export function ContactEditModal({ address, onClose }: { address: string | null;
           )}
 
           <View className="mt-[18px] flex-row items-center gap-[10px]">
-            {existing ? (
+            {existing && !adding ? (
               <Pressable
                 onPress={() => save('')}
                 className="h-[44px] items-center justify-center rounded-[12px] px-[12px] active:opacity-[0.7]"
