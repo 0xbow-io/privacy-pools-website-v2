@@ -4,7 +4,8 @@ import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import { DROPDOWN_SHADOW_WEB } from '@/components/ui/web-style-shims';
 import { shortAddress } from '@/services/address-book-core';
-import { EMPTY_HINT, EMPTY_TITLE, type AddressSuggestionsListProps } from '@/components/contacts/address-suggestions-list';
+import type { AddressSuggestionsListProps } from '@/components/contacts/address-suggestions-list';
+import { EMPTY_HINT, EMPTY_TITLE, LOADING_TITLE } from '@/components/contacts/contacts-copy';
 
 /**
  * Web: a listbox portalled to <body> and anchored to the field by Floating UI,
@@ -12,11 +13,11 @@ import { EMPTY_HINT, EMPTY_TITLE, type AddressSuggestionsListProps } from '@/com
  * leaves the input (every mousedown is prevented), which keeps typing to
  * filter and arrow keys working; the input owns aria-activedescendant.
  */
-export function AddressSuggestionsList({ open, empty, anchor, listId, suggestions, activeIndex, onHover, onSelect, onEdit, testID }: AddressSuggestionsListProps) {
+export function AddressSuggestionsList({ open, empty, loading, anchor, listId, suggestions, activeIndex, onHover, onSelect, onEdit, testID }: AddressSuggestionsListProps) {
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const { refs, floatingStyles } = useFloating({
-    open: open || !!empty,
+    open: open || !!empty || !!loading,
     placement: 'bottom-start',
     // top/left positioning, so the enter animation owns `transform`.
     transform: false,
@@ -30,8 +31,10 @@ export function AddressSuggestionsList({ open, empty, anchor, listId, suggestion
         padding: 12,
         apply({ rects, availableHeight, elements }) {
           Object.assign(elements.floating.style, {
+            // Exactly the field's width (border-box, padding included).
             width: `${Math.max(rects.reference.width, 260)}px`,
             maxHeight: `${Math.max(140, Math.min(320, availableHeight))}px`,
+            boxSizing: 'border-box',
           });
         },
       }),
@@ -54,6 +57,30 @@ export function AddressSuggestionsList({ open, empty, anchor, listId, suggestion
   }, [open, activeIndex, listId]);
 
   if (!anchor) return null;
+  if (loading) {
+    return (
+      <FloatingPortal>
+        <div
+          ref={attach}
+          id={listId}
+          role="status"
+          aria-live="polite"
+          data-testid={testID ? `${testID}-loading` : undefined}
+          onMouseDown={(e) => e.preventDefault()}
+          className="flex items-center gap-[10px] rounded-[14px] border border-solid border-border-light bg-menu-background px-[12px] py-[10px]"
+          style={{
+            // nw-keep(floating-ui): Floating UI anchor position
+            ...floatingStyles,
+            // nw-keep(platform-css): web-only shadow and stacking above RN-Web modals
+            zIndex: 100000,
+            boxShadow: DROPDOWN_SHADOW_WEB,
+          }}
+        >
+          <span className="font-pp-regular text-[12.5px] text-text-muted">{LOADING_TITLE}</span>
+        </div>
+      </FloatingPortal>
+    );
+  }
   if (empty) {
     return (
       <FloatingPortal>

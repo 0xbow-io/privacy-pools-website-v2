@@ -161,3 +161,18 @@ export function withRecords(index: RecipientIndex | null, records: readonly Payo
   for (const rec of records) fold(next, rec);
   return next;
 }
+
+export type RecipientListState = 'list' | 'loading' | 'empty' | 'none';
+
+/**
+ * What a focused field shows. Rows win as soon as there are any. With none
+ * and an empty field: 'loading' while a source has not settled (the device
+ * index is still being built, or the Activity rows are still loading), so a
+ * not-yet-ready source never reads as "nothing to suggest"; 'empty' once both
+ * have settled. Typing with no match shows nothing.
+ */
+export function recipientListState(opts: { rows: number; query: string; deviceReady: boolean; activityLoading: boolean }): RecipientListState {
+  if (opts.rows > 0) return 'list';
+  if (opts.query.trim() !== '') return 'none';
+  return !opts.deviceReady || opts.activityLoading ? 'loading' : 'empty';
+}

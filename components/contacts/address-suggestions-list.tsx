@@ -1,17 +1,17 @@
-import { Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import { shortAddress } from '@/services/address-book-core';
 import type { RecipientSuggestion } from '@/services/recipient-suggestions';
-
-export const EMPTY_TITLE = 'No saved addresses yet';
-export const EMPTY_HINT = 'Paste an address. It is remembered after you withdraw or send to it.';
+import { EMPTY_HINT, EMPTY_TITLE, LOADING_TITLE } from '@/components/contacts/contacts-copy';
 
 export type AddressSuggestionsListProps = {
   open: boolean;
   /** Focused with nothing to suggest: show the empty state instead of nothing. */
   empty?: boolean;
+  /** A source has not settled yet: say so rather than claim there is nothing. */
+  loading?: boolean;
   /** Web only: the DOM node the list anchors to. */
   anchor: unknown;
   listId: string;
@@ -29,9 +29,17 @@ export type AddressSuggestionsListProps = {
  * layer over a ScrollView either clips or eats the first tap that dismisses
  * the keyboard, and rows here are big enough to hit with a thumb.
  */
-export function AddressSuggestionsList({ open, empty, suggestions, onSelect, onEdit, onClose, testID }: AddressSuggestionsListProps) {
+export function AddressSuggestionsList({ open, empty, loading, suggestions, onSelect, onEdit, onClose, testID }: AddressSuggestionsListProps) {
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
+  if (loading) {
+    return (
+      <View className="mt-[6px] flex-row items-center gap-[10px] rounded-[14px] border border-border-light bg-menu-background px-[12px] py-[10px]" testID={testID ? `${testID}-loading` : undefined}>
+        <ActivityIndicator size="small" color={colors.textMuted} />
+        <Text className="font-pp-regular text-[12.5px] text-text-muted">{LOADING_TITLE}</Text>
+      </View>
+    );
+  }
   if (empty) {
     return (
       <Pressable onPress={onClose} className="mt-[6px] flex-row items-center gap-[10px] rounded-[14px] border border-border-light bg-menu-background px-[12px] py-[10px]" accessibilityRole="text" testID={testID ? `${testID}-empty` : undefined}>

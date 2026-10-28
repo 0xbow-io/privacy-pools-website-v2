@@ -4,7 +4,7 @@ import { AddressSuggestionsList } from '@/components/contacts/address-suggestion
 import { ContactEditModal } from '@/components/contacts/contact-edit-modal';
 import { useRecipientSuggestions } from '@/hooks/use-contacts';
 import type { AddressFormat } from '@/services/address-book-core';
-import type { RecipientSuggestion } from '@/services/recipient-suggestions';
+import { recipientListState, type RecipientSuggestion } from '@/services/recipient-suggestions';
 
 /** Spread onto the field's TextInput. */
 export type AddressInputBind = {
@@ -50,7 +50,7 @@ export function AddressAutocomplete({
   const [editing, setEditing] = useState<string | null>(null);
   const [anchor, setAnchor] = useState<unknown>(null);
   const listId = `addr-ac-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
-  const { suggestions, refresh, ready } = useRecipientSuggestions({ formats, query: value, exclude });
+  const { suggestions, refresh, ready, activityLoading } = useRecipientSuggestions({ formats, query: value, exclude });
 
   // Typing again after a pick or Escape brings the list back (state adjusted
   // during render, React's pattern for "reset when a prop changes").
@@ -70,7 +70,9 @@ export function AddressAutocomplete({
   // Focus always answers: an empty field with nothing to suggest (a new
   // device, or a domain whose storage holds no records) shows a short empty
   // state instead of nothing. While typing, no match just means no list.
-  const showEmpty = !disabled && engaged && ready && suggestions.length === 0 && value.trim() === '';
+  const listState = recipientListState({ rows: suggestions.length, query: value, deviceReady: ready, activityLoading });
+  const showEmpty = !disabled && engaged && listState === 'empty';
+  const showLoading = !disabled && engaged && listState === 'loading';
 
   const pick = useCallback((s: RecipientSuggestion) => {
     onSelect(s.address);
@@ -129,7 +131,7 @@ export function AddressAutocomplete({
       ? {
         role: 'combobox',
         'aria-autocomplete': 'list',
-        'aria-expanded': open || showEmpty,
+        'aria-expanded': open || showEmpty || showLoading,
         'aria-controls': listId,
         'aria-activedescendant': open && activeIndex >= 0 ? `${listId}-opt-${activeIndex}` : undefined,
       }
@@ -144,6 +146,7 @@ export function AddressAutocomplete({
       <AddressSuggestionsList
         open={open}
         empty={showEmpty}
+        loading={showLoading}
         anchor={anchor}
         listId={listId}
         suggestions={suggestions}
