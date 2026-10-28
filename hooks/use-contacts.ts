@@ -31,12 +31,11 @@ export function useContacts(): {
   // The version is an explicit input: a read the compiler cannot see change
   // must not be memoized on `owner` alone.
   const version = useSyncExternalStore(subscribeContacts, getContactsVersion, getContactsVersion);
-  const contacts = useMemo(() => { void version; return readContacts(owner); }, [owner, version]);
+  const contacts = useMemo(() => readContacts(owner, version), [owner, version]);
   const recipients = useMemo(() => {
-    void version;
     const merged = new Map<string, RecipientRecord>();
     // Device bucket first, owner bucket second: the owner's entry wins a tie.
-    for (const r of [...readRecipientRecords(null), ...(owner ? readRecipientRecords(owner) : [])]) {
+    for (const r of [...readRecipientRecords(null, version), ...(owner ? readRecipientRecords(owner, version) : [])]) {
       const key = canonicalAddress(r.address)?.key;
       if (!key) continue;
       const prev = merged.get(key);

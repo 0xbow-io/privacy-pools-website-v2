@@ -66,8 +66,15 @@ export function getContactsVersion(): number {
   return version;
 }
 
-/** Stable per (owner, version), so useSyncExternalStore does not loop. */
-export function readContacts(owner: string | null | undefined): Contact[] {
+/**
+ * Stable per (owner, version), so useSyncExternalStore does not loop.
+ * `atVersion` is the version the caller rendered with: passing it makes the
+ * store version a real input of the call, which the React Compiler then keeps
+ * as a memo dependency (a `void version` line was compiled away and the list
+ * never refreshed after a save, seen on the production build).
+ */
+export function readContacts(owner: string | null | undefined, atVersion?: number): Contact[] {
+  void atVersion;
   if (!owner) return EMPTY;
   const key = contactsStorageKey(owner);
   const hit = cache.get(key);
@@ -99,7 +106,8 @@ export function writeContacts(owner: string, list: readonly Contact[]): boolean 
 const recipientsCache = new Map<string, { version: number; list: RecipientRecord[] }>();
 
 /** Oldest first. `null` reads the device bucket. */
-export function readRecipientRecords(owner: string | null): RecipientRecord[] {
+export function readRecipientRecords(owner: string | null, atVersion?: number): RecipientRecord[] {
+  void atVersion;
   const key = recipientsStorageKey(owner);
   const hit = recipientsCache.get(key);
   if (hit && hit.version === version) return hit.list;
