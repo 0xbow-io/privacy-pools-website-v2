@@ -25,6 +25,8 @@ const SEEDED = [
   { recipient: '0xab5801a7d398351b8be11c439e05c5b3259aec9b', ageMs: 5 * 86_400_000 },
 ];
 
+const MANUAL = { address: '0x1db3439a222c519ab44bb1144fc28167b4fa6ee6', checksummed: '0x1Db3439a222C519ab44bb1144fC28167b4Fa6EE6', name: 'Payroll multisig' };
+
 const results: { name: string; ok: boolean; detail: string }[] = [];
 const record = (name: string, ok: boolean, detail: string) => { results.push({ name, ok, detail }); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}: ${detail}`); };
 
@@ -87,6 +89,25 @@ async function run(phase: 'empty' | 'seeded') {
       await sleep(500);
       const value = await field.inputValue();
       record('Enter fills the field', value.toLowerCase() === SEEDED[0].recipient, value);
+      // Manual add from Settings > Contacts: shows in the field with its name.
+      await field.fill('');
+      await page.getByTestId('header-account').filter({ visible: true }).first().click();
+      await page.getByTestId('menu-contacts').filter({ visible: true }).first().click();
+      await page.getByTestId('contacts-add').click();
+      await page.getByTestId('contact-add-address').fill(MANUAL.address);
+      await page.getByTestId('contact-edit-name').fill(MANUAL.name);
+      await page.getByTestId('contact-edit-save').click();
+      await sleep(800);
+      const saved = await page.getByTestId(`contacts-row-${MANUAL.checksummed}`).isVisible().catch(() => false);
+      record('Add address saves a named contact (checksummed)', saved, saved ? MANUAL.checksummed : 'row not found');
+      await app.shot('contacts-after-add');
+      await page.getByTestId('contacts-close').click();
+      await sleep(500);
+      const again = await focusRecipient(page);
+      const names = await page.getByRole('option').allInnerTexts();
+      record('the autocomplete shows the manual contact with its name', names.some((t) => t.includes(MANUAL.name)), names.map((t) => t.split('\n')[0]).join(' | '));
+      await app.shot('seeded-with-manual');
+      void again;
     }
   } finally {
     await browser.close();

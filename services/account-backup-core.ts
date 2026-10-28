@@ -10,6 +10,14 @@ import type { AccountExport } from '@/services/sdk-types';
 import { parseWithMaps, stringifyWithMaps } from '@/services/json-maps';
 import { PaymentRequestServiceStateSchema } from '@/services/payment-request-state-schema';
 import { upgradeLegacyPaymentRequestState } from '@/services/payment-request-state-migration';
+import {
+  ADDRESS_BOOK_BACKUP_FIELD,
+  buildAddressBookBackup,
+  parseAddressBookBackup,
+  type AddressBookBackup,
+  type Contact,
+  type RecipientRecord,
+} from '@/services/address-book-core';
 
 // --- Injected persistence -------------------------------------------------
 
@@ -23,6 +31,23 @@ export type PaymentRequestStateStore = {
   }>;
   save(chainId: number, owner: string, state: PaymentRequestServiceState): Promise<void>;
 };
+
+/**
+ * The address book (saved contacts + recipient history) of the backup's owner.
+ * Injected like the payment-request store; optional so callers without one
+ * (and every existing test) keep the old behaviour.
+ */
+export type AddressBookStore = {
+  load(owner: string): { contacts: Contact[]; recipients: RecipientRecord[] };
+  /** Merge a validated backup in; never overwrites a saved name. Returns how many entries were new. */
+  restore(owner: string, backup: { contacts: Contact[]; recipients: RecipientRecord[] }): { added: number };
+};
+
+/** What the import did with the address book, for the UI. */
+export type AddressBookImportResult =
+  | { status: 'restored'; added: number }
+  | { status: 'absent' }
+  | { status: 'skipped'; message: string };
 
 // --- Password-based AES-256-GCM encryption ---------------------------------
 
@@ -143,7 +168,37 @@ export function backupTextNeedsPassword(text: string): boolean {
 // older builds reading a newer backup still get the notes back.
 export type BackupEnvelope = AccountExport & {
   paymentRequests?: PaymentRequestServiceState | null;
+  /**
+   * PASSWORD-ENCRYPTED backups only: recipient addresses link a user's
+   * activity, so a plain file never carries them. The SDK never reads it and
+   * it is stripped before the export reaches importAccount.
+   */
+  [ADDRESS_BOOK_BACKUP_FIELD]?: AddressBookBackup;
 };
+
+/** The export without ppv2's own extension fields, as the SDK should see it. */
+function forSdk(envelope: BackupEnvelope): AccountExport {
+  const { [ADDRESS_BOOK_BACKUP_FIELD]: _book, ...rest } = envelope;
+  void _book;
+  return rest as AccountExport;
+}
+
+function restoreAddressBook(
+  addressBook: AddressBookStore | undefined,
+  owner: string,
+  raw: unknown,
+): AddressBookImportResult {
+  if (raw === undefined || raw === null) return { status: 'absent' };
+  if (!addressBook) return { status: 'absent' };
+  const parsed = parseAddressBookBackup(raw);
+  if (!parsed.ok) return { status: 'skipped', message: parsed.error || 'The saved addresses in this backup could not be read.' };
+  try {
+    const { added } = addressBook.restore(owner, { contacts: parsed.contacts, recipients: parsed.recipients });
+    return { status: 'restored', added };
+  } catch {
+    return { status: 'skipped', message: 'The saved addresses could not be stored on this device.' };
+  }
+}
 
 function validateAccountExport(value: unknown): AccountExport {
   if (!value || typeof value !== 'object' || !Array.isArray((value as Partial<AccountExport>).notes)) {
@@ -252,6 +307,7 @@ export async function prepareAccountBackupCore(
   chainId: number,
   accountExport: AccountExport,
   password?: string,
+  addressBook?: AddressBookStore,
 ): Promise<PreparedAccountBackup> {
   const { state: paymentRequests, loadError } = await store.load(chainId, address);
   // Tell the user when payment-request recovery data wasn't included
@@ -269,6 +325,15 @@ export async function prepareAccountBackupCore(
   // ignored on the SDK side.
   const envelope: BackupEnvelope = { ...accountExport, paymentRequests };
   if (password) {
+    // The address book rides inside the encrypted blob only.
+    if (addressBook) {
+      try {
+        const book = addressBook.load(address);
+        if (book.contacts.length || book.recipients.length) {
+          envelope[ADDRESS_BOOK_BACKUP_FIELD] = buildAddressBookBackup(book.contacts, book.recipients);
+        }
+      } catch { /* the notes backup must not fail over the address book */ }
+    }
     const encrypted = await encryptAccountExportCore(address, chainId, envelope, password);
     return {
       serialized: JSON.stringify(encrypted, null, 2),
@@ -291,6 +356,8 @@ export async function parseAccountBackupCore(
   chainId: number,
   rawPayload: string,
   password?: string,
+  addressBook?: AddressBookStore,
+  onAddressBook?: (result: AddressBookImportResult) => void,
 ): Promise<AccountExport> {
   let parsed: unknown;
   try {
@@ -310,7 +377,10 @@ export async function parseAccountBackupCore(
     // chainId is the only authority. Merge (don't replace) so an old
     // backup can't orphan newer local request links.
     await restorePaymentRequestStateForChainCore(store, chainId, envelope.paymentRequests, address);
-    return accountExport;
+    // A plain file never carries the address book; one that does (hand-made)
+    // is ignored, and the field never reaches the SDK.
+    onAddressBook?.({ status: 'absent' });
+    return forSdk(accountExport as BackupEnvelope);
   }
 
   // Encrypted payload — validate the embedded metadata BEFORE
@@ -359,5 +429,7 @@ export async function parseAccountBackupCore(
   // Merge into local state — preserves any request links created on
   // this device after the backup was taken.
   await restorePaymentRequestStateForChainCore(store, chainId, envelope.paymentRequests, address);
-  return accountExport;
+  // Malformed or oversized: skipped with a plain message, the notes still import.
+  onAddressBook?.(restoreAddressBook(addressBook, address, envelope[ADDRESS_BOOK_BACKUP_FIELD]));
+  return forSdk(accountExport as BackupEnvelope);
 }
