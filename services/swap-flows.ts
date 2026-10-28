@@ -30,6 +30,7 @@ import {
   isLifiExecutor,
   lifiAddressesKnownForChain,
 } from '@/config/lifi-addresses';
+import { acrossDirectSourceChainIds, isAcrossSpokePool } from '@/config/across-direct';
 import { displayTokenSymbol, isShareSymbol, tokenAmountLabel, approxUnderlyingText } from '@/services/share-display';
 import type { Address, Hash, Hex, SwapStatusLike } from '@/services/sdk-types';
 import { prepareSizedAgain } from '@/services/yield-sizing-race';
@@ -228,7 +229,10 @@ export function assertSwapApprovalTx(
  *   1. The spender is the route's declared `approvalAddress`. Nothing else.
  *   2. That address must be one LiFi publishes as an approval target for this
  *      chain (config/lifi-addresses.ts). Those are access-controlled: the proxy
- *      answers only to the Diamond.
+ *      answers only to the Diamond. With direct Across on for this chain
+ *      (config/across-direct.ts) the chain's own Across SpokePool also counts:
+ *      it is still a pinned, published address, and it pulls only from its
+ *      own caller.
  *   3. If it is missing, or is anything else, the flow stops here with nothing
  *      signed.
  *
@@ -256,6 +260,17 @@ export function assertApprovalSpender(
   sendsSoFar = 'Nothing was sent.',
 ): Address {
   const account = sendsSoFar ? ` ${sendsSoFar}` : '';
+  // Direct Across (flag-gated, config/across-direct.ts): the chain's own
+  // SpokePool. It pulls only from its caller, so a standing allowance on it is
+  // not spendable by anyone else. Checked by exact address per chain, never by
+  // a field of the route.
+  if (
+    approvalAddress
+    && acrossDirectSourceChainIds().includes(chainId)
+    && isAcrossSpokePool(chainId, approvalAddress)
+  ) {
+    return approvalAddress;
+  }
   if (!lifiAddressesKnownForChain(chainId)) {
     throw new UnexpectedSwapTxError(
       `This app has no verified approval address for chain ${chainId}, so the token approval was not signed.${account} Deposit the token directly instead.`,
