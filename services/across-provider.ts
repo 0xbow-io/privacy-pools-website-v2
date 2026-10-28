@@ -4,7 +4,8 @@
 // Pure and SDK-agnostic on purpose: the SDK module is passed in, so this runs in
 // bun tests with fakes and stays inert against an SDK build that predates
 // AcrossBridgeQuoteProvider (v2-monorepo#514). Until that SDK is vendored, the
-// flag changes nothing.
+// flag changes nothing. Browser routing also stays closed until a privacy-safe
+// quote transport exists; re-vendoring alone must not activate network egress.
 
 import { acrossDirectEnabled, acrossDirectSourceChainIds } from '@/config/across-direct';
 
@@ -24,7 +25,7 @@ export interface AcrossSdkExports {
 }
 
 export type AcrossWiring =
-  | { kind: 'lifi-only'; reason: 'flag-off' | 'no-source-chains' | 'sdk-without-across' }
+  | { kind: 'lifi-only'; reason: 'flag-off' | 'no-source-chains' | 'sdk-without-across' | 'privacy-transport-unavailable' }
   | { kind: 'across-first'; sourceChainIds: number[] };
 
 /** What withAcrossDirect will do, without building anything. */
@@ -35,13 +36,16 @@ export function acrossWiring(sdk: AcrossSdkExports): AcrossWiring {
   if (typeof sdk.AcrossBridgeQuoteProvider !== 'function' || typeof sdk.PreferAcrossSwapQuoteProvider !== 'function') {
     return { kind: 'lifi-only', reason: 'sdk-without-across' };
   }
-  return { kind: 'across-first', sourceChainIds };
+  // The SDK sends the actual note-bearing destination message to suggested-fees.
+  // Even plain quotes disclose action timing. Do not enable this from env vars
+  // until a reviewed transport supplies quotes from a clock-driven public cache.
+  return { kind: 'lifi-only', reason: 'privacy-transport-unavailable' };
 }
 
 /**
- * The provider to give the session: `lifi` unchanged unless the flag is on, at
- * least one source chain is enabled and the SDK exports the Across classes.
- * Every Across request goes through `fetchFn` when one is given, as LiFi's do.
+ * The provider to give the session. Currently returns `lifi` unchanged: browser
+ * Across quoting is closed pending a reviewed privacy-safe transport. The wiring
+ * below is retained for that integration, not enabled by environment variables.
  */
 export function withAcrossDirect<T extends QuoteProviderLike>(
   lifi: T,

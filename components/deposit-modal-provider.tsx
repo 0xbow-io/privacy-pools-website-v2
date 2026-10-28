@@ -13,7 +13,7 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 import { usePathname } from 'expo-router';
 import { plainNativeDepositRefused, resolveDepositPayAsset } from '@/services/shield-pools';
 import { ACTIVE_ENVIRONMENT } from '@/config/environments';
-import { statusBridgeFor } from '@/config/across-direct';
+import { canPollBridgeStatus, statusBridgeFor } from '@/config/across-direct';
 import { cappedQuickAmounts, checkDepositCap } from '@/services/deposit-cap';
 import { reportErrorReport } from '@/services/error-reports';
 import { classifyFailure } from '@/services/error-reports-cause';
@@ -2557,7 +2557,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
             const bridge = statusBridgeFor(prepared.transactionTo);
             // LI.FI Scan only knows LI.FI routes; a direct Across deposit is not on it.
             const scan = bridge ? null : lifiScanUrl(String(swapHash));
-            setBridgeProgress({ tone: 'pending', text: 'Checking bridge status…', ...(scan ? { lifiScanUrl: scan } : {}) });
+            setBridgeProgress({ tone: 'pending', text: bridge ? 'Bridge submitted. Waiting for destination discovery…' : 'Checking bridge status…', ...(scan ? { lifiScanUrl: scan } : {}) });
             setBridgeWatch({
               txHash: swapHash,
               fromChainId: chainId,
@@ -3934,7 +3934,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     bridgeDepsRef.current = { ensureInitialized, refreshNotes, queryClient, depositOwnerAddress, log };
   }, [ensureInitialized, refreshNotes, queryClient, depositOwnerAddress, log]);
   useEffect(() => {
-    if (!bridgeWatch) return;
+    if (!bridgeWatch || !canPollBridgeStatus(bridgeWatch.bridge)) return;
     let cancelled = false;
     const startedAt = Date.now();
     let lastResyncMs: number | null = null;

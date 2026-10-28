@@ -37,7 +37,7 @@
 
 import { decodeFunctionData, multicall3Abi } from 'viem';
 
-export type EgressParty = 'asp' | 'rpc' | 'relayer';
+export type EgressParty = 'asp' | 'rpc' | 'relayer' | 'across';
 
 export type EgressRequest = {
   method: string;
@@ -716,6 +716,12 @@ export function checkEgress(
   intent?: EgressIntent,
 ): EgressVerdict {
   switch (party) {
+    case 'across':
+      // app.across.to/api/suggested-fees would carry an action-timed amount,
+      // recipient and (for deposits) note-bearing message. /api/deposit/status
+      // would name the relayed transaction. No route, query field, body or
+      // header is approved until a clock-driven public transport is reviewed.
+      return { allowed: false, reason: 'Across browser transport is not approved' };
     case 'asp':
       return checkAspRequest(req, intent);
     case 'rpc':

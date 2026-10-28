@@ -4,7 +4,8 @@
 // screen: the SDK session keeps the plain LiFi provider, previews keep calling
 // li.quest, and no Across address is accepted anywhere.
 //
-// Turning it on takes two env vars, on purpose:
+// These env vars declare intent only. services/across-provider.ts keeps browser
+// execution closed until a privacy-safe quote transport is available:
 //   EXPO_PUBLIC_ACROSS_DIRECT=true           the feature itself
 //   EXPO_PUBLIC_ACROSS_DIRECT_CHAINS=10,8453 the SOURCE chains whose RelaySwaps has
 //                                            the Across SpokePool on approvedRouters
@@ -120,4 +121,9 @@ export function acrossDirectServes(params: {
   if (!ACROSS_SPOKE_POOLS[params.toChainId]) return false;
   if (params.destinationCall && !acrossMulticallHandler(params.toChainId)) return false;
   return !NATIVE_SPELLINGS.has(params.fromToken.toLowerCase()) && !NATIVE_SPELLINGS.has(params.toToken.toLowerCase());
+}
+
+/** Direct Across status must come from bulk discovery, never a per-transfer HTTP lookup. */
+export function canPollBridgeStatus(bridge: string | undefined): boolean {
+  return bridge !== ACROSS_DIRECT_BRIDGE;
 }

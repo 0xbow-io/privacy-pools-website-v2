@@ -13,7 +13,7 @@ import { HoverHint } from '@/components/ui/hover-hint';
 import { compactPhoneLayout } from '@/services/header-nav';
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, useSyncExternalStore } from 'react';
 import { destinationCallsVersion, reshieldDestinationStillValid, subscribeDestinationCalls } from '@/config/destination-calls';
-import { statusBridgeFor } from '@/config/across-direct';
+import { canPollBridgeStatus, statusBridgeFor } from '@/config/across-direct';
 import { ENS_UNSUPPORTED_MESSAGE, isPotentialEnsName } from '@/services/ens';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
 import { AlertCircleIcon, CaretDownIcon, CheckCircleIcon, CloseIcon } from '@/components/ui/modal-icons';
@@ -1038,6 +1038,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
   const deliveryStatus = delivery?.status ?? null;
   const deliveryBridge = delivery?.bridge;
   useEffect(() => {
+    if (!canPollBridgeStatus(deliveryBridge)) return;
     if (step !== 'success' || pendingDeliveryChainId === null || !txHash || deliveryStatus !== 'pending') return;
     let cancelled = false;
     const startedAt = Date.now();

@@ -6,8 +6,6 @@
 // typed, within slippage).
 import { LIFI_API_KEY, NATIVE_ASSET_ADDRESS } from '@/config/intent-swaps';
 import { contractCallDeniedBridges } from '@/services/lifi-native-delivery';
-import { acrossDirectServes } from '@/config/across-direct';
-import { fetchAcrossDirectEstimate } from '@/services/across-quote';
 
 // LiFi uses the zero address for native, our config uses the 0xeee sentinel.
 const LIFI_NATIVE = '0x0000000000000000000000000000000000000000';
@@ -35,14 +33,6 @@ export async function fetchLifiExactInQuote(params: {
   signal?: AbortSignal;
 }): Promise<LifiExactInEstimate | null> {
   if (params.fromAmountWei <= 0n) return null;
-  // A route the session sends to Across direct is previewed on Across too
-  // (flag-gated, config/across-direct.ts). Any Across failure falls through to
-  // LI.FI, as the session itself does.
-  const toChainId = params.toChainId ?? params.chainId;
-  if (acrossDirectServes({ fromChainId: params.chainId, toChainId, fromToken: params.fromToken, toToken: params.toToken, destinationCall: false })) {
-    const across = await fetchAcrossDirectEstimate({ ...params, toChainId, recipient: params.fromAddress, destinationCall: false });
-    if (across) return { toAmount: across.toAmount, toAmountMin: across.deliverableMin };
-  }
   const qs = new URLSearchParams({
     fromChain: String(params.chainId),
     toChain: String(params.toChainId ?? params.chainId),
@@ -113,20 +103,6 @@ export async function fetchLifiContractCallDeliverable(params: {
 }): Promise<LifiContractCallDeliverable | null> {
   if (params.fromAmountWei <= 0n) return null;
   const toChain = params.toChainId ?? params.chainId;
-  if (acrossDirectServes({ fromChainId: params.chainId, toChainId: toChain, fromToken: params.fromToken, toToken: params.toToken, destinationCall: true })) {
-    const across = await fetchAcrossDirectEstimate({ ...params, toChainId: toChain, recipient: params.fromAddress, destinationCall: true });
-    if (across) {
-      return {
-        deliverableMin: across.deliverableMin,
-        toAmount: across.toAmount,
-        tool: 'across-direct',
-        // Across charges no fee on top of the token amount.
-        nativeFeeUsd: 0,
-        fromPriceUsd: null,
-        fromDecimals: across.fromDecimals,
-      };
-    }
-  }
   const toToken = toLifiToken(params.toToken);
   const deniedBridges = contractCallDeniedBridges(params.chainId, toChain, toToken);
   try {

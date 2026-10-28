@@ -376,7 +376,8 @@ export async function createPoolSession(params: CreatePoolSessionParams) {
   // legs from the chains in EXPO_PUBLIC_ACROSS_DIRECT_CHAINS deposit into the
   // Across SpokePool directly; every other route, and any Across quote that
   // fails, stays on the LiFi provider above with its shims. Inert until the
-  // vendored SDK exports the Across classes. See config/across-direct.ts.
+  // vendored SDK exports the Across classes AND a privacy-safe quote transport
+  // is reviewed. withAcrossDirect currently preserves LI.FI even with the flag on.
   const swapProvider = lifiProvider
     ? (withAcrossDirect(lifiProvider, PrivacyPoolsSdk as unknown as AcrossSdkExports) as typeof lifiProvider)
     : undefined;

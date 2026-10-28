@@ -7,13 +7,19 @@ import {
   acrossDirectSourceChainIds,
   acrossMulticallHandler,
   acrossSpokePool,
+  canPollBridgeStatus,
   isAcrossSpokePool,
   statusBridgeFor,
 } from '@/config/across-direct';
+import { checkEgress } from '@/services/egress-policy';
 import { acrossWiring, withAcrossDirect, type QuoteProviderLike } from '@/services/across-provider';
 import { fetchAcrossDirectEstimate } from '@/services/across-quote';
-import { fetchLifiContractCallDeliverable, fetchLifiExactInQuote } from '@/services/lifi-quote';
-import { assertApprovalSpender } from '@/services/swap-flows';
+import { readFileSync } from 'node:fs';
+import ts from 'typescript';
+import * as acrossConfig from '@/config/across-direct';
+import * as lifiAddresses from '@/config/lifi-addresses';
+import * as nativeDelivery from '@/services/lifi-native-delivery';
+
 import type { Address } from '@/services/sdk-types';
 
 const USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -22,6 +28,36 @@ const NATIVE = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 const WALLET = '0x8ba1f109551bD432803012645Ac136ddd64DBA72';
 const BASE_SPOKE = '0x09aea4b2242abC8bb4BB78D537A67a245A7bEC64';
 const ARB_SPOKE = '0xe35e9842fceaCA96570B734083f4a58e8F7C5f2A';
+
+// Load real quote and approval code without the React Native configuration graph.
+// No global module mocks: these tests also run independently of the full suite.
+function loadSource(file: string, dependencies: Record<string, unknown>, names?: string[]) {
+  const source = readFileSync(new URL('../../' + file, import.meta.url), 'utf8');
+  const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  const selected = names ? ast.statements.filter((node) =>
+    (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) && node.name && names.includes(node.name.text),
+  ).map((node) => node.getText(ast)).join('\n') : source;
+  const code = ts.transpileModule(selected, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const exports: Record<string, unknown> = {};
+  const require = (name: string) => {
+    if (!(name in dependencies)) throw new Error('Unexpected dependency: ' + name);
+    return dependencies[name];
+  };
+  const globals = names ? dependencies : {};
+  new Function('require', 'exports', ...Object.keys(globals), code)(require, exports, ...Object.values(globals));
+  return exports;
+}
+const { fetchLifiContractCallDeliverable, fetchLifiExactInQuote } = loadSource('services/lifi-quote.ts', {
+  '@/config/intent-swaps': { LIFI_API_KEY: '', NATIVE_ASSET_ADDRESS: NATIVE },
+  '@/services/lifi-native-delivery': nativeDelivery,
+  '@/config/across-direct': acrossConfig,
+  '@/services/across-quote': { fetchAcrossDirectEstimate },
+}) as typeof import('@/services/lifi-quote');
+const { assertApprovalSpender } = loadSource('services/swap-flows.ts', {
+  ...lifiAddresses,
+  acrossDirectSourceChainIds,
+  isAcrossSpokePool,
+}, ['UnexpectedSwapTxError', 'assertApprovalSpender']) as typeof import('@/services/swap-flows');
 
 const savedFlag = process.env.EXPO_PUBLIC_ACROSS_DIRECT;
 const savedChains = process.env.EXPO_PUBLIC_ACROSS_DIRECT_CHAINS;
@@ -47,13 +83,6 @@ function stubFetch(answer: (url: URL) => Response): URL[] {
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
-const acrossFees = (amount: bigint, extra: Record<string, unknown> = {}) => ({
-  outputAmount: (amount - 1_000n).toString(),
-  relayerGasFee: { total: '300' },
-  inputToken: { decimals: 6 },
-  outputToken: { decimals: 6 },
-  ...extra,
-});
 
 beforeEach(() => setEnv(undefined, undefined));
 afterEach(() => {
@@ -76,6 +105,11 @@ describe('config/across-direct', () => {
     expect(acrossDirectSourceChainIds().sort()).toEqual([10, 8453]);
     setEnv('true', '');
     expect(acrossDirectSourceChainIds()).toEqual([]);
+  });
+
+  it('never polls a direct Across transfer by transaction hash', () => {
+    expect(canPollBridgeStatus(ACROSS_DIRECT_BRIDGE)).toBe(false);
+    expect(canPollBridgeStatus(undefined)).toBe(true);
   });
 
   it('pins SpokePools per chain and names the status bridge only for them', () => {
@@ -137,14 +171,12 @@ describe('withAcrossDirect', () => {
     expect(acrossWiring({})).toEqual({ kind: 'lifi-only', reason: 'sdk-without-across' });
   });
 
-  it('wraps LiFi with Across first for the enabled chains', () => {
+  it('keeps browser quoting on LI.FI until a private quote transport exists', () => {
     setEnv('true', '8453,10');
-    const wrapped = withAcrossDirect(lifi, sdk) as unknown as FakePrefer;
-    expect(wrapped).toBeInstanceOf(FakePrefer);
-    expect(wrapped.config.fallback).toBe(lifi);
-    expect(wrapped.config.across).toBeInstanceOf(FakeAcross);
-    expect((wrapped.config.sourceChainIds as number[]).sort()).toEqual([10, 8453]);
+    expect(withAcrossDirect(lifi, sdk)).toBe(lifi);
+    expect(acrossWiring(sdk)).toEqual({ kind: 'lifi-only', reason: 'privacy-transport-unavailable' });
   });
+
 });
 
 describe('assertApprovalSpender and the Across SpokePool', () => {
@@ -176,32 +208,14 @@ describe('fetchAcrossDirectEstimate', () => {
     recipient: WALLET,
   };
 
-  it('prices a plain bridge to the recipient at its exact output', async () => {
-    const seen = stubFetch((url) => json(acrossFees(BigInt(url.searchParams.get('amount')!))));
-    const est = await fetchAcrossDirectEstimate({ ...base, destinationCall: false });
-    expect(est).toEqual({ toAmount: 99_999_000n, deliverableMin: 99_999_000n, fromDecimals: 6 });
-    expect(seen[0]!.origin + seen[0]!.pathname).toBe('https://app.across.to/api/suggested-fees');
-    expect(seen[0]!.searchParams.get('recipient')).toBe(WALLET);
-    expect([...seen[0]!.searchParams.keys()].sort()).toEqual(
-      ['amount', 'destinationChainId', 'inputToken', 'originChainId', 'outputToken', 'recipient'],
-    );
+  it('never sends action-timed previews, even with the flag on', async () => {
+    setEnv('true', '8453');
+    const seen = stubFetch(() => json({}, 500));
+    expect(await fetchAcrossDirectEstimate({ ...base, destinationCall: false })).toBeNull();
+    expect(await fetchAcrossDirectEstimate({ ...base, destinationCall: true })).toBeNull();
+    expect(seen).toEqual([]);
   });
 
-  it('holds back one relayer-gas fee for a deposit-ending route, quoted to the handler', async () => {
-    const seen = stubFetch((url) => json(acrossFees(BigInt(url.searchParams.get('amount')!))));
-    const est = await fetchAcrossDirectEstimate({ ...base, destinationCall: true });
-    expect(est?.deliverableMin).toBe(99_998_700n);
-    expect(seen[0]!.searchParams.get('recipient')).toBe(acrossMulticallHandler(10)!);
-  });
-
-  it('returns null on refusal, a too-low amount or unmatched decimals', async () => {
-    stubFetch(() => json({ message: 'Route is not enabled.' }, 400));
-    expect(await fetchAcrossDirectEstimate({ ...base, destinationCall: false })).toBeNull();
-    stubFetch(() => json({ ...acrossFees(1n), isAmountTooLow: true }));
-    expect(await fetchAcrossDirectEstimate({ ...base, destinationCall: false })).toBeNull();
-    stubFetch((url) => json(acrossFees(BigInt(url.searchParams.get('amount')!), { outputToken: { decimals: 18 } })));
-    expect(await fetchAcrossDirectEstimate({ ...base, destinationCall: false })).toBeNull();
-  });
 });
 
 describe('LI.FI previews with direct Across', () => {
@@ -221,20 +235,24 @@ describe('LI.FI previews with direct Across', () => {
     expect(seen.every((u) => u.host === 'li.quest')).toBe(true);
   });
 
-  it('previews an eligible route on Across only', async () => {
+  it('retains LI.FI quotes for every route when the flag is on', async () => {
     setEnv('true', '8453');
-    const seen = stubFetch((url) => json(acrossFees(BigInt(url.searchParams.get('amount')!))));
-    expect(await fetchLifiExactInQuote(params)).toEqual({ toAmount: 99_999_000n, toAmountMin: 99_999_000n });
-    const deliverable = await fetchLifiContractCallDeliverable({ ...params, slippage: 0.03 });
-    expect(deliverable?.tool).toBe('across-direct');
-    expect(deliverable?.deliverableMin).toBe(99_998_700n);
-    expect(seen.map((u) => u.host)).toEqual(['app.across.to', 'app.across.to']);
-  });
-
-  it('falls back to LI.FI when Across refuses the route', async () => {
-    setEnv('true', '8453');
-    const seen = stubFetch((url) => (url.host === 'app.across.to' ? json({}, 400) : json({}, 404)));
+    const seen = stubFetch(() => json({}, 404));
     await fetchLifiExactInQuote(params);
-    expect(seen.map((u) => u.host)).toEqual(['app.across.to', 'li.quest']);
+    await fetchLifiContractCallDeliverable({ ...params, slippage: 0.03 });
+    expect(seen.map((u) => u.host)).toEqual(['li.quest', 'li.quest']);
+  });
+});
+
+describe('Across egress policy', () => {
+  it('refuses quotes, note messages, status hashes, and unknown routes', () => {
+    for (const path of [
+      '/api/suggested-fees?amount=100&recipient=' + WALLET,
+      '/api/suggested-fees?message=0x' + 'ab'.repeat(32),
+      '/api/deposit/status?depositTxnRef=0x' + 'ab'.repeat(32),
+      '/api/unknown',
+    ]) {
+      expect(checkEgress('across', { method: 'GET', url: 'https://app.across.to' + path }).allowed).toBe(false);
+    }
   });
 });
