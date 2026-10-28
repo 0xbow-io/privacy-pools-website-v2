@@ -205,6 +205,7 @@ import { useNativeMockBlock } from '@/hooks/use-native-mock-block';
 import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { FeeWarning } from '@/components/fee-warning';
 import { buildFeeBreakdown, gasCostUsd, quoteGas, splitRelayerFee, swapLossUsd, type FeeGasReading } from '@/services/fee-warning';
+import { AddressAutocomplete } from '@/components/contacts/address-autocomplete';
 
 const WITHDRAW_RELAY_METHOD = /^relay(Withdrawal|RegisterAndWithdrawal|WithAnnounce)$/;
 const SWAP_EXIT_PENDING_MESSAGE = 'The relayer accepted this withdrawal, but it has not been included in a block yet. It has not failed and can still land, so these funds are held for it. Your balance and history update on their own once it settles; if it is still pending after 10 minutes, report it from the pending notice.';
@@ -5380,8 +5381,17 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
 
                 {/* Target Address Input */}
                 <View className="w-full gap-[4px]">
+                  {/* Previous recipients + saved names, from this device only (components/contacts). */}
+                  <AddressAutocomplete
+                    value={targetInput}
+                    onSelect={handleTargetInputChange}
+                    formats={isStellar ? ['stellar'] : isSui ? ['sui'] : ['evm']}
+                    testID="withdraw-recipient"
+                  >
+                    {(bind) => (
                   <View className={`w-full h-[40px] flex-row items-center rounded-control border px-[16px] py-[12px] gap-[12px] bg-card-background ${targetError ? 'border-[#E53935]' : 'border-border'}`}>
                     <TextInput
+                      {...bind}
                       className={`text-[14px] flex-1 p-0 m-0 font-pp-regular ${targetInput ? 'text-text' : 'text-[#999999]'}`}
                       // nw-keep(platform-css): web-only outline reset + text cursor have no className path (empty on native)
                       style={[WEB_NO_OUTLINE, Platform.OS === 'web' ? { cursor: 'text' } as unknown as TextStyle : {}]}
@@ -5391,8 +5401,11 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       onChangeText={handleTargetInputChange}
                       autoCapitalize="none"
                       autoCorrect={false}
+                      testID="withdraw-recipient-input"
                     />
                   </View>
+                    )}
+                  </AddressAutocomplete>
                   {targetError ? (
                     <Text className="text-[12px] text-[#E53935] font-pp-regular">
                       {targetError}

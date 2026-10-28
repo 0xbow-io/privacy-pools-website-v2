@@ -47,6 +47,7 @@ import { usePaymentRequestsModal } from '@/components/payment-requests-modal-pro
 import { useImportNoteModal } from '@/components/import-note-modal-provider';
 import { useAccountRecoveryModal } from '@/components/account-recovery-modal-provider';
 import { useCustomRpcModal } from '@/components/custom-rpc-modal-provider';
+import { ContactsModal } from '@/components/contacts/contacts-modal';
 import { activeCustomRpcUrl } from '@/config/custom-rpc';
 import { TOR_IN_FORCE, TOR_ON_DEVICE } from '@/config/tor';
 import { NotificationCenter } from '@/components/ui/notification-center';
@@ -264,6 +265,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
   // key, passkey), Theme (design variants) and Pool (every pool the ASP serves).
   // Each submenu has a back row; the menu always reopens on main.
   // 'environment' (Prod / Staging) is always offered; see the row below.
+  const [contactsOpen, setContactsOpen] = useState(false);
   const [actionsMenuView, setActionsMenuView] = useState<'main' | 'theme' | 'pool' | 'payments' | 'privacy' | 'environment'>('main');
 
   useEffect(() => {
@@ -1094,6 +1096,16 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                       in localStorage and takes effect on a page reload, neither
                       of which a native build has. The label is the "in force"
                       indicator — no custom endpoint, no second state. */}
+                  {/* Saved names for recipient addresses, with import/export (components/contacts). */}
+                  <Pressable
+                    className="flex-row items-center gap-[10px] rounded-pill px-[12px] py-[10px] hover:bg-background-secondary"
+                    onPress={() => { setActionsDropdownOpen(false); setContactsOpen(true); }}
+                    testID="menu-contacts"
+                  >
+                    {/* nw-keep(data-color): glyph color is a theme token into the vector-icon sink */}
+                    <Ionicons name="people-outline" size={16} color={colors.text} />
+                    <Text className="flex-1 font-pp-sans text-[14px] text-text">Contacts</Text>
+                  </Pressable>
                   {!activeIsNonEvm && Platform.OS === 'web' && (
                   <Pressable
                     className="flex-row items-center gap-[10px] px-[12px] py-[10px]"
@@ -1242,6 +1254,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
 
       <AccountKeyExportModal visible={exportKeyOpen} onClose={() => setExportKeyOpen(false)} />
       <ErrorReportsModal visible={errorReportsOpen} onClose={() => setErrorReportsOpen(false)} />
+      {contactsOpen ? <ContactsModal visible onClose={() => setContactsOpen(false)} /> : null}
       {/* Mounted only while open: closing unmounts it, so the code, key and QR go with it. */}
       {Platform.OS === 'web' && exportToMobileOpen ? (
         <AccountKeyToMobileModal visible onClose={() => setExportToMobileOpen(false)} />

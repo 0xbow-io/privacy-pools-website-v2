@@ -150,6 +150,7 @@ import { useNativeMockBlock } from '@/hooks/use-native-mock-block';
 import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { FeeWarning } from '@/components/fee-warning';
 import { buildFeeBreakdown, gasCostUsd, quoteGas, splitRelayerFee, swapLossUsd, tokenUsd, type FeeGasReading } from '@/services/fee-warning';
+import { AddressAutocomplete } from '@/components/contacts/address-autocomplete';
 
 // Intent swap (withdraw-and-swap): a private note leaves the pool, swaps
 // through a LiFi route that is sealed inside the ZK proof, and the output
@@ -2934,7 +2935,11 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                   )}
                 </View>
                 {recipientOpen || crossChain || crossChainReshield ? (
+                  // Every destination this field can name is an EVM chain (ADDRESS_RE above).
+                  <AddressAutocomplete value={recipient} onSelect={editRecipient} formats={['evm']} testID="swap-recipient">
+                  {(bind) => (
                   <TextInput
+                    {...bind}
                     className={`w-full rounded-control border px-[14px] py-[11px] text-[14px] text-text font-pp-regular ${recipient && !recipientValid ? 'border-danger' : 'border-border'}`}
                     // nw-keep(platform-css): web-only outlineStyle:'none' removes the focus ring — no className path; empty on native
                     style={WEB_NO_OUTLINE}
@@ -2945,7 +2950,10 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                     placeholderTextColor={colors.textMuted}
                     autoCapitalize="none"
                     autoCorrect={false}
+                    testID="swap-recipient-input"
                   />
+                  )}
+                  </AddressAutocomplete>
                 ) : (
                   <Text numberOfLines={1} className="w-full text-[13px] text-text-secondary font-pp-regular">
                     Your wallet{address ? ` · ${address.slice(0, 6)}…${address.slice(-4)}` : ''}

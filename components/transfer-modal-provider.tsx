@@ -134,6 +134,7 @@ import { useNativeMockBlock } from '@/hooks/use-native-mock-block';
 import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { FeeWarning } from '@/components/fee-warning';
 import { relayedSpendBreakdown } from '@/services/fee-warning';
+import { AddressAutocomplete } from '@/components/contacts/address-autocomplete';
 import { SHIELDED_TRANSFER_GAS } from '@/services/transfer-fee-estimate';
 
 // Web-only styles
@@ -3813,8 +3814,17 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
 
                 {/* Recipient address */}
                 <View className="w-full gap-[4px]">
+                  {/* Previous recipients + saved names, from this device only (components/contacts). */}
+                  <AddressAutocomplete
+                    value={recipientInput}
+                    onSelect={handleRecipientInputChange}
+                    formats={isStellar ? ['stellar'] : isSui ? ['sui'] : ['evm']}
+                    testID="send-recipient"
+                  >
+                    {(bind) => (
                   <View className={`w-full h-[48px] border rounded-control px-[16px] flex-row items-center justify-between bg-card-background ${recipientError ? 'border-[#E53935]' : 'border-border-light'}`}>
                     <TextInput
+                      {...bind}
                       className={`text-[14px] flex-1 p-0 m-0 font-pp-regular ${recipientInput ? 'text-text' : 'text-[#999999]'}`}
                       // nw-keep(platform-css): web-only outlineStyle:none removes the focus ring; empty on native
                       style={WEB_NO_OUTLINE}
@@ -3824,8 +3834,11 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                       onChangeText={handleRecipientInputChange}
                       autoCapitalize="none"
                       autoCorrect={false}
+                      testID="send-recipient-input"
                     />
                   </View>
+                    )}
+                  </AddressAutocomplete>
                   {isSwapSend && publicSwapPayout ? (
                     <Text className="text-[12px] leading-[16px] text-text-secondary font-pp-regular">
                       Paid to this address on-chain, so the recipient and amount are public. Continues in Withdraw. Pick a token that can be delivered privately, or send it to yourself, to keep it private.
