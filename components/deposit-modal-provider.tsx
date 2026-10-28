@@ -13,6 +13,7 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 import { usePathname } from 'expo-router';
 import { plainNativeDepositRefused, resolveDepositPayAsset } from '@/services/shield-pools';
 import { ACTIVE_ENVIRONMENT } from '@/config/environments';
+import { statusBridgeFor } from '@/config/across-direct';
 import { cappedQuickAmounts, checkDepositCap } from '@/services/deposit-cap';
 import { reportErrorReport } from '@/services/error-reports';
 import { classifyFailure } from '@/services/error-reports-cause';
@@ -1496,6 +1497,8 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     txHash: string;
     fromChainId: number;
     toChainId: number;
+    /** The provider that carried the route, for the status lookup. Unset for LiFi. */
+    bridge?: string;
     /** The destination note the SDK persisted PENDING; removed if the deposit never executes. */
     pendingCommitment?: string;
   } | null>(null);
@@ -2551,12 +2554,15 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
           // can say where it actually is, and so the balance refresh can be
           // driven by delivery instead of a guess at how long bridges take.
           if (depositChainId !== chainId && swapHash) {
-            const scan = lifiScanUrl(String(swapHash));
+            const bridge = statusBridgeFor(prepared.transactionTo);
+            // LI.FI Scan only knows LI.FI routes; a direct Across deposit is not on it.
+            const scan = bridge ? null : lifiScanUrl(String(swapHash));
             setBridgeProgress({ tone: 'pending', text: 'Checking bridge status…', ...(scan ? { lifiScanUrl: scan } : {}) });
             setBridgeWatch({
               txHash: swapHash,
               fromChainId: chainId,
               toChainId: depositChainId,
+              ...(bridge ? { bridge } : {}),
               // Our own pending note only: a recipient's is not in this session.
               ...(prepared.pendingNote?.commitment && !recipientMode ? { pendingCommitment: String(prepared.pendingNote.commitment) } : {}),
             });
@@ -3934,7 +3940,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     let lastResyncMs: number | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const stop = () => { if (timer) clearTimeout(timer); timer = null; };
-    const scan = lifiScanUrl(bridgeWatch.txHash);
+    const scan = bridgeWatch.bridge ? null : lifiScanUrl(bridgeWatch.txHash);
     const finish = (progress: { tone: 'pending' | 'done' | 'failed'; text: string; explorerUrl?: string }) => {
       stop();
       setBridgeProgress({ ...progress, ...(scan ? { lifiScanUrl: scan } : {}) });
@@ -3963,11 +3969,13 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       try {
         const session = await bridgeDepsRef.current.ensureInitialized();
         const status: SwapStatusLike = await (session as unknown as {
-          getSwapStatus: (p: { txHash: `0x${string}`; fromChainId: number; toChainId: number }) => Promise<SwapStatusLike>;
+          getSwapStatus: (p: { txHash: `0x${string}`; fromChainId: number; toChainId: number; bridge?: string }) => Promise<SwapStatusLike>;
         }).getSwapStatus({
           txHash: bridgeWatch.txHash as `0x${string}`,
           fromChainId: bridgeWatch.fromChainId,
           toChainId: bridgeWatch.toChainId,
+          // Ask the provider that carried it; unset keeps the LiFi lookup.
+          ...(bridgeWatch.bridge ? { bridge: bridgeWatch.bridge } : {}),
         });
         if (cancelled) return;
         const described = describeSwapStatus(status);

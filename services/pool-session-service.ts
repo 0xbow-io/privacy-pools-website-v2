@@ -7,6 +7,8 @@ import {
   createEvmPoolSession,
   EvmSwapChainAdapter,
 } from '@privacy-pools-v2/sdk';
+import * as PrivacyPoolsSdk from '@privacy-pools-v2/sdk';
+import { withAcrossDirect, type AcrossSdkExports } from '@/services/across-provider';
 import { ACTIVE_DEPLOYMENTS_BY_CHAIN } from '@/config/environments';
 import type {
   Address,
@@ -370,6 +372,15 @@ export async function createPoolSession(params: CreatePoolSessionParams) {
     // removed with the re-vendor; see 0xbow-remote#18.
   }
 
+  // Direct Across (EXPO_PUBLIC_ACROSS_DIRECT, default off): cross-chain ERC-20
+  // legs from the chains in EXPO_PUBLIC_ACROSS_DIRECT_CHAINS deposit into the
+  // Across SpokePool directly; every other route, and any Across quote that
+  // fails, stays on the LiFi provider above with its shims. Inert until the
+  // vendored SDK exports the Across classes. See config/across-direct.ts.
+  const swapProvider = lifiProvider
+    ? (withAcrossDirect(lifiProvider, PrivacyPoolsSdk as unknown as AcrossSdkExports) as typeof lifiProvider)
+    : undefined;
+
   // The session chain's RelaySwaps: with it the SDK validates LiFi quote
   // addresses against approvedRouters before use, on both the swap-deposit and
   // reshield paths. Undefined for chains with no deployment (fail-closed).
@@ -418,8 +429,8 @@ export async function createPoolSession(params: CreatePoolSessionParams) {
     ),
     ...(yieldDeployment ? { yieldDeployment } : {}),
     ...(yieldDeployments.length > 1 ? { yieldDeployments: yieldDeployments.slice(1) } : {}),
-    ...(lifiProvider
-      ? { swapQuoteProvider: lifiProvider, swapAndDepositQuoteProvider: lifiProvider }
+    ...(swapProvider
+      ? { swapQuoteProvider: swapProvider, swapAndDepositQuoteProvider: swapProvider }
       : {}),
     cryptoService,
     merkleService,
