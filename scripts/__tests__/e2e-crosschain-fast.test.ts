@@ -1,6 +1,6 @@
 // Guards for the headless cross-chain e2e (scripts/e2e/crosschain-swap-fast.ts)
 // and its workflow. The run spends real mainnet funds with account A's key, so
-// the workflow must never trigger on its own, and the script must keep the
+// the workflow must never run for a pull request, and the script must keep the
 // Across pin and close what it opened before it exits.
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -17,11 +17,16 @@ const timeoutMinutes = (yaml: string) => Number(/timeout-minutes:\s*(\d+)/.exec(
 describe('e2e-crosschain-fast workflow', () => {
   const wf = uncommented(WORKFLOW);
 
-  test('runs by hand only', () => {
-    expect(wf).toMatch(/^on:\s*\n\s+workflow_dispatch:/m);
-    for (const trigger of ['pull_request', 'pull_request_target', 'push', 'schedule', 'workflow_run', 'workflow_call']) {
+  test('runs on pushes to dev and main and by hand, never on a pull request', () => {
+    expect(wf).toMatch(/^on:\s*\n\s+push:\s*\n\s+branches:\s*\[dev, main\]/m);
+    expect(wf).toMatch(/^\s+workflow_dispatch:/m);
+    for (const trigger of ['pull_request', 'pull_request_target', 'schedule', 'workflow_run', 'workflow_call']) {
       expect(wf).not.toMatch(new RegExp(`^\\s*${trigger}\\s*:`, 'm'));
     }
+  });
+
+  test('sits in the e2e-mainnet environment, which only dev and main may deploy to', () => {
+    expect(wf).toMatch(/environment:\s*e2e-mainnet/);
   });
 
   test('queues behind the browser run on the same account', () => {
