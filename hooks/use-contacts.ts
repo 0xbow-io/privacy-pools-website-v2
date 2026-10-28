@@ -18,8 +18,10 @@ export function useContacts(): {
 } {
   const { sessionAddress } = useSdkContext();
   const owner = sessionAddress ?? null;
-  useSyncExternalStore(subscribeContacts, getContactsVersion, getContactsVersion);
-  const contacts = readContacts(owner);
+  // The version is an explicit input: a read the compiler cannot see change
+  // must not be memoized on `owner` alone.
+  const version = useSyncExternalStore(subscribeContacts, getContactsVersion, getContactsVersion);
+  const contacts = useMemo(() => { void version; return readContacts(owner); }, [owner, version]);
   const setName = useCallback((address: string, name: string): string | null => {
     if (!owner) return 'Sign in to save names.';
     const r = setContactName(readContacts(owner), address, name, Date.now());
@@ -36,13 +38,11 @@ export function useContacts(): {
 // ---------------------------------------------------------------------------
 
 let sharedIndex: RecipientIndex | null = null;
-let indexRevision = 0;
 let building: Promise<void> | null = null;
 const indexListeners = new Set<() => void>();
 
 function publish(next: RecipientIndex) {
   sharedIndex = next;
-  indexRevision++;
   for (const l of indexListeners) l();
 }
 
@@ -80,7 +80,7 @@ function subscribeIndex(l: () => void) {
   indexListeners.add(l);
   return () => { indexListeners.delete(l); };
 }
-const getIndexRevision = () => indexRevision;
+const getIndex = () => sharedIndex;
 
 /**
  * Suggestions for one recipient field. Renders at once with whatever index is
@@ -93,14 +93,14 @@ export function useRecipientSuggestions(opts: {
   limit?: number;
 }): { suggestions: RecipientSuggestion[]; contacts: Contact[]; refresh: () => void } {
   const { contacts } = useContacts();
-  const revision = useSyncExternalStore(subscribeIndex, getIndexRevision, getIndexRevision);
+  // The snapshot is the index itself: every publish is a new Map.
+  const index = useSyncExternalStore(subscribeIndex, getIndex, getIndex);
   useEffect(() => { void refreshRecipientIndex(); }, []);
   const formatsKey = opts.formats.join(',');
   const excludeKey = (opts.exclude ?? []).join(',');
   const suggestions = useMemo(
-    () => rankRecipientSuggestions(sharedIndex, contacts, { formats: opts.formats, query: opts.query, exclude: opts.exclude, limit: opts.limit }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [revision, contacts, formatsKey, opts.query, excludeKey, opts.limit],
+    () => rankRecipientSuggestions(index, contacts, { formats: formatsKey ? formatsKey.split(',') as AddressFormat[] : [], query: opts.query, exclude: excludeKey ? excludeKey.split(',') : undefined, limit: opts.limit }),
+    [index, contacts, formatsKey, opts.query, excludeKey, opts.limit],
   );
   const refresh = useCallback(() => { void refreshRecipientIndex(); }, []);
   return { suggestions, contacts, refresh };
