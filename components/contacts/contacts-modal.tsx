@@ -229,7 +229,7 @@ export function ContactsModal({ visible, onClose }: { visible: boolean; onClose:
             </View>
           ) : null}
 
-          <ScrollView className="min-h-0 flex-1 grow-0" contentContainerClassName="px-[12px] pb-[18px]" showsVerticalScrollIndicator={false}>
+          <ScrollView className="min-h-0 shrink grow-0" contentContainerClassName="px-[12px] pb-[18px]" showsVerticalScrollIndicator={false}>
             {!owner ? (
               <EmptyState icon="lock-closed-outline" title="Sign in to see your contacts" colors={colors} />
             ) : contacts.length === 0 ? (
