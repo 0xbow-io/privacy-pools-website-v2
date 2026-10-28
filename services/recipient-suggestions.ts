@@ -176,3 +176,54 @@ export function recipientListState(opts: { rows: number; query: string; deviceRe
   if (opts.query.trim() !== '') return 'none';
   return !opts.deviceReady || opts.activityLoading ? 'loading' : 'empty';
 }
+
+/**
+ * asp-v2#165: recipients of THIS user's own withdrawals, from data already
+ * downloaded in bulk. Two in-memory joins, no request:
+ *   - spends: the user's own spends (note-derived), each carrying the
+ *     `recipient` of the snapshot logs the user spent into (never another log
+ *     that shares the tx hash in a batch);
+ *   - feed rows: a public feed Withdrawal row whose (chain, tx hash) is one of
+ *     the user's own spends, and only when the feed has exactly one Withdrawal
+ *     for that hash (a batch row could be someone else's).
+ * The field is optional everywhere: absent, null or malformed means nothing,
+ * silently, and the other sources carry on.
+ */
+export function recipientsFromOwnSpends(opts: {
+  spends: readonly { txHash?: string; chainId?: number; kind?: string; blockTimestamp?: string; recipients?: readonly unknown[] }[];
+  feedRows?: readonly { type?: string; txHash?: string; chainId?: number; recipient?: unknown; timestamp?: number }[];
+  /** The address formats valid on a chain; any valid format when omitted. */
+  formatsFor?: (chainId: number | undefined) => readonly AddressFormat[] | undefined;
+}): PayoutRecord[] {
+  const out: PayoutRecord[] = [];
+  const valid = (raw: unknown, chainId: number | undefined): string | null => {
+    if (typeof raw !== 'string') return null;
+    const canon = canonicalAddress(raw);
+    if (!canon) return null;
+    const allowed = opts.formatsFor?.(chainId);
+    return allowed && !allowed.includes(canon.format) ? null : canon.display;
+  };
+  const key = (chainId: number | undefined, txHash: string | undefined) => `${chainId ?? ''}|${String(txHash ?? '').toLowerCase()}`;
+  const own = new Set<string>();
+  for (const s of opts.spends ?? []) {
+    if (!s || !s.txHash || s.kind !== 'withdrawal') continue;
+    own.add(key(s.chainId, s.txHash));
+    const t = s.blockTimestamp ? Date.parse(s.blockTimestamp) : NaN;
+    for (const r of Array.isArray(s.recipients) ? s.recipients : []) {
+      const address = valid(r, s.chainId);
+      if (address) out.push({ address, timestamp: Number.isFinite(t) ? t : 0 });
+    }
+  }
+  if (own.size > 0 && opts.feedRows?.length) {
+    const counts = new Map<string, number>();
+    for (const row of opts.feedRows) if (row?.type === 'Withdrawal' && row.txHash) counts.set(key(row.chainId, row.txHash), (counts.get(key(row.chainId, row.txHash)) ?? 0) + 1);
+    for (const row of opts.feedRows) {
+      if (row?.type !== 'Withdrawal' || !row.txHash) continue;
+      const k = key(row.chainId, row.txHash);
+      if (!own.has(k) || counts.get(k) !== 1) continue;
+      const address = valid(row.recipient, row.chainId);
+      if (address) out.push({ address, timestamp: typeof row.timestamp === 'number' ? row.timestamp : 0 });
+    }
+  }
+  return out;
+}

@@ -42,7 +42,7 @@ describe('timing: the list follows the Activity source', () => {
 
   test('the hook recomputes from the Activity rows on every change, nothing computed once', () => {
     const hook = src('hooks/use-contacts.ts');
-    expect(hook).toMatch(/\[data\.transactions, data\.lineageRows, data\.internalTxHashes, data\.spendClassificationPending, data\.anchorTxHashes, filterMineEvents\]/);
+    expect(hook).toContain("[data.transactions, data.lineageRows, data.internalTxHashes, data.spendClassificationPending, data.anchorTxHashes, data.ownPayoutRecipients, filterMineEvents]");
     expect(hook).toContain('useMemo(() => withRecords(withRecords(deviceIndex, history), activity), [deviceIndex, history, activity])');
     expect(hook).toContain('loading: isLoading || data.spendClassificationPending');
   });

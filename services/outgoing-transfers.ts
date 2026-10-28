@@ -130,6 +130,12 @@ export interface UserSpend {
   /** 'withdrawal' only: the caller is a RelaySwaps contract, so the value went
    *  through a swap route (a cross-chain swap or a receive-as payout). */
   swapRoute?: boolean;
+  /**
+   * The payout recipients the ASP named (asp-v2#165) on the logs THIS user
+   * spent into, never another log sharing the tx hash. Absent when the field
+   * is absent or null. Local only: read by the recipient autocomplete.
+   */
+  recipients?: string[];
 }
 
 /** A note as the classifier reads it. `chainId` names the chain whose store
@@ -287,6 +293,7 @@ export function reconstructUserSpends(
     let claimWithRegistration = false;
     const spentLabels = new Set<string>();
     const outputCommitments = new Set<string>();
+    const logRecipients = new Set<string>();
     // Shape is decided PER LOG, never per bucket.
     //
     // A batch relays several transacts under one tx hash (PrivacyPoolRelay
@@ -344,6 +351,9 @@ export function reconstructUserSpends(
         }));
       }
       if (logSpent > 0 && options.isSwapRouteCaller?.(tx.caller, tx.chainId) === true) swapCaller = true;
+      // asp-v2#165: optional, may be absent or null; only the logs this user spent into.
+      const r = (tx as { recipient?: unknown }).recipient;
+      if (logSpent > 0 && typeof r === 'string' && r.trim() !== '') logRecipients.add(r.trim());
       if (!asset && tx.asset) asset = String(tx.asset);
       // Earliest non-empty timestamp in the bucket (one tx → one time anyway).
       if (!blockTimestamp && tx.blockTimestamp) blockTimestamp = tx.blockTimestamp;
@@ -488,6 +498,7 @@ export function reconstructUserSpends(
       ...(kind === 'swap' ? { swapOutputs } : {}),
       ...(kind === 'swap' || kind === 'withdrawal' ? { inputLabels: [...spentLabels] } : {}),
       ...(kind === 'withdrawal' && swapCaller ? { swapRoute: true } : {}),
+      ...(kind === 'withdrawal' && logRecipients.size > 0 ? { recipients: [...logRecipients] } : {}),
     });
   }
   return out;

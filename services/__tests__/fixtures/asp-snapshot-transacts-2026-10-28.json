@@ -1,0 +1,66 @@
+{
+ "source": "GET https://api-v2.0xbow.io/1/public/event-snapshot/payload?include=transacts (2026-10-28), three real relayed-withdrawal-shaped transact rows, unedited: the pre-asp-v2#165 shape, no recipient field",
+ "chainId": 1,
+ "transacts": [
+  {
+   "txHash": "0x246feded63f265bf2c4dd533b82e034e78930f12e2d4575e2b91295d38a55e57",
+   "logIndex": 600,
+   "outputCommitments": [
+    "16187182364596259232899796293320827064201777909425757646026102175293920560725"
+   ],
+   "nullifierHashes": [
+    "15393944435804169290444355752297048312402700390749733485404178031431847481365"
+   ],
+   "caller": "0x5936aefb2134550f3f526d65e984620582d270e7",
+   "withdrawnValue": "15000000",
+   "relayFee": null,
+   "encryptedPayload": null,
+   "blockNumber": "25903746",
+   "blockTimestamp": "2026-09-04T11:46:23.000Z",
+   "asset": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+  },
+  {
+   "txHash": "0xcde60af19e6bef3781d1d9dc4a6a6974cf0720629dd79b80bbeb6eecd9c87468",
+   "logIndex": 423,
+   "outputCommitments": [
+    "2226831391393740182085992093997853635601792711895929377368789006809483731692"
+   ],
+   "nullifierHashes": [
+    "19378778873614239446991719569824518115028132266703567753716036640665672509264"
+   ],
+   "caller": "0xe76e793d776c1e207ad7a7fa7c57d27420d85110",
+   "withdrawnValue": "10080907230510010968",
+   "relayFee": "80907230510010968",
+   "encryptedPayload": null,
+   "blockNumber": "25908932",
+   "blockTimestamp": "2026-09-05T05:06:59.000Z",
+   "asset": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6"
+  },
+  {
+   "txHash": "0x19b032abc43202b276e0cae92e5905cd133a792b0850b414ede5b3566379bf8e",
+   "logIndex": 162,
+   "outputCommitments": [
+    "10226037026250333417782587639000978382217726931184519223685827324872201861428"
+   ],
+   "nullifierHashes": [
+    "20254286713782163811855945344818970365349876587600218071740070750818978580527"
+   ],
+   "caller": "0xe76e793d776c1e207ad7a7fa7c57d27420d85110",
+   "withdrawnValue": "10102162177775928286",
+   "relayFee": "102162177775928286",
+   "encryptedPayload": null,
+   "blockNumber": "25909046",
+   "blockTimestamp": "2026-09-05T05:29:47.000Z",
+   "asset": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6"
+  }
+ ],
+ "producer165": {
+  "source": "asp-v2#165 apps/asp/src/event-snapshot.service.spec.ts and public.service.global-events.spec.ts: recipient is EIP-55 or null, null for transfers; feed withdrawal rows carry recipient (maybe null), other types omit it",
+  "snapshotRecipients": [
+   "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed",
+   "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359",
+   null
+  ],
+  "feedRecipient": "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359"
+ }
+}
