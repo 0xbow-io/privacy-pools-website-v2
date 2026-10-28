@@ -133,8 +133,9 @@ function useActivityPayouts(): { records: PayoutRecord[]; loading: boolean } {
       data.lineageRows,
       data.anchorTxHashes,
     );
-    return payoutRecordsFromActivity(mine, { contractAddresses: contractAddressesOn });
-  }, [data.transactions, data.lineageRows, data.internalTxHashes, data.spendClassificationPending, data.anchorTxHashes, filterMineEvents]);
+    // asp-v2#165 recipients of my own withdrawals (empty until the ASP names them).
+    return [...payoutRecordsFromActivity(mine, { contractAddresses: contractAddressesOn }), ...(data.ownPayoutRecipients ?? [])];
+  }, [data.transactions, data.lineageRows, data.internalTxHashes, data.spendClassificationPending, data.anchorTxHashes, data.ownPayoutRecipients, filterMineEvents]);
   // Not settled while the feed is loading or own spends are still being classified.
   return { records, loading: isLoading || data.spendClassificationPending };
 }

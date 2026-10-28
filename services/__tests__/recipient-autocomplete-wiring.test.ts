@@ -48,6 +48,8 @@ const CONTACT_FILES = [
   'services/address-book-core.ts',
   'services/address-book-store.ts',
   'services/recipient-suggestions.ts',
+  // asp-v2#165: the in-memory join of own spends with held snapshot rows.
+  'services/outgoing-transfers.ts',
   'hooks/use-contacts.ts',
   'components/contacts/address-autocomplete.tsx',
   'components/contacts/address-suggestions-list.tsx',

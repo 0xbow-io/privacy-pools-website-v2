@@ -329,7 +329,8 @@ export function debugSafeRow<T extends { swapOut?: unknown; receivedAs?: unknown
 
 /** A spend as a debug snapshot may record it: without its swap outputs or
  *  the labels of the notes it spent. */
-export function debugSafeSpend<T extends { swapOutputs?: unknown; inputLabels?: unknown }>(spend: T): Omit<T, 'swapOutputs' | 'inputLabels'> {
-  const { swapOutputs: _swapOutputs, inputLabels: _inputLabels, ...rest } = spend;
+export function debugSafeSpend<T extends { swapOutputs?: unknown; inputLabels?: unknown; recipients?: unknown }>(spend: T): Omit<T, 'swapOutputs' | 'inputLabels' | 'recipients'> {
+  // recipients: who this user paid (asp-v2#165), never in a debug capture.
+  const { swapOutputs: _swapOutputs, inputLabels: _inputLabels, recipients: _recipients, ...rest } = spend;
   return rest;
 }
