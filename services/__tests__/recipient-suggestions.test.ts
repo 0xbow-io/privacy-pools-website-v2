@@ -117,3 +117,31 @@ describe('ranking', () => {
     expect(rankRecipientSuggestions(many, [], { formats: ['evm'], query: '' })).toHaveLength(8);
   });
 });
+
+describe('Activity rows as a source', () => {
+  const PROCESSOR = '0x' + 'f'.repeat(40);
+  const contracts = () => [PROCESSOR];
+  test('withdrawals and outgoing sends that name an address; nothing else', async () => {
+    const { payoutRecordsFromActivity } = await import('../recipient-suggestions');
+    const rows = [
+      { type: 'Withdrawal', fullAddress: A, timestamp: 50, chainId: 1 },
+      { type: 'Withdrawal', fullAddress: '', timestamp: 60, chainId: 1 }, // the feed names no recipient
+      { type: 'Withdrawal', fullAddress: PROCESSOR, timestamp: 70, chainId: 1 }, // a contract, not the payee
+      { type: 'Transfer', direction: 'out', fullAddress: B, timestamp: 40, chainId: 1 },
+      { type: 'Transfer', direction: 'in', fullAddress: C, timestamp: 30, chainId: 1 },
+      { type: 'Deposit', fullAddress: C, timestamp: 20, chainId: 1 }, // the depositor is not a recipient
+      { type: 'Withdrawal', fullAddress: 'garbage', timestamp: 10, chainId: 1 },
+    ];
+    expect(payoutRecordsFromActivity(rows, { contractAddresses: contracts }).map((r) => r.address)).toEqual([A, B]);
+  });
+  test('merged with the device index without mutating it; latest use wins', async () => {
+    const { withRecords } = await import('../recipient-suggestions');
+    const device = await buildRecipientIndex([[{ address: A, timestamp: 10 }]], { yieldFn: noYield });
+    const merged = withRecords(device, [{ address: A, timestamp: 99 }, { address: B, timestamp: 5 }])!;
+    expect(merged.get(A)!.lastUsedAt).toBe(99);
+    expect(merged.size).toBe(2);
+    expect(device!.get(A)!.lastUsedAt).toBe(10);
+    expect(withRecords(device, [])).toBe(device);
+    expect(withRecords(null, [{ address: B, timestamp: 1 }])!.size).toBe(1);
+  });
+});

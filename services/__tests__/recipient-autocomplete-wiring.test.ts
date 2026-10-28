@@ -83,3 +83,21 @@ describe('contacts code makes no request', () => {
     expect(hook).not.toMatch(/localStorage\.setItem/);
   });
 });
+
+describe('focus always answers', () => {
+  test('an empty field with nothing to suggest shows the empty state (both platforms)', () => {
+    const ac = src('components/contacts/address-autocomplete.tsx');
+    expect(ac).toMatch(/const showEmpty = !disabled && engaged && ready && suggestions\.length === 0 && value\.trim\(\) === ''/);
+    expect(ac).toContain('empty={showEmpty}');
+    for (const f of ['components/contacts/address-suggestions-list.tsx', 'components/contacts/address-suggestions-list.web.tsx']) {
+      const t = src(f);
+      expect(t).toContain('-empty`');
+      expect(t).toMatch(/EMPTY_TITLE/);
+    }
+  });
+  test('the Activity rows feed the list from memory only', () => {
+    const hook = src('hooks/use-contacts.ts');
+    expect(hook).toContain('payoutRecordsFromActivity(mine');
+    expect(hook).toContain('usePools()');
+  });
+});

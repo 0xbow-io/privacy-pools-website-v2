@@ -50,7 +50,7 @@ export function AddressAutocomplete({
   const [editing, setEditing] = useState<string | null>(null);
   const [anchor, setAnchor] = useState<unknown>(null);
   const listId = `addr-ac-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
-  const { suggestions, refresh } = useRecipientSuggestions({ formats, query: value, exclude });
+  const { suggestions, refresh, ready } = useRecipientSuggestions({ formats, query: value, exclude });
 
   // Typing again after a pick or Escape brings the list back (state adjusted
   // during render, React's pattern for "reset when a prop changes").
@@ -67,6 +67,10 @@ export function AddressAutocomplete({
   // the hide row (the first tap on a row may only dismiss the keyboard).
   // A field holding an address the list knows shows nothing (ranking returns []).
   const open = !disabled && engaged && suggestions.length > 0;
+  // Focus always answers: an empty field with nothing to suggest (a new
+  // device, or a domain whose storage holds no records) shows a short empty
+  // state instead of nothing. While typing, no match just means no list.
+  const showEmpty = !disabled && engaged && ready && suggestions.length === 0 && value.trim() === '';
 
   const pick = useCallback((s: RecipientSuggestion) => {
     onSelect(s.address);
@@ -125,7 +129,7 @@ export function AddressAutocomplete({
       ? {
         role: 'combobox',
         'aria-autocomplete': 'list',
-        'aria-expanded': open,
+        'aria-expanded': open || showEmpty,
         'aria-controls': listId,
         'aria-activedescendant': open && activeIndex >= 0 ? `${listId}-opt-${activeIndex}` : undefined,
       }
@@ -139,6 +143,7 @@ export function AddressAutocomplete({
       </View>
       <AddressSuggestionsList
         open={open}
+        empty={showEmpty}
         anchor={anchor}
         listId={listId}
         suggestions={suggestions}

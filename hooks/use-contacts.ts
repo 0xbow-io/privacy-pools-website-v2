@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useSdkContext } from '@/components/sdk-provider';
 import { setContactName, type AddressFormat, type Contact } from '@/services/address-book-core';
 import { getContactsVersion, readContacts, subscribeContacts, writeContacts } from '@/services/address-book-store';
-import { buildRecipientIndex, rankRecipientSuggestions, yieldToHost, type PayoutRecord, type RecipientIndex, type RecipientSuggestion } from '@/services/recipient-suggestions';
+import { buildRecipientIndex, payoutRecordsFromActivity, rankRecipientSuggestions, withRecords, yieldToHost, type PayoutRecord, type RecipientIndex, type RecipientSuggestion } from '@/services/recipient-suggestions';
+import { usePools } from '@/components/pools-provider';
+import { useMyTransactionOwnership } from '@/hooks/use-my-transaction-ownership';
+import { mergeMyTransactions } from '@/services/transfer-direction';
+import { getWithdrawalProcessorAddress } from '@/config/relayer';
+import { getSwapProcessorAddress } from '@/config/intent-swaps';
+import { getPinnedYieldRouters } from '@/config/yield';
 import { readAllWithdrawRecipients } from '@/services/withdraw-recipients-store';
 import { readAllSentTransfers } from '@/services/sent-transfers-store';
 
@@ -82,6 +88,34 @@ function subscribeIndex(l: () => void) {
 }
 const getIndex = () => sharedIndex;
 
+/** The app's own contracts on a chain: an address that is one of these on a row is not a recipient. */
+function contractAddressesOn(chainId: number | undefined): string[] {
+  if (!chainId) return [];
+  const out: string[] = [];
+  try { out.push(getWithdrawalProcessorAddress(chainId)); } catch { /* no deployment */ }
+  try { const s = getSwapProcessorAddress(chainId); if (s) out.push(s); } catch { /* none */ }
+  try { out.push(...getPinnedYieldRouters(chainId)); } catch { /* none */ }
+  return out;
+}
+
+/**
+ * Past recipients named by the "Mine" Activity rows, the same merge the
+ * Activity panel shows (feed rows attributed to me + note-lineage rows). It
+ * reads the rows PoolsProvider already holds; it adds no request.
+ */
+function useActivityPayouts(): PayoutRecord[] {
+  const { data } = usePools();
+  const { filterMineEvents } = useMyTransactionOwnership();
+  return useMemo(() => {
+    const mine = mergeMyTransactions(
+      filterMineEvents(data.transactions, { internalTxHashes: data.internalTxHashes, spendClassificationPending: data.spendClassificationPending }),
+      data.lineageRows,
+      data.anchorTxHashes,
+    );
+    return payoutRecordsFromActivity(mine, { contractAddresses: contractAddressesOn });
+  }, [data.transactions, data.lineageRows, data.internalTxHashes, data.spendClassificationPending, data.anchorTxHashes, filterMineEvents]);
+}
+
 /**
  * Suggestions for one recipient field. Renders at once with whatever index is
  * ready (none on a cold start), and warms the index in an idle slot on mount.
@@ -91,10 +125,12 @@ export function useRecipientSuggestions(opts: {
   query: string;
   exclude?: readonly string[];
   limit?: number;
-}): { suggestions: RecipientSuggestion[]; contacts: Contact[]; refresh: () => void } {
+}): { suggestions: RecipientSuggestion[]; contacts: Contact[]; refresh: () => void; ready: boolean } {
   const { contacts } = useContacts();
   // The snapshot is the index itself: every publish is a new Map.
-  const index = useSyncExternalStore(subscribeIndex, getIndex, getIndex);
+  const deviceIndex = useSyncExternalStore(subscribeIndex, getIndex, getIndex);
+  const activity = useActivityPayouts();
+  const index = useMemo(() => withRecords(deviceIndex, activity), [deviceIndex, activity]);
   useEffect(() => { void refreshRecipientIndex(); }, []);
   const formatsKey = opts.formats.join(',');
   const excludeKey = (opts.exclude ?? []).join(',');
@@ -103,5 +139,6 @@ export function useRecipientSuggestions(opts: {
     [index, contacts, formatsKey, opts.query, excludeKey, opts.limit],
   );
   const refresh = useCallback(() => { void refreshRecipientIndex(); }, []);
-  return { suggestions, contacts, refresh };
+  // Ready once the first index build has published (it may be empty).
+  return { suggestions, contacts, refresh, ready: deviceIndex !== null };
 }

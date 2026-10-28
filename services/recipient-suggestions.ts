@@ -121,3 +121,43 @@ export function rankRecipientSuggestions(
     .sort((a, b) => b.sortAt - a.sortAt || a.key.localeCompare(b.key))
     .slice(0, opts.limit ?? 8);
 }
+
+/** The slice of an Activity row this reads (components/pools-provider.tsx Transaction). */
+export type ActivityRowLike = { type?: string; direction?: string; fullAddress?: string; timestamp?: number; chainId?: number };
+
+/**
+ * Past recipients from the "Mine" Activity rows the app already holds in
+ * memory (the feed rows attributed to this user plus the note-lineage rows).
+ * Reads those rows and nothing else: no request, no per-row lookup.
+ *
+ * Only Withdrawal rows and outgoing Transfer rows that NAME an address are
+ * used. Most feed withdrawals carry no address at all (the public feed does
+ * not publish the recipient of a relayed withdrawal), and an address that is
+ * one of the app's own contracts (a withdrawal processor, the swap router) is
+ * the contract, not the person paid, so those rows are skipped rather than
+ * suggested.
+ */
+export function payoutRecordsFromActivity(
+  rows: readonly ActivityRowLike[],
+  opts: { contractAddresses?: (chainId: number | undefined) => readonly string[] } = {},
+): PayoutRecord[] {
+  const out: PayoutRecord[] = [];
+  for (const r of rows) {
+    const isPayout = r.type === 'Withdrawal' || (r.type === 'Transfer' && r.direction === 'out');
+    if (!isPayout || !r.fullAddress) continue;
+    const canon = canonicalAddress(r.fullAddress);
+    if (!canon) continue;
+    const contracts = (opts.contractAddresses?.(r.chainId) ?? []).map((a) => a.toLowerCase());
+    if (contracts.includes(canon.key)) continue;
+    out.push({ address: r.fullAddress, timestamp: typeof r.timestamp === 'number' ? r.timestamp : 0 });
+  }
+  return out;
+}
+
+/** A copy of `index` with `records` folded in (latest use wins). Synchronous: for small in-memory sets. */
+export function withRecords(index: RecipientIndex | null, records: readonly PayoutRecord[]): RecipientIndex | null {
+  if (records.length === 0) return index;
+  const next: RecipientIndex = new Map(index ?? []);
+  for (const rec of records) fold(next, rec);
+  return next;
+}
