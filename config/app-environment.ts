@@ -26,6 +26,23 @@ export const DEFAULT_APP_ENVIRONMENT: AppEnvironment = 'prod';
 export const APP_ENVIRONMENT_STORAGE_KEY = 'ppv2_app_env_v1';
 export const APP_ENVIRONMENT_QUERY_PARAM = 'env';
 
+/**
+ * Hostnames that are staging and nothing else: the dev-branch test domain
+ * (Vercel serves it from the `dev` branch). On these the world is not a
+ * preference, so `?env=`, the stored choice and the build default are all
+ * ignored and the environment switcher is hidden. Without this a tester on
+ * test.privacypools.com could flip to prod with `?env=prod`.
+ */
+export const STAGING_ONLY_HOSTNAMES: readonly string[] = [
+  'test.privacypools.com',
+  'testnet.privacypools.com',
+];
+
+export function isStagingOnlyHostname(hostname: string | null | undefined): boolean {
+  const host = hostname?.trim().toLowerCase();
+  return !!host && STAGING_ONLY_HOSTNAMES.includes(host);
+}
+
 export function parseAppEnvironment(raw: string | null | undefined): AppEnvironment | undefined {
   const value = raw?.trim().toLowerCase();
   // `staging-mainnet` is the staging world plus its pools on the production
@@ -66,7 +83,11 @@ export function readAppEnvironment(deps: {
   buildDefault?: string | null;
   /** The prod world serves Stellar too (EXPO_PUBLIC_STELLAR_ENABLED). */
   prodIncludesStellar?: boolean;
+  /** window.location.hostname; a staging-only host short-circuits to staging. */
+  hostname?: string | null;
 }): AppEnvironment {
+  // Staging-only host: no query, no stored choice, and nothing written back.
+  if (isStagingOnlyHostname(deps.hostname)) return 'staging';
   let query: string | null = null;
   try {
     const params = deps.search ? new URLSearchParams(deps.search) : null;
@@ -117,9 +138,16 @@ function readActiveAppEnvironment(): AppEnvironment {
   } catch {
     storage = null;
   }
+  let hostname: string | null = null;
+  try {
+    hostname = window.location?.hostname ?? null;
+  } catch {
+    hostname = null;
+  }
   return readAppEnvironment({
     search,
     storage,
+    hostname,
     buildDefault: BUILD_DEFAULT_APP_ENVIRONMENT,
     // Static member read, for the same reason as above.
     prodIncludesStellar: process.env.EXPO_PUBLIC_STELLAR_ENABLED === 'true',
@@ -128,6 +156,19 @@ function readActiveAppEnvironment(): AppEnvironment {
 
 /** Resolved once at module load; switching requires a reload (by design). */
 export const ACTIVE_APP_ENVIRONMENT: AppEnvironment = readActiveAppEnvironment();
+
+/** True on a host that only ever serves staging (the switcher is hidden there). */
+export const IS_STAGING_ONLY_HOST: boolean =
+  typeof window !== 'undefined' &&
+  isStagingOnlyHostname(
+    (() => {
+      try {
+        return window.location?.hostname ?? null;
+      } catch {
+        return null;
+      }
+    })(),
+  );
 
 export function getActiveAppEnvironment(): AppEnvironment {
   return ACTIVE_APP_ENVIRONMENT;
@@ -174,6 +215,8 @@ export function withAppEnvironmentQuery(href: string, env: AppEnvironment): stri
  */
 export function applyAppEnvironment(env: AppEnvironment): void {
   if (typeof window === 'undefined') return;
+  // A staging-only host never switches worlds, whatever calls this.
+  if (IS_STAGING_ONLY_HOST) return;
   try {
     window.localStorage.setItem(APP_ENVIRONMENT_STORAGE_KEY, env);
   } catch {
