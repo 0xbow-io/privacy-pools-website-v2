@@ -24,6 +24,7 @@ import {
 } from '@/config/yield';
 import {
   DEFAULT_YIELD_PAUSE_BANNER_TEXT,
+  DEFAULT_YIELD_DEPOSITS_PAUSED,
   parseYieldDepositsPaused,
   pauseActive,
   pauseCoversChain,
@@ -43,7 +44,8 @@ const paused = pauseVaultDeposits(prodTokens, PROD_YIELD_DEPLOYMENTS);
 
 describe('default OFF', () => {
   test('the switch is off unless the env says true, and the served registries carry no pause', () => {
-    expect(process.env.EXPO_PUBLIC_YIELD_DEPOSITS_PAUSED).toBeUndefined();
+    // The preload pins the env to `false` so the suite describes the open world.
+    expect(process.env.EXPO_PUBLIC_YIELD_DEPOSITS_PAUSED).toBe('false');
     expect(YIELD_DEPOSITS_PAUSED).toBe(false);
     for (const env of ['prod', 'staging'] as const) {
       for (const tokens of Object.values(ENVIRONMENTS[env].tokensByChain)) {
@@ -184,6 +186,19 @@ describe('per chain scope (Pat, 2026-10-29: Aave froze its Ethereum reserves onl
     // `true` inside a list is still "every chain": a typo must not narrow the kill switch.
     expect(parseYieldDepositsPaused('true,56')).toEqual({ all: true, chainIds: [] });
     expect(parseYieldDepositsPaused('56,TRUE')).toEqual({ all: true, chainIds: [] });
+  });
+
+  test('an unset env means Ethereum and Base paused, `false` opens deposits again (Pat, 2026-10-29)', () => {
+    expect(DEFAULT_YIELD_DEPOSITS_PAUSED).toBe('1,8453');
+    const unset = parseYieldDepositsPaused(DEFAULT_YIELD_DEPOSITS_PAUSED);
+    expect(unset).toEqual({ all: false, chainIds: [1, 8453] });
+    expect(pauseCoversChain(unset, 1)).toBe(true);
+    expect(pauseCoversChain(unset, 8453)).toBe(true);
+    expect(pauseCoversChain(unset, 56)).toBe(false);
+    expect(resolveYieldPauseBannerText(unset, undefined))
+      .toBe('Deposits are paused for yield assets on Ethereum and Base because of Aave.');
+    // An explicit `false` is the way out.
+    expect(pauseActive(parseYieldDepositsPaused('false'))).toBe(false);
   });
 
   test('true covers every chain, a list covers only its chains, off covers none', () => {

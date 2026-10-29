@@ -60,7 +60,16 @@ export function pauseActive(pause: YieldDepositsPause): boolean {
 
 // Read via a STATIC `process.env.EXPO_PUBLIC_*` member: Expo only inlines
 // static member access (see config/yield.ts).
-export const YIELD_DEPOSITS_PAUSE: YieldDepositsPause = parseYieldDepositsPaused(process.env.EXPO_PUBLIC_YIELD_DEPOSITS_PAUSED);
+/**
+ * What an UNSET EXPO_PUBLIC_YIELD_DEPOSITS_PAUSED means: Ethereum and Base are
+ * paused (Aave froze its reserves there, Pat 2026-10-29, "please do"), so a
+ * build needs no env to be safe. Set the var to `false` to open deposits again.
+ */
+export const DEFAULT_YIELD_DEPOSITS_PAUSED = '1,8453';
+
+export const YIELD_DEPOSITS_PAUSE: YieldDepositsPause = parseYieldDepositsPaused(
+  process.env.EXPO_PUBLIC_YIELD_DEPOSITS_PAUSED ?? DEFAULT_YIELD_DEPOSITS_PAUSED,
+);
 
 /** True when vault deposits are paused on at least one chain for this build. */
 export const YIELD_DEPOSITS_PAUSED = pauseActive(YIELD_DEPOSITS_PAUSE);
