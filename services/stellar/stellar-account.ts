@@ -98,6 +98,7 @@ import { isStellarAccountAddress, requestStates, type StellarRequestState } from
 import type { StellarSdkPaymentRequest } from '@/services/payment-request-codec';
 import { envScopedStorageKey } from '@/config/app-environment';
 import { buildStellarNoteOrigins, reconstructStellarSpends, type StellarNoteOrigins } from '@/services/stellar-activity';
+import { withSigningWindow } from '@/services/stellar/stellar-signing-window';
 
 export type { StellarRequestState };
 
@@ -274,7 +275,9 @@ class StellarAccount {
       // Required by the config schema even with an ASP override; never fetched.
       ipfsGatewayUrl: 'http://unused.invalid',
       protocolKeys,
-      walletInteractor: { type: 'freighter', provider: signer },
+      // Each transaction's validity window starts when Freighter is asked to sign it
+      // (stellar-signing-window.ts). The key derivation above signs through the bare signer.
+      walletInteractor: { type: 'freighter', provider: withSigningWindow(signer) },
       // In-memory: the account is persisted below via export/import after every
       // sync (one JSON blob per account), which also restores notes saved by
       // builds from before the SDK's storage schema fix.
@@ -859,7 +862,7 @@ class StellarAccount {
         readSourcePublicKey: address,
       });
       const wallet = new sdk.FreighterWalletInteractor({
-        provider: signer,
+        provider: withSigningWindow(signer),
         networkPassphrase: STELLAR_TESTNET_NETWORK.networkPassphrase,
         rpcInteractor,
       });

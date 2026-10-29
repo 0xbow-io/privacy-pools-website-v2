@@ -167,11 +167,18 @@ export interface ConnectLandingSeedInput {
   hasCachedBalance: boolean;
   /** Latches after the first landing whether or not a prompt was necessary. */
   seedHandled: boolean;
+  /**
+   * Sui or Stellar is the selected chain. The unlock dialog signs the EVM
+   * session only, so there it would ask MetaMask (on Sepolia) instead of the
+   * chain's own wallet. Those chains unlock from their own Sign in buttons.
+   */
+  nonEvmChain: boolean;
 }
 
 /** The unlock invitation is a one-time companion to the first landing only. */
 export function shouldOpenSeedOnConnectLanding(input: ConnectLandingSeedInput): boolean {
   return input.firstLanding
+    && !input.nonEvmChain
     && !input.seedHandled
     && input.sessionLocked
     && !input.hasCachedBalance;
