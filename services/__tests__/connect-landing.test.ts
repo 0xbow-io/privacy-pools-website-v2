@@ -256,6 +256,7 @@ describe('shouldOpenSeedOnConnectLanding', () => {
     sessionLocked: true,
     hasCachedBalance: false,
     seedHandled: false,
+    nonEvmChain: false,
   };
 
   test('opens once on the first locked landing with no cached balance', () => {
@@ -267,5 +268,11 @@ describe('shouldOpenSeedOnConnectLanding', () => {
     expect(shouldOpenSeedOnConnectLanding({ ...LOCKED_EMPTY, hasCachedBalance: true })).toBe(false);
     expect(shouldOpenSeedOnConnectLanding({ ...LOCKED_EMPTY, sessionLocked: false })).toBe(false);
     expect(shouldOpenSeedOnConnectLanding({ ...LOCKED_EMPTY, firstLanding: false })).toBe(false);
+  });
+
+  // The dialog only knows the EVM session: on Stellar its Sign in asked
+  // MetaMask to sign on Sepolia and Freighter was never asked.
+  test('never opens the EVM unlock on a Stellar or Sui landing', () => {
+    expect(shouldOpenSeedOnConnectLanding({ ...LOCKED_EMPTY, nonEvmChain: true })).toBe(false);
   });
 });
