@@ -290,6 +290,36 @@ class StellarAccount {
     }
   }
 
+  /**
+   * Stamps claimed notes imported with the '0x0' creation stub. The pool's state-tree leaf is
+   * hash(tag, commitment, createdAt), so a stubbed note can never be anchored ("Leaf … not found in
+   * tree"). The time comes from the pool's own events (the whole-history index: no read names the
+   * note). Returns false when a note is not indexed yet; `required` makes that an error instead.
+   */
+  private async stampClaimedNotes(session: StellarPoolSession, commitments: readonly Hex[], required: boolean): Promise<boolean> {
+    const wanted = new Set(commitments.map((c) => BigInt(c)));
+    const account = await session.exportAccount();
+    const stubs = account.notes.filter((n) => wanted.has(BigInt(n.commitment)) && BigInt(n.createdAtBlock ?? 0) === 0n);
+    if (stubs.length === 0 || !this.rpc) return stubs.length === 0;
+    const sdk = await loadStellarSdk();
+    const pool = new sdk.StellarPoolVaultChainAdapter({
+      rpcInteractor: this.rpc,
+      contractId: STELLAR_TESTNET_CONTRACTS.poolContractId,
+      readSourcePublicKey: sdk.STELLAR_NEUTRAL_READ_SOURCE,
+      deploymentLedger: Number(STELLAR_TESTNET_DEPLOYMENT_LEDGER),
+    });
+    for (const note of stubs) {
+      const createdAt = await pool.getCommitmentValue(note.commitment as Hex);
+      if (createdAt === 0n) {
+        if (required) throw new Error('This payment is not on the pool index yet. Try again in a minute.');
+        return false;
+      }
+      note.createdAtBlock = `0x${createdAt.toString(16)}` as Hex;
+    }
+    await session.importAccount(account);
+    return true;
+  }
+
   /** Relays the first quoted option; refuses a receipt that did not spend this transfer's notes. */
   private async relayPreparedTransfer(
     session: StellarPoolSession,
@@ -814,6 +844,8 @@ class StellarAccount {
         await session.importReceivedNote(toImportableNote(n) as Parameters<StellarPoolSession['importReceivedNote']>[0]);
         imported++;
       }
+      // Best effort here (a just-sent note may not be indexed yet); saving requires it.
+      await this.stampClaimedNotes(session, notes.map((n) => n.commitment as Hex), false);
       await this.refreshLocal(session, address);
       return { imported, already: notes.length - imported };
     });
@@ -831,6 +863,7 @@ class StellarAccount {
       const session = await this.ensureSession(params?.onStage);
       const relayer = await this.connectRelayer(await loadStellarSdk());
       await this.ensureRegistered(session, generation, params?.onStage);
+      await this.stampClaimedNotes(session, commitments, true);
       const { notes } = await session.exportAccount();
       const wanted = new Set(commitments.map((c) => BigInt(c)));
       const claimed = notes.filter((n) => wanted.has(BigInt(n.commitment)));
