@@ -33,6 +33,9 @@ export const NO_YIELD_DEPOSITS_PAUSE: YieldDepositsPause = { all: false, chainId
 export function parseYieldDepositsPaused(raw: string | undefined): YieldDepositsPause {
   const value = raw?.trim() ?? '';
   if (!value) return NO_YIELD_DEPOSITS_PAUSE;
+  // The explicit "off" spellings, quiet: `false` is how a build opens deposits
+  // again now that an unset env means paused.
+  if (['false', 'off', 'none', '0'].includes(value.toLowerCase())) return NO_YIELD_DEPOSITS_PAUSE;
   const parts = value.split(',').map((part) => part.trim()).filter(Boolean);
   // `true` anywhere in the list means every chain: a kill switch must never
   // narrow itself on a typo like `true,56`.
