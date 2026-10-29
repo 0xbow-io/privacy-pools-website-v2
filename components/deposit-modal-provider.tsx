@@ -159,7 +159,7 @@ import { useAllChainsPriceMap, usePriceFeedsSettled } from '@/hooks/use-all-chai
 import apiClient from '@/services/api-client';
 import { invalidateTransactionCaches } from '@/services/cache';
 import { NoteStatus, type Note, type PoolSession, type YieldDeployment } from '@/services/sdk-types';
-import { getConfiguredNativeYieldDeployment, getConfiguredYieldDepositDeploymentForUnderlying, getConfiguredYieldDeploymentForAsset, getNativeYieldDepositDeployment, getYieldDepositDeploymentForUnderlying, getYieldDeploymentsForChain, VAULT_DEPOSITS_PAUSED_MESSAGE, YIELD_APY_PERCENT, YIELD_OPT_OUT_FEE, yieldDepositsPaused, yieldOptOutFeeActive } from '@/config/yield';
+import { getConfiguredNativeYieldDeployment, getConfiguredYieldDepositDeploymentForUnderlying, getConfiguredYieldDeploymentForAsset, getNativeYieldDepositDeployment, getYieldDepositDeploymentForUnderlying, getYieldDeploymentsForChain, VAULT_DEPOSITS_PAUSED_MESSAGE, YIELD_APY_PERCENT, YIELD_OPT_OUT_FEE, yieldDepositsPausedOnChain, yieldOptOutFeeActive } from '@/config/yield';
 import { PP_ROUTER_QUOTE_ABI, toYieldDepositFor } from '@/services/yield-deposit-for';
 import { toNativeYieldDeposit } from '@/services/yield-native-deposit';
 import { useYieldVaultProbeVersion } from '@/hooks/use-yield-vault-probe';
@@ -2655,11 +2655,11 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       const liveYieldIsNative = selectedToken.isNative && liveDeployment?.nativeMode === true;
       const useYieldPath = yieldAvailable && yieldOn && !!liveDeployment;
       depositErrorReportRef.current.isYield = useYieldPath;
-      // Vault deposits paused: an asset whose deposits land in a vault is
-      // refused here, before anything is prepared, and never shielded plainly
-      // into the closed or superseded pool. The configured route (not the
-      // verified one) decides, so a pending probe cannot slip past it.
-      if (yieldDepositsPaused() && (selectedToken.isNative
+      // Vault deposits paused on this chain: an asset whose deposits land in a
+      // vault is refused here, before anything is prepared, and never shielded
+      // plainly into the closed or superseded pool. The configured route (not
+      // the verified one) decides, so a pending probe cannot slip past it.
+      if (yieldDepositsPausedOnChain(depositChainId) && (selectedToken.isNative
         ? getConfiguredNativeYieldDeployment(depositChainId) !== undefined
         : getConfiguredYieldDepositDeploymentForUnderlying(depositChainId, selectedToken.address) !== undefined)) {
         throw new Error(VAULT_DEPOSITS_PAUSED_MESSAGE);

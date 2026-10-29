@@ -55,9 +55,9 @@
 import type { YieldDeployment } from '@/services/sdk-types';
 import { ACTIVE_ENVIRONMENT } from '@/config/environments';
 import { yieldVaultUsable } from '@/services/yield-vault-probe';
-import { YIELD_DEPOSITS_PAUSED } from '@/config/yield-deposits-paused';
+import { yieldDepositsPausedOnChain } from '@/config/yield-deposits-paused';
 
-export { YIELD_DEPOSITS_PAUSED, yieldDepositsPaused, VAULT_DEPOSITS_PAUSED_MESSAGE, DEPOSITS_PAUSED_SUBTITLE } from '@/config/yield-deposits-paused';
+export { YIELD_DEPOSITS_PAUSED, yieldDepositsPaused, yieldDepositsPausedOnChain, VAULT_DEPOSITS_PAUSED_MESSAGE, DEPOSITS_PAUSED_SUBTITLE } from '@/config/yield-deposits-paused';
 
 function getEnv(...values: Array<string | undefined>): string | undefined {
   return values.find((value) => value && value.trim().length > 0)?.trim();
@@ -403,11 +403,13 @@ const YIELD_DEPLOYMENT_MAP: Record<number, YieldDeployment> = Object.fromEntries
 const YIELD_FLAGS = { enabled: YIELD_ENABLED, withdrawReady: YIELD_WITHDRAW_READY };
 /**
  * The flags the two DEPOSIT money gates read (getYieldDepositDeploymentForUnderlying,
- * getNativeYieldDepositDeployment): YIELD_FLAGS plus the kill switch. Nothing
- * else reads these, so withdraw, redemption, unwrap, ragequit and Portfolio
- * resolve exactly as before with deposits paused.
+ * getNativeYieldDepositDeployment): YIELD_FLAGS plus the kill switch for that
+ * chain. Nothing else reads these, so withdraw, redemption, unwrap, ragequit
+ * and Portfolio resolve exactly as before with deposits paused.
  */
-const YIELD_DEPOSIT_FLAGS = { ...YIELD_FLAGS, depositsPaused: YIELD_DEPOSITS_PAUSED };
+function yieldDepositFlags(chainId: number) {
+  return { ...YIELD_FLAGS, depositsPaused: yieldDepositsPausedOnChain(chainId) };
+}
 
 /** Every deployment the env CONFIGURES for `chainId`, flags-gated, unverified. For the probe site only. */
 export function getConfiguredYieldDeployments(chainId: number): YieldDeployment[] {
@@ -485,7 +487,7 @@ export function isConfiguredYieldUnderlying(chainId: number, tokenAddress: strin
 
 /** Exact verified PPRouter route for a selected underlying deposit input. */
 export function getYieldDepositDeploymentForUnderlying(chainId: number, tokenAddress: string | undefined): YieldDeployment | undefined {
-  return resolveYieldDepositDeploymentForUnderlying(chainId, tokenAddress, YIELD_DEPOSIT_FLAGS, YIELD_DEPLOYMENTS_MAP, yieldVaultUsable);
+  return resolveYieldDepositDeploymentForUnderlying(chainId, tokenAddress, yieldDepositFlags(chainId), YIELD_DEPLOYMENTS_MAP, yieldVaultUsable);
 }
 
 /**
@@ -591,7 +593,7 @@ export function resolveNativeYieldDepositDeployment(
  * pass the probe, so an unconfigured build behaves exactly as before.
  */
 export function getNativeYieldDepositDeployment(chainId: number): YieldDeployment | undefined {
-  return resolveNativeYieldDepositDeployment(chainId, YIELD_DEPOSIT_FLAGS, YIELD_DEPLOYMENTS_MAP, yieldVaultUsable);
+  return resolveNativeYieldDepositDeployment(chainId, yieldDepositFlags(chainId), YIELD_DEPLOYMENTS_MAP, yieldVaultUsable);
 }
 
 /**

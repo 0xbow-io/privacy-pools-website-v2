@@ -22,7 +22,15 @@ import {
   resolveYieldDepositDeploymentForUnderlying,
   YIELD_DEPOSITS_PAUSED,
 } from '@/config/yield';
-import { VAULT_DEPOSITS_PAUSED_MESSAGE } from '@/config/yield-deposits-paused';
+import {
+  DEFAULT_YIELD_PAUSE_BANNER_TEXT,
+  parseYieldDepositsPaused,
+  pauseActive,
+  pauseCoversChain,
+  resolveYieldPauseBannerText,
+  VAULT_DEPOSITS_PAUSED_MESSAGE,
+  YIELD_PAUSE_BANNER_TEXT,
+} from '@/config/yield-deposits-paused';
 import { conversionTargetRefusal, entrypointOnlyTargetBlocked } from '@/services/entrypoint-only-route';
 import { NO_HOLDINGS, selectHubTokens } from '@/services/hub-token-catalog-rule';
 
@@ -156,5 +164,89 @@ describe('paused: every exit resolves exactly as before', () => {
     for (const chainId of Object.keys(prodTokens).map(Number)) {
       expect(paused[chainId][NATIVE_ASSET_ADDRESS.toLowerCase()]).toBeDefined();
     }
+  });
+});
+
+describe('per chain scope (Pat, 2026-10-29: Aave froze its Ethereum reserves only)', () => {
+  test('the flag parses true, a chain id list, or off', () => {
+    expect(parseYieldDepositsPaused(undefined)).toEqual({ all: false, chainIds: [] });
+    expect(parseYieldDepositsPaused('')).toEqual({ all: false, chainIds: [] });
+    expect(parseYieldDepositsPaused('  ')).toEqual({ all: false, chainIds: [] });
+    expect(parseYieldDepositsPaused('false')).toEqual({ all: false, chainIds: [] });
+    expect(parseYieldDepositsPaused('true')).toEqual({ all: true, chainIds: [] });
+    expect(parseYieldDepositsPaused(' TRUE ')).toEqual({ all: true, chainIds: [] });
+    expect(parseYieldDepositsPaused('1')).toEqual({ all: false, chainIds: [1] });
+    expect(parseYieldDepositsPaused('1,56')).toEqual({ all: false, chainIds: [1, 56] });
+    expect(parseYieldDepositsPaused(' 1 , 56 ,1,')).toEqual({ all: false, chainIds: [1, 56] });
+    // Junk entries are ignored, never widened into "every chain".
+    expect(parseYieldDepositsPaused('1,abc,-5,0,1.5')).toEqual({ all: false, chainIds: [1] });
+    expect(parseYieldDepositsPaused('yes')).toEqual({ all: false, chainIds: [] });
+  });
+
+  test('true covers every chain, a list covers only its chains, off covers none', () => {
+    for (const chainId of [1, 56, 10, 8453, 42161]) {
+      expect(pauseCoversChain(parseYieldDepositsPaused('true'), chainId)).toBe(true);
+      expect(pauseCoversChain(parseYieldDepositsPaused(undefined), chainId)).toBe(false);
+      expect(pauseCoversChain(parseYieldDepositsPaused('1'), chainId)).toBe(chainId === 1);
+    }
+    expect(pauseActive(parseYieldDepositsPaused('1'))).toBe(true);
+    expect(pauseActive(parseYieldDepositsPaused('true'))).toBe(true);
+    expect(pauseActive(parseYieldDepositsPaused('false'))).toBe(false);
+  });
+
+  test('chain 1 paused: its vault entries are marked, BNB Chain and the rest stay open', () => {
+    const only1 = pauseVaultDeposits(prodTokens, PROD_YIELD_DEPLOYMENTS, (id) => id === 1);
+    for (const [chainId, tokens] of Object.entries(only1)) {
+      if (Number(chainId) === 1) {
+        expect(tokens).toEqual(paused[1]);
+      } else {
+        expect(tokens).toBe(prodTokens[Number(chainId)]);
+        for (const t of Object.values(tokens)) expect(t.depositPaused).toBeUndefined();
+      }
+    }
+    for (const symbol of ['ETH', 'USDC', 'USDT']) {
+      expect(Object.values(only1[1]).filter((t) => t.symbol === symbol).every((t) => t.depositPaused)).toBe(true);
+    }
+    // BNB Chain has a vault, and it is still open.
+    expect((PROD_YIELD_DEPLOYMENTS[56] ?? []).length).toBeGreaterThan(0);
+    expect(Object.values(only1[56]).some((t) => t.yieldShare)).toBe(true);
+  });
+
+  test('the money gates pause chain 1 while another chain still resolves its vault', () => {
+    const flagsFor = (chainId: number) => ({ ...ON, depositsPaused: pauseCoversChain(parseYieldDepositsPaused('1'), chainId) });
+    for (const chainId of chains) {
+      for (const d of PROD_YIELD_DEPLOYMENTS[chainId]) {
+        const want = chainId === 1 ? undefined : d;
+        if (d.nativeMode) {
+          expect(resolveNativeYieldDepositDeployment(chainId, flagsFor(chainId), PROD_YIELD_DEPLOYMENTS, usable)).toBe(want);
+        } else {
+          expect(resolveYieldDepositDeploymentForUnderlying(chainId, d.underlying, flagsFor(chainId), PROD_YIELD_DEPLOYMENTS, usable)).toBe(want);
+        }
+        // Exits never read the switch.
+        expect(resolveYieldDeploymentForAsset(chainId, d.ppUSDC, flagsFor(chainId), PROD_YIELD_DEPLOYMENTS, usable)).toBe(d);
+      }
+    }
+  });
+});
+
+describe('the pause banner text', () => {
+  const on = parseYieldDepositsPaused('1');
+  const off = parseYieldDepositsPaused(undefined);
+
+  test('unset text with a pause on shows Pat\'s default', () => {
+    expect(resolveYieldPauseBannerText(on, undefined)).toBe(DEFAULT_YIELD_PAUSE_BANNER_TEXT);
+    expect(resolveYieldPauseBannerText(parseYieldDepositsPaused('true'), undefined)).toBe(DEFAULT_YIELD_PAUSE_BANNER_TEXT);
+    expect(DEFAULT_YIELD_PAUSE_BANNER_TEXT).toBe('Deposits are paused for yield assets on Ethereum because of Aave.');
+  });
+
+  test('custom text is shown trimmed, an empty string hides the banner', () => {
+    expect(resolveYieldPauseBannerText(on, '  Deposits are paused on Ethereum.  ')).toBe('Deposits are paused on Ethereum.');
+    expect(resolveYieldPauseBannerText(on, '')).toBeNull();
+    expect(resolveYieldPauseBannerText(on, '   ')).toBeNull();
+  });
+
+  test('no pause, no banner, whatever the text', () => {
+    for (const raw of [undefined, '', 'Something']) expect(resolveYieldPauseBannerText(off, raw)).toBeNull();
+    expect(YIELD_PAUSE_BANNER_TEXT).toBeNull();
   });
 });
