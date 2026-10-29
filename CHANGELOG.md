@@ -2,6 +2,14 @@
 
 All notable changes to the Privacy Pools v2 web app are documented in this file.
 
+## [1.3.0] - 2026-10-29
+
+### Added
+- A notice at the top of the app that deposits are paused for yield assets on Ethereum and Base because of Aave's reserve freeze, with a link to Aave's announcement. Withdrawals, Send and Portfolio are not affected.
+
+### Changed
+- An opt-in setting can pause new deposits into the yield vaults per chain, off by default. When it is on, those assets show "Deposits paused" and Shield, swaps and pool pages refuse the deposit before anything is signed.
+
 ## [1.2.1] - 2026-10-23
 
 ### Fixed
