@@ -1216,10 +1216,14 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     () => (isStellar ? (stellarSession.spendableNotes as unknown as StellarUiNote[]) : []),
     [isStellar, stellarSession.spendableNotes],
   );
-  // A relayed Stellar send pays the relayer fee from the same notes (a one-time link is self-submitted).
-  const stellarSendFee = isStellar
-    ? stellarTransferRelayFee({ oneTime: recipientRegistrationCheck?.registered === false })
-    : 0n;
+  // The user confirmed a one-time link for exactly this recipient (self-submitted, so no relayer fee).
+  // Case-insensitive: the shared check may hold a lowercased copy (a G address is uppercase only).
+  const stellarOneTime = isStellar
+    && recipientRegistrationCheck?.registered === false
+    && recipientRegistrationCheck.chainId === STELLAR_TESTNET_ID
+    && recipientRegistrationCheck.recipientAddress.toUpperCase() === recipientAddress.trim().toUpperCase();
+  // A relayed Stellar send pays the relayer fee from the same notes.
+  const stellarSendFee = isStellar ? stellarTransferRelayFee({ oneTime: stellarOneTime }) : 0n;
   const suiActiveTotal = useMemo(
     () => (isStellar
       ? maxStellarTransferForInputs(stellarActiveNotes.reduce((a, n) => a + BigInt(n.value), 0n), stellarSendFee)
@@ -1647,15 +1651,14 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         // No separate recipient lookup here: the SDK resolves the recipient's
         // viewing key inside transfer() and refuses an unregistered one.
         const want = parseUnits(amount, altDecimals);
-        // The user already confirmed a one-time link for exactly this recipient.
-        // Case-insensitive: the shared check may hold a lowercased copy (a G address is uppercase only).
-        const oneTime = recipientRegistrationCheck?.registered === false
-          && recipientRegistrationCheck.chainId === STELLAR_TESTNET_ID
-          && recipientRegistrationCheck.recipientAddress.toUpperCase() === recipientAddress.trim().toUpperCase();
-        // A relayed send pays the relayer's fee from the same notes (one-time links stay self-submitted).
-        const fee = stellarTransferRelayFee({ oneTime });
+        const oneTime = stellarOneTime;
+        const fee = stellarSendFee;
         const pick = selectGreedyTransferInputs(stellarActiveNotes, want + fee, TRANSFER_MAX_INPUTS, TRANSFER_MAX_LABELS);
-        if (!pick.covered) throw new Error(`One transfer can spend up to ${TRANSFER_MAX_INPUTS} notes from ${TRANSFER_MAX_LABELS} deposits.`);
+        if (!pick.covered) {
+          throw new Error(fee > 0n && selectGreedyTransferInputs(stellarActiveNotes, want, TRANSFER_MAX_INPUTS, TRANSFER_MAX_LABELS).covered
+            ? `Not enough left for the ${formatUnits(fee, altDecimals)} ${altSymbol} relayer fee. Send a little less.`
+            : `One transfer can spend up to ${TRANSFER_MAX_INPUTS} notes from ${TRANSFER_MAX_LABELS} deposits.`);
+        }
         if (!live()) { log('warn', 'Transfer', 'Stale run aborted before Stellar broadcast'); return; }
         const inputCommitments = pick.selectedNotes.map((n) => n.commitment as `0x${string}`);
         transferPhaseRef.current = 'proof';
@@ -3267,7 +3270,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     hideAddress, relayFeeEstimate, maxSpendableWei, sendTransactionAsync, walletAddress, sendExactActive,
     selectedNoteCommitments, enteredAmountWei, selectedTokenId, chainId, forcedInputs, feeDisplayGrain, selectedDecimals,
     transfer, prepareRelayed, log, noteManager, keystoreManager,
-    activeNotes, selectedDecimals, recipientIsRegistered, recipientRegistrationCheck,
+    activeNotes, selectedDecimals, recipientIsRegistered, recipientRegistrationCheck, stellarOneTime, stellarSendFee,
     refetchNotes,
     exportAccount, publicClient,
     beginTx, endTx,
@@ -4191,7 +4194,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                   )}
                   {/* Stellar sends are relayed, but one-time links are self-signed,
                       so the chain shows this account as sender. */}
-                  {isStellar && recipientRegistrationCheck?.registered === false && (
+                  {stellarOneTime && (
                     <Text className="text-[12px] leading-[18px] text-[#B45309] font-pp-regular" testID="stellar-transfer-linkable">
                       Sent from your Freighter account, so this send is publicly linked to it.
                     </Text>

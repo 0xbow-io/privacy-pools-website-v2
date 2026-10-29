@@ -23,7 +23,7 @@ import type {
 } from '@privacy-pools-v2/stellar-sdk';
 
 import { STELLAR_RELAYER_CHAIN_ID, STELLAR_TESTNET_CONTRACTS } from '@/config/stellar-deployment';
-import type { StellarSdk } from '@/services/stellar/stellar-runtime';
+import type { StellarRpcInteractor, StellarSdk } from '@/services/stellar/stellar-runtime';
 
 const TIMEOUT_MS = 90_000;
 
@@ -66,6 +66,48 @@ function formatProof(proof: { pi_a: Hex[]; pi_b: Hex[][]; pi_c: Hex[] }) {
 export interface StellarRelayedSpendHooks {
   mark(): Promise<Hex>;
   relayed(txHash: Hex, spentNullifiers: Hex[], fromCursor: Hex): void;
+}
+
+/** What the SDK gets instead of a pool `transact` built from the user's account while relaying. */
+export const RELAYED_TRANSACT_PLACEHOLDER = '';
+
+type Receipt = Awaited<ReturnType<StellarRpcInteractor['waitForTransactionReceipt']>>;
+
+/**
+ * The session's RPC for relayed flows (`relaying()` is true while a relayer is handed to the session):
+ * - The SDK encodes every proof as a pool `transact` from the user's account and simulates it, which
+ *   would show the RPC that account with the nullifiers the relayer then spends. While relaying that
+ *   build is skipped: the relayer builds its own tx and the SDK only uses the proof.
+ * - A relayed tx's receipt comes from `confirmRelayed` (pool events by spent nullifiers), never from
+ *   `getTransaction(hash)`; while relaying, a hash it does not know is refused.
+ */
+export function relayAwareRpc<T extends Pick<StellarRpcInteractor, 'buildTransaction' | 'waitForTransactionReceipt'>>(
+  rpc: T,
+  poolContractId: string,
+  hooks: { relaying(): boolean; confirmRelayed(hash: Hex): Promise<Receipt> | null },
+): T {
+  return new Proxy(rpc, {
+    get: (target, prop) => {
+      if (prop === 'buildTransaction') {
+        const build: StellarRpcInteractor['buildTransaction'] = target.buildTransaction.bind(target);
+        return async (...args: Parameters<StellarRpcInteractor['buildTransaction']>) => {
+          const [contractId, method] = args;
+          if (hooks.relaying() && contractId === poolContractId && method === 'transact') return RELAYED_TRANSACT_PLACEHOLDER;
+          return build(...args);
+        };
+      }
+      if (prop === 'waitForTransactionReceipt') {
+        return async (hash: Hex) => {
+          const confirmed = hooks.confirmRelayed(hash);
+          if (confirmed) return confirmed;
+          if (hooks.relaying()) throw new Error('Refusing to look up a relayed transaction by its hash.');
+          return target.waitForTransactionReceipt(hash);
+        };
+      }
+      const value = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
 }
 
 /** The proof's leading `inputs` public signals are the spent nullifiers, as 32-byte hex. */

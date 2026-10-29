@@ -70,7 +70,7 @@ import {
   type IndexedStellarRpcInteractor,
   type StellarRpcInteractor,
 } from '@/services/stellar/stellar-runtime';
-import { createStellarRelayer } from '@/services/stellar/stellar-relayer';
+import { createStellarRelayer, relayAwareRpc } from '@/services/stellar/stellar-relayer';
 import {
   decodeStellarBackup,
   decodeStellarRequestBackup,
@@ -272,28 +272,16 @@ class StellarAccount {
     });
   }
 
-  /**
-   * The session's RPC, except that the receipt of a transfer this client handed to the relayer
-   * is found by its spent nullifiers in the pool's events (a read every client makes) rather
-   * than by `getTransaction(hash)`, which would tell the RPC which relayed tx is ours.
-   */
+  /** The session's RPC; while a relayer is active it never builds a `transact` from this account (see relayAwareRpc). */
   private confirmingRpc(sdk: StellarSdk, address: string, rpc: IndexedStellarRpcInteractor): IndexedStellarRpcInteractor {
-    return new Proxy(rpc, {
-      get: (target, prop) => {
-        if (prop === 'waitForTransactionReceipt') {
-          return async (hash: Hex) => {
-            const key = String(hash).toLowerCase();
-            const spend = this.relayedSpends.get(key);
-            if (!spend) return target.waitForTransactionReceipt(hash);
-            try {
-              return await this.relayedTxConfirmer(sdk, address, target).confirmRelayedTransaction({ txHash: hash, ...spend });
-            } finally {
-              this.relayedSpends.delete(key);
-            }
-          };
-        }
-        const value = Reflect.get(target, prop, target);
-        return typeof value === 'function' ? value.bind(target) : value;
+    return relayAwareRpc(rpc, STELLAR_TESTNET_CONTRACTS.poolContractId, {
+      relaying: () => this.activeRelayer !== null,
+      confirmRelayed: (hash) => {
+        const key = String(hash).toLowerCase();
+        const spend = this.relayedSpends.get(key);
+        if (!spend) return null;
+        this.relayedSpends.delete(key);
+        return this.relayedTxConfirmer(sdk, address, rpc).confirmRelayedTransaction({ txHash: hash, ...spend });
       },
     });
   }
@@ -345,6 +333,10 @@ class StellarAccount {
   ): Promise<TransferResult<StellarAddress, StellarLog>> {
     const option = prepared.relayOptions[0];
     if (!option) throw new Error('The relayer did not return a quote.');
+    // Note selection and the UI reserve the estimate; a higher signed fee would come out of the slack.
+    if (BigInt(option.selectedQuote.quote.feeCommitment.feeAmount) > STELLAR_TRANSFER_RELAY_FEE_ESTIMATE) {
+      throw new Error('The relayer asks for more than the fee shown. Try again later.');
+    }
     // As on the self-submitted path: the SDK's rebuild of the recipient notes (one
     // commitment-keyed timestamp read per note) is skipped.
     const result = await session.relayTransfer({ ...option, recipient: { ...option.recipient, noteSecretsMap: undefined } });
