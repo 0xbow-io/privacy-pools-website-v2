@@ -27,7 +27,7 @@ describe('relayAwareRpc', () => {
   test("the SDK builds a proof's transact locally, unsimulated: proving sends the RPC nothing", async () => {
     const sdk = await import('@privacy-pools-v2/stellar-sdk');
     const { calls, rpc } = spyRpc();
-    const wrapped = relayAwareRpc(rpc as unknown as StellarRpcInteractor, POOL, { relaying: () => false, confirmRelayed: () => null });
+    const wrapped = relayAwareRpc(rpc as unknown as StellarRpcInteractor, POOL, () => false);
     const vault = sdk.createStellarPoolVaultInteractor(
       { rpcInteractor: wrapped, contractId: POOL, readSourcePublicKey: ACCOUNT },
       { walletInteractor: { getAccounts: async () => [ACCOUNT] } as never },
@@ -45,28 +45,23 @@ describe('relayAwareRpc', () => {
 
   test('a transact build is skipped while relaying', async () => {
     const { calls, rpc } = spyRpc();
-    const wrapped = relayAwareRpc(rpc as unknown as StellarRpcInteractor, POOL, { relaying: () => true, confirmRelayed: () => null });
+    const wrapped = relayAwareRpc(rpc as unknown as StellarRpcInteractor, POOL, () => true);
     expect(await wrapped.buildTransaction(POOL, 'transact', [], ACCOUNT)).toBe(RELAYED_TRANSACT_PLACEHOLDER);
     expect(calls).toEqual([]);
   });
 
   test('other builds pass through while relaying', async () => {
     const { calls, rpc } = spyRpc();
-    const wrapped = relayAwareRpc(rpc as unknown as StellarRpcInteractor, POOL, { relaying: () => true, confirmRelayed: () => null });
+    const wrapped = relayAwareRpc(rpc as unknown as StellarRpcInteractor, POOL, () => true);
     expect(await wrapped.buildTransaction(STELLAR_TESTNET_CONTRACTS.keystoreContractId, 'set_auth_policy', [], ACCOUNT)).toBe('xdr');
     expect(await wrapped.buildTransaction(POOL, 'ragequit', [], ACCOUNT)).toBe('xdr');
     expect(calls.map((c) => c[2])).toEqual(['set_auth_policy', 'ragequit']);
   });
 
-  test('a relayed receipt comes from the confirmer; an unknown hash is refused while relaying', async () => {
+  test('a receipt is never looked up by hash while relaying', async () => {
     let relaying = true;
     const { calls, rpc } = spyRpc();
-    const confirmed = { status: true, txHash: '0xbeef', logs: [] };
-    const wrapped = relayAwareRpc(rpc as unknown as StellarRpcInteractor, POOL, {
-      relaying: () => relaying,
-      confirmRelayed: (hash) => (hash === '0xbeef' ? Promise.resolve(confirmed as never) : null),
-    });
-    expect(await wrapped.waitForTransactionReceipt('0xbeef')).toBe(confirmed as never);
+    const wrapped = relayAwareRpc(rpc as unknown as StellarRpcInteractor, POOL, () => relaying);
     await expect(wrapped.waitForTransactionReceipt('0xcafe')).rejects.toThrow(/relayed transaction/);
     expect(calls).toEqual([]);
 
@@ -77,7 +72,7 @@ describe('relayAwareRpc', () => {
 
   test('everything else is the underlying RPC', async () => {
     const { calls, rpc } = spyRpc();
-    const wrapped = relayAwareRpc(rpc as unknown as StellarRpcInteractor, POOL, { relaying: () => true, confirmRelayed: () => null }) as unknown as typeof rpc;
+    const wrapped = relayAwareRpc(rpc as unknown as StellarRpcInteractor, POOL, () => true) as unknown as typeof rpc;
     await wrapped.getEvents();
     expect(calls).toEqual([['getEvents']]);
   });

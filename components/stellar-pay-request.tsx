@@ -55,6 +55,9 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
   const stroops = link ? BigInt(link.request.amount) : null;
   const amountText = stroops !== null ? formatUnits(stroops, STELLAR_XLM.decimals) : null;
   const amountLabel = amountText ? `${amountText} XLM` : null;
+  // Paid through the relayer: its fee comes on top of the amount.
+  const relayFee = stellarTransferRelayFee();
+  const totalLabel = stroops !== null ? `up to ${formatUnits(stroops + relayFee, STELLAR_XLM.decimals)} XLM` : null;
   const paymentCode = link
     ? short(link.format === 'blind' ? link.request.paymentId.replace(/^0x/, '') : link.request.requestId.replace(/-/g, ''))
     : '';
@@ -204,12 +207,16 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
               <Text className="font-pp-medium text-[14px] text-text">1x Private pool payment</Text>
               <Text className="font-pp-semi-bold text-[14px] text-text">{amountLabel}</Text>
             </View>
+            <View className="flex-row items-center justify-between gap-[12px]">
+              <Text className="font-pp-medium text-[14px] text-text">Relayer fee</Text>
+              <Text className="font-pp-semi-bold text-[14px] text-text" testID="stellar-pay-fee">up to {formatUnits(relayFee, STELLAR_XLM.decimals)} XLM</Text>
+            </View>
 
             <View className="border-t border-dashed border-border-light" />
 
             <View className="flex-row items-center justify-between">
               <Text className="font-pp-bold text-[16px] text-text">Total</Text>
-              <Text className="font-pp-bold text-[16px] text-text">{amountLabel}</Text>
+              <Text className="font-pp-bold text-[16px] text-text">{totalLabel}</Text>
             </View>
 
             <View className="gap-[8px]">

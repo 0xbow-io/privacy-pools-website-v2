@@ -133,7 +133,7 @@ describe('createIndexedRpcInteractor: asp-v2 as the single events source', () =>
     expect(rpcCalls).toEqual([]);
   });
 
-  test('serves a cursor read from the cursor ledger, dropping events at or before the cursor', async () => {
+  test('serves a pool cursor read from the whole history, dropping events at or before the cursor', async () => {
     const cursor = '0021263867686522880-0000000002';
     route = () => ({
       body: {
@@ -144,9 +144,20 @@ describe('createIndexedRpcInteractor: asp-v2 as the single events source', () =>
 
     const result = await rpc.getEvents({ contractId: POOL, cursor });
 
-    expect(new URL(requested[0]).searchParams.get('fromLedger')).toBe(String(BigInt('0021263867686522880') >> 32n));
+    // The cursor never reaches the ASP: a dated read would tie this client to the spend it waits for.
+    expect(new URL(requested[0]).searchParams.get('fromLedger')).toBe('0');
     expect(result.events.map((e) => e.id)).toEqual(['0021263867686522880-0000000003']);
     expect(result.cursor).toBe('0021263867686522880-0000000003');
+  });
+
+  test("serves a pool start-ledger read (a relayed spend's confirmation poll) from the whole history", async () => {
+    const atLedger = (ledger: bigint, i: number) => `${(ledger << 32n).toString().padStart(19, '0')}-${String(i).padStart(10, '0')}`;
+    route = () => ({ body: { events: [event(atLedger(100n, 1)), event(atLedger(200n, 1)), event(atLedger(201n, 1))], latestLedger: '0xc9' } });
+
+    const result = await rpc.getEvents({ contractId: POOL, startLedger: '200' } as never);
+
+    expect(new URL(requested[0]).searchParams.get('fromLedger')).toBe('0');
+    expect(result.events.map((e) => e.id)).toEqual([atLedger(200n, 1), atLedger(201n, 1)]);
   });
 
   test('keeps the cursor when nothing new is indexed', async () => {
@@ -207,6 +218,9 @@ describe('Stellar relayer (v2 relayer routes)', () => {
     expect(bodies[0]).toEqual({ amount: '10000000', asset: ASSET, recipient: G, commit: true });
     expect(quote).toMatchObject({ txCost: '0', gasPrice: '0', feeAmount: '50000', amountSent: '10050000', amountReceived: '10000000' });
     expect(quote.feeCommitment).toEqual({ ...commitment, extraGas: false });
+
+    await relayer.getWithdrawalQuote(info, { amount: '0x989680', asset: ASSET, recipient: G, shape: { n: 2, m: 2 } } as never);
+    expect(bodies.at(-1)).toEqual({ amount: '10000000', asset: ASSET, recipient: G, commit: true, shape: { n: 2, m: 2 } });
   });
 
   test('relays the proof with the signed commitment unchanged, and surfaces a refusal', async () => {
@@ -277,36 +291,13 @@ describe('Stellar relayer (v2 relayer routes)', () => {
     await expect(relayer.relayTransfer(info, transferParams())).rejects.toBeInstanceOf(RelayerRejected);
   });
 
-  test('hands the spent nullifiers and the pre-submit cursor to the caller, not the hash to the RPC', async () => {
-    route = () => ({ status: 201, body: { txHash: '0xbeef' } });
-    const order: string[] = [];
-    const seen: unknown[] = [];
-    const hooked = createStellarRelayer(sdk, {
-      url: RELAYER,
-      relayerAddress: G,
-      relayedSpends: {
-        mark: async () => { order.push('mark'); return '0xc0' as never; },
-        relayed: (txHash, spentNullifiers, fromCursor) => { order.push('relayed'); seen.push({ txHash, spentNullifiers, fromCursor }); },
-      },
-    });
-    const [info] = await hooked.getRelayers();
-    await hooked.relayTransfer(info, transferParams());
-    expect(order).toEqual(['mark', 'relayed']);
-    expect(seen).toEqual([{ txHash: '0xbeef', spentNullifiers: [`0x${'11'.padStart(64, '0')}`, `0x${'12'.padStart(64, '0')}`], fromCursor: '0xc0' }]);
-    expect(rpcCalls).toEqual([]);
-  });
-
-  test('a refused relay records nothing to confirm', async () => {
-    route = () => ({ status: 400, body: { message: 'nope' } });
-    const seen: unknown[] = [];
-    const hooked = createStellarRelayer(sdk, {
-      url: RELAYER,
-      relayerAddress: G,
-      relayedSpends: { mark: async () => '0xc0' as never, relayed: (...args) => { seen.push(args); } },
-    });
-    const [info] = await hooked.getRelayers();
-    await expect(hooked.relayTransfer(info, transferParams())).rejects.toBeInstanceOf(RelayerRejected);
-    expect(seen).toEqual([]);
+  test('forwards the proof shape the SDK prices a quote by', async () => {
+    route = () => ({ status: 200, body: { feeAmount: '317289', txCost: '117289', gasPrice: '0', feeCommitment: transferCommitment } });
+    const [info] = await relayer.getRelayers();
+    await relayer.getTransferQuote(info, { asset: ASSET, commit: true, shape: { n: 1, m: 2 } } as never);
+    expect(bodies.at(-1)).toEqual({ asset: ASSET, commit: true, shape: { n: 1, m: 2 } });
+    await relayer.getTransferQuote(info, { asset: ASSET, commit: true });
+    expect(bodies.at(-1)).toEqual({ asset: ASSET, commit: true });
   });
 
   test('swaps and announcements stay unsupported', async () => {

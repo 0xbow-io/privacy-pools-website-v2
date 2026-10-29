@@ -4192,6 +4192,15 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                   {relayFeeCeiled != null && (
                     <FeeWarning breakdown={relayedFeeBreakdown(enteredAmountWei, relayFeeEstimate)} testID="transfer-fee-warning" />
                   )}
+                  {/* Stellar: the relayer's fee comes on top of the amount (none on a self-submitted one-time link). */}
+                  {isStellar && stellarSendFee > 0n && (
+                    <Text className="text-[14px] leading-[24px]">
+                      <Text className="text-[14px] text-[#737373] font-pp-bold">Relayer fee: </Text>
+                      <Text className="text-[14px] text-[#737373] font-pp-regular" testID="stellar-transfer-fee">
+                        up to {formatUnits(stellarSendFee, altDecimals)} {altSymbol}, added on top
+                      </Text>
+                    </Text>
+                  )}
                   {/* Stellar sends are relayed, but one-time links are self-signed,
                       so the chain shows this account as sender. */}
                   {stellarOneTime && (
