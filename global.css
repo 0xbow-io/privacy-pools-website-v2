@@ -470,3 +470,26 @@
     height: 100dvh;
   }
 }
+
+/* Ecosystem links and filters share the app's theme tokens. */
+.ecosystem-project:focus-visible,
+.ecosystem-control:focus-visible {
+  outline: 2px solid var(--pp-text);
+  outline-offset: 4px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .ecosystem-project:hover > div { border-color: var(--pp-text-muted); }
+}
+
+/* Match the landing page's external CTA arrow: 3px diagonal, 220ms ease-out.
+   Project cards remain still; this applies only to the action buttons. */
+@media (prefers-reduced-motion: no-preference) {
+  .ecosystem-control .ecosystem-arrow {
+    transition: transform 220ms cubic-bezier(.22, 1, .36, 1);
+  }
+}
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .ecosystem-control:hover .ecosystem-arrow {
+    transform: translate(3px, -3px);
+  }
+}
