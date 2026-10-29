@@ -1,11 +1,12 @@
 /**
  * Stellar testnet deployment - single source of truth for deployed contract IDs.
  *
- * Mirrors v2-monorepo packages/contracts-stellar/scripts/deployments/testnet.json
- * (origin/v2.0, deployed 2026-09-30 by GDMVB24I…3CDN; the pool was then upgraded
- * in place to a4c3dbb5, wasm 4c8a42a3). Checked on-chain 2026-09-30: all four
- * contracts are live, the relay contract's pool() resolves to the pool, native
- * XLM is enabled (0.01 XLM minimum, 100 bps fee, 0.1 XLM max relay fee).
+ * Redeployed from scratch by Artem on 2026-10-29 (the previous deployer key was
+ * lost, and the old contracts probably still carried the dev circuit keys, so proofs
+ * failed with InvalidProof, error #4). Addresses as posted in his Slack DM; not
+ * yet checked on-chain from here. The ASP and the Stellar relayer must point at
+ * these same contracts. Previous set: v2-monorepo
+ * packages/contracts-stellar/scripts/deployments/testnet.json (2026-09-30).
  *
  * Every value can be overridden per deployment via EXPO_PUBLIC_STELLAR_* (see
  * .env.example). Each access is STATIC so Expo inlines it into the web bundle;
@@ -40,19 +41,19 @@ export const STELLAR_TESTNET_ID = 202;
 export const STELLAR_TESTNET_CONTRACTS: StellarContracts = {
   poolContractId: env(
     process.env.EXPO_PUBLIC_STELLAR_POOL_ID,
-    'CD7MO327ZMNRWQFKPCTOOZ45LDH3EOVCEM2BYRJSGXYVG4Q2BXJ4LNXY',
+    'CAEC22LQOCPYI54KVKDABDD2BEJ5FJ5RBCEGUMPBBYFK2P5TIDHMXLEO',
   ),
   keystoreContractId: env(
     process.env.EXPO_PUBLIC_STELLAR_KEYSTORE_ID,
-    'CBCRN7ZYS5J3NCFL6CSCDZAFH7WZK3WPNXPNE3HFMRQ277AH6E5QDR3P',
+    'CCADEFKNONBCNZCJMEZY762CGHWEEPHC5WKXQRXJNS4EFQGPJPQQ5ZAO',
   ),
   aspRegistryContractId: env(
     process.env.EXPO_PUBLIC_STELLAR_ASP_REGISTRY_ID,
-    'CAU4IZTQYTXBUTCJIGVQOPSPEUTC6G4LXFCPYQRF4VLOCQDNY3ICAOZD',
+    'CDZMJFM35EGJJOSYM5RBTRU4VYQ2CRHTTNLIWNN2BEBS2WEH2ZPNRDU4',
   ),
   relayContractId: env(
     process.env.EXPO_PUBLIC_STELLAR_RELAY_ID,
-    'CAL2LFF6F2GDXIEYA6VTH7BF2E2JZPSOUASBL6IGVLHVIK2RSESD42W6',
+    'CD3JIC3HAIG7NANY7MSGPQZDU5I4PJ4OWZGLTZC2QWEBOPE6RVGENH7Q',
   ),
   nativeAssetContractId: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC',
 };
