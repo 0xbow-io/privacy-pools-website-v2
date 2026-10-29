@@ -16,7 +16,7 @@ test('restores an identity Wagmi can hydrate and persist before reconnecting', (
   const state = read();
   expect(state?.status).toBe('reconnecting');
   expect(state?.connections.get(state.current!)?.accounts).toEqual([address]);
-  const config = createConfig({ chains: [mainnet], transports: { [mainnet.id]: http() }, ssr: true });
+  const config = createConfig({ chains: [mainnet], transports: { [mainnet.id]: http() }, ssr: true, multiInjectedProviderDiscovery: false });
   expect(() => hydrate(config, { initialState: state, reconnectOnMount: true })).not.toThrow();
   expect(config.state.current).toBe('wallet');
 });
