@@ -1220,7 +1220,8 @@ function buildAspCiphertext(sdk: StellarSdk, note: StellarNote, aspPublicKey: He
   );
 }
 
-const LABEL_PENDING_KEY = (address: string) => `ppv2_stellar_label_pending_v2_${STELLAR_TESTNET_ID}_${address}`;
+// Scoped to the pool: after a redeploy a marker for the old pool must not be sent to the new registry.
+const LABEL_PENDING_KEY = (address: string) => `ppv2_stellar_label_pending_v3_${STELLAR_TESTNET_ID}_${STELLAR_TESTNET_CONTRACTS.poolContractId}_${address}`;
 
 /** A confirmed deposit whose `register_label` still has to be sent. */
 export type PendingLabel = { depositTxHash: string; aspCiphertext: Hex };
@@ -1253,7 +1254,7 @@ function clearLabelPending(address: string, depositTxHash: string) {
 }
 
 /** Pre-ciphertext markers (commitments only), from builds before the v2 key. */
-const LEGACY_LABEL_PENDING_KEY = (address: string) => `ppv2_stellar_label_pending_${STELLAR_TESTNET_ID}_${address}`;
+const LEGACY_LABEL_PENDING_KEY = (address: string) => `ppv2_stellar_label_pending_${STELLAR_TESTNET_ID}_${STELLAR_TESTNET_CONTRACTS.poolContractId}_${address}`;
 
 function readLegacyLabelPending(address: string): Hex[] {
   try {

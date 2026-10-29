@@ -8,18 +8,18 @@ withdraw, transfer and exit modals. Stellar is one more network in the selector,
 
 | Piece | Where |
 |---|---|
-| Contracts | `config/stellar-deployment.ts` (v2-monorepo `v2.0`, `scripts/deployments/testnet.json`, deployed 2026-09-30) |
+| Contracts | `config/stellar-deployment.ts` (redeployed from scratch by Artem on 2026-10-29) |
 | SDK | `@privacy-pools-v2/stellar-sdk`, vendored as `vendor/privacy-pools-v2-stellar-sdk-*.tgz` |
 | Wallet | Freighter (`components/stellar-wallet-provider.tsx`) |
 | ASP + event history | asp-v2, the environment's ASP like every other chain (`EXPO_PUBLIC_ASP_URL`, the dev asp-v2 in staging): `/association-set/{root,leaves}`, `/labels/{rejected,poi-required}`, `/public-key` and `GET /202/public/events`, scoped to chain 202 and the pool |
 | Relayer | the v2 relayer (v2-monorepo `packages/relayer/relayer`), Stellar testnet only, at `EXPO_PUBLIC_STELLAR_RELAYER_URL` (`/v1/details\|quote\|relay/stellar/1/…`), via `services/stellar/stellar-relayer.ts` |
 | Circuits | the EVM set in `public/artifacts`, reused unchanged by the Stellar verifier |
 
-The 2026-09-30 deployment (deployer `GDMVB24I…3CDN`) replaced the 2026-09-26 one (pool
-`CBEXH5…`, still live but no longer used). Checked on-chain on 2026-09-30: all four
-contracts are live, the pool was upgraded in place to `a4c3dbb5` (wasm `4c8a42a3`), the
-relay contract points at the pool, and native XLM is enabled (0.01 XLM minimum, 100 bps
-fee, 0.1 XLM max relay fee). The app keeps a 1 XLM deposit floor.
+The 2026-10-29 deployment (Artem, from scratch, new deployer) replaced the 2026-09-30
+one: the old deployer key was lost and its contracts probably still verified with the
+dev circuit keys (deposit failed with InvalidProof, error #4). The addresses come from
+his Slack DM and have not been checked on-chain from this repo; the ASP and the Stellar
+relayer must point at the same contracts. Native XLM keeps a 1 XLM deposit floor in the app.
 
 ## Run it
 
@@ -32,7 +32,7 @@ fee, 0.1 XLM max relay fee). The app keeps a 1 XLM deposit floor.
    ```
 
 2. The app uses the environment's ASP (`EXPO_PUBLIC_ASP_URL`): asp-v2, which on the
-   2026-09-30 deployment is the registry's postman and approves whitelisted depositors
+   current deployment is the registry's postman and approves whitelisted depositors
    only. `EXPO_PUBLIC_STELLAR_RELAYER_URL` names the relayer (see `.env.production`);
    without it withdrawals refuse.
 
