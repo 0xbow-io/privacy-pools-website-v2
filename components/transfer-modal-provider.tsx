@@ -1480,7 +1480,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     if (isStellar) { if (!stellarConnected || stellarLocked) return null; }
     else if (!connectedAddress) return null;
     if (isSui) {
-      if (enteredAmountWei > suiActiveTotal) return `Insufficient ${isStellar ? 'Stellar' : 'Sui'} balance (${formatUnits(suiActiveTotal, altDecimals)} ${altSymbol} available${stellarSendFee > 0n ? ` after the ${formatUnits(stellarSendFee, altDecimals)} ${altSymbol} relayer fee` : ''})`;
+      if (enteredAmountWei > suiActiveTotal) return `Insufficient ${isStellar ? 'Stellar' : 'Sui'} balance (${formatUnits(suiActiveTotal, altDecimals)} ${altSymbol} available${stellarSendFee > 0n ? ` after a relayer fee of up to ${formatUnits(stellarSendFee, altDecimals)} ${altSymbol}` : ''})`;
       if (enteredAmountWei > suiMaxLineageTotal) {
         return isStellar
           ? `One transfer can spend up to ${TRANSFER_MAX_INPUTS} notes from ${TRANSFER_MAX_LABELS} deposits (${formatUnits(suiMaxLineageTotal, altDecimals)} ${altSymbol}). Send that first, then the rest.`
@@ -1656,7 +1656,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         const pick = selectGreedyTransferInputs(stellarActiveNotes, want + fee, TRANSFER_MAX_INPUTS, TRANSFER_MAX_LABELS);
         if (!pick.covered) {
           throw new Error(fee > 0n && selectGreedyTransferInputs(stellarActiveNotes, want, TRANSFER_MAX_INPUTS, TRANSFER_MAX_LABELS).covered
-            ? `Not enough left for the ${formatUnits(fee, altDecimals)} ${altSymbol} relayer fee. Send a little less.`
+            ? `Not enough left for the relayer fee (up to ${formatUnits(fee, altDecimals)} ${altSymbol}). Send a little less.`
             : `One transfer can spend up to ${TRANSFER_MAX_INPUTS} notes from ${TRANSFER_MAX_LABELS} deposits.`);
         }
         if (!live()) { log('warn', 'Transfer', 'Stale run aborted before Stellar broadcast'); return; }

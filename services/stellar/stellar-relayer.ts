@@ -75,9 +75,9 @@ type Receipt = Awaited<ReturnType<StellarRpcInteractor['waitForTransactionReceip
 
 /**
  * The session's RPC for relayed flows (`relaying()` is true while a relayer is handed to the session):
- * - The SDK encodes every proof as a pool `transact` from the user's account and simulates it, which
- *   would show the RPC that account with the nullifiers the relayer then spends. While relaying that
- *   build is skipped: the relayer builds its own tx and the SDK only uses the proof.
+ * - A simulated pool `transact` from the user's account would show the RPC that account with the
+ *   nullifiers the relayer then spends. The SDK builds a proof's transact locally (unsimulated); any
+ *   simulated transact build while relaying is still skipped, since the relayer builds its own tx.
  * - A relayed tx's receipt comes from `confirmRelayed` (pool events by spent nullifiers), never from
  *   `getTransaction(hash)`; while relaying, a hash it does not know is refused.
  */
@@ -141,7 +141,7 @@ export function createStellarRelayer(
       if (params.extraGas) throw new sdk.RelayerRequestFailed('extraGas is not supported on Stellar');
       const quote = await postJson<Omit<WithdrawalRelayerQuote<StellarAddress>, 'txCost' | 'gasPrice'>>(
         `${base}/quote/${path}/receive`,
-        { amount: BigInt(params.amount).toString(), asset: params.asset, recipient: params.recipient, commit: true },
+        { amount: BigInt(params.amount).toString(), asset: params.asset, recipient: params.recipient, commit: true, ...(params.shape && { shape: params.shape }) },
       );
       if (!quote.feeCommitment) throw new sdk.RelayerRequestFailed('The relayer returned no fee commitment');
       return { ...quote, txCost: '0', gasPrice: '0', feeCommitment: { ...quote.feeCommitment, extraGas: false } };
@@ -153,7 +153,7 @@ export function createStellarRelayer(
         txCost: string;
         gasPrice: string;
         feeCommitment?: TransferRelayerQuote<StellarAddress>['feeCommitment'];
-      }>(`${base}/quote/${path}/transfer`, { asset: params.asset, commit: true }).catch((error: unknown) => {
+      }>(`${base}/quote/${path}/transfer`, { asset: params.asset, commit: true, ...(params.shape && { shape: params.shape }) }).catch((error: unknown) => {
         throw new sdk.RelayerRequestFailed(error instanceof Error ? error.message : String(error));
       });
       if (!quote.feeCommitment) throw new sdk.RelayerRequestFailed('The relayer returned no fee commitment');

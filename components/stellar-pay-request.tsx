@@ -141,7 +141,7 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
     if (!pick.covered) {
       const available = formatUnits(stellarSession.spendableTotal, STELLAR_XLM.decimals);
       setError(stellarSession.spendableTotal < need
-        ? `Insufficient Stellar balance (${available} XLM available${fee > 0n ? `, ${formatUnits(fee, STELLAR_XLM.decimals)} XLM relayer fee on top` : ''}).`
+        ? `Insufficient Stellar balance (${available} XLM available${fee > 0n ? `, plus a relayer fee of up to ${formatUnits(fee, STELLAR_XLM.decimals)} XLM` : ''}).`
         : `One transfer can spend up to ${TRANSFER_MAX_INPUTS} notes from ${TRANSFER_MAX_LABELS} deposits.`);
       return;
     }

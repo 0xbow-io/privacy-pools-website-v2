@@ -1,6 +1,6 @@
 // Relayed Stellar flows must not show the RPC the user's account next to the nullifiers the relayer
-// spends: the SDK encodes every proof as a pool `transact` from that account and simulates it, so
-// while relaying that build is skipped, and a relayed receipt is never looked up by its hash.
+// spends: the SDK builds a proof's `transact` locally (unsimulated), a simulated transact build is
+// skipped while relaying, and a relayed receipt is never looked up by its hash.
 import { describe, expect, test } from 'bun:test';
 import { Keypair } from '@stellar/stellar-sdk';
 
@@ -16,6 +16,7 @@ function spyRpc() {
   const calls: unknown[][] = [];
   const rpc = {
     async buildTransaction(...args: unknown[]) { calls.push(['buildTransaction', ...args]); return 'xdr'; },
+    async buildUnsimulatedTransaction(...args: unknown[]) { calls.push(['buildUnsimulatedTransaction', ...args]); return 'unsimulated'; },
     async waitForTransactionReceipt(hash: string) { calls.push(['waitForTransactionReceipt', hash]); return { status: true, txHash: hash }; },
     async getEvents() { calls.push(['getEvents']); return []; },
   };
@@ -23,32 +24,30 @@ function spyRpc() {
 }
 
 describe('relayAwareRpc', () => {
-  test("while relaying, the SDK's own transact encode never reaches the RPC", async () => {
+  test("the SDK builds a proof's transact locally, unsimulated: proving sends the RPC nothing", async () => {
     const sdk = await import('@privacy-pools-v2/stellar-sdk');
-    let relaying = true;
     const { calls, rpc } = spyRpc();
-    const wrapped = relayAwareRpc(rpc as unknown as StellarRpcInteractor, POOL, { relaying: () => relaying, confirmRelayed: () => null });
+    const wrapped = relayAwareRpc(rpc as unknown as StellarRpcInteractor, POOL, { relaying: () => false, confirmRelayed: () => null });
     const vault = sdk.createStellarPoolVaultInteractor(
       { rpcInteractor: wrapped, contractId: POOL, readSourcePublicKey: ACCOUNT },
       { walletInteractor: { getAccounts: async () => [ACCOUNT] } as never },
     );
-    const encode = () => vault.encodeTransact(
+    await vault.encodeTransact(
       { a: hex(64), b: hex(128), c: hex(64) } as never,
       [['0x1'], ['0x2', '0x3'], ['0x4'], ['0x5'], ['0x6'], ['0x7'], ['0x8']] as never,
       { processor: STELLAR_TESTNET_CONTRACTS.relayContractId, data: '0x' } as never,
       [],
       STELLAR_TESTNET_CONTRACTS.nativeAssetContractId as never,
     );
+    // buildUnsimulatedTransaction is local (a placeholder sequence, no getAccount, no simulation).
+    expect(calls.map((c) => c[0])).toEqual(['buildUnsimulatedTransaction']);
+  });
 
-    expect(await encode()).toBe(RELAYED_TRANSACT_PLACEHOLDER);
+  test('a transact build is skipped while relaying', async () => {
+    const { calls, rpc } = spyRpc();
+    const wrapped = relayAwareRpc(rpc as unknown as StellarRpcInteractor, POOL, { relaying: () => true, confirmRelayed: () => null });
+    expect(await wrapped.buildTransaction(POOL, 'transact', [], ACCOUNT)).toBe(RELAYED_TRANSACT_PLACEHOLDER);
     expect(calls).toEqual([]);
-
-    // Self-submitted (not relaying): the build goes out, with the user's account as source.
-    relaying = false;
-    expect(await encode()).toBe('xdr');
-    expect(calls).toHaveLength(1);
-    expect(calls[0].slice(0, 3)).toEqual(['buildTransaction', POOL, 'transact']);
-    expect(calls[0].at(-1)).toBe(ACCOUNT);
   });
 
   test('other builds pass through while relaying', async () => {

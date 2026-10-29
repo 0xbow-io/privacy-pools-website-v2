@@ -45,8 +45,10 @@ import type {
 
 import {
   STELLAR_KEY_APP_IDENTIFIER,
+  estimateStellarRelayFee,
   STELLAR_RELAYER_CHAIN_ID,
   STELLAR_TESTNET_CONTRACTS,
+  STELLAR_TESTNET_DEPLOYMENT_LEDGER,
   STELLAR_TESTNET_NETWORK,
   STELLAR_TESTNET_RPC_URL,
   STELLAR_TRANSFER_RELAY_FEE_ESTIMATE,
@@ -181,8 +183,6 @@ class StellarAccount {
   // Memory only, like the session's own keys: matches this account's spends
   // in the pool's Transacted events (services/stellar-activity.ts).
   private nullifyingKey: string | null = null;
-  // Registrations re-sent from this page, so a caller-held copy is not sent twice.
-  private readonly labelsSent = new Set<string>();
   private poseidon: ReturnType<StellarSdk['PoseidonHashService']['create']> | null = null;
 
   getSnapshot = (): StellarAccountSnapshot => this.snapshot;
@@ -359,6 +359,7 @@ class StellarAccount {
       rpcInteractor: this.confirmingRpc(sdk, address, this.rpc),
       networkPassphrase: STELLAR_TESTNET_NETWORK.networkPassphrase,
       poolContractId: STELLAR_TESTNET_CONTRACTS.poolContractId,
+      deploymentLedger: STELLAR_TESTNET_DEPLOYMENT_LEDGER,
       keystoreContractId: STELLAR_TESTNET_CONTRACTS.keystoreContractId,
       aspRegistryContractId: STELLAR_TESTNET_CONTRACTS.aspRegistryContractId,
       // Required by the config schema even with an ASP override; never fetched.
@@ -369,6 +370,9 @@ class StellarAccount {
       // sync (one JSON blob per account), which also restores notes saved by
       // builds from before the SDK's storage schema fix.
       persistentStorage: { type: 'memory' },
+      // The SDK's store is in memory, but every payment request record (with its note secrets) is
+      // kept in localStorage by stellar-request-storage.ts and imported back on each session build.
+      ephemeralPaymentRequests: true,
       aspDataProvider: new StellarTestnetAspProvider(sdk, ASP_URL),
       circuitArtifacts: new FetchCircuitArtifacts(),
       // No relayer outside a relayed flow: the SDK asks every relayer for a quote even on a
@@ -615,7 +619,6 @@ class StellarAccount {
       // asking for one would put signatures ahead of the recipient check.
       if (!params.recipient) await this.ensureRegistered(session, generation, onStage);
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
-      const sdk = await loadStellarSdk();
       onStage?.('proving');
       const base = { tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId, value: toHex(params.amount) };
       const prepared = params.recipient
@@ -626,34 +629,18 @@ class StellarAccount {
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       this.assertStillBound(generation);
       onStage?.('signing');
-      // executeDeposit submits the deposit, then registers its ASP label
-      // (`register_label`, a second wallet approval). If only the label step
-      // fails the deposit is already on-chain: that must not read as a failed
-      // deposit. The ciphertext is kept and re-sent by the next manual sync.
-      let labelRegistered = true;
-      let pendingLabel: PendingLabel | null = null;
-      let txHash: string;
-      try {
-        const receipt = await session.executeDeposit(prepared);
-        if (!receipt.status) throw new Error('The deposit transaction failed on-chain.');
-        txHash = receipt.txHash as string;
-      } catch (error) {
-        if (!(error instanceof sdk.DepositLabelRegistrationFailed)) throw error;
-        labelRegistered = false;
-        txHash = error.depositTxHash;
-        pendingLabel = { depositTxHash: error.depositTxHash, aspCiphertext: error.aspCiphertext as Hex };
-        markLabelPending(address, pendingLabel);
-        console.warn('[stellar] deposit landed but its ASP registration did not; Sync will retry', error);
-      }
+      // One transaction (`deposit_with_label`): the ASP label cannot fail on its own.
+      const receipt = await session.executeDeposit(prepared);
+      if (!receipt.status) throw new Error('The deposit transaction failed on-chain.');
+      const txHash = receipt.txHash as string;
       onStage?.('syncing');
       await this.refreshLocal(session, address);
       return {
         txHash,
         commitment: prepared.pendingNote.commitment,
         label: prepared.pendingNote.label,
-        labelRegistered,
-        // Held by the caller too: the stored retry marker is best-effort.
-        pendingLabel,
+        labelRegistered: true,
+        pendingLabel: null,
       };
     });
   }
@@ -694,7 +681,13 @@ class StellarAccount {
           recipient: params.recipient,
           extraGas: false,
           amount: params.amount.toString(),
+          // Priced by proof shape, as the SDK asks for it (n = m = inputs).
+          shape: { n: Math.min(params.inputCommitments.length, 5), m: Math.min(params.inputCommitments.length, 5) },
         });
+        // The inputs were selected for amount + this estimate; a higher fee would not be covered.
+        if (BigInt(quote.feeAmount) > estimateStellarRelayFee(params.amount)) {
+          throw new Error('The relayer asks for more than the fee shown. Try again later.');
+        }
         const option = {
           inputCommitments: params.inputCommitments,
           amount: toHex(params.amount),
@@ -917,105 +910,16 @@ class StellarAccount {
   }
 
   /**
-   * Re-sends ASP registrations that did not go through at deposit time (the
-   * second Freighter prompt declined, or the network failed). Needs a wallet
-   * approval per deposit, so it only runs from an explicit user action.
+   * Deposits carry their ASP label in the same transaction (`deposit_with_label`), so nothing is
+   * left to re-send. Markers stored by older builds belong to the replaced 2026-09-30 pool: sending
+   * them to the current registry would only register junk labels, so they are dropped.
    */
-  retryPendingLabels(extra: readonly PendingLabel[] = []): Promise<{ sent: number; failed: number; firstError: string | null }> {
-    const address = this.snapshot.address;
-    // A failure before the per-label loop (no signer, SDK load) is recorded on
-    // the session error too, so no caller can swallow it silently.
-    return this.enqueueRetryPendingLabels(extra).catch((error) => {
-      if (this.snapshot.address === address) this.set({ error: messageOf(error) });
-      throw error;
-    });
-  }
-
-  private enqueueRetryPendingLabels(extra: readonly PendingLabel[]): Promise<{ sent: number; failed: number; firstError: string | null }> {
+  retryPendingLabels(_extra: readonly PendingLabel[] = []): Promise<{ sent: number; failed: number; firstError: string | null }> {
     return this.enqueue(async () => {
-      const { address, signer, generation } = this.requireSigner();
-      // A caller-held ciphertext (from the deposit result) counts even when
-      // storage refused the marker.
-      const stored = readLabelPending(address);
-      const pending = [
-        ...stored,
-        ...extra.filter((e) => !this.labelsSent.has(e.depositTxHash) && !stored.some((p) => p.depositTxHash === e.depositTxHash)),
-      ];
-      const legacy = readLegacyLabelPending(address);
-      if (pending.length === 0 && legacy.length === 0) return { sent: 0, failed: 0, firstError: null };
-      const sdk = await loadStellarSdk();
-      const rpcInteractor = this.rpc ?? createIndexedRpcInteractor(sdk, ASP_URL);
-      const registry = new sdk.StellarASPRegistryInteractor({
-        rpcInteractor,
-        contractId: STELLAR_TESTNET_CONTRACTS.aspRegistryContractId,
-        readSourcePublicKey: address,
-      });
-      const wallet = new sdk.FreighterWalletInteractor({
-        provider: signer,
-        networkPassphrase: STELLAR_TESTNET_NETWORK.networkPassphrase,
-        rpcInteractor,
-      });
-      let sent = 0;
-      let failed = 0;
-      let firstError: string | null = null;
-      const register = async (ciphertext: Hex) => {
-        this.assertStillBound(generation);
-        // The SDK's own retry path: rebuild register_label from the
-        // ciphertext; the deposit itself is never resubmitted.
-        const unsignedXdr = await registry.encodeRegisterLabel(ciphertext, address);
-        const hash = await wallet.sendTransaction(unsignedXdr);
-        await rpcInteractor.waitForTransactionReceipt(hash);
-      };
-      // Each registration is independent: one declined or failed approval
-      // must not strand the deposits after it.
-      for (const item of pending) {
-        try {
-          await register(item.aspCiphertext);
-          clearLabelPending(address, item.depositTxHash);
-          this.labelsSent.add(item.depositTxHash);
-          sent++;
-        } catch (error) {
-          failed++;
-          firstError ??= messageOf(error);
-          console.warn('[stellar] ASP registration retry failed', error);
-        }
-      }
-      // Markers from builds before the ciphertext was kept hold only the
-      // deposit's commitment. The note (and its deposit secret) comes from
-      // this session's own state, which the preceding sync filled; the
-      // ciphertext is rebuilt locally. Settled notes just drop the marker.
-      if (legacy.length > 0 && this.sessionPromise) {
-        try {
-          const session = await this.sessionPromise;
-          const { notes } = await session.exportAccount();
-          const aspPublicKey = await new StellarTestnetAspProvider(sdk, ASP_URL).getASPPublicKey();
-          for (const commitment of legacy) {
-            const note = notes.find((n) => BigInt(n.commitment) === BigInt(commitment));
-            if (!note) continue; // not rediscovered yet: keep the marker
-            if (note.status !== NOTE_STATUS_PENDING || !note.depositSecret) {
-              clearLegacyLabelPending(address, commitment);
-              continue;
-            }
-            try {
-              const ciphertext = buildAspCiphertext(sdk, note, aspPublicKey);
-              await register(ciphertext);
-              clearLegacyLabelPending(address, commitment);
-              sent++;
-            } catch (error) {
-              failed++;
-              firstError ??= messageOf(error);
-              console.warn('[stellar] legacy ASP registration retry failed', error);
-            }
-          }
-        } catch (error) {
-          failed++;
-          firstError ??= messageOf(error);
-        }
-      }
-      if (firstError && this.snapshot.address === address) {
-        this.set({ error: `${failed} deposit${failed === 1 ? '' : 's'} still need ASP approval: ${firstError}` });
-      }
-      return { sent, failed, firstError };
+      const { address } = this.requireSigner();
+      for (const item of readLabelPending(address)) clearLabelPending(address, item.depositTxHash);
+      for (const commitment of readLegacyLabelPending(address)) clearLegacyLabelPending(address, commitment);
+      return { sent: 0, failed: 0, firstError: null };
     });
   }
 
@@ -1294,26 +1198,6 @@ function restoreStoredRows(address: string): boolean {
   return missing.length > 0;
 }
 
-// Same value as the SDK's NoteStatus.PENDING, without importing the SDK
-// eagerly (it is lazy-loaded with snarkjs).
-const NOTE_STATUS_PENDING = 'PENDING';
-
-/** The ASP ciphertext for a deposit note, as the SDK's executeDeposit builds it. */
-function buildAspCiphertext(sdk: StellarSdk, note: StellarNote, aspPublicKey: Hex): Hex {
-  const tokenId = new sdk.StellarAddressFieldConverter().toTokenIdField(STELLAR_TESTNET_CONTRACTS.nativeAssetContractId);
-  return sdk.encodeASPCipherText(
-    {
-      noteAddressHash: note.noteAddressHash,
-      tokenId,
-      value: note.value,
-      depositSecret: note.depositSecret as Hex,
-      metadata: '0x0' as Hex,
-    } as Parameters<StellarSdk['encodeASPCipherText']>[0],
-    { aspPublicKey } as Parameters<StellarSdk['encodeASPCipherText']>[1],
-    { cryptoService: new sdk.StellarCryptoService() } as unknown as Parameters<StellarSdk['encodeASPCipherText']>[2],
-  );
-}
-
 const LABEL_PENDING_KEY = (address: string) => `ppv2_stellar_label_pending_v2_${STELLAR_TESTNET_ID}_${address}`;
 
 /** A confirmed deposit whose `register_label` still has to be sent. */
@@ -1335,11 +1219,6 @@ function writeLabelPending(address: string, list: PendingLabel[]) {
   } catch {
     // storage unavailable: the retry list is best-effort
   }
-}
-
-function markLabelPending(address: string, item: PendingLabel) {
-  const list = readLabelPending(address);
-  if (!list.some((p) => p.depositTxHash === item.depositTxHash)) writeLabelPending(address, [...list, item]);
 }
 
 function clearLabelPending(address: string, depositTxHash: string) {

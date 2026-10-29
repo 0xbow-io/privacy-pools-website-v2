@@ -53,6 +53,8 @@ async function sessionFor(owner: string, seed = 'ab') {
     rpcInteractor: chainStub,
     networkPassphrase: STELLAR_TESTNET_NETWORK.networkPassphrase,
     poolContractId: STELLAR_TESTNET_CONTRACTS.poolContractId,
+    deploymentLedger: '1',
+    ephemeralPaymentRequests: true,
     keystoreContractId: STELLAR_TESTNET_CONTRACTS.keystoreContractId,
     aspRegistryContractId: STELLAR_TESTNET_CONTRACTS.aspRegistryContractId,
     ipfsGatewayUrl: 'http://unused.invalid',

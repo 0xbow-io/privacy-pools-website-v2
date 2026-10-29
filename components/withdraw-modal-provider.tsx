@@ -5583,7 +5583,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       no relayer yet: the withdrawal is sent from this account. */}
                   {isStellar ? (
                     <Text className="py-[9px] font-pp-sans text-[11.5px] text-text-muted">
-                      {`Relayer fee ~${formatUnits(estimateStellarRelayFee(parseTokenAmount(amount, altDecimals)), altDecimals)} XLM (0.5%), added on top. Sent by the testnet relayer, not your account.`}
+                      {`Relayer fee up to ${formatUnits(estimateStellarRelayFee(parseTokenAmount(amount, altDecimals)), altDecimals)} XLM (0.5% plus network cost), added on top; any unused part returns as change. Sent by the testnet relayer, not your account.`}
                     </Text>
                   ) : (
                   <View className="flex-row flex-wrap items-center justify-between gap-[6px] py-[9px]">
