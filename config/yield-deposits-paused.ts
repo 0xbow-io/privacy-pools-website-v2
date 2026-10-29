@@ -81,7 +81,26 @@ export const DEPOSITS_PAUSED_SUBTITLE = 'Deposits paused';
 /** The one-line reason a refused vault deposit gives. */
 export const VAULT_DEPOSITS_PAUSED_MESSAGE = 'Vault deposits are paused. Withdraw and send still work.';
 
-/** Banner text when EXPO_PUBLIC_YIELD_PAUSE_BANNER_TEXT is unset (Pat, 2026-10-29). */
+/**
+ * Chains whose yield vaults sit on Aave, so "because of Aave" is true for them.
+ * The default banner names only these; any other scope sets its own text.
+ */
+const AAVE_CHAIN_NAMES: Readonly<Record<number, string>> = { 1: 'Ethereum', 8453: 'Base', 10: 'Optimism', 42161: 'Arbitrum' };
+
+/**
+ * Default banner text for a pause naming specific chains (Pat, 2026-10-29,
+ * Ethereum; 8453 Base added the same day), or null when the pause is "every
+ * chain" or names a chain that is not an Aave chain.
+ */
+export function defaultYieldPauseBannerText(pause: YieldDepositsPause): string | null {
+  if (pause.all || pause.chainIds.length === 0) return null;
+  const names = pause.chainIds.map((id) => AAVE_CHAIN_NAMES[id]);
+  if (names.some((name) => !name)) return null;
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return `Deposits are paused for yield assets on ${list} because of Aave.`;
+}
+
+/** The Ethereum-only default, kept for the prod test. */
 export const DEFAULT_YIELD_PAUSE_BANNER_TEXT = 'Deposits are paused for yield assets on Ethereum because of Aave.';
 
 /**
@@ -91,11 +110,9 @@ export const DEFAULT_YIELD_PAUSE_BANNER_TEXT = 'Deposits are paused for yield as
  */
 export function resolveYieldPauseBannerText(pause: YieldDepositsPause, raw: string | undefined): string | null {
   if (!pauseActive(pause)) return null;
-  // The default names Ethereum and Aave, so it only fits a pause on exactly
-  // chain 1. Any other scope must set its own text, never show a wrong chain.
-  if (raw === undefined) {
-    return !pause.all && pause.chainIds.length === 1 && pause.chainIds[0] === 1 ? DEFAULT_YIELD_PAUSE_BANNER_TEXT : null;
-  }
+  // The default names its chains and Aave, so it only fits a pause on Aave
+  // chains. Any other scope must set its own text, never show a wrong chain.
+  if (raw === undefined) return defaultYieldPauseBannerText(pause);
   const text = raw.trim();
   return text.length > 0 ? text : null;
 }

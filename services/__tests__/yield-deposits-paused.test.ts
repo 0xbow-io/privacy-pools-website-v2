@@ -242,6 +242,13 @@ describe('the pause banner text', () => {
     expect(resolveYieldPauseBannerText(parseYieldDepositsPaused('true'), undefined)).toBeNull();
     expect(resolveYieldPauseBannerText(parseYieldDepositsPaused('56'), undefined)).toBeNull();
     expect(resolveYieldPauseBannerText(parseYieldDepositsPaused('1,56'), undefined)).toBeNull();
+    // Ethereum and Base, both Aave chains (Pat, 2026-10-29).
+    expect(resolveYieldPauseBannerText(parseYieldDepositsPaused('1,8453'), undefined))
+      .toBe('Deposits are paused for yield assets on Ethereum and Base because of Aave.');
+    expect(resolveYieldPauseBannerText(parseYieldDepositsPaused('8453'), undefined))
+      .toBe('Deposits are paused for yield assets on Base because of Aave.');
+    expect(resolveYieldPauseBannerText(parseYieldDepositsPaused('1,10,8453'), undefined))
+      .toBe('Deposits are paused for yield assets on Ethereum, Optimism and Base because of Aave.');
     expect(resolveYieldPauseBannerText(parseYieldDepositsPaused('true'), 'Deposits are paused.')).toBe('Deposits are paused.');
     expect(DEFAULT_YIELD_PAUSE_BANNER_TEXT).toBe('Deposits are paused for yield assets on Ethereum because of Aave.');
   });
