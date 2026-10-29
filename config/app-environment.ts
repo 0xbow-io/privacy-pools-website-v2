@@ -215,6 +215,8 @@ export function withAppEnvironmentQuery(href: string, env: AppEnvironment): stri
  */
 export function applyAppEnvironment(env: AppEnvironment): void {
   if (typeof window === 'undefined') return;
+  // A staging-only host never switches worlds, whatever calls this.
+  if (IS_STAGING_ONLY_HOST) return;
   try {
     window.localStorage.setItem(APP_ENVIRONMENT_STORAGE_KEY, env);
   } catch {
