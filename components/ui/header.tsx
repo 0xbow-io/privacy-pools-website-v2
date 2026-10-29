@@ -16,6 +16,7 @@ import { ACTIVE_DEPLOYMENTS, ACTIVE_DEPLOYMENTS_BY_CHAIN } from '@/config/enviro
 import {
   ACTIVE_APP_ENVIRONMENT,
   APP_ENVIRONMENTS,
+  IS_STAGING_ONLY_HOST,
   appEnvironmentLabel,
   applyAppEnvironment,
 } from '@/config/app-environment';
@@ -1040,6 +1041,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                       2026-09-08): regular testers need Sepolia without knowing ?env=
                       or ?debug=1 (Artem: "too nerdy for regular testers"), and a tester
                       parked on staging must be able to get back to prod. */}
+                  {!IS_STAGING_ONLY_HOST && (
                   <Pressable
                     className="flex-row items-center gap-[10px] rounded-pill px-[12px] py-[10px] hover:bg-background-secondary"
                     onPress={() => setActionsMenuView('environment')}
@@ -1055,6 +1057,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                     </Text>
                     <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
                   </Pressable>
+                  )}
                   {INTERNAL_TOOLS_ENABLED && (
                   <Pressable
                     className="flex-row items-center gap-[10px] rounded-pill px-[12px] py-[10px] hover:bg-background-secondary"
