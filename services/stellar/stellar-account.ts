@@ -45,7 +45,6 @@ import type {
 
 import {
   STELLAR_KEY_APP_IDENTIFIER,
-  STELLAR_RELAYED_TRANSFERS,
   STELLAR_RELAYER_CHAIN_ID,
   STELLAR_TESTNET_CONTRACTS,
   STELLAR_TESTNET_NETWORK,
@@ -328,17 +327,12 @@ class StellarAccount {
     });
   }
 
-  /**
-   * Runs `fn` with the relayer handed to the session when relayed transfers are on
-   * (STELLAR_RELAYED_TRANSFERS), else self-submitted through Freighter as before. The relayer is
-   * reachable from the session only for this call, as for a withdrawal.
-   */
-  private async withTransferRelayer<T>(address: string, fn: (relayed: boolean) => Promise<T>): Promise<T> {
-    if (!STELLAR_RELAYED_TRANSFERS) return fn(false);
+  /** Runs `fn` with the relayer handed to the session; it is reachable only for this call, as for a withdrawal. */
+  private async withTransferRelayer<T>(address: string, fn: () => Promise<T>): Promise<T> {
     const relayer = await this.connectRelayer(await loadStellarSdk(), address);
     this.activeRelayer = relayer;
     try {
-      return await fn(true);
+      return await fn();
     } finally {
       this.activeRelayer = null;
     }
@@ -749,18 +743,16 @@ class StellarAccount {
       // The recipient's viewing key is resolved by the SDK here (it throws
       // RecipientViewingKeyUnregistered when there is none), so no separate
       // lookup naming the recipient is made beforehand.
-      const transferParams = {
-        tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
-        amount: toHex(params.amount),
-        inputCommitments: params.inputCommitments,
-        // The field name is EVM-flavoured; the Stellar SDK resolves the
-        // recipient's viewing key from the Stellar keystore by this G-address.
-        recipientDiscoveryData: { evmAddress: params.recipient },
-      };
-      const result = await this.withTransferRelayer(address, async (relayed) => {
-        if (!relayed) return session.transfer(transferParams);
+      const result = await this.withTransferRelayer(address, async () => {
         // Relayed: the relayer submits, its fee comes on top of `amount`.
-        const prepared = await session.prepareTransfer(transferParams);
+        const prepared = await session.prepareTransfer({
+          tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
+          amount: toHex(params.amount),
+          inputCommitments: params.inputCommitments,
+          // The field name is EVM-flavoured; the Stellar SDK resolves the
+          // recipient's viewing key from the Stellar keystore by this G-address.
+          recipientDiscoveryData: { evmAddress: params.recipient },
+        });
         if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
         this.assertStillBound(generation);
         onStage?.('relaying');
@@ -894,17 +886,16 @@ class StellarAccount {
       this.assertStillBound(generation);
       params?.onStage?.('proving');
       const total = claimed.reduce((sum, n) => sum + BigInt(n.value), 0n);
-      const result = await this.withTransferRelayer(address, async (relayed) => {
-        const keepParams = {
-          tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
-          inputCommitments: claimed.map((n) => n.commitment as Hex),
-          recipientDiscoveryData: { evmAddress: address },
-        };
-        if (!relayed) return session.transfer({ ...keepParams, amount: toHex(total) });
+      const result = await this.withTransferRelayer(address, async () => {
         // Relayed: the fee comes out of the claimed notes, and whatever the
         // estimate over-reserves returns to this account as change.
         if (total <= STELLAR_TRANSFER_RELAY_FEE_ESTIMATE) throw new Error('This link holds less than the relayer fee.');
-        const prepared = await session.prepareTransfer({ ...keepParams, amount: toHex(total - STELLAR_TRANSFER_RELAY_FEE_ESTIMATE) });
+        const prepared = await session.prepareTransfer({
+          tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
+          amount: toHex(total - STELLAR_TRANSFER_RELAY_FEE_ESTIMATE),
+          inputCommitments: claimed.map((n) => n.commitment as Hex),
+          recipientDiscoveryData: { evmAddress: address },
+        });
         this.assertStillBound(generation);
         params?.onStage?.('relaying');
         return this.relayPreparedTransfer(session, prepared);
@@ -1223,15 +1214,15 @@ class StellarAccount {
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       this.assertStillBound(generation);
       onStage?.('proving');
-      const result = await this.withTransferRelayer(address, async (relayed) => {
+      const result = await this.withTransferRelayer(address, async () => {
         const prepared = await session.prepareFulfillPaymentRequest({
           paymentRequest: params.request as Parameters<StellarPoolSession['prepareFulfillPaymentRequest']>[0]['paymentRequest'],
           inputCommitments: params.inputCommitments,
         });
         if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
         this.assertStillBound(generation);
-        onStage?.(relayed ? 'relaying' : 'signing');
-        return relayed ? this.relayPreparedTransfer(session, prepared) : session.executeTransfer(prepared.executeOptions);
+        onStage?.('relaying');
+        return this.relayPreparedTransfer(session, prepared);
       });
       if (!result.txReceipt.status) throw new Error('The transfer transaction failed on-chain.');
       onStage?.('syncing');

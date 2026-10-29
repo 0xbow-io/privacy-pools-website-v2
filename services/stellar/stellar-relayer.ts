@@ -4,7 +4,7 @@
  * (c81ba9d5) still speaks the old reference relayer's /api/v1/relayer/* protocol. Delete once the
  * SDK is re-vendored with v2.0's interactor.
  *
- * Withdrawals, and private transfers when STELLAR_RELAYED_TRANSFERS is on. A withdrawal quote's
+ * Withdrawals and private transfers. A withdrawal quote's
  * routing (`feeCommitment.data`) is checked against the user's recipient and fee by the SDK's
  * withdraw builder before proving. A relayed transfer's only public outflow is the fee
  * (`amountOut == feeAmount`, paid to the relayer as the pool's gated processor).

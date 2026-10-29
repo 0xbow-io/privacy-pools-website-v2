@@ -38,7 +38,7 @@ import { plainTransferRelayError, relayerTransferQuotes, relayTransferParams, re
 import { expectTransferRelay } from '@/services/transfer-relay-outputs';
 import { feeWithinReviewed } from '@/services/relayer-fee-jitter';
 import { recordSentTransfer } from '@/services/sent-transfers-store';
-import { STELLAR_RELAYED_TRANSFERS, STELLAR_TESTNET_CONTRACTS, maxStellarTransferForInputs, stellarTransferRelayFee } from '@/config/stellar-deployment';
+import { STELLAR_TESTNET_CONTRACTS, maxStellarTransferForInputs, stellarTransferRelayFee } from '@/config/stellar-deployment';
 import { recordOwnAction } from '@/services/own-actions-store';
 import { recordWithdrawFee } from '@/services/withdraw-fees-store';
 import { useRequireConnection } from '@/hooks/use-require-connection';
@@ -4189,10 +4189,9 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                   {relayFeeCeiled != null && (
                     <FeeWarning breakdown={relayedFeeBreakdown(enteredAmountWei, relayFeeEstimate)} testID="transfer-fee-warning" />
                   )}
-                  {/* Stellar sends are self-signed until relayed transfers are
-                      on (STELLAR_RELAYED_TRANSFERS), and one-time links always
-                      are, so the chain shows this account as sender. */}
-                  {isStellar && (!STELLAR_RELAYED_TRANSFERS || recipientRegistrationCheck?.registered === false) && (
+                  {/* Stellar sends are relayed, but one-time links are self-signed,
+                      so the chain shows this account as sender. */}
+                  {isStellar && recipientRegistrationCheck?.registered === false && (
                     <Text className="text-[12px] leading-[18px] text-[#B45309] font-pp-regular" testID="stellar-transfer-linkable">
                       Sent from your Freighter account, so this send is publicly linked to it.
                     </Text>

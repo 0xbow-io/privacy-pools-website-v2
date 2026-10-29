@@ -143,29 +143,20 @@ export function maxStellarWithdrawForInputs(inputs: bigint): bigint {
 }
 
 /**
- * Relayed private transfers (Send, /pay "Pools Payment", keeping a claimed link):
- * the v2 relayer submits the pool's own `transact` as the gated processor, so the
- * user's Freighter account never appears on the transfer and only the relayer's
- * fee leaves the pool. Needs a relayer serving
- * `POST /v1/quote/stellar/:id/transfer` and `/v1/relay/stellar/:id/transfer`
- * (the testnet relayer since 2026-10-28, v2-monorepo 860d5213); against one
- * without them every Stellar send fails at the quote instead of falling back
- * to Freighter. Only the literal 'true' turns it on.
- */
-export const STELLAR_RELAYED_TRANSFERS = process.env.EXPO_PUBLIC_STELLAR_RELAYED_TRANSFERS === 'true';
-
-/**
- * The relayer's flat transfer fee for XLM (its `fixedFeeAmount`, 0.02 XLM on the
- * 2026-09-30 config), capped at the asset's max_relay_fee. Only sizes note
- * selection: the signed quote is authoritative and the SDK refuses inputs that do
- * not cover it.
+ * Private transfers (Send, /pay "Pools Payment", keeping a claimed link) are
+ * relayed: the v2 relayer submits the pool's own `transact` as the gated
+ * processor, so the user's Freighter account never appears on the transfer and
+ * only the relayer's fee leaves the pool. One-time links stay self-submitted.
+ *
+ * The relayer's flat transfer fee for XLM (its `fixedFeeAmount`, 0.02 XLM),
+ * capped at the asset's max_relay_fee. Only sizes note selection: the signed
+ * quote is authoritative and the SDK refuses inputs that do not cover it.
  */
 export const STELLAR_TRANSFER_RELAY_FEE_ESTIMATE = 200_000n;
 
-/** The relayer fee a Stellar transfer pays on top of its amount: none when self-submitted. */
-export function stellarTransferRelayFee(params: { relayed?: boolean; oneTime?: boolean } = {}): bigint {
-  const relayed = params.relayed ?? STELLAR_RELAYED_TRANSFERS;
-  return relayed && !params.oneTime ? STELLAR_TRANSFER_RELAY_FEE_ESTIMATE : 0n;
+/** The relayer fee a Stellar transfer pays on top of its amount: none for a self-submitted one-time link. */
+export function stellarTransferRelayFee(params: { oneTime?: boolean } = {}): bigint {
+  return params.oneTime ? 0n : STELLAR_TRANSFER_RELAY_FEE_ESTIMATE;
 }
 
 /** The most a transfer can send when `coverable` is what its inputs hold: the fee comes off. */
