@@ -130,3 +130,38 @@ export const YIELD_PAUSE_BANNER_TEXT: string | null = resolveYieldPauseBannerTex
   YIELD_DEPOSITS_PAUSE,
   process.env.EXPO_PUBLIC_YIELD_PAUSE_BANNER_TEXT,
 );
+
+/**
+ * Where the word "Aave" in the banner points (Pat, 2026-10-29): Aave's own
+ * announcement of the freeze. Build configuration, https only, and an explicit
+ * empty string means no link. Static `process.env.EXPO_PUBLIC_*` read.
+ */
+export const DEFAULT_YIELD_PAUSE_BANNER_LINK_URL = 'https://x.com/aave/status/2115937863162339637';
+
+/** Pure (unit-tested): the link URL to use, or null for none. Only https URLs are accepted. */
+export function resolveYieldPauseBannerLinkUrl(raw: string | undefined): string | null {
+  if (raw === undefined) return DEFAULT_YIELD_PAUSE_BANNER_LINK_URL;
+  const url = raw.trim();
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+export const YIELD_PAUSE_BANNER_LINK_URL: string | null = resolveYieldPauseBannerLinkUrl(
+  process.env.EXPO_PUBLIC_YIELD_PAUSE_BANNER_LINK_URL,
+);
+
+/**
+ * Pure (unit-tested): split the banner text around the first "Aave" so that
+ * word can be rendered as the link. No url or no "Aave" in the text means no link.
+ */
+export function splitBannerAtAave(text: string, url: string | null): { before: string; label: string; after: string } | null {
+  if (!url) return null;
+  const at = text.indexOf('Aave');
+  if (at < 0) return null;
+  return { before: text.slice(0, at), label: 'Aave', after: text.slice(at + 4) };
+}

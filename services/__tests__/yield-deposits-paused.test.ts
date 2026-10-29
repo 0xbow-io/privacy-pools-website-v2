@@ -28,6 +28,9 @@ import {
   pauseActive,
   pauseCoversChain,
   resolveYieldPauseBannerText,
+  resolveYieldPauseBannerLinkUrl,
+  splitBannerAtAave,
+  DEFAULT_YIELD_PAUSE_BANNER_LINK_URL,
   VAULT_DEPOSITS_PAUSED_MESSAGE,
   YIELD_PAUSE_BANNER_TEXT,
 } from '@/config/yield-deposits-paused';
@@ -274,5 +277,26 @@ describe('the pause banner text', () => {
     for (const raw of ['', '   ']) expect(resolveYieldPauseBannerText(off, raw)).toBeNull();
     // This unit suite runs with the env unset, so the served constant is the default.
     expect(YIELD_PAUSE_BANNER_TEXT).toBe('Deposits are paused for yield assets on Ethereum and Base because of Aave.');
+  });
+});
+
+describe('the Aave link in the banner (Pat, 2026-10-29)', () => {
+  test('defaults to the Aave announcement, https only, empty means no link', () => {
+    expect(resolveYieldPauseBannerLinkUrl(undefined)).toBe('https://x.com/aave/status/2115937863162339637');
+    expect(DEFAULT_YIELD_PAUSE_BANNER_LINK_URL).toBe('https://x.com/aave/status/2115937863162339637');
+    expect(resolveYieldPauseBannerLinkUrl('')).toBeNull();
+    expect(resolveYieldPauseBannerLinkUrl('   ')).toBeNull();
+    expect(resolveYieldPauseBannerLinkUrl('http://example.com')).toBeNull();
+    expect(resolveYieldPauseBannerLinkUrl('javascript:alert(1)')).toBeNull();
+    expect(resolveYieldPauseBannerLinkUrl('not a url')).toBeNull();
+    expect(resolveYieldPauseBannerLinkUrl('https://governance.aave.com/t/x')).toBe('https://governance.aave.com/t/x');
+  });
+
+  test('the first "Aave" is the link label, no url or no Aave means no link', () => {
+    const url = 'https://x.com/aave/status/2115937863162339637';
+    expect(splitBannerAtAave('Deposits are paused for yield assets on Ethereum because of Aave.', url))
+      .toEqual({ before: 'Deposits are paused for yield assets on Ethereum because of ', label: 'Aave', after: '.' });
+    expect(splitBannerAtAave('Deposits are paused for yield assets on Ethereum because of Aave.', null)).toBeNull();
+    expect(splitBannerAtAave('Deposits are paused.', url)).toBeNull();
   });
 });
