@@ -40,14 +40,17 @@ import type {
   StellarLog,
   StellarProof,
   StellarWalletProvider,
+  TransferResult,
 } from '@privacy-pools-v2/stellar-sdk';
 
 import {
   STELLAR_KEY_APP_IDENTIFIER,
+  STELLAR_RELAYED_TRANSFERS,
   STELLAR_RELAYER_CHAIN_ID,
   STELLAR_TESTNET_CONTRACTS,
   STELLAR_TESTNET_NETWORK,
   STELLAR_TESTNET_RPC_URL,
+  STELLAR_TRANSFER_RELAY_FEE_ESTIMATE,
   requireStellarRelayerUrl,
 } from '@/config/stellar-deployment';
 import { STELLAR_TESTNET_ID } from '@/config/chains';
@@ -164,8 +167,11 @@ class StellarAccount {
   private readonly listeners = new Set<() => void>();
   private signer: StellarWalletProvider | null = null;
   private sessionPromise: Promise<StellarPoolSession> | null = null;
-  // The relayer, set only while a withdrawal runs (see buildSession).
-  private withdrawRelayer: IRelayerInteractor<StellarAddress> | null = null;
+  // The relayer, set only while a relayed withdrawal or transfer runs (see buildSession).
+  private activeRelayer: IRelayerInteractor<StellarAddress> | null = null;
+  // Relayed transfers by the hash the relayer reported: confirmed from pool events, never by
+  // asking the RPC about that hash (see relayedSpendHooks).
+  private readonly relayedSpends = new Map<string, { spentNullifiers: Hex[]; fromCursor: Hex }>();
   private rpc: IndexedStellarRpcInteractor | null = null;
   private syncPromise: Promise<void> | null = null;
   // Serialises flows: two spends built from one note view would double-select.
@@ -255,6 +261,103 @@ class StellarAccount {
     return this.sessionPromise;
   }
 
+  private relayedTxConfirmer(sdk: StellarSdk, address: string, rpc: StellarRpcInteractor) {
+    return new sdk.StellarRelayedTxConfirmer({
+      rpcInteractor: rpc,
+      poolContractId: STELLAR_TESTNET_CONTRACTS.poolContractId,
+      nullifierExtractor: sdk.createStellarPoolVaultInteractor({
+        rpcInteractor: rpc,
+        contractId: STELLAR_TESTNET_CONTRACTS.poolContractId,
+        readSourcePublicKey: address,
+      }),
+    });
+  }
+
+  /**
+   * The session's RPC, except that the receipt of a transfer this client handed to the relayer
+   * is found by its spent nullifiers in the pool's events (a read every client makes) rather
+   * than by `getTransaction(hash)`, which would tell the RPC which relayed tx is ours.
+   */
+  private confirmingRpc(sdk: StellarSdk, address: string, rpc: IndexedStellarRpcInteractor): IndexedStellarRpcInteractor {
+    return new Proxy(rpc, {
+      get: (target, prop) => {
+        if (prop === 'waitForTransactionReceipt') {
+          return async (hash: Hex) => {
+            const key = String(hash).toLowerCase();
+            const spend = this.relayedSpends.get(key);
+            if (!spend) return target.waitForTransactionReceipt(hash);
+            try {
+              return await this.relayedTxConfirmer(sdk, address, target).confirmRelayedTransaction({ txHash: hash, ...spend });
+            } finally {
+              this.relayedSpends.delete(key);
+            }
+          };
+        }
+        const value = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+  }
+
+  /** Reads the relayer's details and builds its client; refuses one serving another deployment. */
+  private async connectRelayer(sdk: StellarSdk, address: string): Promise<IRelayerInteractor<StellarAddress>> {
+    const url = requireStellarRelayerUrl();
+    let details: { relayerAddress: string; contracts?: { relay?: string } };
+    try {
+      const res = await fetch(`${url}/v1/details/stellar/${STELLAR_RELAYER_CHAIN_ID}`, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`relayer details ${res.status}`);
+      details = await res.json();
+    } catch {
+      throw new Error('The Stellar testnet relayer is not reachable. Try again later.');
+    }
+    if (details.contracts?.relay !== STELLAR_TESTNET_CONTRACTS.relayContractId) {
+      throw new Error('The Stellar testnet relayer serves another deployment.');
+    }
+    const rpc = this.rpc;
+    return createStellarRelayer(sdk, {
+      url,
+      relayerAddress: details.relayerAddress,
+      relayedSpends: rpc
+        ? {
+            mark: () => this.relayedTxConfirmer(sdk, address, rpc).markSubmission(),
+            relayed: (txHash, spentNullifiers, fromCursor) => {
+              this.relayedSpends.set(String(txHash).toLowerCase(), { spentNullifiers, fromCursor });
+            },
+          }
+        : undefined,
+    });
+  }
+
+  /**
+   * Runs `fn` with the relayer handed to the session when relayed transfers are on
+   * (STELLAR_RELAYED_TRANSFERS), else self-submitted through Freighter as before. The relayer is
+   * reachable from the session only for this call, as for a withdrawal.
+   */
+  private async withTransferRelayer<T>(address: string, fn: (relayed: boolean) => Promise<T>): Promise<T> {
+    if (!STELLAR_RELAYED_TRANSFERS) return fn(false);
+    const relayer = await this.connectRelayer(await loadStellarSdk(), address);
+    this.activeRelayer = relayer;
+    try {
+      return await fn(true);
+    } finally {
+      this.activeRelayer = null;
+    }
+  }
+
+  /** Relays the first quoted option; refuses a receipt that did not spend this transfer's notes. */
+  private async relayPreparedTransfer(
+    session: StellarPoolSession,
+    prepared: Awaited<ReturnType<StellarPoolSession['prepareTransfer']>>,
+  ): Promise<TransferResult<StellarAddress, StellarLog>> {
+    const option = prepared.relayOptions[0];
+    if (!option) throw new Error('The relayer did not return a quote.');
+    // As on the self-submitted path: the SDK's rebuild of the recipient notes (one
+    // commitment-keyed timestamp read per note) is skipped.
+    const result = await session.relayTransfer({ ...option, recipient: { ...option.recipient, noteSecretsMap: undefined } });
+    if (result.spentNullifiersConfirmed === false) throw new Error('The relayer reported a transaction that is not this transfer.');
+    return result;
+  }
+
   private async buildSession(address: string, signer: StellarWalletProvider): Promise<StellarPoolSession> {
     const sdk = await loadStellarSdk();
     this.rpc = createIndexedRpcInteractor(sdk, ASP_URL);
@@ -265,8 +368,9 @@ class StellarAccount {
       ownerAddress: address,
       rpcUrl: STELLAR_TESTNET_RPC_URL,
       // Event history from the testnet indexer (every event since the
-      // deployment); everything else is plain Soroban RPC.
-      rpcInteractor: this.rpc,
+      // deployment); everything else is plain Soroban RPC. A relayed
+      // transfer's receipt is confirmed from pool events, never by its hash.
+      rpcInteractor: this.confirmingRpc(sdk, address, this.rpc),
       networkPassphrase: STELLAR_TESTNET_NETWORK.networkPassphrase,
       poolContractId: STELLAR_TESTNET_CONTRACTS.poolContractId,
       keystoreContractId: STELLAR_TESTNET_CONTRACTS.keystoreContractId,
@@ -281,10 +385,10 @@ class StellarAccount {
       persistentStorage: { type: 'memory' },
       aspDataProvider: new StellarTestnetAspProvider(sdk, ASP_URL),
       circuitArtifacts: new FetchCircuitArtifacts(),
-      // No relayer outside a withdrawal: the SDK asks every relayer for a quote even on a
-      // self-submitted transfer, and Stellar relayers refuse transfer quotes.
+      // No relayer outside a relayed flow: the SDK asks every relayer for a quote even on a
+      // self-submitted transfer, and a relayer without the transfer routes refuses it.
       relayerInteractor: new Proxy(createNoRelayerInteractor(sdk), {
-        get: (none, prop) => Reflect.get(this.withdrawRelayer ?? none, prop),
+        get: (none, prop) => Reflect.get(this.activeRelayer ?? none, prop),
       }),
     }) as StellarPoolSession;
     const saved = readSessionAccount<SavedAccount>(STELLAR_TESTNET_ID, address);
@@ -582,25 +686,12 @@ class StellarAccount {
       // Relayed: the relayer submits through the relay contract, so the user's
       // account never appears on the withdrawal. Its details are read BEFORE
       // registration, so an unreachable relayer fails before the wallet is asked to sign.
-      const sdk = await loadStellarSdk();
-      const url = requireStellarRelayerUrl();
-      let details: { relayerAddress: string; contracts?: { relay?: string } };
-      try {
-        const res = await fetch(`${url}/v1/details/stellar/${STELLAR_RELAYER_CHAIN_ID}`, { cache: 'no-store' });
-        if (!res.ok) throw new Error(`relayer details ${res.status}`);
-        details = await res.json();
-      } catch {
-        throw new Error('The Stellar testnet relayer is not reachable. Try again later.');
-      }
-      if (details.contracts?.relay !== STELLAR_TESTNET_CONTRACTS.relayContractId) {
-        throw new Error('The Stellar testnet relayer serves another deployment.');
-      }
-      const relayer = createStellarRelayer(sdk, { url, relayerAddress: details.relayerAddress });
+      const relayer = await this.connectRelayer(await loadStellarSdk(), address);
       await this.ensureRegistered(session, generation, onStage);
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       // The fee comes on top of `amount`, so the inputs must cover amount + fee.
       onStage?.('proving');
-      this.withdrawRelayer = relayer;
+      this.activeRelayer = relayer;
       let receipt;
       try {
         // One committed quote and one proof. prepareWithdraw would quote, then
@@ -631,7 +722,7 @@ class StellarAccount {
         onStage?.('relaying');
         receipt = await session.relayWithdraw(option);
       } finally {
-        this.withdrawRelayer = null;
+        this.activeRelayer = null;
       }
       if (!receipt.status) throw new Error('The relayed withdrawal failed on-chain.');
       onStage?.('syncing');
@@ -658,13 +749,22 @@ class StellarAccount {
       // The recipient's viewing key is resolved by the SDK here (it throws
       // RecipientViewingKeyUnregistered when there is none), so no separate
       // lookup naming the recipient is made beforehand.
-      const result = await session.transfer({
+      const transferParams = {
         tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
         amount: toHex(params.amount),
         inputCommitments: params.inputCommitments,
         // The field name is EVM-flavoured; the Stellar SDK resolves the
         // recipient's viewing key from the Stellar keystore by this G-address.
         recipientDiscoveryData: { evmAddress: params.recipient },
+      };
+      const result = await this.withTransferRelayer(address, async (relayed) => {
+        if (!relayed) return session.transfer(transferParams);
+        // Relayed: the relayer submits, its fee comes on top of `amount`.
+        const prepared = await session.prepareTransfer(transferParams);
+        if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
+        this.assertStillBound(generation);
+        onStage?.('relaying');
+        return this.relayPreparedTransfer(session, prepared);
       });
       if (!result.txReceipt.status) throw new Error('The transfer transaction failed on-chain.');
       onStage?.('syncing');
@@ -794,11 +894,20 @@ class StellarAccount {
       this.assertStillBound(generation);
       params?.onStage?.('proving');
       const total = claimed.reduce((sum, n) => sum + BigInt(n.value), 0n);
-      const result = await session.transfer({
-        tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
-        amount: toHex(total),
-        inputCommitments: claimed.map((n) => n.commitment as Hex),
-        recipientDiscoveryData: { evmAddress: address },
+      const result = await this.withTransferRelayer(address, async (relayed) => {
+        const keepParams = {
+          tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
+          inputCommitments: claimed.map((n) => n.commitment as Hex),
+          recipientDiscoveryData: { evmAddress: address },
+        };
+        if (!relayed) return session.transfer({ ...keepParams, amount: toHex(total) });
+        // Relayed: the fee comes out of the claimed notes, and whatever the
+        // estimate over-reserves returns to this account as change.
+        if (total <= STELLAR_TRANSFER_RELAY_FEE_ESTIMATE) throw new Error('This link holds less than the relayer fee.');
+        const prepared = await session.prepareTransfer({ ...keepParams, amount: toHex(total - STELLAR_TRANSFER_RELAY_FEE_ESTIMATE) });
+        this.assertStillBound(generation);
+        params?.onStage?.('relaying');
+        return this.relayPreparedTransfer(session, prepared);
       });
       if (!result.txReceipt.status) throw new Error('The transaction failed on-chain.');
       params?.onStage?.('syncing');
@@ -1114,14 +1223,16 @@ class StellarAccount {
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       this.assertStillBound(generation);
       onStage?.('proving');
-      const prepared = await session.prepareFulfillPaymentRequest({
-        paymentRequest: params.request as Parameters<StellarPoolSession['prepareFulfillPaymentRequest']>[0]['paymentRequest'],
-        inputCommitments: params.inputCommitments,
+      const result = await this.withTransferRelayer(address, async (relayed) => {
+        const prepared = await session.prepareFulfillPaymentRequest({
+          paymentRequest: params.request as Parameters<StellarPoolSession['prepareFulfillPaymentRequest']>[0]['paymentRequest'],
+          inputCommitments: params.inputCommitments,
+        });
+        if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
+        this.assertStillBound(generation);
+        onStage?.(relayed ? 'relaying' : 'signing');
+        return relayed ? this.relayPreparedTransfer(session, prepared) : session.executeTransfer(prepared.executeOptions);
       });
-      if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
-      this.assertStillBound(generation);
-      onStage?.('signing');
-      const result = await session.executeTransfer(prepared.executeOptions);
       if (!result.txReceipt.status) throw new Error('The transfer transaction failed on-chain.');
       onStage?.('syncing');
       await this.refreshLocal(session, address);

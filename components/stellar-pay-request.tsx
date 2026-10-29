@@ -19,7 +19,7 @@ import { formatUnits } from 'viem';
 import { useStellarWallet } from '@/components/stellar-wallet-provider';
 import { useTransferModal } from '@/components/transfer-modal-provider';
 import { STELLAR_TESTNET_ID, getExplorerTxUrl } from '@/config/chains';
-import { STELLAR_XLM } from '@/config/stellar-deployment';
+import { STELLAR_XLM, stellarTransferRelayFee } from '@/config/stellar-deployment';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { toStellarSdkPaymentRequest } from '@/services/payment-request-codec';
@@ -129,16 +129,19 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
       await signIn();
       return;
     }
+    // A relayed payment pays the relayer's fee from the same notes.
+    const fee = stellarTransferRelayFee();
+    const need = stroops + fee;
     const pick = selectGreedyTransferInputs(
       stellarSession.spendableNotes as unknown as UiNote[],
-      stroops,
+      need,
       TRANSFER_MAX_INPUTS,
       TRANSFER_MAX_LABELS,
     );
     if (!pick.covered) {
       const available = formatUnits(stellarSession.spendableTotal, STELLAR_XLM.decimals);
-      setError(stellarSession.spendableTotal < stroops
-        ? `Insufficient Stellar balance (${available} XLM available).`
+      setError(stellarSession.spendableTotal < need
+        ? `Insufficient Stellar balance (${available} XLM available${fee > 0n ? `, ${formatUnits(fee, STELLAR_XLM.decimals)} XLM relayer fee on top` : ''}).`
         : `One transfer can spend up to ${TRANSFER_MAX_INPUTS} notes from ${TRANSFER_MAX_LABELS} deposits.`);
       return;
     }

@@ -1,16 +1,22 @@
 /**
  * Client for the v2 relayer's Stellar routes (v2-monorepo packages/relayer/relayer), a copy of
- * v2.0's StellarRelayerInteractor. Temporary: the vendored SDK (c81ba9d5) still speaks the old
- * reference relayer's /api/v1/relayer/* protocol. Delete once the SDK is re-vendored with v2.0's.
+ * v2.0's StellarRelayerInteractor (packages/stellar-sdk, 8abfc67f). Temporary: the vendored SDK
+ * (c81ba9d5) still speaks the old reference relayer's /api/v1/relayer/* protocol. Delete once the
+ * SDK is re-vendored with v2.0's interactor.
  *
- * Only relayed withdrawals exist on Stellar. The quote's routing (`feeCommitment.data`) is
- * checked against the user's recipient and fee by the SDK's withdraw builder before proving.
+ * Withdrawals, and private transfers when STELLAR_RELAYED_TRANSFERS is on. A withdrawal quote's
+ * routing (`feeCommitment.data`) is checked against the user's recipient and fee by the SDK's
+ * withdraw builder before proving. A relayed transfer's only public outflow is the fee
+ * (`amountOut == feeAmount`, paid to the relayer as the pool's gated processor).
  */
 import type {
   Hex,
   IRelayerInteractor,
   RelayerInfo,
   StellarAddress,
+  TransferQuoteParams,
+  TransferRelayerQuote,
+  TransferRelayParams,
   WithdrawalQuoteParams,
   WithdrawalRelayerQuote,
   WithdrawalRelayParams,
@@ -52,9 +58,24 @@ function formatProof(proof: { pi_a: Hex[]; pi_b: Hex[][]; pi_c: Hex[] }) {
   };
 }
 
+/**
+ * Confirms a relayed transfer from bulk pool events instead of asking the RPC about the
+ * relayer's tx hash (which would link this client to it). `mark` runs right before the proof is
+ * handed over; `relayed` gets the hash with the proof's spent nullifiers and that cursor.
+ */
+export interface StellarRelayedSpendHooks {
+  mark(): Promise<Hex>;
+  relayed(txHash: Hex, spentNullifiers: Hex[], fromCursor: Hex): void;
+}
+
+/** The proof's leading `inputs` public signals are the spent nullifiers, as 32-byte hex. */
+export function spentNullifiersOf(publicSignals: readonly (string | bigint)[], inputs: number): Hex[] {
+  return publicSignals.slice(0, inputs).map((s) => `0x${BigInt(s).toString(16).padStart(64, '0')}` as Hex);
+}
+
 export function createStellarRelayer(
   sdk: StellarSdk,
-  config: { url: string; relayerAddress: string },
+  config: { url: string; relayerAddress: string; relayedSpends?: StellarRelayedSpendHooks },
 ): IRelayerInteractor<StellarAddress> {
   const base = `${config.url}/v1`;
   const path = `stellar/${STELLAR_RELAYER_CHAIN_ID}`;
@@ -82,6 +103,39 @@ export function createStellarRelayer(
       );
       if (!quote.feeCommitment) throw new sdk.RelayerRequestFailed('The relayer returned no fee commitment');
       return { ...quote, txCost: '0', gasPrice: '0', feeCommitment: { ...quote.feeCommitment, extraGas: false } };
+    },
+
+    async getTransferQuote(relayer, params: TransferQuoteParams<StellarAddress>): Promise<TransferRelayerQuote<StellarAddress>> {
+      const quote = await postJson<{
+        feeAmount: string;
+        txCost: string;
+        gasPrice: string;
+        feeCommitment?: TransferRelayerQuote<StellarAddress>['feeCommitment'];
+      }>(`${base}/quote/${path}/transfer`, { asset: params.asset, commit: true }).catch((error: unknown) => {
+        throw new sdk.RelayerRequestFailed(error instanceof Error ? error.message : String(error));
+      });
+      if (!quote.feeCommitment) throw new sdk.RelayerRequestFailed('The relayer returned no fee commitment');
+      return { txCost: quote.txCost, gasPrice: quote.gasPrice, feeAmount: quote.feeAmount, feeCommitment: quote.feeCommitment };
+    },
+
+    async relayTransfer(relayer, params: TransferRelayParams<StellarAddress>): Promise<Hex> {
+      sdk.assertFeeCommitmentLive(params.signedFeeCommitment.expiration);
+      const n = params.inputNullifierNumber;
+      const m = params.outputCommitmentNumber;
+      const hooks = config.relayedSpends;
+      const fromCursor = hooks ? await hooks.mark() : undefined;
+      const res = await postJson<{ txHash?: string; error?: string }>(`${base}/relay/${path}/transfer`, {
+        proof: { ...formatProof(params.proof.proof), publicSignals: params.proof.publicSignals.slice(0, n + m + 6) },
+        inputNullifierNumber: n,
+        outputCommitmentNumber: m,
+        noteData: params.noteData,
+        signedFeeCommitment: params.signedFeeCommitment,
+      }).catch((error: unknown) => {
+        throw new sdk.RelayerRejected(error instanceof Error ? error.message : String(error));
+      });
+      if (res.error || !res.txHash) throw new sdk.RelayerRejected(res.error ?? 'The relayer rejected the transfer');
+      if (hooks && fromCursor !== undefined) hooks.relayed(res.txHash as Hex, spentNullifiersOf(params.proof.publicSignals, n), fromCursor);
+      return res.txHash as Hex;
     },
 
     async relayWithdrawal(relayer, params: WithdrawalRelayParams<StellarAddress>): Promise<Hex> {

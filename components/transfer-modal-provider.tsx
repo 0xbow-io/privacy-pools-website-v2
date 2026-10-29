@@ -38,7 +38,7 @@ import { plainTransferRelayError, relayerTransferQuotes, relayTransferParams, re
 import { expectTransferRelay } from '@/services/transfer-relay-outputs';
 import { feeWithinReviewed } from '@/services/relayer-fee-jitter';
 import { recordSentTransfer } from '@/services/sent-transfers-store';
-import { STELLAR_TESTNET_CONTRACTS } from '@/config/stellar-deployment';
+import { STELLAR_RELAYED_TRANSFERS, STELLAR_TESTNET_CONTRACTS, maxStellarTransferForInputs, stellarTransferRelayFee } from '@/config/stellar-deployment';
 import { recordOwnAction } from '@/services/own-actions-store';
 import { recordWithdrawFee } from '@/services/withdraw-fees-store';
 import { useRequireConnection } from '@/hooks/use-require-connection';
@@ -1216,20 +1216,24 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     () => (isStellar ? (stellarSession.spendableNotes as unknown as StellarUiNote[]) : []),
     [isStellar, stellarSession.spendableNotes],
   );
+  // A relayed Stellar send pays the relayer fee from the same notes (a one-time link is self-submitted).
+  const stellarSendFee = isStellar
+    ? stellarTransferRelayFee({ oneTime: recipientRegistrationCheck?.registered === false })
+    : 0n;
   const suiActiveTotal = useMemo(
     () => (isStellar
-      ? stellarActiveNotes.reduce((a, n) => a + BigInt(n.value), 0n)
+      ? maxStellarTransferForInputs(stellarActiveNotes.reduce((a, n) => a + BigInt(n.value), 0n), stellarSendFee)
       : suiActiveNotes.reduce((a, n) => a + BigInt(n.value), 0n)),
-    [isStellar, stellarActiveNotes, suiActiveNotes],
+    [isStellar, stellarActiveNotes, suiActiveNotes, stellarSendFee],
   );
   // The most a one-proof Sui transfer can move (largest single lineage) — the
   // amount validation uses this, not the cross-lineage total, so the UI never
   // green-lights an amount the submit path must reject.
   const suiMaxLineageTotal = useMemo(
     () => (isStellar
-      ? maxCoverableTransfer(stellarActiveNotes, TRANSFER_MAX_INPUTS, TRANSFER_MAX_LABELS)
+      ? maxStellarTransferForInputs(maxCoverableTransfer(stellarActiveNotes, TRANSFER_MAX_INPUTS, TRANSFER_MAX_LABELS), stellarSendFee)
       : isSui ? maxSuiLineageTotal(suiActiveNotes) : 0n),
-    [isSui, isStellar, stellarActiveNotes, suiActiveNotes],
+    [isSui, isStellar, stellarActiveNotes, suiActiveNotes, stellarSendFee],
   );
   // Mirror the confirm-time lineage-first note selection for review display.
   const suiChosen = useMemo(() => {
@@ -1237,12 +1241,12 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     let want = 0n;
     try { want = amount ? parseUnits(amount, altDecimals) : 0n; } catch { want = 0n; }
     if (isStellar) {
-      const pick = want > 0n ? selectGreedyTransferInputs(stellarActiveNotes, want, TRANSFER_MAX_INPUTS, TRANSFER_MAX_LABELS) : null;
+      const pick = want > 0n ? selectGreedyTransferInputs(stellarActiveNotes, want + stellarSendFee, TRANSFER_MAX_INPUTS, TRANSFER_MAX_LABELS) : null;
       return pick?.covered ? { count: pick.selectedNotes.length, sum: pick.accumulated } : { count: 0, sum: 0n };
     }
     const sel = want > 0n ? selectSuiNotes(suiActiveNotes, want) : null;
     return sel ? { count: sel.notes.length, sum: sel.sum } : { count: 0, sum: 0n };
-  }, [isSui, isStellar, altDecimals, stellarActiveNotes, suiActiveNotes, amount]);
+  }, [isSui, isStellar, altDecimals, stellarActiveNotes, suiActiveNotes, amount, stellarSendFee]);
 
   // Transfer circuits cap inputs at 5 (transact_5x*) AND outputs at 5 — one
   // change note per input lineage plus up to one recipient note per lineage,
@@ -1472,7 +1476,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     if (isStellar) { if (!stellarConnected || stellarLocked) return null; }
     else if (!connectedAddress) return null;
     if (isSui) {
-      if (enteredAmountWei > suiActiveTotal) return `Insufficient ${isStellar ? 'Stellar' : 'Sui'} balance (${formatUnits(suiActiveTotal, altDecimals)} ${altSymbol} available)`;
+      if (enteredAmountWei > suiActiveTotal) return `Insufficient ${isStellar ? 'Stellar' : 'Sui'} balance (${formatUnits(suiActiveTotal, altDecimals)} ${altSymbol} available${stellarSendFee > 0n ? ` after the ${formatUnits(stellarSendFee, altDecimals)} ${altSymbol} relayer fee` : ''})`;
       if (enteredAmountWei > suiMaxLineageTotal) {
         return isStellar
           ? `One transfer can spend up to ${TRANSFER_MAX_INPUTS} notes from ${TRANSFER_MAX_LABELS} deposits (${formatUnits(suiMaxLineageTotal, altDecimals)} ${altSymbol}). Send that first, then the rest.`
@@ -1511,7 +1515,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
       return `Send at least a little more than the relayer fee (~${formatUnits(relayFeeReserveWei ?? 0n, selectedDecimals)} ${isShareSymbol(selectedSymbol) ? selectedSymbol : displayTokenSymbol(selectedSymbol)}), or the recipient gets nothing`;
     }
     return null;
-  }, [stellarLocked, amount, enteredAmount, enteredAmountWei, activeNotes, selectedDecimals, selectedSymbol, maxSpendableWei, eligibleTotalWei, isSui, suiActiveTotal, suiMaxLineageTotal, sendExactBelowFee, relayFeeReserveWei, relayFeeExceeds, relayFeeCeiled, relayFeeMaxSend, connectedAddress, isStellar, stellarConnected, altDecimals, altSymbol]);
+  }, [stellarLocked, amount, enteredAmount, enteredAmountWei, activeNotes, selectedDecimals, selectedSymbol, maxSpendableWei, eligibleTotalWei, isSui, suiActiveTotal, suiMaxLineageTotal, sendExactBelowFee, relayFeeReserveWei, relayFeeExceeds, relayFeeCeiled, relayFeeMaxSend, connectedAddress, isStellar, stellarConnected, altDecimals, altSymbol, stellarSendFee]);
 
   // Render error figures at the same display boundary as balances. The
   // validation memo above remains in shares and has no rate dependencies.
@@ -1643,14 +1647,16 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         // No separate recipient lookup here: the SDK resolves the recipient's
         // viewing key inside transfer() and refuses an unregistered one.
         const want = parseUnits(amount, altDecimals);
-        const pick = selectGreedyTransferInputs(stellarActiveNotes, want, TRANSFER_MAX_INPUTS, TRANSFER_MAX_LABELS);
-        if (!pick.covered) throw new Error(`One transfer can spend up to ${TRANSFER_MAX_INPUTS} notes from ${TRANSFER_MAX_LABELS} deposits.`);
-        if (!live()) { log('warn', 'Transfer', 'Stale run aborted before Stellar broadcast'); return; }
         // The user already confirmed a one-time link for exactly this recipient.
         // Case-insensitive: the shared check may hold a lowercased copy (a G address is uppercase only).
         const oneTime = recipientRegistrationCheck?.registered === false
           && recipientRegistrationCheck.chainId === STELLAR_TESTNET_ID
           && recipientRegistrationCheck.recipientAddress.toUpperCase() === recipientAddress.trim().toUpperCase();
+        // A relayed send pays the relayer's fee from the same notes (one-time links stay self-submitted).
+        const fee = stellarTransferRelayFee({ oneTime });
+        const pick = selectGreedyTransferInputs(stellarActiveNotes, want + fee, TRANSFER_MAX_INPUTS, TRANSFER_MAX_LABELS);
+        if (!pick.covered) throw new Error(`One transfer can spend up to ${TRANSFER_MAX_INPUTS} notes from ${TRANSFER_MAX_LABELS} deposits.`);
+        if (!live()) { log('warn', 'Transfer', 'Stale run aborted before Stellar broadcast'); return; }
         const inputCommitments = pick.selectedNotes.map((n) => n.commitment as `0x${string}`);
         transferPhaseRef.current = 'proof';
         const onStage = (stage: Parameters<typeof describeStellarStage>[0]) => { if (!live()) return; transferPhaseRef.current = stellarErrorReportStage(stage); setLoadingMessage(describeStellarStage(stage)); };
@@ -4183,9 +4189,10 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                   {relayFeeCeiled != null && (
                     <FeeWarning breakdown={relayedFeeBreakdown(enteredAmountWei, relayFeeEstimate)} testID="transfer-fee-warning" />
                   )}
-                  {/* Stellar sends are self-signed (no relayed transfer on
-                      Stellar yet), so the chain shows this account as sender. */}
-                  {isStellar && (
+                  {/* Stellar sends are self-signed until relayed transfers are
+                      on (STELLAR_RELAYED_TRANSFERS), and one-time links always
+                      are, so the chain shows this account as sender. */}
+                  {isStellar && (!STELLAR_RELAYED_TRANSFERS || recipientRegistrationCheck?.registered === false) && (
                     <Text className="text-[12px] leading-[18px] text-[#B45309] font-pp-regular" testID="stellar-transfer-linkable">
                       Sent from your Freighter account, so this send is publicly linked to it.
                     </Text>

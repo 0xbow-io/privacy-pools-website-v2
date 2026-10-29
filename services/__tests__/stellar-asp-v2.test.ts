@@ -233,8 +233,84 @@ describe('Stellar relayer (v2 relayer routes)', () => {
     await expect(relayer.relayWithdrawal(info, params)).rejects.toBeInstanceOf(RelayerRejected);
   });
 
-  test('has no relayed transfer', async () => {
+  // Routes and bodies of v2-monorepo v2.0's StellarRelayerInteractor.getTransferQuote/relayTransfer (8abfc67f).
+  const transferCommitment = { data: '0xabcd', asset: ASSET, expiration: Date.now() + 60_000, feeAmount: '200000', signedRelayerCommitment: '0x99' };
+  const transferParams = () => {
+    const p = (v: number) => `0x${v.toString(16)}`;
+    return {
+      proof: { proof: { pi_a: [p(1), p(2)], pi_b: [[p(3), p(4)], [p(5), p(6)]], pi_c: [p(7), p(8)] }, publicSignals: ['17', '18', '3', '4', '5', '6', '7', '8', '9', '10'] },
+      inputNullifierNumber: 2,
+      outputCommitmentNumber: 2,
+      noteData: [{ hint: '0x01', data: '0x02' }],
+      signedFeeCommitment: transferCommitment,
+    } as never;
+  };
+
+  test('asks for a committed transfer quote naming only the asset', async () => {
+    route = () => ({ status: 201, body: { feeAmount: '200000', txCost: '0', gasPrice: '0', feeCommitment: transferCommitment } });
     const [info] = await relayer.getRelayers();
-    expect(() => relayer.getTransferQuote(info, {} as never)).toThrow(/Not supported/);
+    const quote = await relayer.getTransferQuote(info, { asset: ASSET, commit: true });
+
+    expect(requested).toEqual([`${RELAYER}/v1/quote/stellar/1/transfer`]);
+    expect(bodies[0]).toEqual({ asset: ASSET, commit: true });
+    expect(quote).toEqual({ txCost: '0', gasPrice: '0', feeAmount: '200000', feeCommitment: transferCommitment });
+  });
+
+  test('a relayer without the transfer route fails the quote, it does not fall back', async () => {
+    // What the relayer deployed 2026-09-30 (fde65488) answers.
+    route = () => ({ status: 400, body: { message: 'Stellar private transfer quotes are not supported (see Scope in the Stellar plan)', statusCode: 400 } });
+    const [info] = await relayer.getRelayers();
+    await expect(relayer.getTransferQuote(info, { asset: ASSET, commit: true })).rejects.toBeInstanceOf(RelayerRequestFailed);
+  });
+
+  test('relays a transfer with the signed commitment unchanged', async () => {
+    route = () => ({ status: 201, body: { txHash: '0xbeef' } });
+    const [info] = await relayer.getRelayers();
+    expect(await relayer.relayTransfer(info, transferParams())).toBe('0xbeef');
+    expect(requested).toEqual([`${RELAYER}/v1/relay/stellar/1/transfer`]);
+    const body = bodies[0] as Record<string, unknown> & { proof: { publicSignals: string[] } };
+    expect(Object.keys(body).sort()).toEqual(['inputNullifierNumber', 'noteData', 'outputCommitmentNumber', 'proof', 'signedFeeCommitment']);
+    expect(body.signedFeeCommitment).toEqual(transferCommitment);
+    expect(body.proof.publicSignals).toEqual(['17', '18', '3', '4', '5', '6', '7', '8', '9', '10']);
+
+    route = () => ({ status: 501, body: { message: 'Stellar private transfer relaying is not supported', statusCode: 501 } });
+    await expect(relayer.relayTransfer(info, transferParams())).rejects.toBeInstanceOf(RelayerRejected);
+  });
+
+  test('hands the spent nullifiers and the pre-submit cursor to the caller, not the hash to the RPC', async () => {
+    route = () => ({ status: 201, body: { txHash: '0xbeef' } });
+    const order: string[] = [];
+    const seen: unknown[] = [];
+    const hooked = createStellarRelayer(sdk, {
+      url: RELAYER,
+      relayerAddress: G,
+      relayedSpends: {
+        mark: async () => { order.push('mark'); return '0xc0' as never; },
+        relayed: (txHash, spentNullifiers, fromCursor) => { order.push('relayed'); seen.push({ txHash, spentNullifiers, fromCursor }); },
+      },
+    });
+    const [info] = await hooked.getRelayers();
+    await hooked.relayTransfer(info, transferParams());
+    expect(order).toEqual(['mark', 'relayed']);
+    expect(seen).toEqual([{ txHash: '0xbeef', spentNullifiers: [`0x${'11'.padStart(64, '0')}`, `0x${'12'.padStart(64, '0')}`], fromCursor: '0xc0' }]);
+    expect(rpcCalls).toEqual([]);
+  });
+
+  test('a refused relay records nothing to confirm', async () => {
+    route = () => ({ status: 400, body: { message: 'nope' } });
+    const seen: unknown[] = [];
+    const hooked = createStellarRelayer(sdk, {
+      url: RELAYER,
+      relayerAddress: G,
+      relayedSpends: { mark: async () => '0xc0' as never, relayed: (...args) => { seen.push(args); } },
+    });
+    const [info] = await hooked.getRelayers();
+    await expect(hooked.relayTransfer(info, transferParams())).rejects.toBeInstanceOf(RelayerRejected);
+    expect(seen).toEqual([]);
+  });
+
+  test('swaps and announcements stay unsupported', async () => {
+    const [info] = await relayer.getRelayers();
+    expect(() => relayer.getSwapQuote(info, {} as never)).toThrow(/Not supported/);
   });
 });
