@@ -181,6 +181,9 @@ describe('per chain scope (Pat, 2026-10-29: Aave froze its Ethereum reserves onl
     // Junk entries are ignored, never widened into "every chain".
     expect(parseYieldDepositsPaused('1,abc,-5,0,1.5')).toEqual({ all: false, chainIds: [1] });
     expect(parseYieldDepositsPaused('yes')).toEqual({ all: false, chainIds: [] });
+    // `true` inside a list is still "every chain": a typo must not narrow the kill switch.
+    expect(parseYieldDepositsPaused('true,56')).toEqual({ all: true, chainIds: [] });
+    expect(parseYieldDepositsPaused('56,TRUE')).toEqual({ all: true, chainIds: [] });
   });
 
   test('true covers every chain, a list covers only its chains, off covers none', () => {
@@ -235,7 +238,11 @@ describe('the pause banner text', () => {
 
   test('unset text with a pause on shows Pat\'s default', () => {
     expect(resolveYieldPauseBannerText(on, undefined)).toBe(DEFAULT_YIELD_PAUSE_BANNER_TEXT);
-    expect(resolveYieldPauseBannerText(parseYieldDepositsPaused('true'), undefined)).toBe(DEFAULT_YIELD_PAUSE_BANNER_TEXT);
+    // The default names Ethereum, so any other scope needs its own text.
+    expect(resolveYieldPauseBannerText(parseYieldDepositsPaused('true'), undefined)).toBeNull();
+    expect(resolveYieldPauseBannerText(parseYieldDepositsPaused('56'), undefined)).toBeNull();
+    expect(resolveYieldPauseBannerText(parseYieldDepositsPaused('1,56'), undefined)).toBeNull();
+    expect(resolveYieldPauseBannerText(parseYieldDepositsPaused('true'), 'Deposits are paused.')).toBe('Deposits are paused.');
     expect(DEFAULT_YIELD_PAUSE_BANNER_TEXT).toBe('Deposits are paused for yield assets on Ethereum because of Aave.');
   });
 

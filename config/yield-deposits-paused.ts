@@ -33,12 +33,18 @@ export const NO_YIELD_DEPOSITS_PAUSE: YieldDepositsPause = { all: false, chainId
 export function parseYieldDepositsPaused(raw: string | undefined): YieldDepositsPause {
   const value = raw?.trim() ?? '';
   if (!value) return NO_YIELD_DEPOSITS_PAUSE;
-  if (value.toLowerCase() === 'true') return { all: true, chainIds: [] };
-  const chainIds = [...new Set(value.split(',')
-    .map((part) => part.trim())
+  const parts = value.split(',').map((part) => part.trim()).filter(Boolean);
+  // `true` anywhere in the list means every chain: a kill switch must never
+  // narrow itself on a typo like `true,56`.
+  if (parts.some((part) => part.toLowerCase() === 'true')) return { all: true, chainIds: [] };
+  const chainIds = [...new Set(parts
     .filter((part) => /^[0-9]+$/.test(part))
     .map(Number)
     .filter((id) => Number.isSafeInteger(id) && id > 0))];
+  const ignored = parts.filter((part) => !/^[0-9]+$/.test(part) || !(Number(part) > 0));
+  if (ignored.length > 0) {
+    console.warn(`[yield] EXPO_PUBLIC_YIELD_DEPOSITS_PAUSED: ignoring "${ignored.join('", "')}". Use true or a list of chain ids.`);
+  }
   return { all: false, chainIds };
 }
 
@@ -85,7 +91,11 @@ export const DEFAULT_YIELD_PAUSE_BANNER_TEXT = 'Deposits are paused for yield as
  */
 export function resolveYieldPauseBannerText(pause: YieldDepositsPause, raw: string | undefined): string | null {
   if (!pauseActive(pause)) return null;
-  if (raw === undefined) return DEFAULT_YIELD_PAUSE_BANNER_TEXT;
+  // The default names Ethereum and Aave, so it only fits a pause on exactly
+  // chain 1. Any other scope must set its own text, never show a wrong chain.
+  if (raw === undefined) {
+    return !pause.all && pause.chainIds.length === 1 && pause.chainIds[0] === 1 ? DEFAULT_YIELD_PAUSE_BANNER_TEXT : null;
+  }
   const text = raw.trim();
   return text.length > 0 ? text : null;
 }
