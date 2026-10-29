@@ -29,7 +29,7 @@ import { ChainLogo, chainLogoChainFor } from '@/components/ui/chain-logo';
 import { TokenNetworkIcon } from '@/components/ui/token-network-icon';
 import { COMING_SOON_ASSET_SUBTITLE, displayTokenSymbol, isShareSymbol, LEGACY_ASSET_SUBTITLE, shareSubtitle, wrapsIntoShareSubtitle } from '@/services/share-display';
 import { getKnownTokenMetadata } from '@/config/tokens';
-import { getConfiguredDepositRouteForPayToken } from '@/config/yield';
+import { DEPOSITS_PAUSED_SUBTITLE, getConfiguredDepositRouteForPayToken } from '@/config/yield';
 import { useShareYield } from '@/hooks/use-share-yield';
 import { formatApyPercent } from '@/services/share-yield';
 import { getChainConfig, supportedChainIds } from '@/config/chains';
@@ -95,8 +95,9 @@ const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
  * The one subtitle that outranks every other: a pool that cannot be deposited
  * into yet must say so, not describe the yield it will one day earn.
  */
-function comingSoonSubtitle(row: { comingSoon: boolean }): string | null {
-  return row.comingSoon ? COMING_SOON_ASSET_SUBTITLE : null;
+function comingSoonSubtitle(row: { comingSoon: boolean; depositPaused?: boolean }): string | null {
+  if (!row.comingSoon) return null;
+  return row.depositPaused ? DEPOSITS_PAUSED_SUBTITLE : COMING_SOON_ASSET_SUBTITLE;
 }
 
 export interface TokenSelectSheetToken {
@@ -134,6 +135,8 @@ export interface TokenSelectSheetToken {
    * not what is true.
    */
   comingSoon?: boolean;
+  /** With `comingSoon`: vault deposits are paused, so the line says that instead. */
+  depositPaused?: boolean;
   /**
    * A pool asset on its chain (the caller's catalog row), as opposed to a
    * token the wallet happens to hold. With `hideZeroBalances` the pay sheet
@@ -178,6 +181,8 @@ type TokenRow = {
   suspicious: boolean;
   /** Pool not open yet — shown, never selectable. */
   comingSoon: boolean;
+  /** Vault deposits paused (with `comingSoon`). */
+  depositPaused: boolean;
   /** Not selectable here, with the reason (see TokenSelectSheetToken). */
   unavailableReason?: string;
   /** undefined = not readable (no wallet / failed read) — never shown as 0. */
@@ -632,6 +637,7 @@ export function TokenSelectSheet({
         chainId: rowChain,
         suspicious: !!token.suspicious,
         comingSoon: !!token.comingSoon,
+        depositPaused: !!token.depositPaused,
         ...(token.unavailableReason ? { unavailableReason: token.unavailableReason } : {}),
         balance,
         usdValue: price != null && balance != null

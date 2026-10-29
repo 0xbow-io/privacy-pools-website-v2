@@ -64,7 +64,7 @@ import { anyLeg, isSwapRow } from '@/services/swap-rows';
 import { useAllChainsPriceMap } from '@/hooks/use-all-chains-price-map';
 import { defaultChainId, getChainConfig, getSupportedChains, STELLAR_TESTNET_ID, SUI_TESTNET_ID } from '@/config/chains';
 import { useChainRouter } from '@/hooks/use-chain-router';
-import { getConfiguredYieldDeployments, YIELD_APY_PERCENT } from '@/config/yield';
+import { getConfiguredYieldDeployments, VAULT_DEPOSITS_PAUSED_MESSAGE, YIELD_APY_PERCENT } from '@/config/yield';
 import { useShareYield } from '@/hooks/use-share-yield';
 import {
   tokenIconFor,
@@ -496,7 +496,8 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
   }, [currentPoolToken, poolChainId]);
   // This pool exists and holds notes, but has not opened for deposits yet
   // (mainnet ETH). Withdraw / Transfer / Request are untouched — only the way
-  // in is shut, so only Deposit is disabled.
+  // in is shut, so only Deposit is disabled. A vault pool with deposits
+  // paused (EXPO_PUBLIC_YIELD_DEPOSITS_PAUSED) carries the same flag.
   const depositComingSoon = currentPoolMetadata.depositComingSoon === true;
   // Live on-chain net APY when this pool's asset is a yield-bearing share
   // (ppUSDC / ppUSDT on prod). Null for a plain asset, so the header chip stays off.
@@ -785,7 +786,9 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
                   testID="pool-deposit-coming-soon"
                   className="px-[12px] pb-[12px] text-[12px] text-center text-text-muted font-pp-regular"
                 >
-                  {comingSoonDepositMessage(currentPoolToken, getChainConfig(poolChainId)?.displayName)}
+                  {currentPoolMetadata.depositPaused
+                    ? VAULT_DEPOSITS_PAUSED_MESSAGE
+                    : comingSoonDepositMessage(currentPoolToken, getChainConfig(poolChainId)?.displayName)}
                 </Text>
               )}
             </Card>
