@@ -331,9 +331,9 @@ class StellarAccount {
     if (BigInt(option.selectedQuote.quote.feeCommitment.feeAmount) > STELLAR_TRANSFER_RELAY_FEE_ESTIMATE) {
       throw new Error('The relayer asks for more than the fee shown. Try again later.');
     }
-    // As on the self-submitted path: the SDK's rebuild of the recipient notes (one
-    // commitment-keyed timestamp read per note) is skipped.
-    const result = await session.relayTransfer({ ...option, recipient: { ...option.recipient, noteSecretsMap: undefined } });
+    // The recipient's noteSecretsMap must stay: relayTransfer builds the note data itself, and without
+    // the map it encodes blind (secretless) notes the recipient can neither discover nor spend.
+    const result = await session.relayTransfer(option);
     if (result.spentNullifiersConfirmed === false) throw new Error('The relayer reported a transaction that is not this transfer.');
     return result;
   }
