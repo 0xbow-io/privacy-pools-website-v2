@@ -148,18 +148,21 @@ export function createIndexedRpcInteractor(sdk: StellarSdk, aspUrl: string): Ind
       // Event ids and cursors are '<TOID>-<index>' (ledger = TOID >> 32) and fixed-width, so string order is chain order.
       const ledgerOf = (id: string) => BigInt(id.split('-')[0]) >> 32n;
       const from = cursor ? ledgerOf(cursor) : params.startLedger ? BigInt(params.startLedger) : 0n;
-      // Pool reads always fetch the whole history and filter here: a cursor or start ledger sent to the ASP
-      // would date the read (a relayed send's confirmation polls from the ledger it was handed over at).
+      // Pool and keystore reads always fetch the whole history and filter here: a cursor or start ledger
+      // sent to the ASP would date the read (a relayed send's confirmation polls from the ledger it was
+      // handed over at; a keystore sync resumes from this client's last one).
+      // Only pool pages are kept per pass: its reads are the ones made per note.
       const pool = params.contractId === STELLAR_TESTNET_CONTRACTS.poolContractId;
+      const undated = pool || params.contractId === STELLAR_TESTNET_CONTRACTS.keystoreContractId;
       let result: StellarGetEventsResult;
-      if (!pool) {
+      if (!undated) {
         result = await fetchEvents(params.contractId, from);
-      } else if (passes > 0 && !cursor && from === 0n) {
+      } else if (pool && passes > 0 && !cursor && from === 0n) {
         result = await wholeHistory(params.contractId);
       } else {
         // A positioned read wants what is new: a fresh whole page, which a pass then reuses.
         const fresh = fetchEvents(params.contractId, 0n);
-        if (passes > 0) {
+        if (pool && passes > 0) {
           pages.set(params.contractId, fresh);
           fresh.catch(() => { if (pages.get(params.contractId) === fresh) pages.delete(params.contractId); });
         }
@@ -168,7 +171,7 @@ export function createIndexedRpcInteractor(sdk: StellarSdk, aspUrl: string): Ind
       note(result.latestLedger);
       const events = cursor
         ? result.events.filter((event) => event.id > cursor)
-        : pool && from > 0n ? result.events.filter((event) => ledgerOf(event.id) >= from) : result.events;
+        : undated && from > 0n ? result.events.filter((event) => ledgerOf(event.id) >= from) : result.events;
       return { events, latestLedger: result.latestLedger, cursor: events.at(-1)?.id ?? cursor };
     }
 

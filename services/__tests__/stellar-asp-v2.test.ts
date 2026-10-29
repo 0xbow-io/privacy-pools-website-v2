@@ -150,6 +150,16 @@ describe('createIndexedRpcInteractor: asp-v2 as the single events source', () =>
     expect(result.cursor).toBe('0021263867686522880-0000000003');
   });
 
+  test('serves a keystore sync from the whole history too, so it never names where this client left off', async () => {
+    const atLedger = (ledger: bigint, i: number) => `${(ledger << 32n).toString().padStart(19, '0')}-${String(i).padStart(10, '0')}`;
+    route = () => ({ body: { events: [event(atLedger(100n, 1)), event(atLedger(300n, 1))], latestLedger: '0x12c' } });
+
+    const result = await rpc.getEvents({ contractId: STELLAR_TESTNET_CONTRACTS.keystoreContractId, startLedger: '200' } as never);
+
+    expect(new URL(requested[0]).searchParams.get('fromLedger')).toBe('0');
+    expect(result.events.map((e) => e.id)).toEqual([atLedger(300n, 1)]);
+  });
+
   test("serves a pool start-ledger read (a relayed spend's confirmation poll) from the whole history", async () => {
     const atLedger = (ledger: bigint, i: number) => `${(ledger << 32n).toString().padStart(19, '0')}-${String(i).padStart(10, '0')}`;
     route = () => ({ body: { events: [event(atLedger(100n, 1)), event(atLedger(200n, 1)), event(atLedger(201n, 1))], latestLedger: '0xc9' } });
