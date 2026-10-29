@@ -28,6 +28,7 @@ import { PROD_ASP_URL_DEFAULT, PROD_CHAINS, PROD_YIELD_DEPLOYMENTS } from './pro
 import { STAGING_CHAINS, STAGING_ENABLED, STAGING_MAINNET_ONLY_CHAIN_IDS } from './staging-deployments';
 import { STAGING_MAINNET_OPT_IN } from './staging-mainnet';
 import { parseDepositCapUsd } from '@/services/deposit-cap';
+import { YIELD_DEPOSITS_PAUSED, yieldDepositsPausedOnChain } from './yield-deposits-paused';
 import type { YieldDeployment } from '@/services/sdk-types';
 
 // Lowercased so notes deposited via this app share casing with notes
@@ -69,6 +70,14 @@ export type TokenMetadata = {
    * real and stay spendable.
    */
   depositComingSoon?: true;
+  /**
+   * Set together with `depositComingSoon` when the vault deposit kill switch
+   * is on (config/yield-deposits-paused.ts): the asset enters a yield vault,
+   * and vault deposits are paused. Every surface that already refuses a
+   * coming-soon pool refuses this one; only the words differ ("Deposits
+   * paused"). Withdraw, send and balances never read it.
+   */
+  depositPaused?: true;
 };
 
 export interface SwapTokenInfo {
@@ -194,6 +203,44 @@ export function nativeYieldRouteInTable(
 /** A pool asset that will take deposits, but does not yet. */
 function comingSoon(token: TokenMetadata): TokenMetadata {
   return { ...token, depositComingSoon: true };
+}
+
+/**
+ * The registry with every vault ENTRY marked paused: each yield share, each
+ * underlying a deployment wraps, and the native coin where a native-mode route
+ * takes it. Pure, for the tests. Reads the environment's own deployment table,
+ * the inventory, not the flag-gated view: a paused build must not reopen a
+ * plain pool just because yield flags are off. Nothing is removed, so notes in
+ * these assets stay known, priced and spendable.
+ */
+export function pauseVaultDeposits(
+  tokens: TokenRegistry,
+  deployments: Record<number, YieldDeployment[]> | undefined,
+  chainPaused: (chainId: number) => boolean = () => true,
+): TokenRegistry {
+  const out: TokenRegistry = {};
+  for (const [key, chainTokens] of Object.entries(tokens)) {
+    // A chain the switch does not name keeps its registry as is.
+    if (!chainPaused(Number(key))) {
+      out[Number(key)] = chainTokens;
+      continue;
+    }
+    const list = deployments?.[Number(key)] ?? [];
+    const underlyings = new Set(list.map((d) => d.underlying.toLowerCase()));
+    const nativeRoute = list.some((d) => d.nativeMode === true);
+    out[Number(key)] = Object.fromEntries(Object.entries(chainTokens).map(([address, token]) => {
+      const entersVault = !!token.yieldShare
+        || underlyings.has(token.address.toLowerCase())
+        || (token.isNative && nativeRoute);
+      return [address, entersVault ? { ...token, depositComingSoon: true as const, depositPaused: true as const } : token];
+    }));
+  }
+  return out;
+}
+
+/** The registry a build serves: vault entries paused on every chain the kill switch names. */
+function servedTokens(tokens: TokenRegistry, deployments?: Record<number, YieldDeployment[]>): TokenRegistry {
+  return YIELD_DEPOSITS_PAUSED ? pauseVaultDeposits(tokens, deployments, yieldDepositsPausedOnChain) : tokens;
 }
 
 /** Mainnet (chain 1) native ETH, deposit-gated by the flag and the ppETH route. */
@@ -337,7 +384,7 @@ function buildStagingEnvironment(): EnvironmentConfig {
     baseEvmChainId: 11155111,
     includesSui: true,
     includesStellar: true,
-    tokensByChain: buildStagingTokens(),
+    tokensByChain: servedTokens(buildStagingTokens()),
     fallbackTokenChainId: 11155111,
     swapOutputTokens: buildStagingSwapOutputs(),
     // Verified against li.quest/v1/chains: of the staging chains Ethereum, OP
@@ -525,7 +572,7 @@ function buildProdEnvironment(): EnvironmentConfig {
     includesBaseChain: false,
     includesSui: false,
     includesStellar: process.env.EXPO_PUBLIC_STELLAR_ENABLED === 'true',
-    tokensByChain: buildProdTokens(PROD_YIELD_DEPLOYMENTS),
+    tokensByChain: servedTokens(buildProdTokens(PROD_YIELD_DEPLOYMENTS), PROD_YIELD_DEPLOYMENTS),
     fallbackTokenChainId: 1,
     swapOutputTokens: buildProdSwapOutputs(),
     // li.quest/v1/chains (checked 2026-10-14) lists Ethereum (1), BSC (56), OP

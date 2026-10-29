@@ -66,7 +66,7 @@ import { useMultiChainWallet } from '@/hooks/use-multi-chain-wallet';
 import { useReceiveSetup } from '@/hooks/use-receive-setup';
 import { useKeystoreRegistrationModal } from '@/components/keystore-registration-modal-provider';
 import { FINISH_SETUP_PRIMARY, RECEIVE_WARNING } from '@/services/receive-setup';
-import { getConfiguredYieldDeploymentForAsset } from '@/config/yield';
+import { getConfiguredYieldDeploymentForAsset, VAULT_DEPOSITS_PAUSED_MESSAGE } from '@/config/yield';
 import { payWrapsIntoPool as payWrapsIntoPoolRule } from '@/services/shield-pay-routing';
 import { swapSurfaceEnabled } from '@/config/intent-lockdown';
 import { formatDepositMinimum, PREVIEW_MINT_ABI, requiredUnderlyingForMinShares, scaleUnits } from '@/services/deposit-limits';
@@ -1494,6 +1494,11 @@ export function ActionHub({
       isSupersededLegacyPool(shieldPool.symbol, shieldPool.chainId),
       shieldPool.chainId !== chainId,
     );
+  // Vault deposits paused (EXPO_PUBLIC_YIELD_DEPOSITS_PAUSED): the destination
+  // keeps its identity (the vault pool, never another pool), and the Shield CTA
+  // is dead with a one-line reason instead.
+  const shieldDepositsPaused = !!shieldPool
+    && getKnownTokenMetadata(shieldPool.address, shieldPool.chainId)?.depositPaused === true;
   const crossPayAllowed = !!shieldPool && !shieldPoolClosed
     && (crossChainShield
       || (shieldPool.chainId === chainId && swapDepositEnabledForChain(chainId)));
@@ -1672,6 +1677,7 @@ export function ActionHub({
         chainId,
         name: TOKEN_NAMES[t.symbol],
         comingSoon: true,
+        depositPaused: t.depositPaused === true,
         poolAsset: true,
       }))
       : [];
@@ -2759,6 +2765,10 @@ export function ActionHub({
     }
     switch (action) {
       case 'shield': {
+        if (shieldDepositsPaused) {
+          toast({ title: VAULT_DEPOSITS_PAUSED_MESSAGE, variant: 'destructive' });
+          return;
+        }
         // An OPEN recipient field must hold a usable address before anything
         // launches; a collapsed one means the user's own wallet.
         if (shieldRecipientInvalid) {
@@ -3091,7 +3101,7 @@ export function ActionHub({
     const shieldPricing = crossPayShield && crossPayAllowed && shieldQuote.status === 'loading';
     const ctaDisabled = ((a === 'withdraw' || a === 'send') && !!amountField.error)
       || (a === 'swap' && (!swapOutToken || swapRecipientBlocks))
-      || (a === 'shield' && (shieldRecipientInvalid || shieldCapBlocksDeposit || shieldPricing));
+      || (a === 'shield' && (shieldRecipientInvalid || shieldCapBlocksDeposit || shieldPricing || shieldDepositsPaused));
     const compactShield = landing && a === 'shield' && !amount && !shieldRecipientEnabled;
     const active = ACTIONS.find((x) => x.key === a)!;
     // A settling deposit keeps the FORM on screen (input visible, disabled)
@@ -4001,6 +4011,11 @@ export function ActionHub({
       {/* Conversion caption — hidden in the 1:1 common case AND once a quote
           landed (the OUT card's ≈ figure says it all); one terse line only
           while the conversion is unavailable, unpriced, or still pricing. */}
+      {a === 'shield' && !shieldBusy && shieldDepositsPaused && (
+        <Text testID="shield-deposits-paused" className="font-pp-sans text-[12px] leading-[17px] text-warning">
+          {VAULT_DEPOSITS_PAUSED_MESSAGE}
+        </Text>
+      )}
       {a === 'shield' && !shieldBusy && shieldPricing && (
         <View className="flex-row items-center gap-[5px]" accessibilityLabel="Pricing the conversion">
           {/* nw-keep(data-color): spinner tint is a theme token into
@@ -4009,7 +4024,7 @@ export function ActionHub({
           <Text className="font-pp-sans text-[12px] leading-[17px] text-text-secondary">Pricing the conversion…</Text>
         </View>
       )}
-      {a === 'shield' && !shieldBusy && crossPayShield && !shieldPricing && !(landing && !walletConnected && shieldPool && displayTokenSymbol(shieldPool.symbol) === payMeta.symbol) && !(crossPayAllowed && shieldQuote.status === 'ok') && (
+      {a === 'shield' && !shieldBusy && !shieldDepositsPaused && crossPayShield && !shieldPricing &&!(landing && !walletConnected && shieldPool && displayTokenSymbol(shieldPool.symbol) === payMeta.symbol) && !(crossPayAllowed && shieldQuote.status === 'ok') && (
         <Text className={`font-pp-sans text-[12px] leading-[17px] ${shieldQuote.status === 'none' ? 'text-warning' : 'text-text-secondary'}`}>
           {shieldPoolClosed ? 'Deposits into this pool are currently unavailable.' : !crossPayAllowed
             /* displayTokenSymbol, not the raw pool symbol: a share pool's symbol is

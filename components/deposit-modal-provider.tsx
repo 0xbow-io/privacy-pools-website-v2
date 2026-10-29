@@ -159,7 +159,7 @@ import { useAllChainsPriceMap, usePriceFeedsSettled } from '@/hooks/use-all-chai
 import apiClient from '@/services/api-client';
 import { invalidateTransactionCaches } from '@/services/cache';
 import { NoteStatus, type Note, type PoolSession, type YieldDeployment } from '@/services/sdk-types';
-import { getConfiguredNativeYieldDeployment, getConfiguredYieldDepositDeploymentForUnderlying, getConfiguredYieldDeploymentForAsset, getNativeYieldDepositDeployment, getYieldDepositDeploymentForUnderlying, getYieldDeploymentsForChain, YIELD_APY_PERCENT, YIELD_OPT_OUT_FEE, yieldOptOutFeeActive } from '@/config/yield';
+import { getConfiguredNativeYieldDeployment, getConfiguredYieldDepositDeploymentForUnderlying, getConfiguredYieldDeploymentForAsset, getNativeYieldDepositDeployment, getYieldDepositDeploymentForUnderlying, getYieldDeploymentsForChain, VAULT_DEPOSITS_PAUSED_MESSAGE, YIELD_APY_PERCENT, YIELD_OPT_OUT_FEE, yieldDepositsPausedOnChain, yieldOptOutFeeActive } from '@/config/yield';
 import { PP_ROUTER_QUOTE_ABI, toYieldDepositFor } from '@/services/yield-deposit-for';
 import { toNativeYieldDeposit } from '@/services/yield-native-deposit';
 import { useYieldVaultProbeVersion } from '@/hooks/use-yield-vault-probe';
@@ -368,6 +368,10 @@ function cannotShieldMessage(options: { tokenSymbol?: string; tokenAddress?: str
   const meta = (options.tokenAddress ? getKnownTokenMetadata(options.tokenAddress, chainId) : undefined)
     ?? (options.tokenSymbol ? getTokenMetadataBySymbol(options.tokenSymbol, chainId) : undefined);
   const symbol = meta?.symbol ?? options.tokenSymbol ?? 'That token';
+  // Vault deposits are paused (EXPO_PUBLIC_YIELD_DEPOSITS_PAUSED): the share,
+  // its underlying and a native coin with a vault route all say so, before the
+  // "not verified yet" and "coming soon" readings below.
+  if (meta?.depositPaused) return VAULT_DEPOSITS_PAUSED_MESSAGE;
   // A yield share whose vault is not verified yet: the deposit is paid in the
   // underlying through the PPRouter, and that route only opens once the vault
   // has been checked on chain. Say so, and that it is a wait, not a refusal.
@@ -2651,6 +2655,15 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       const liveYieldIsNative = selectedToken.isNative && liveDeployment?.nativeMode === true;
       const useYieldPath = yieldAvailable && yieldOn && !!liveDeployment;
       depositErrorReportRef.current.isYield = useYieldPath;
+      // Vault deposits paused on this chain: an asset whose deposits land in a
+      // vault is refused here, before anything is prepared, and never shielded
+      // plainly into the closed or superseded pool. The configured route (not
+      // the verified one) decides, so a pending probe cannot slip past it.
+      if (yieldDepositsPausedOnChain(depositChainId) && (selectedToken.isNative
+        ? getConfiguredNativeYieldDeployment(depositChainId) !== undefined
+        : getConfiguredYieldDepositDeploymentForUnderlying(depositChainId, selectedToken.address) !== undefined)) {
+        throw new Error(VAULT_DEPOSITS_PAUSED_MESSAGE);
+      }
       // The native coin on a chain with a CONFIGURED native-mode route has one
       // way in: the router. If the verified route is not available right now
       // (probe pending or failed) the deposit is refused, never shielded plainly
@@ -4829,6 +4842,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
               isNative: t.isNative,
               name: TOKEN_NAMES[t.symbol],
               comingSoon: true,
+              depositPaused: t.depositPaused === true,
             })),
           ]}
           networks={supportedNetworks}

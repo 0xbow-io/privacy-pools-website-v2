@@ -55,6 +55,9 @@
 import type { YieldDeployment } from '@/services/sdk-types';
 import { ACTIVE_ENVIRONMENT } from '@/config/environments';
 import { yieldVaultUsable } from '@/services/yield-vault-probe';
+import { yieldDepositsPausedOnChain } from '@/config/yield-deposits-paused';
+
+export { YIELD_DEPOSITS_PAUSED, yieldDepositsPaused, yieldDepositsPausedOnChain, VAULT_DEPOSITS_PAUSED_MESSAGE, DEPOSITS_PAUSED_SUBTITLE } from '@/config/yield-deposits-paused';
 
 function getEnv(...values: Array<string | undefined>): string | undefined {
   return values.find((value) => value && value.trim().length > 0)?.trim();
@@ -306,15 +309,19 @@ export function resolveYieldDeploymentForAsset(
  * A share address must return undefined: ppUSDC is already an Entrypoint asset
  * and depositing it through PPRouter would wrongly treat 18-decimal shares as
  * 6-decimal underlying.
+ *
+ * `depositsPaused` (the vault deposit kill switch) answers undefined for every
+ * underlying: no deposit into a vault can be built. Only the money twin passes
+ * it; the naming twin and every share-side resolver ignore it.
  */
 export function resolveYieldDepositDeploymentForUnderlying(
   chainId: number,
   tokenAddress: string | undefined,
-  opts: { enabled: boolean; withdrawReady: boolean },
+  opts: { enabled: boolean; withdrawReady: boolean; depositsPaused?: boolean },
   deployments: Record<number, YieldDeployment[]>,
   usable: (chainId: number, share: string) => boolean,
 ): YieldDeployment | undefined {
-  if (!tokenAddress) return undefined;
+  if (!tokenAddress || opts.depositsPaused) return undefined;
   const key = tokenAddress.toLowerCase();
   return resolveYieldDeployments(chainId, opts, deployments).find(
     (d) => usable(chainId, d.ppUSDC) && d.underlying.toLowerCase() === key,
@@ -394,6 +401,15 @@ const YIELD_DEPLOYMENT_MAP: Record<number, YieldDeployment> = Object.fromEntries
   Object.entries(YIELD_DEPLOYMENTS_MAP).flatMap(([chainId, list]) => (list[0] ? [[Number(chainId), list[0]]] : [])),
 );
 const YIELD_FLAGS = { enabled: YIELD_ENABLED, withdrawReady: YIELD_WITHDRAW_READY };
+/**
+ * The flags the two DEPOSIT money gates read (getYieldDepositDeploymentForUnderlying,
+ * getNativeYieldDepositDeployment): YIELD_FLAGS plus the kill switch for that
+ * chain. Nothing else reads these, so withdraw, redemption, unwrap, ragequit
+ * and Portfolio resolve exactly as before with deposits paused.
+ */
+function yieldDepositFlags(chainId: number) {
+  return { ...YIELD_FLAGS, depositsPaused: yieldDepositsPausedOnChain(chainId) };
+}
 
 /** Every deployment the env CONFIGURES for `chainId`, flags-gated, unverified. For the probe site only. */
 export function getConfiguredYieldDeployments(chainId: number): YieldDeployment[] {
@@ -471,7 +487,7 @@ export function isConfiguredYieldUnderlying(chainId: number, tokenAddress: strin
 
 /** Exact verified PPRouter route for a selected underlying deposit input. */
 export function getYieldDepositDeploymentForUnderlying(chainId: number, tokenAddress: string | undefined): YieldDeployment | undefined {
-  return resolveYieldDepositDeploymentForUnderlying(chainId, tokenAddress, YIELD_FLAGS, YIELD_DEPLOYMENTS_MAP, yieldVaultUsable);
+  return resolveYieldDepositDeploymentForUnderlying(chainId, tokenAddress, yieldDepositFlags(chainId), YIELD_DEPLOYMENTS_MAP, yieldVaultUsable);
 }
 
 /**
@@ -555,13 +571,17 @@ export function isYieldUnderlying(chainId: number, tokenAddress: string | undefi
 // says NATIVE_MODE, which no env var can fake and which
 // services/yield-vault-probe.ts asks on chain.
 
-/** Pure: the verified native-mode deployment for a chain, if the env names one. */
+/**
+ * Pure: the verified native-mode deployment for a chain, if the env names one.
+ * Undefined with `depositsPaused` (the kill switch, money twin only).
+ */
 export function resolveNativeYieldDepositDeployment(
   chainId: number,
-  opts: { enabled: boolean; withdrawReady: boolean },
+  opts: { enabled: boolean; withdrawReady: boolean; depositsPaused?: boolean },
   deployments: Record<number, YieldDeployment[]>,
   usable: (chainId: number, share: string) => boolean,
 ): YieldDeployment | undefined {
+  if (opts.depositsPaused) return undefined;
   return resolveYieldDeployments(chainId, opts, deployments).find(
     (d) => d.nativeMode === true && usable(chainId, d.ppUSDC),
   );
@@ -573,7 +593,7 @@ export function resolveNativeYieldDepositDeployment(
  * pass the probe, so an unconfigured build behaves exactly as before.
  */
 export function getNativeYieldDepositDeployment(chainId: number): YieldDeployment | undefined {
-  return resolveNativeYieldDepositDeployment(chainId, YIELD_FLAGS, YIELD_DEPLOYMENTS_MAP, yieldVaultUsable);
+  return resolveNativeYieldDepositDeployment(chainId, yieldDepositFlags(chainId), YIELD_DEPLOYMENTS_MAP, yieldVaultUsable);
 }
 
 /**

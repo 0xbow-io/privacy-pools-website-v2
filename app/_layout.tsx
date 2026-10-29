@@ -66,6 +66,8 @@ import { MobileNav } from '@/components/mobile-nav';
 import { GlobalSheets } from '@/components/global-sheets';
 import { ConnectBalanceLanding } from '@/components/connect-balance-landing';
 import { ModalUrlBridge } from '@/components/modal-url-bridge';
+import { YieldPauseBannerFrame } from '@/components/yield-pause-banner';
+import { YIELD_PAUSE_BANNER_TEXT } from '@/config/yield-deposits-paused';
 import { config, initialState } from '@/config/wagmi';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SuiProvider } from '@/components/sui-provider';
@@ -136,8 +138,11 @@ export const unstable_settings = {
 function RootLayoutNav() {
   const { colorScheme } = useTheme();
   const baseTheme = colorScheme === 'dark' ? DarkTheme : DefaultTheme;
-  // Pushed pages start below the status bar on native (0 on web).
-  const topInset = useNativeTopInset();
+  // Pushed pages start below the status bar on native (0 on web). With the
+  // yield pause banner up, the banner takes that inset and the pages start
+  // right under it.
+  const nativeTopInset = useNativeTopInset();
+  const topInset = YIELD_PAUSE_BANNER_TEXT ? 0 : nativeTopInset;
   // Route transitions reveal the navigator underneath the page. Keep that
   // surface on the same background token as every screen.
   const navigationTheme = {
@@ -156,6 +161,7 @@ function RootLayoutNav() {
           suppression was gated on a feature flag. A screen that genuinely
           wants a header now says so explicitly below; nothing can leak one by
           being forgotten here. */}
+      <YieldPauseBannerFrame>
       <Stack
         screenOptions={{
           headerShown: false,
@@ -208,6 +214,7 @@ function RootLayoutNav() {
             placeholder title. */}
         <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
       </Stack>
+      </YieldPauseBannerFrame>
       {/* nw-keep(third-party-style-api): expo-status-bar `style` selects the native status-bar
           bar-style ('auto'|'light'|'dark'), not a RN/CSS style. No className path. */}
       <StatusBar style="auto" />
