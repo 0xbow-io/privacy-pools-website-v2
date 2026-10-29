@@ -205,6 +205,7 @@ import { useNativeMockBlock } from '@/hooks/use-native-mock-block';
 import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { FeeWarning } from '@/components/fee-warning';
 import { buildFeeBreakdown, gasCostUsd, quoteGas, splitRelayerFee, swapLossUsd, type FeeGasReading } from '@/services/fee-warning';
+import { useTorOperation } from '@/hooks/use-tor-operation';
 
 const WITHDRAW_RELAY_METHOD = /^relay(Withdrawal|RegisterAndWithdrawal|WithAnnounce)$/;
 const SWAP_EXIT_PENDING_MESSAGE = 'The relayer accepted this withdrawal, but it has not been included in a block yet. It has not failed and can still land, so these funds are held for it. Your balance and history update on their own once it settles; if it is still pending after 10 minutes, report it from the pending notice.';
@@ -531,6 +532,7 @@ function quoteFailureMessage(message: string, shown: string = message): string {
 
 export function WithdrawModalProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
+  useTorOperation(isOpen);
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const isDark = colorScheme === 'dark';

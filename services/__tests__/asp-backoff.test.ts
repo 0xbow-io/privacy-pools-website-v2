@@ -26,6 +26,17 @@ import { LABEL_DECISIONS_INTERVAL_MS, LABEL_DECISIONS_MAX_AGE_MS } from '@/servi
 
 const ASP = 'https://asp.example';
 
+/** React Native's abort-controller 3.0.0 signal: no throwIfAborted() and no reason. */
+function nativeSignal() {
+  const target = new EventTarget();
+  const signal = Object.assign(target, { aborted: false }) as unknown as AbortSignal;
+  const abort = () => {
+    (signal as { aborted: boolean }).aborted = true;
+    target.dispatchEvent(new Event('abort'));
+  };
+  return { signal, abort };
+}
+
 // The real APIClient, with only its native config module replaced (same
 // approach as egress-policy-coverage.test.ts; config/env cannot load in bun).
 function loadApi() {
@@ -194,6 +205,19 @@ describe('policedFetch: no ASP request leaves during the window', () => {
     }
   });
 
+  test('a request carrying React Native\'s AbortSignal (no throwIfAborted, no reason) is sent', async () => {
+    let sent = 0;
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => { sent += 1; return Response.json({}); }) as typeof fetch;
+    try {
+      const { signal } = nativeSignal();
+      expect((await policedFetch('asp', ASP, `${ASP}/public-key`, { signal })).status).toBe(200);
+      expect(sent).toBe(1);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
   test('the relayer is not affected by the ASP window', async () => {
     let sent = 0;
     const original = globalThis.fetch;
@@ -356,6 +380,20 @@ describe('production ASP pacing and fixed-grid recovery', () => {
     expect((await Promise.all(pending)).every(e => e instanceof Error)).toBe(true);
     expect(clock.pending()).toBe(0);
     await pacer.wait();
+  });
+
+  test('with React Native\'s AbortSignal, an abort still rejects as an AbortError, queued or before queueing', async () => {
+    const clock = fakeClock();
+    const pacer = createAspPacer(clock);
+    await pacer.wait();
+    const queued = nativeSignal();
+    const waiting = pacer.wait(queued.signal).catch(e => e);
+    queued.abort();
+    expect((await waiting).name).toBe('AbortError');
+    const early = nativeSignal();
+    early.abort();
+    expect((await pacer.wait(early.signal).catch(e => e)).name).toBe('AbortError');
+    expect(clock.pending()).toBe(0);
   });
 
   test('only one probe is in flight; a slow current probe succeeds and an old-window probe cannot close a new window', async () => {

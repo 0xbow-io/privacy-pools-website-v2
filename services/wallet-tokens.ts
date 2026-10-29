@@ -20,6 +20,7 @@ import { ALCHEMY_KEY } from '@/config/env';
 import { getChainConfig, isTestnetChain, supportedEvmChainIds, usesCustomRpc } from '@/config/chains';
 import { getActionableTokens } from '@/config/tokens';
 import { partitionSpamTokens } from '@/services/token-spam-filter';
+import { routedFetch } from '@/services/tor-fetch';
 
 const ALCHEMY_NETWORK_BY_CHAIN: Record<number, string> = {
   1: 'eth-mainnet',
@@ -178,7 +179,7 @@ export async function fetchWalletTokensByChain(
   const rows: AlchemyTokenRow[] = [];
   let pageKey: string | undefined;
   for (let page = 0; page < MAX_PAGES; page++) {
-    const res = await fetch(`https://api.g.alchemy.com/data/v1/${ALCHEMY_KEY}/assets/tokens/by-address`, {
+    const res = await routedFetch('web')(`https://api.g.alchemy.com/data/v1/${ALCHEMY_KEY}/assets/tokens/by-address`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({

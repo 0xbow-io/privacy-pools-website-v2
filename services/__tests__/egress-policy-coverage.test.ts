@@ -570,26 +570,14 @@ describe('app-owned network boundary coverage', () => {
       };
       visit(ast);
     }
-    // Sui's and Stellar's separate SDK stacks and explicit third-party services
-    // are outside the EVM boundary. Inventory is not a runtime sandbox for them.
+    // Every other request goes through policedFetch, policedHttp or
+    // routedFetch, which put it on its anon-rpc group when Tor is in force
+    // (services/tor-groups.ts). What is left is same-origin, or bootstraps Tor.
     expect(counts).toEqual({
-      'components/newsletter-modal.tsx': 1,
-      'hooks/use-stellar-balance.ts': 1, // Horizon account balance (the wallet's own, public)
-      'hooks/use-sui-proof.ts': 2,
-      'hooks/use-sui-relay.ts': 2,
-      'services/egress-fetch.ts': 1,
-      'services/fx-rate.ts': 1,
-      'services/lifi-quote.ts': 2,
-      'services/lifi-token-list.ts': 1, // whole-chain token list, names no wallet
-      'services/price-service.ts': 1,
-      'services/sdk-setup.ts': 1, // circuit artifacts, not the ASP client
-      // Stellar testnet: its own SDK/Soroban/Horizon stack, like Sui's.
-      'services/stellar/stellar-account.ts': 1, // testnet relayer details, before a withdrawal
-      'services/stellar/stellar-relayer.ts': 1, // testnet relayer quote + relay
-      'services/stellar/stellar-runtime.ts': 2, // asp-v2 events + ASP data, and circuit artifacts
-      'services/sui-witness/asp-labels.ts': 1,
-      'services/tor-fetch.ts': 1, // anon-rpc specifier read, allowlist-checked, before Tor exists
-      'services/wallet-tokens.ts': 1, // Alchemy token REST API, not JSON-RPC
+      'hooks/use-sui-proof.ts': 2, // circuit artifacts, same-origin by default
+      'services/sdk-setup.ts': 1, // circuit artifacts, same-origin
+      'services/stellar/stellar-runtime.ts': 1, // circuit artifacts, same-origin by default
+      'services/tor-fetch.ts': 2, // the specifier read before Tor exists, and routedFetch's direct send when Tor is off
     });
   });
 });

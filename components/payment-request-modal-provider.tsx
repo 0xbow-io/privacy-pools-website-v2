@@ -48,6 +48,7 @@ import Svg, { Circle } from 'react-native-svg';
 import { CopyIconButton } from '@/components/ui/copy-address';
 import { InlineOpPortal } from '@/components/inline-op-portal';
 import { useInlineOpsCapable } from '@/hooks/use-inline-ops-capable';
+import { useTorOperation } from '@/hooks/use-tor-operation';
 import { useAccount, usePublicClient, useSendTransaction, useSignTypedData, useSwitchChain } from 'wagmi';
 import { encodeFunctionData, erc20Abi, formatUnits, parseUnits } from 'viem';
 import { NoteStatus } from '@/services/sdk-types';
@@ -620,6 +621,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
   const { openKeystoreRegistrationModal } = useKeystoreRegistrationModal();
 
   const [isOpen, setIsOpen] = useState(false);
+  useTorOperation(isOpen);
   const [mode, setMode] = useState<PaymentMode>('request');
   // Chain-scoped request catalog: a request created on mainnet must carry the
   // canonical token contract. Superseded native pools are excluded; the

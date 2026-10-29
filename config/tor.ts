@@ -39,7 +39,7 @@
  * anon-rpc worker (https://github.com/ethereum/anon-rpc), a bundle pinned by
  * hash on an on-chain specifier contract and run in a null-origin sandbox. A
  * provider is one such specifier: tor-js, Nym and Nox are the anonymizing ones
- * published in anon-rpc's adopters.json5. Only tor-js takes a gateway; Nym and
+ * the harness lists as known workers. Only tor-js takes a gateway; Nym and
  * Nox carry their own way in and take no config.
  *
  * Resolved ONCE at module load, like config/custom-rpc.ts, because the wagmi
@@ -74,12 +74,12 @@ export const TOR_STORAGE_KEY = 'ppv2_tor_v1';
 export type TorProviderId = 'tor-js' | 'nym' | 'nox';
 
 export type TorProvider = {
+  /**
+   * The harness's known-worker name, which supplies the specifier contract and
+   * the chain it is published on (knownWorker() in the browser harness).
+   */
   id: TorProviderId;
   label: string;
-  /** The anon-rpc IWorkerSpecifier that pins the client bundle by hash. */
-  specifier: `0x${string}`;
-  /** The chain the specifier is read from, once, before the client exists. */
-  specifierChainId: number;
   /**
    * The bundle hash this build accepts. The specifier is read over an RPC, and
    * the harness runs whatever hash that read returns; pinning it here means an
@@ -103,13 +103,14 @@ export type TorProvider = {
   /**
    * The worker's own config (anon-rpc §7.1). tor-js takes the user's gateway;
    * the others take none, which the harness passes as undefined, as the
-   * anon-rpc demo does for an entry without an exampleConfig.
+   * anon-rpc demo does for an entry without an exampleConfig. The harness
+   * takes only a plain value (anon-rpc §9.4).
    */
-  workerConfig: (gatewayUrl: string) => unknown;
+  workerConfig: (gatewayUrl: string) => { gateways: string[] } | undefined;
 };
 
 /**
- * Specifiers from anon-rpc's adopters.json5. The passthrough reference worker
+ * The harness's known workers that anonymize. The passthrough reference worker
  * is left out on purpose: it sends with a plain fetch and anonymizes nothing.
  */
 export const TOR_PROVIDERS: readonly TorProvider[] = ([
@@ -118,8 +119,6 @@ export const TOR_PROVIDERS: readonly TorProvider[] = ([
     // client there is Arti, so the label names the network instead.
     id: 'tor-js',
     label: TOR_ON_DEVICE ? 'Tor' : 'tor-js',
-    specifier: '0x700dA3193D35fA54Cd3fBf29B66f2a2A0385659e',
-    specifierChainId: 1,
     // tor-js 0.4.3, as the specifier named it on 2026-10-07 (verified 2026-10-15:
     // same owner, bundle keccak matches on all three resolvers).
     workerHash: '0xe39f8c42ed72b7f580a73c46c3300f6d3ad3954bbc26e5fe075b18c48fedc8b5',
@@ -131,8 +130,6 @@ export const TOR_PROVIDERS: readonly TorProvider[] = ([
   {
     id: 'nym',
     label: 'Nym',
-    specifier: '0x3aCD9742C68F6d993066Ae25533e09b9e1f60eD0',
-    specifierChainId: 1,
     // As the specifier named it on 2026-10-15.
     workerHash: '0xf13a448a8721b9d0b20da3d5b80ffe00bf4c5bb3aae812a38d3d1e3bc81fceb8',
     needsGateway: false,
@@ -143,12 +140,8 @@ export const TOR_PROVIDERS: readonly TorProvider[] = ([
   {
     id: 'nox',
     label: 'Nox (demo)',
-    // Published on Sepolia, so its bootstrap read goes to Sepolia. The fetch
-    // it carries can still reach any chain.
-    specifier: '0x35133267A8F7EC35046a83DCA0f4Ca8A6e1b7A9A',
-    specifierChainId: 11155111,
-    // As the specifier named it on 2026-10-15.
-    workerHash: '0xd8bef626ec8511d7a468bca5137880680ca2da20d2ea4d9c981a2a3d0c86ba1e',
+    // @hisoka-io/anon-rpc-worker 0.4.1, as the specifier named it on 2026-10-26.
+    workerHash: '0xd9fa04b080a33062680a27cad828196bfb04615a0ebc76bcbffedb6dcbe838d4',
     needsGateway: false,
     webOnly: true,
     hint: 'A Sphinx mixnet. This is a demo network: it may be slow or go away.',

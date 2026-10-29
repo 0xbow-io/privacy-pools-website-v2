@@ -2,9 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync, readdirSync } from 'node:fs';
 import ts from 'typescript';
 import * as viem from 'viem';
+import * as abortSignal from '../abort-signal';
 import * as policy from '../egress-policy';
 import * as settings from '../../config/tor';
-import { AnonRpcWorker } from '@0xbow/anon-rpc-rs-browser-harness';
+import * as harness from '@0xbow/anon-rpc-rs-browser-harness';
 
 const MAINNET = 'https://mainnet.example/';
 const ENV_MAINNET = 'https://env-mainnet.example/';
@@ -28,164 +29,40 @@ function config(gateway: string, store = storage()) {
   return load('config/tor.ts', { process: { env: { EXPO_PUBLIC_TOR_GATEWAY: gateway } }, window: { localStorage: store } }) as typeof settings;
 }
 
-for (const phase of ['download', 'body'] as const) test(`the bundled harness cannot resume after close during a ${phase}`, async () => {
-  const bundle = new TextEncoder().encode('/* cancellation fixture */');
-  const hash = viem.keccak256(bundle);
-  const resolvers = viem.encodeAbiParameters([{ type: 'string[]' }], [['https://first.example/worker', 'https://second.example/worker']]);
-  let started!: () => void;
-  const downloading = new Promise<void>(resolve => { started = resolve; });
-  let finish!: () => void;
-  let signal: AbortSignal | null | undefined;
-  const calls: string[] = [];
-  let frames = 0;
-  const realFetch = globalThis.fetch;
-  const realDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
-  Object.defineProperty(globalThis, 'document', { configurable: true, value: {
-    createElement() { frames++; throw new Error('A closed worker must not create an iframe'); },
-  } });
-  globalThis.fetch = (async (url: string, init?: RequestInit) => {
-    calls.push(url);
-    signal = init?.signal;
-    if (phase === 'download') return new Promise<Response>(resolve => {
-      finish = () => resolve(new Response(bundle));
-      started();
-    });
-    return new Response(new ReadableStream<Uint8Array>({ start(controller) {
-      finish = () => { controller.enqueue(bundle); controller.close(); };
-      started();
-    } }));
-  }) as typeof fetch;
-  const worker = new AnonRpcWorker({ address: settings.TOR_PROVIDERS[0].specifier, preExisting: { rpcProvider: {
-    request: async ({ params }) => (params?.[0] as { data: string }).data === '0x3898587d' ? hash : resolvers,
-  } } });
-  try {
-    await downloading;
-    worker.close();
-    await expect(worker.ready).rejects.toThrow('worker closed');
-    // Even a fetch implementation that ignores abort may resolve later.
-    finish();
-    await new Promise(resolve => setTimeout(resolve, 0));
-    expect(frames).toBe(0);
-    expect(calls).toEqual(['https://first.example/worker']);
-    expect(signal?.aborted).toBe(true);
-  } finally {
-    worker.close();
-    globalThis.fetch = realFetch;
-    if (realDocument) Object.defineProperty(globalThis, 'document', realDocument);
-    else Reflect.deleteProperty(globalThis, 'document');
-  }
-});
-
-
-test('the bundled harness releases its bootstrap when closed while the iframe has not said ready', async () => {
-  const bundle = new TextEncoder().encode('/* ready-wait fixture */');
-  const hash = viem.keccak256(bundle);
-  const resolvers = viem.encodeAbiParameters([{ type: 'string[]' }], [['https://first.example/worker']]);
-  let appended!: () => void;
-  const waitingForReady = new Promise<void>(resolve => { appended = resolve; });
-  const posted: unknown[] = [];
-  // Record the bootstrap's own signal, and whether anything waiting on it runs.
-  const RealAbortController = globalThis.AbortController;
-  let fired = 0;
-  class SpyAbortController extends RealAbortController {
-    constructor() {
-      super();
-      const signal = this.signal;
-      const add = signal.addEventListener.bind(signal);
-      signal.addEventListener = ((type: string, listener: EventListener, options?: AddEventListenerOptions) =>
-        add(type, (event: Event) => { if (type === 'abort') fired++; listener(event); }, options)) as typeof signal.addEventListener;
-    }
-  }
-  const realFetch = globalThis.fetch;
-  const realDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
-  const realWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
-  const iframe = { style: {}, setAttribute() {}, remove() {}, contentWindow: { postMessage: (message: unknown) => { posted.push(message); } } };
-  Object.defineProperty(globalThis, 'document', { configurable: true, value: {
-    createElement: () => iframe,
-    body: { appendChild: () => { appended(); } },
-  } });
-  Object.defineProperty(globalThis, 'window', { configurable: true, value: { addEventListener() {}, removeEventListener() {} } });
-  globalThis.fetch = (async () => new Response(bundle)) as typeof fetch;
-  globalThis.AbortController = SpyAbortController as typeof AbortController;
-  let worker: InstanceType<typeof AnonRpcWorker> | undefined;
-  try {
-    worker = new AnonRpcWorker({ address: settings.TOR_PROVIDERS[0].specifier, preExisting: { rpcProvider: {
-      request: async ({ params }) => (params?.[0] as { data: string }).data === '0x3898587d' ? hash : resolvers,
-    } } });
-    globalThis.AbortController = RealAbortController;
-    await waitingForReady;
-    const before = fired;
-    worker.close();
-    await expect(worker.ready).rejects.toThrow('worker closed');
-    await new Promise(resolve => setTimeout(resolve, 0));
-    // The wait for iframe-ready listens on the bootstrap signal, so close() ends it.
-    expect(fired).toBeGreaterThan(before);
-    expect(posted).toEqual([]);
-  } finally {
-    globalThis.AbortController = RealAbortController;
-    worker?.close();
-    globalThis.fetch = realFetch;
-    if (realDocument) Object.defineProperty(globalThis, 'document', realDocument);
-    else Reflect.deleteProperty(globalThis, 'document');
-    if (realWindow) Object.defineProperty(globalThis, 'window', realWindow);
-    else Reflect.deleteProperty(globalThis, 'window');
-  }
-});
-test('canceling a KPS bundle download closes the stream and its connection', async () => {
-  const controller = new AbortController();
-  let reading!: () => void;
-  const waiting = new Promise<void>(resolve => { reading = resolve; });
-  let reader!: ReadableStreamDefaultController<Uint8Array>;
-  let closed = 0;
-  let dialSignal: AbortSignal | undefined;
-  const stream = {
-    writable: new WritableStream<Uint8Array>(),
-    readable: new ReadableStream<Uint8Array>({ start(value) { reader = value; }, pull() { reading(); } }),
-    close: async () => { closed++; reader.error(new Error('stream closed')); },
-  };
-  const { fetchBundleOverKps } = load('node_modules/@0xbow/anon-rpc-rs-browser-harness/src/host/kps-http.ts', {
-    require: (name: string) => {
-      if (name !== '@kpstreams/webrtc-client') throw new Error(`Unexpected dependency ${name}`);
-      return { openStream: async (_address: string, options: { signal?: AbortSignal }) => {
-        dialSignal = options.signal;
-        return stream;
-      } };
-    },
-  }) as { fetchBundleOverKps: (address: string, path: string, cap: number, signal: AbortSignal) => Promise<Uint8Array> };
-  const pending = fetchBundleOverKps(GATEWAY, '/worker', 1024, controller.signal);
-  await waiting;
-  // Allow the dial and request writer to settle before aborting the read.
-  await new Promise(resolve => setTimeout(resolve, 0));
-  controller.abort();
-  await expect(pending).rejects.toThrow('stream closed');
-  expect(dialSignal).toBe(controller.signal);
-  expect(closed).toBeGreaterThan(0);
-});
-
 // Compile isolated modules so neither browser globals nor module mocks leak into other tests.
 function transport(active: boolean, importer: () => unknown, options: {
+  timeoutSignal?: (ms: number) => AbortSignal;
   mainnetInChainList?: boolean;
   chainUrls?: Record<number, string>;
   customRpcUrls?: Record<number, string>;
+  cores?: number;
+  device?: boolean;
 } = {}) {
   let imports = 0;
-  const tor = load('services/tor-fetch.ts', { require(name: string) {
-    if (name === '@/config/tor') return { ...settings, TOR_IN_FORCE: active, ACTIVE_TOR_SETTINGS: { enabled: active, gatewayUrl: GATEWAY, provider: 'tor-js' } };
+  const errors = load('services/tor-errors.ts', {});
+  const groups = load('services/tor-groups.ts', { require: (name: string) => { if (name === 'viem') return viem; throw new Error(`Unexpected dependency ${name}`); } }) as typeof import('../tor-groups');
+  const tor = load('services/tor-fetch.ts', { navigator: { hardwareConcurrency: options.cores ?? 4 }, require(name: string) {
+    if (name === '@/services/tor-errors') return errors;
+    if (name === '@/services/tor-groups') return groups;
+    if (name === '@0xbow/anon-rpc-rs-react-native') { imports++; return importer(); }
+    if (name === '@/services/abort-signal') return options.timeoutSignal ? { ...abortSignal, timeoutSignal: options.timeoutSignal } : abortSignal;
+    if (name === '@/config/tor') return { ...settings, TOR_IN_FORCE: active, TOR_ON_DEVICE: options.device ?? false, ACTIVE_TOR_SETTINGS: { enabled: active, gatewayUrl: GATEWAY, provider: 'tor-js' } };
     if (name === '@/services/egress-policy') return policy;
     if (name === '@/config/chains') return { getChainConfig: (id: number) => options.chainUrls?.[id] ? { rpcUrl: options.chainUrls[id] }
       : id === 1 && options.mainnetInChainList !== false ? { rpcUrl: MAINNET } : undefined };
     if (name === '@/config/custom-rpc') return { activeCustomRpcUrl: (id: number) => options.customRpcUrls?.[id] };
     if (name === '@/config/env') return { MAINNET_RPC_URL: ENV_MAINNET, SEPOLIA_RPC_URL: ENV_SEPOLIA };
-    if (name === '@0xbow/anon-rpc-rs-browser-harness') { imports++; return importer(); }
+    if (name === '@0xbow/anon-rpc-rs-browser-harness') { imports++; return { ...harness, ...importer() as object }; }
     throw new Error(`Unexpected dependency ${name}`);
   } }) as typeof import('../tor-fetch');
   const { policedHttp } = load('services/egress-transport.ts', { require(name: string) {
     if (name === 'viem') return viem;
     if (name === '@/services/egress-policy') return policy;
     if (name === '@/services/tor-fetch') return tor;
+    if (name === '@/services/tor-groups') return groups;
     throw new Error(`Unexpected dependency ${name}`);
   } }) as typeof import('../egress-transport');
-  return { tor, policedHttp, imports: () => imports };
+  return { tor, groups, policedHttp, imports: () => imports };
 }
 
 describe('Tor configuration', () => {
@@ -248,25 +125,21 @@ describe('Tor configuration', () => {
     expect(config('', refusing).saveTorSettings(settings.TOR_OFF)).toBe(true);
   });
 
-  test('the tor-js provider is the published anon-rpc specifier and takes the gateway as its config', () => {
+  test('the tor-js provider takes the gateway as its config, as the harness requires', () => {
     const provider = settings.torProvider('tor-js')!;
-    expect(provider.specifier).toBe('0x700dA3193D35fA54Cd3fBf29B66f2a2A0385659e');
-    expect(provider.specifierChainId).toBe(1);
     expect(provider.workerConfig(GATEWAY)).toEqual({ gateways: [GATEWAY] });
-    // The passthrough reference worker sends with a plain fetch.
-    expect(settings.TOR_PROVIDERS.map(p => p.specifier.toLowerCase())).not.toContain('0x4fd77be300f31c5fe6ab266d35d27750a3478d27');
+    expect(harness.knownWorker('tor-js').requiredConfig).toEqual(['gateways']);
   });
 
-  test('the provider list is tor-js, Nym and Nox, each pinned to its published specifier', () => {
-    expect(settings.TOR_PROVIDERS.map(p => [p.id, p.specifier, p.specifierChainId, p.needsGateway])).toEqual([
-      ['tor-js', '0x700dA3193D35fA54Cd3fBf29B66f2a2A0385659e', 1, true],
-      ['nym', '0x3aCD9742C68F6d993066Ae25533e09b9e1f60eD0', 1, false],
-      ['nox', '0x35133267A8F7EC35046a83DCA0f4Ca8A6e1b7A9A', 11155111, false],
-    ]);
+  test('the provider list is the harness\'s anonymizing workers: tor-js, Nym and Nox', () => {
+    expect(settings.TOR_PROVIDERS.map(p => [p.id, p.needsGateway])).toEqual([['tor-js', true], ['nym', false], ['nox', false]]);
+    // The passthrough reference worker sends with a plain fetch.
+    expect(harness.KNOWN_WORKERS.filter(w => w.kind === 'network').map(w => w.id)).toEqual(settings.TOR_PROVIDERS.map(p => p.id));
+    for (const p of settings.TOR_PROVIDERS) expect(harness.knownWorker(p.id).requiredConfig.length > 0).toBe(p.needsGateway);
     expect(settings.TOR_PROVIDERS.map(p => [p.id, p.workerHash])).toEqual([
       ['tor-js', '0xe39f8c42ed72b7f580a73c46c3300f6d3ad3954bbc26e5fe075b18c48fedc8b5'],
       ['nym', '0xf13a448a8721b9d0b20da3d5b80ffe00bf4c5bb3aae812a38d3d1e3bc81fceb8'],
-      ['nox', '0xd8bef626ec8511d7a468bca5137880680ca2da20d2ea4d9c981a2a3d0c86ba1e'],
+      ['nox', '0xd9fa04b080a33062680a27cad828196bfb04615a0ebc76bcbffedb6dcbe838d4'],
     ]);
     for (const p of settings.TOR_PROVIDERS) {
       expect(p.hint).not.toContain('\u2014');
@@ -377,6 +250,105 @@ describe('Tor sender under the egress policy', () => {
   });
 });
 
+// Each fetch takes the next outcome: 'ok', a status to answer with, 'fail', 'hang' (never settles), or a pending response.
+function scriptedWorkers(outcomes: (string | number | Promise<Response>)[]) {
+  const workers: { id: number; calls: number; closed: boolean }[] = [];
+  const loaded = transport(true, () => ({ AnonRpcWorker: class {
+    readonly me = { id: workers.length + 1, calls: 0, closed: false };
+    constructor() { workers.push(this.me); }
+    ready = Promise.resolve();
+    close() { this.me.closed = true; }
+    fetch = async () => {
+      this.me.calls++;
+      const next = outcomes.shift();
+      if (next === 'fail') throw new Error('operation timed out');
+      if (next === 'hang') return new Promise<Response>(() => {});
+      if (next instanceof Promise) return next;
+      return new Response('{}', { status: typeof next === 'number' ? next : 200 });
+    };
+  } }));
+  return { send: loaded.tor.createTorFetch(GATEWAY, 'tor-js'), workers, tor: loaded.tor };
+}
+
+test('a client that fails before it has ever answered is replaced by the next call', async () => {
+  const { send, workers } = scriptedWorkers(['fail', 'ok', 'ok']);
+  await expect(send('https://rpc.example')).rejects.toThrow('operation timed out');
+  expect(workers.map(w => w.closed)).toEqual([true]);
+  expect((await send('https://rpc.example')).status).toBe(200);
+  expect((await send('https://rpc.example')).status).toBe(200);
+  expect(workers.map(w => [w.calls, w.closed])).toEqual([[1, true], [2, false]]);
+});
+
+// Holds back every timer of `ms`, the route deadline, until the test fires it.
+function heldDeadlines(ms: number) {
+  const realSet = globalThis.setTimeout;
+  const realClear = globalThis.clearTimeout;
+  const held: (() => void)[] = [];
+  const ids = new Set<unknown>();
+  globalThis.setTimeout = ((fn: () => void, delay?: number, ...args: unknown[]) => {
+    if (delay !== ms) return realSet(fn, delay, ...args);
+    const id = { held: held.length };
+    ids.add(id);
+    held.push(fn);
+    return id;
+  }) as typeof setTimeout;
+  globalThis.clearTimeout = ((id?: unknown) => { if (!ids.has(id)) realClear(id as number); }) as typeof clearTimeout;
+  return { held, restore() { globalThis.setTimeout = realSet; globalThis.clearTimeout = realClear; } };
+}
+
+test('an answered client survives one failure and is replaced at the second in a row; the route deadline counts, an error status and a caller\'s abort do not', async () => {
+  const { send, workers, tor } = scriptedWorkers(['ok', 'fail', 500, 'hang', 'fail', 'hang', 'ok']);
+  const deadlines = heldDeadlines(tor.TOR_ROUTE_DEADLINE_MS);
+  try {
+    const outcome = (p: Promise<Response>) => p.then(r => r.status, () => 'failed');
+    const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+    expect(await outcome(send('https://rpc.example'))).toBe(200);
+    expect(await outcome(send('https://rpc.example'))).toBe('failed');
+    expect(await outcome(send('https://rpc.example'))).toBe(500);
+    const caller = new AbortController();
+    const abandoned = outcome(send('https://rpc.example', { signal: caller.signal }));
+    await tick();
+    caller.abort();
+    expect(await abandoned).toBe('failed');
+    expect(await outcome(send('https://rpc.example'))).toBe('failed');
+    expect(workers.map(w => w.closed)).toEqual([false]);
+    const hung = outcome(send('https://rpc.example'));
+    await tick();
+    deadlines.held.at(-1)!();
+    expect(await hung).toBe('failed');
+    expect(workers.map(w => w.closed)).toEqual([true]);
+    expect(await outcome(send('https://rpc.example'))).toBe(200);
+    expect(workers.map(w => [w.calls, w.closed])).toEqual([[6, true], [1, false]]);
+  } finally {
+    deadlines.restore();
+  }
+});
+
+test('a failing host leaves the client in place while a call to another host may still answer', async () => {
+  let answer!: (response: Response) => void;
+  const { send, workers } = scriptedWorkers([new Promise<Response>(resolve => { answer = resolve; }), 'fail']);
+  const healthy = send('https://healthy.example');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await expect(send('https://broken.example')).rejects.toThrow('operation timed out');
+  expect(workers.map(w => w.closed)).toEqual([false]);
+  answer(new Response('{}'));
+  expect((await healthy).status).toBe(200);
+  expect(workers.map(w => [w.calls, w.closed])).toEqual([[2, false]]);
+});
+
+test('a call keeps its redirect mode over anon-rpc', async () => {
+  const modes: (string | undefined)[] = [];
+  const loaded = transport(true, () => ({ AnonRpcWorker: class {
+    ready = Promise.resolve();
+    close() {}
+    fetch = async (_url: string, init?: RequestInit) => { modes.push(init?.redirect); return new Response('{}'); };
+  } }));
+  const send = loaded.tor.createTorFetch(GATEWAY, 'tor-js');
+  await send('https://rpc.example', { redirect: 'error' });
+  await send('https://rpc.example');
+  expect(modes).toEqual(['error', 'follow']);
+});
+
 test('an RPC body still arrives when Request has no .body (React Native whatwg-fetch)', async () => {
   const RealRequest = globalThis.Request;
   class PolyfillRequest extends RealRequest {
@@ -405,7 +377,7 @@ test('an RPC body still arrives when Request has no .body (React Native whatwg-f
 
 test('the worker gets the specifier, the gateway config, and a direct bootstrap read that passes the allowlist', async () => {
   policy.setEgressMode('enforce');
-  let init!: { address: string; config: unknown; preExisting: { rpcProvider: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } } };
+  let init!: { address: string; specifierChainId: number; config: unknown; preExisting: { rpcProvider: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } } };
   const loaded = transport(true, () => ({ AnonRpcWorker: class {
     ready = Promise.resolve();
     constructor(value: typeof init) { init = value; }
@@ -415,6 +387,7 @@ test('the worker gets the specifier, the gateway config, and a direct bootstrap 
   const reply = await loaded.tor.torFetchIfActive()!(MAINNET, { method: 'POST', body: '{"id":1}' });
   expect(await reply.json()).toEqual({ result: '{"id":1}' });
   expect(init.address).toBe('0x700dA3193D35fA54Cd3fBf29B66f2a2A0385659e');
+  expect(init.specifierChainId).toBe(1);
   expect(init.config).toEqual({ gateways: [GATEWAY] });
 
   const realFetch = globalThis.fetch;
@@ -458,8 +431,149 @@ test('a chain list without mainnet (plain staging) still reads the specifier fro
   expect(urls).toEqual([ENV_MAINNET]);
 });
 
+test('every client reads the specifier through one provider per endpoint, each read under its own deadline', async () => {
+  type Init = { preExisting: { rpcProvider: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } } };
+  const inits: Init[] = [];
+  const deadlines: AbortController[] = [];
+  const loaded = transport(false, () => ({ AnonRpcWorker: class {
+    ready = Promise.resolve();
+    constructor(value: Init) { inits.push(value); }
+    close() {}
+    fetch = async () => Response.json({});
+  } }), { timeoutSignal: () => { const deadline = new AbortController(); deadlines.push(deadline); return deadline.signal; } });
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = ((_url: string, request?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    request!.signal!.addEventListener('abort', () => reject(new Error('read ended')), { once: true });
+  })) as typeof fetch;
+  try {
+    const first = loaded.tor.createTorFetch(GATEWAY);
+    const second = loaded.tor.createTorFetch(GATEWAY);
+    await first(MAINNET);
+    await second(MAINNET);
+    expect(inits).toHaveLength(2);
+    // The harness shares boot reads by provider: one provider, one set of reads.
+    expect(inits[1].preExisting.rpcProvider).toBe(inits[0].preExisting.rpcProvider);
+    first.close();
+    second.close();
+    const before = deadlines.length;
+    const read = inits[0].preExisting.rpcProvider.request({ method: 'eth_chainId' }).then(() => null, (error: unknown) => error);
+    expect(deadlines.length).toBe(before + 1);
+    deadlines[before].abort();
+    expect(await read).toBeInstanceOf(Error);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('app RPC timeouts allow for building a route only while Tor is in force', () => {
+  const on = transport(true, () => ({}));
+  const off = transport(false, () => ({}));
+  const timeoutOf = (loaded: typeof on, config?: { timeout?: number }, params: { timeout?: number } = {}) =>
+    loaded.policedHttp(MAINNET, config)(params).config.timeout;
+  expect(timeoutOf(on, { timeout: 5_000 })).toBe(90_000);
+  expect(timeoutOf(on)).toBe(90_000);
+  expect(timeoutOf(on, undefined, { timeout: 5_000 })).toBe(90_000);
+  expect(timeoutOf(on, { timeout: 300_000 })).toBe(300_000);
+  expect(timeoutOf(off, { timeout: 5_000 })).toBe(5_000);
+  expect(timeoutOf(off, undefined, { timeout: 7_000 })).toBe(7_000);
+  expect(timeoutOf(off)).toBe(10_000);
+});
+
+test('a Test retries transport failures on a new client within its deadline, never an answer', async () => {
+  let calls = 0;
+  let started = 0;
+  let failures = 0;
+  let answer: unknown = { jsonrpc: '2.0', id: 1, result: '0x1' };
+  const loaded = transport(false, () => ({ AnonRpcWorker: class {
+    constructor() { started++; }
+    ready = Promise.resolve();
+    close() {}
+    fetch = async () => {
+      calls++;
+      if (failures-- > 0) throw new Error('IO error: tls handshake eof');
+      return Response.json(answer);
+    };
+  } }));
+  failures = 2;
+  expect(await loaded.tor.probeTorGateway('', 5_000, 'nym')).toEqual({ ok: true });
+  expect([calls, started]).toEqual([3, 3]);
+  calls = started = 0;
+  failures = 3;
+  expect(await loaded.tor.probeTorGateway('', 5_000, 'nym')).toEqual({ ok: false, message: 'Could not reach the anon-rpc network.' });
+  expect([calls, started]).toEqual([3, 3]);
+  calls = started = 0;
+  failures = 0;
+  answer = { jsonrpc: '2.0', id: 1, result: '0xaa36a7' };
+  expect((await loaded.tor.probeTorGateway('', 5_000, 'nym')).ok).toBe(false);
+  expect([calls, started]).toEqual([1, 1]);
+});
+
+test('a Test gives an attempt unanswered for the route deadline up for a new client', async () => {
+  let started = 0;
+  let waiting!: () => void;
+  const firstWaiting = new Promise<void>(resolve => { waiting = resolve; });
+  const loaded = transport(false, () => ({ AnonRpcWorker: class {
+    readonly first = ++started === 1;
+    ready = Promise.resolve();
+    close() {}
+    fetch = async () => {
+      if (!this.first) return Response.json({ jsonrpc: '2.0', id: 1, result: '0x1' });
+      waiting();
+      return new Promise<Response>(() => {});
+    };
+  } }));
+  const deadlines = heldDeadlines(loaded.tor.TOR_ROUTE_DEADLINE_MS);
+  try {
+    const result = loaded.tor.probeTorGateway('', 5_000, 'nym');
+    await firstWaiting;
+    deadlines.held[0]();
+    expect(await result).toEqual({ ok: true });
+    expect([started, deadlines.held.length]).toEqual([2, 2]);
+  } finally {
+    deadlines.restore();
+  }
+});
+
+test('an answer that arrives before the attempt deadline keeps its body past it', async () => {
+  const deadline = new AbortController();
+  let finish!: () => void;
+  const loaded = transport(false, () => ({ AnonRpcWorker: class {
+    ready = Promise.resolve();
+    close() {}
+    // As the harness does, a streamed body ends when the call's signal aborts.
+    fetch = async (_url: string, init?: RequestInit) => new Response(new ReadableStream({
+      start(controller) {
+        init?.signal?.addEventListener('abort', () => controller.error(init.signal!.reason));
+        finish = () => { controller.enqueue(new TextEncoder().encode('{"jsonrpc":"2.0","id":1,"result":"0x1"}')); controller.close(); };
+      },
+    }));
+  } }), { timeoutSignal: (ms) => ms === loaded.tor.TOR_RPC_TIMEOUT_MS ? deadline.signal : AbortSignal.timeout(ms) });
+  const result = loaded.tor.probeTorGateway('', 5_000, 'nym');
+  while (!finish) await new Promise(resolve => setTimeout(resolve, 0));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  deadline.abort();
+  finish();
+  expect(await result).toEqual({ ok: true });
+});
+
+test('a Test canceled during a failing attempt starts no further attempt', async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  const loaded = transport(false, () => ({ AnonRpcWorker: class {
+    ready = Promise.resolve();
+    close() {}
+    fetch = async () => {
+      calls++;
+      controller.abort();
+      throw new Error('IO error: tls handshake eof');
+    };
+  } }));
+  expect((await loaded.tor.probeTorGateway('', 5_000, 'nym', undefined, controller.signal)).ok).toBe(false);
+  expect(calls).toBe(1);
+});
+
 test('Nox: no gateway, no config, specifier read on Sepolia, and the Test is an eth_chainId over the mixnet', async () => {
-  let init!: { address: string; config: unknown; preExisting: { rpcProvider: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } } };
+  let init!: { address: string; specifierChainId: number; config: unknown; preExisting: { rpcProvider: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } } };
   const sent: { url: string; body: unknown }[] = [];
   const loaded = transport(false, () => ({ AnonRpcWorker: class {
     ready = Promise.resolve();
@@ -469,6 +583,7 @@ test('Nox: no gateway, no config, specifier read on Sepolia, and the Test is an 
   } }), { mainnetInChainList: false });
   expect(await loaded.tor.probeTorGateway('', 5_000, 'nox')).toEqual({ ok: true });
   expect(init.address).toBe('0x35133267A8F7EC35046a83DCA0f4Ca8A6e1b7A9A');
+  expect(init.specifierChainId).toBe(11155111);
   expect(init.config).toBeUndefined();
   expect(sent).toEqual([{ url: loaded.tor.MIXNET_PROBE_URL, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }) }]);
   const realFetch = globalThis.fetch;
@@ -492,45 +607,8 @@ test('a mixnet Test fails when the answer is not mainnet', async () => {
   expect(result.ok).toBe(false);
 });
 
-test('closing during bootstrap fails the specifier reads, so the harness stops before the bundle', async () => {
-  let init!: { preExisting: { rpcProvider: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } } };
-  let release!: () => void;
-  const loaded = transport(false, () => ({ AnonRpcWorker: class {
-    ready = new Promise<void>(resolve => { release = resolve; });
-    constructor(value: typeof init) { init = value; }
-    close() {}
-    fetch = async () => Response.json({});
-  } }));
-  const realFetch = globalThis.fetch;
-  const signals: AbortSignal[] = [];
-  // A read that is still in flight when the form closes, the way the harness
-  // issues it right after construction.
-  globalThis.fetch = ((_url: string, request?: RequestInit) => new Promise<Response>((_resolve, reject) => {
-    signals.push(request!.signal!);
-    request!.signal!.addEventListener('abort', () => reject(request!.signal!.reason), { once: true });
-  })) as typeof fetch;
-  try {
-    const sender = loaded.tor.createTorFetch(GATEWAY);
-    const pending = sender(MAINNET).then(() => null, (error: unknown) => error);
-    await new Promise(resolve => setTimeout(resolve, 0));
-    expect(typeof release).toBe('function');
-    const inFlight = init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ data: '0x9a1a3c5e' }, 'latest'] }).then(() => null, (error: unknown) => error);
-    expect(signals).toHaveLength(1);
-    expect(signals[0].aborted).toBe(false);
-    sender.close();
-    expect(await pending).toBeInstanceOf(Error);
-    expect(await inFlight).toBeInstanceOf(Error);
-    expect(signals[0].aborted).toBe(true);
-    // And nothing new starts after the close.
-    await expect(init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ data: '0x9a1a3c5e' }, 'latest'] })).rejects.toThrow();
-    expect(signals).toHaveLength(1);
-  } finally {
-    globalThis.fetch = realFetch;
-  }
-});
-
-for (const provider of settings.TOR_PROVIDERS) test(`${provider.id}: specifier reads enforce the exact pinned hash`, async () => {
-  let init!: { address: string; preExisting: { rpcProvider: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } } };
+for (const provider of settings.TOR_PROVIDERS) test(`${provider.id}: each worker requires this build's pinned hash, and specifier reads pass through`, async () => {
+  let init!: { address: string; expectedWorkerHash?: string; preExisting: { rpcProvider: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> } } };
   const loaded = transport(true, () => ({ AnonRpcWorker: class {
     ready = Promise.resolve();
     constructor(value: typeof init) { init = value; }
@@ -539,23 +617,14 @@ for (const provider of settings.TOR_PROVIDERS) test(`${provider.id}: specifier r
   } }));
   const send = loaded.tor.createTorFetch(GATEWAY, provider.id);
   await send(MAINNET, { method: 'POST', body: '{}' });
-  const pinned = provider.workerHash;
+  expect(init.expectedWorkerHash).toBe(provider.workerHash);
   const realFetch = globalThis.fetch;
-  let answer: unknown = pinned;
-  globalThis.fetch = (async () => Response.json({ result: answer })) as typeof fetch;
+  const other = `0x${'ab'.repeat(32)}`;
+  globalThis.fetch = (async () => Response.json({ result: other })) as typeof fetch;
   try {
-    const read = () => init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ to: init.address.toLowerCase(), data: '0x3898587d' }, 'latest'] });
-    expect(await read()).toBe(pinned);
-    answer = pinned.toUpperCase();
-    expect(await read()).toBe(answer);
-    for (const invalid of [`0x${'ab'.repeat(32)}`, pinned.slice(0, -2), `${pinned}00`, null, 1]) {
-      answer = invalid;
-      await expect(read()).rejects.toThrow('not the one this build accepts');
-      await expect(init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ to: init.address, input: '0x3898587d' }, 'latest'] }))
-        .rejects.toThrow('not the one this build accepts');
-    }
-    // Other specifier reads (the resolver list) pass through untouched.
-    expect(await init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ to: init.address, data: '0x4e2f8a45' }, 'latest'] })).toBe(answer);
+    // The harness compares the answer with expectedWorkerHash; the provider
+    // only carries it.
+    expect(await init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ to: init.address, data: '0x3898587d' }, 'latest'] })).toBe(other);
   } finally {
     globalThis.fetch = realFetch;
     send.close();
@@ -575,18 +644,60 @@ for (const provider of settings.TOR_PROVIDERS) test(`${provider.id}: a rejected 
     const loaded = transport(false, () => ({ AnonRpcWorker: class {
       ready: Promise<void>;
       constructor(init: { address: string; preExisting: { rpcProvider: { request: (args: unknown) => Promise<unknown> } } }) {
-        this.ready = init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ to: init.address, data: '0x3898587d' }, 'latest'] }).then(() => {});
+        // As the harness does: read workerHash(), then refuse the mismatch
+        // before fetching any bundle.
+        this.ready = init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ to: init.address, data: '0x3898587d' }, 'latest'] })
+          .then(() => { throw Object.assign(new Error('specifier pins another bundle'), { name: 'WorkerHashMismatchError' }); });
       }
       close() { closed++; }
       fetch = async () => { relayed++; return Response.json({}); };
     } }));
     const result = await loaded.tor.probeTorGateway(GATEWAY, 5_000, provider.id);
     expect(result).toEqual({ ok: false, message: 'The anon-rpc client named on-chain is not the one this build accepts.' });
-    expect(calls).toEqual([provider.specifierChainId === 1 ? MAINNET : ENV_SEPOLIA]);
+    expect(calls).toEqual([harness.knownWorker(provider.id).specifierChainId === 1 ? MAINNET : ENV_SEPOLIA]);
     expect(relayed).toBe(0);
     expect(closed).toBe(1);
   } finally {
     globalThis.fetch = realFetch;
+  }
+});
+
+test('a rejected pin is final for the session: later calls fail at once without reading the specifier again', async () => {
+  const calls: string[] = [];
+  let started = 0;
+  const warn = console.warn;
+  const warnings: unknown[] = [];
+  console.warn = (...args: unknown[]) => { warnings.push(args[0]); };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string) => {
+    calls.push(url);
+    return Response.json({ result: `0x${'ab'.repeat(32)}` });
+  }) as typeof fetch;
+  try {
+    const loaded = transport(true, () => ({ AnonRpcWorker: class {
+      ready: Promise<void>;
+      constructor(init: { address: string; preExisting: { rpcProvider: { request: (args: unknown) => Promise<unknown> } } }) {
+        started++;
+        this.ready = init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ to: init.address, data: '0x3898587d' }, 'latest'] })
+          .then(() => { throw Object.assign(new Error('specifier pins another bundle'), { name: 'WorkerHashMismatchError' }); });
+      }
+      close() {}
+      fetch = async () => Response.json({});
+    } }));
+    const send = loaded.tor.torFetchIfActive()!;
+    const message = 'The anon-rpc client named on-chain is not the one this build accepts.';
+    await expect(send(MAINNET, { method: 'POST', body: '{}' })).rejects.toThrow(message);
+    const read = calls.length;
+    for (let i = 0; i < 3; i++) {
+      await expect(send(MAINNET, { method: 'POST', body: '{}' })).rejects.toThrow(message);
+      await expect(loaded.tor.torFetchFor('relayer', `x${i}`)!(MAINNET, { method: 'POST', body: '{}' })).rejects.toThrow(message);
+    }
+    expect(started).toBe(1);
+    expect(calls.length).toBe(read);
+    expect(warnings).toHaveLength(1);
+  } finally {
+    globalThis.fetch = realFetch;
+    console.warn = warn;
   }
 });
 
@@ -613,15 +724,18 @@ for (const from of ['registry', 'override'] as const) test(`Nox bootstraps from 
 });
 
 for (const provider of ['nym', 'nox'] as const) {
-  test(`${provider}: a failed probe does not ask for a gateway`, async () => {
+  test(`${provider}: a failed probe does not ask for a gateway, and closes every client it started`, async () => {
+    let started = 0;
     let closed = 0;
     const loaded = transport(false, () => ({ AnonRpcWorker: class {
+      constructor() { started++; }
       ready = Promise.resolve();
       close() { closed++; }
       fetch = async () => { throw new Error('offline'); };
     } }));
     expect(await loaded.tor.probeTorGateway('', 5_000, provider)).toEqual({ ok: false, message: 'Could not reach the anon-rpc network.' });
-    expect(closed).toBe(1);
+    expect(started).toBe(3);
+    expect(closed).toBe(3);
   });
 
   test(`${provider}: only a valid JSON-RPC probe response succeeds in enforce mode`, async () => {
@@ -684,53 +798,13 @@ test('canceling a Test when ready cannot start its outbound probe', async () => 
   expect(sent).toBe(0);
 });
 
-test('a specifier response that finishes after cancellation cannot continue bootstrap', async () => {
-  let init!: { address: string; preExisting: { rpcProvider: { request: (args: unknown) => Promise<unknown> } } };
-  const loaded = transport(false, () => ({ AnonRpcWorker: class {
-    ready = Promise.resolve();
-    constructor(value: typeof init) { init = value; }
-    close() {}
-    fetch = async () => Response.json({});
-  } }));
-  const send = loaded.tor.createTorFetch('', 'nym');
-  await send(MAINNET);
-  const realFetch = globalThis.fetch;
-  let finishBody!: (reply: unknown) => void;
-  let reading!: () => void;
-  const readingBody = new Promise<void>(resolve => { reading = resolve; });
-  // A response body already delivered by a fetch implementation can settle
-  // even after its abort signal fires.
-  globalThis.fetch = (async () => Object.assign(new Response('{}'), { json: () => {
-    reading();
-    return new Promise(resolve => { finishBody = resolve; });
-  } })) as typeof fetch;
-  try {
-    const pending = init.preExisting.rpcProvider.request({ method: 'eth_call', params: [{ to: init.address, data: '0x4e2f8a45' }, 'latest'] });
-    await readingBody;
-    send.close();
-    finishBody({ result: '0x' });
-    await expect(pending).rejects.toThrow('closed');
-  } finally {
-    globalThis.fetch = realFetch;
-    send.close();
-  }
-});
-
-test('an abort after the headers still ends the body, and a pending request body cannot block it', async () => {
-  let upstreamCancelled = false;
+test('a pending request body cannot block an abort', async () => {
   const loaded = transport(true, () => ({ AnonRpcWorker: class {
     ready = Promise.resolve();
     close() {}
-    fetch = async () => new Response(new ReadableStream<Uint8Array>({ cancel() { upstreamCancelled = true; } }));
+    fetch = async () => Response.json({});
   } }));
   const send = loaded.tor.torFetchIfActive()!;
-  const abort = new AbortController();
-  const response = await send(MAINNET, { method: 'POST', body: '{}', signal: abort.signal });
-  const text = response.text();
-  abort.abort(new Error('timed out'));
-  await expect(text).rejects.toThrow('timed out');
-  expect(upstreamCancelled).toBe(true);
-
   const stalled = new AbortController();
   const neverEnds = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array([1])); } });
   const blocked = send(MAINNET, { method: 'POST', body: neverEnds, signal: stalled.signal, duplex: 'half' } as RequestInit);
@@ -794,6 +868,9 @@ test('on a device the provider and the Test name Tor, not tor-js', () => {
   }
   const deviceTor = load('services/tor-fetch.ts', { require(name: string) {
     if (name === '@/config/tor') return device;
+    if (name === '@/services/tor-errors') return load('services/tor-errors.ts', {});
+    if (name === '@/services/tor-groups') return load('services/tor-groups.ts', { require: () => viem });
+    if (name === '@/services/abort-signal') return abortSignal;
     if (name === '@/services/egress-policy') return policy;
     throw new Error(`Unexpected dependency ${name}`);
   } }) as typeof import('../tor-fetch');
@@ -903,5 +980,155 @@ describe('a proxy address is refused with its own reason', () => {
     // address carries no scheme, so the two cannot be confused.
     const gateway = `127.0.0.1:12298:u${Buffer.from([0x12, 0x20, ...new Array(32).fill(0)]).toString('base64url')}`;
     expect(settings.validateTorGateway(gateway)).toEqual({ ok: true, url: gateway });
+  });
+});
+
+describe('isolation groups over the worker pool', () => {
+  const ACCOUNT = '0x2222222222222222222222222222222222222222';
+  // A worker that records which instance served each call.
+  function pooled() {
+    const workers: { id: number; closed: boolean; served: string[] }[] = [];
+    const module = { AnonRpcWorker: class {
+      ready = Promise.resolve();
+      record = { id: workers.length, closed: false, served: [] as string[] };
+      constructor() { workers.push(this.record); }
+      close() { this.record.closed = true; }
+      // A URL ending in /hang waits until its caller gives up.
+      fetch = async (url: string, init?: RequestInit) => {
+        this.record.served.push(url);
+        if (url.endsWith('/hang')) {
+          await new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true }));
+        }
+        // A URL ending in /quote answers like a relayer quote.
+        if (url.endsWith('/quote')) return Response.json({ feeCommitment: { signedRelayerCommitment: COMMITMENT } });
+        return Response.json({ result: '0x1' });
+      };
+    } };
+    return { workers, importer: () => module, servedBy: (url: string) => workers.filter(w => w.served.includes(url)).map(w => w.id) };
+  }
+  const COMMITMENT = `0x${'5e'.repeat(65)}`;
+
+  test('a call naming an account never shares a worker with public reads', async () => {
+    const { importer, servedBy } = pooled();
+    const loaded = transport(true, importer, { cores: 12 });
+    loaded.groups.setTorAccounts([ACCOUNT]);
+    await loaded.tor.torFetchFor('rpc', '{"method":"eth_blockNumber"}')!('https://rpc.example/public', { method: 'POST', body: '{}' });
+    await loaded.tor.torFetchFor('rpc', `{"params":["${ACCOUNT}"]}`)!('https://rpc.example/account', { method: 'POST', body: '{}' });
+    await loaded.tor.torFetchFor('rpc', '{"method":"eth_chainId"}')!('https://rpc.example/public-2', { method: 'POST', body: '{}' });
+    const [publicWorker] = servedBy('https://rpc.example/public');
+    expect(servedBy('https://rpc.example/public-2')).toEqual([publicWorker]);
+    expect(servedBy('https://rpc.example/account')).not.toEqual([publicWorker]);
+    expect(servedBy('https://rpc.example/account')).toHaveLength(1);
+  });
+
+  test('ending an operation closes its worker, and the next operation starts another', async () => {
+    const { importer, workers, servedBy } = pooled();
+    const loaded = transport(true, importer, { cores: 12 });
+    const endFirst = loaded.tor.beginTorOperationScope();
+    await loaded.tor.torFetchFor('relayer', 'https://relayer.example/v1/quote')!('https://relayer.example/first', {});
+    const [first] = servedBy('https://relayer.example/first');
+    endFirst();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(workers[first].closed).toBe(true);
+    const endSecond = loaded.tor.beginTorOperationScope();
+    await loaded.tor.torFetchFor('relayer', 'https://relayer.example/v1/quote')!('https://relayer.example/second', {});
+    expect(servedBy('https://relayer.example/second')).not.toContain(first);
+    endSecond();
+  });
+
+  test('a relay sent after its operation ended goes over a worker of its own, never the public one or the next operation\'s', async () => {
+    const { importer, servedBy } = pooled();
+    const loaded = transport(true, importer, { cores: 12 });
+    const endFirst = loaded.tor.beginTorOperationScope();
+    const quote = await loaded.tor.torFetchFor('relayer', 'https://relayer.example/v1/quote\n{"amount":"1"}')!('https://relayer.example/quote', { method: 'POST', body: '{"amount":"1"}' });
+    expect((await quote.json()).feeCommitment.signedRelayerCommitment).toBe(COMMITMENT);
+    // The modal closes while the SDK is still proving.
+    endFirst();
+    await loaded.tor.torFetchFor('relayer', 'https://relayer.example/v1/details')!('https://relayer.example/details', {});
+    const endSecond = loaded.tor.beginTorOperationScope();
+    await loaded.tor.torFetchFor('relayer', 'https://relayer.example/v1/quote\n{"amount":"2"}')!('https://relayer.example/second', { method: 'POST', body: '{"amount":"2"}' });
+    const relay = `{"signedFeeCommitment":{"signedRelayerCommitment":"${COMMITMENT}"}}`;
+    await loaded.tor.torFetchFor('relayer', `https://relayer.example/v1/relay\n${relay}`)!('https://relayer.example/relay', { method: 'POST', body: relay });
+    const [relayWorker] = servedBy('https://relayer.example/relay');
+    expect(relayWorker).toBeDefined();
+    expect([...servedBy('https://relayer.example/quote'), ...servedBy('https://relayer.example/details'), ...servedBy('https://relayer.example/second')]).not.toContain(relayWorker);
+    endSecond();
+  });
+
+  test('ending an operation fails its pending request and any later one through a sender it handed out', async () => {
+    const { importer, servedBy } = pooled();
+    const loaded = transport(true, importer, { cores: 12 });
+    const end = loaded.tor.beginTorOperationScope();
+    const send = loaded.tor.torFetchFor('relayer', 'https://relayer.example/v1/quote')!;
+    const pending = send('https://relayer.example/hang', {}).then(() => null, (error: unknown) => error);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    end();
+    expect(String(await pending)).toContain('has ended');
+    expect(String(await send('https://relayer.example/later', {}).catch((error: unknown) => error))).toContain('has ended');
+    expect(servedBy('https://relayer.example/later')).toEqual([]);
+  });
+
+  test('a request that identifies the user outside an operation gets a worker of its own, closed once it is read', async () => {
+    const { importer, workers, servedBy } = pooled();
+    const loaded = transport(true, importer, { cores: 12 });
+    const first = await loaded.tor.torFetchFor('asp', 'https://asp.example/', { identifying: true })!('https://asp.example/label/1', {});
+    expect(await first.json()).toEqual({ result: '0x1' });
+    await loaded.tor.torFetchFor('asp', 'https://asp.example/', { identifying: true })!('https://asp.example/label/2', {});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const [a] = servedBy('https://asp.example/label/1');
+    const [b] = servedBy('https://asp.example/label/2');
+    expect(a).not.toBe(b);
+    expect(workers[a].closed).toBe(true);
+    expect(workers[b].closed).toBe(true);
+  });
+
+  test('the worker budget merges public services as it shrinks; identity groups keep their own', async () => {
+    for (const [cores, shared] of [[12, false], [2, true]] as const) {
+      const { importer, servedBy } = pooled();
+      const loaded = transport(true, importer, { cores });
+      await loaded.tor.torFetchFor('asp', 'https://asp.example/')!('https://asp.example/leaves', {});
+      await loaded.tor.torFetchFor('web', 'https://prices.example/')!('https://prices.example/usd', {});
+      expect(servedBy('https://asp.example/leaves')[0] === servedBy('https://prices.example/usd')[0]).toBe(shared);
+    }
+  });
+
+  test('on a device one Arti client carries every group, each under its own isolation key', async () => {
+    const calls: { url: string; isolationKey?: string }[] = [];
+    let started: unknown;
+    const module = { ReplacingWorker: class {
+      constructor(options: { start: unknown }) { started = options.start; }
+      close() {}
+      fetch = async (url: string, init?: RequestInit & { anonOptions?: { isolationKey?: string } }) => {
+        calls.push({ url, isolationKey: init?.anonOptions?.isolationKey });
+        return Response.json({ result: '0x1' });
+      };
+    } };
+    const loaded = transport(true, () => module, { device: true });
+    loaded.groups.setTorAccounts([ACCOUNT]);
+    await loaded.tor.torFetchFor('rpc', '')!('https://rpc.example/a', {});
+    await loaded.tor.torFetchFor('rpc', ACCOUNT)!('https://rpc.example/b', {});
+    expect(started).toEqual({ tor: {} });
+    expect(calls).toEqual([
+      { url: 'https://rpc.example/a', isolationKey: 'public:rpc' },
+      { url: 'https://rpc.example/b', isolationKey: `account:${ACCOUNT.slice(2)}` },
+    ]);
+  });
+
+  test('routedFetch sends over anon-rpc while Tor is in force, and direct only when it is off', async () => {
+    const realFetch = globalThis.fetch;
+    const direct: string[] = [];
+    globalThis.fetch = (async (url: string) => { direct.push(String(url)); return Response.json({}); }) as typeof fetch;
+    try {
+      const { importer, servedBy } = pooled();
+      const on = transport(true, importer, { cores: 12 });
+      await on.tor.routedFetch('web')('https://prices.example/on', {});
+      expect(servedBy('https://prices.example/on')).toHaveLength(1);
+      const off = transport(false, importer);
+      await off.tor.routedFetch('web')('https://prices.example/off', {});
+      expect(direct).toEqual(['https://prices.example/off']);
+      expect(off.imports()).toBe(0);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 });

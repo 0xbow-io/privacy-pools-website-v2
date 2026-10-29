@@ -7,13 +7,15 @@
 // internal price stays in USD. Callers cache the result (react-query) rather
 // than refetching per render.
 
+import { routedFetch } from '@/services/tor-fetch';
+
 const FRANKFURTER_URL = 'https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR';
 
 /** Fetch the latest USD→EUR rate. Throws on a network error or a malformed
  *  response so the caller (react-query) can retain the last good cached value
  *  and surface the failure, rather than silently formatting with a bad rate. */
 export async function getUsdToEurRate(): Promise<number> {
-  const res = await fetch(FRANKFURTER_URL);
+  const res = await routedFetch('web')(FRANKFURTER_URL);
   if (!res.ok) throw new Error(`FX rate request failed: ${res.status}`);
   const json = (await res.json()) as { rates?: { EUR?: number } };
   const rate = json?.rates?.EUR;

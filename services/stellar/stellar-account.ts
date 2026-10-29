@@ -69,6 +69,8 @@ import {
   type StellarRpcInteractor,
 } from '@/services/stellar/stellar-runtime';
 import { createStellarRelayer } from '@/services/stellar/stellar-relayer';
+import { routeSoroban } from '@/services/stellar/stellar-runtime';
+import { routedFetch } from '@/services/tor-fetch';
 import {
   decodeStellarBackup,
   decodeStellarRequestBackup,
@@ -586,7 +588,7 @@ class StellarAccount {
       const url = requireStellarRelayerUrl();
       let details: { relayerAddress: string; contracts?: { relay?: string } };
       try {
-        const res = await fetch(`${url}/v1/details/stellar/${STELLAR_RELAYER_CHAIN_ID}`, { cache: 'no-store' });
+        const res = await routedFetch('relayer')(`${url}/v1/details/stellar/${STELLAR_RELAYER_CHAIN_ID}`, { cache: 'no-store' });
         if (!res.ok) throw new Error(`relayer details ${res.status}`);
         details = await res.json();
       } catch {
@@ -1151,10 +1153,10 @@ async function deriveProtocolKeys(
   const walletInteractor = new sdk.FreighterWalletInteractor({
     provider: signer,
     networkPassphrase: STELLAR_TESTNET_NETWORK.networkPassphrase,
-    rpcInteractor: new sdk.SorobanRPCInteractor({
+    rpcInteractor: routeSoroban(new sdk.SorobanRPCInteractor({
       rpcUrl: STELLAR_TESTNET_RPC_URL,
       networkPassphrase: STELLAR_TESTNET_NETWORK.networkPassphrase,
-    }),
+    })),
   });
   const signature = await walletInteractor.signKeyDerivationMessage(address);
   const derived = new sdk.StellarCryptoService().deriveKeysFromSignature({
