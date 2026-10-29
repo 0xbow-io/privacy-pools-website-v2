@@ -1,12 +1,15 @@
 // Pure final-leg rules. The caller supplies CONFIGURED routing facts, never a
 // vault probe result: a pending/failed probe must not reopen a legacy pool.
 import { displayTokenSymbol } from '@/services/share-display';
+import { VAULT_DEPOSITS_PAUSED_MESSAGE } from '@/config/yield-deposits-paused';
 
 export interface EntrypointTarget {
   symbol?: string;
   isNative?: boolean;
   withdrawOnly?: boolean;
   depositComingSoon?: boolean;
+  /** Vault deposits paused (set with depositComingSoon, config/yield-deposits-paused.ts). */
+  depositPaused?: boolean;
   yieldShare?: string;
 }
 
@@ -89,6 +92,7 @@ export function conversionTargetRefusal(
 ): string | null {
   if (targetAcceptsConversion(token, route)) return null;
   if (!token) return 'This conversion destination is not available on this network. Pick another pool.';
+  if (token.depositPaused === true) return VAULT_DEPOSITS_PAUSED_MESSAGE;
   const symbol = displayTokenSymbol(token.symbol ?? 'This asset');
   if (token.isNative === true && route.bridgedEntrypointDeposit === true && !entrypointOnlyTargetBlocked(token, route)) {
     return `Converting into ${symbol} from another network is not available yet. Pick another asset, or swap into ${symbol} on its own network.`;
