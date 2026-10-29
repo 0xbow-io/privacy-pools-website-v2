@@ -133,7 +133,7 @@ describe('createIndexedRpcInteractor: asp-v2 as the single events source', () =>
     expect(rpcCalls).toEqual([]);
   });
 
-  test('serves a cursor read from the cursor ledger, dropping events at or before the cursor', async () => {
+  test('serves a pool cursor read from the whole history, dropping events at or before the cursor', async () => {
     const cursor = '0021263867686522880-0000000002';
     route = () => ({
       body: {
@@ -144,9 +144,30 @@ describe('createIndexedRpcInteractor: asp-v2 as the single events source', () =>
 
     const result = await rpc.getEvents({ contractId: POOL, cursor });
 
-    expect(new URL(requested[0]).searchParams.get('fromLedger')).toBe(String(BigInt('0021263867686522880') >> 32n));
+    // The cursor never reaches the ASP: a dated read would tie this client to the spend it waits for.
+    expect(new URL(requested[0]).searchParams.get('fromLedger')).toBe('0');
     expect(result.events.map((e) => e.id)).toEqual(['0021263867686522880-0000000003']);
     expect(result.cursor).toBe('0021263867686522880-0000000003');
+  });
+
+  test('serves a keystore sync from the whole history too, so it never names where this client left off', async () => {
+    const atLedger = (ledger: bigint, i: number) => `${(ledger << 32n).toString().padStart(19, '0')}-${String(i).padStart(10, '0')}`;
+    route = () => ({ body: { events: [event(atLedger(100n, 1)), event(atLedger(300n, 1))], latestLedger: '0x12c' } });
+
+    const result = await rpc.getEvents({ contractId: STELLAR_TESTNET_CONTRACTS.keystoreContractId, startLedger: '200' } as never);
+
+    expect(new URL(requested[0]).searchParams.get('fromLedger')).toBe('0');
+    expect(result.events.map((e) => e.id)).toEqual([atLedger(300n, 1)]);
+  });
+
+  test("serves a pool start-ledger read (a relayed spend's confirmation poll) from the whole history", async () => {
+    const atLedger = (ledger: bigint, i: number) => `${(ledger << 32n).toString().padStart(19, '0')}-${String(i).padStart(10, '0')}`;
+    route = () => ({ body: { events: [event(atLedger(100n, 1)), event(atLedger(200n, 1)), event(atLedger(201n, 1))], latestLedger: '0xc9' } });
+
+    const result = await rpc.getEvents({ contractId: POOL, startLedger: '200' } as never);
+
+    expect(new URL(requested[0]).searchParams.get('fromLedger')).toBe('0');
+    expect(result.events.map((e) => e.id)).toEqual([atLedger(200n, 1), atLedger(201n, 1)]);
   });
 
   test('keeps the cursor when nothing new is indexed', async () => {
@@ -207,6 +228,9 @@ describe('Stellar relayer (v2 relayer routes)', () => {
     expect(bodies[0]).toEqual({ amount: '10000000', asset: ASSET, recipient: G, commit: true });
     expect(quote).toMatchObject({ txCost: '0', gasPrice: '0', feeAmount: '50000', amountSent: '10050000', amountReceived: '10000000' });
     expect(quote.feeCommitment).toEqual({ ...commitment, extraGas: false });
+
+    await relayer.getWithdrawalQuote(info, { amount: '0x989680', asset: ASSET, recipient: G, shape: { n: 2, m: 2 } } as never);
+    expect(bodies.at(-1)).toEqual({ amount: '10000000', asset: ASSET, recipient: G, commit: true, shape: { n: 2, m: 2 } });
   });
 
   test('relays the proof with the signed commitment unchanged, and surfaces a refusal', async () => {
@@ -233,8 +257,61 @@ describe('Stellar relayer (v2 relayer routes)', () => {
     await expect(relayer.relayWithdrawal(info, params)).rejects.toBeInstanceOf(RelayerRejected);
   });
 
-  test('has no relayed transfer', async () => {
+  // Routes and bodies of v2-monorepo v2.0's StellarRelayerInteractor.getTransferQuote/relayTransfer (8abfc67f).
+  const transferCommitment = { data: '0xabcd', asset: ASSET, expiration: Date.now() + 60_000, feeAmount: '200000', signedRelayerCommitment: '0x99' };
+  const transferParams = () => {
+    const p = (v: number) => `0x${v.toString(16)}`;
+    return {
+      proof: { proof: { pi_a: [p(1), p(2)], pi_b: [[p(3), p(4)], [p(5), p(6)]], pi_c: [p(7), p(8)] }, publicSignals: ['17', '18', '3', '4', '5', '6', '7', '8', '9', '10'] },
+      inputNullifierNumber: 2,
+      outputCommitmentNumber: 2,
+      noteData: [{ hint: '0x01', data: '0x02' }],
+      signedFeeCommitment: transferCommitment,
+    } as never;
+  };
+
+  test('asks for a committed transfer quote naming only the asset', async () => {
+    route = () => ({ status: 201, body: { feeAmount: '200000', txCost: '0', gasPrice: '0', feeCommitment: transferCommitment } });
     const [info] = await relayer.getRelayers();
-    expect(() => relayer.getTransferQuote(info, {} as never)).toThrow(/Not supported/);
+    const quote = await relayer.getTransferQuote(info, { asset: ASSET, commit: true });
+
+    expect(requested).toEqual([`${RELAYER}/v1/quote/stellar/1/transfer`]);
+    expect(bodies[0]).toEqual({ asset: ASSET, commit: true });
+    expect(quote).toEqual({ txCost: '0', gasPrice: '0', feeAmount: '200000', feeCommitment: transferCommitment });
+  });
+
+  test('a relayer without the transfer route fails the quote, it does not fall back', async () => {
+    // What the relayer deployed 2026-09-30 (fde65488) answers.
+    route = () => ({ status: 400, body: { message: 'Stellar private transfer quotes are not supported (see Scope in the Stellar plan)', statusCode: 400 } });
+    const [info] = await relayer.getRelayers();
+    await expect(relayer.getTransferQuote(info, { asset: ASSET, commit: true })).rejects.toBeInstanceOf(RelayerRequestFailed);
+  });
+
+  test('relays a transfer with the signed commitment unchanged', async () => {
+    route = () => ({ status: 201, body: { txHash: '0xbeef' } });
+    const [info] = await relayer.getRelayers();
+    expect(await relayer.relayTransfer(info, transferParams())).toBe('0xbeef');
+    expect(requested).toEqual([`${RELAYER}/v1/relay/stellar/1/transfer`]);
+    const body = bodies[0] as Record<string, unknown> & { proof: { publicSignals: string[] } };
+    expect(Object.keys(body).sort()).toEqual(['inputNullifierNumber', 'noteData', 'outputCommitmentNumber', 'proof', 'signedFeeCommitment']);
+    expect(body.signedFeeCommitment).toEqual(transferCommitment);
+    expect(body.proof.publicSignals).toEqual(['17', '18', '3', '4', '5', '6', '7', '8', '9', '10']);
+
+    route = () => ({ status: 501, body: { message: 'Stellar private transfer relaying is not supported', statusCode: 501 } });
+    await expect(relayer.relayTransfer(info, transferParams())).rejects.toBeInstanceOf(RelayerRejected);
+  });
+
+  test('forwards the proof shape the SDK prices a quote by', async () => {
+    route = () => ({ status: 200, body: { feeAmount: '317289', txCost: '117289', gasPrice: '0', feeCommitment: transferCommitment } });
+    const [info] = await relayer.getRelayers();
+    await relayer.getTransferQuote(info, { asset: ASSET, commit: true, shape: { n: 1, m: 2 } } as never);
+    expect(bodies.at(-1)).toEqual({ asset: ASSET, commit: true, shape: { n: 1, m: 2 } });
+    await relayer.getTransferQuote(info, { asset: ASSET, commit: true });
+    expect(bodies.at(-1)).toEqual({ asset: ASSET, commit: true });
+  });
+
+  test('swaps and announcements stay unsupported', async () => {
+    const [info] = await relayer.getRelayers();
+    expect(() => relayer.getSwapQuote(info, {} as never)).toThrow(/Not supported/);
   });
 });

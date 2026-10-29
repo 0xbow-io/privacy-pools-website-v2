@@ -8,18 +8,18 @@ withdraw, transfer and exit modals. Stellar is one more network in the selector,
 
 | Piece | Where |
 |---|---|
-| Contracts | `config/stellar-deployment.ts` (v2-monorepo `v2.0`, `scripts/deployments/testnet.json`, deployed 2026-09-30) |
+| Contracts | `config/stellar-deployment.ts` (redeployed 2026-10-29 with the ceremony keys) |
 | SDK | `@privacy-pools-v2/stellar-sdk`, vendored as `vendor/privacy-pools-v2-stellar-sdk-*.tgz` |
 | Wallet | Freighter (`components/stellar-wallet-provider.tsx`) |
 | ASP + event history | asp-v2, the environment's ASP like every other chain (`EXPO_PUBLIC_ASP_URL`, the dev asp-v2 in staging): `/association-set/{root,leaves}`, `/labels/{rejected,poi-required}`, `/public-key` and `GET /202/public/events`, scoped to chain 202 and the pool |
 | Relayer | the v2 relayer (v2-monorepo `packages/relayer/relayer`), Stellar testnet only, at `EXPO_PUBLIC_STELLAR_RELAYER_URL` (`/v1/details\|quote\|relay/stellar/1/…`), via `services/stellar/stellar-relayer.ts` |
 | Circuits | the EVM set in `public/artifacts`, reused unchanged by the Stellar verifier |
 
-The 2026-09-30 deployment (deployer `GDMVB24I…3CDN`) replaced the 2026-09-26 one (pool
-`CBEXH5…`, still live but no longer used). Checked on-chain on 2026-09-30: all four
-contracts are live, the pool was upgraded in place to `a4c3dbb5` (wasm `4c8a42a3`), the
-relay contract points at the pool, and native XLM is enabled (0.01 XLM minimum, 100 bps
-fee, 0.1 XLM max relay fee). The app keeps a 1 XLM deposit floor.
+The 2026-10-29 deployment (deployer `GAKJWKXT…XB3D`, from ledger 5453276) replaced the
+2026-09-30 one (pool `CD7MO3…`), whose verifier held the pre-ceremony keys and so rejects
+proofs made with `public/artifacts`. Checked on-chain on 2026-10-29: the pool registers the
+ceremony verifying keys, and native XLM is enabled (0.01 XLM minimum, 100 bps fee, 0.5 XLM
+max relay fee). The app keeps a 1 XLM deposit floor.
 
 ## Run it
 
@@ -27,14 +27,14 @@ fee, 0.1 XLM max relay fee). The app keeps a 1 XLM deposit floor.
    then install:
 
    ```bash
-   bash scripts/stellar/build-stellar-sdk.sh ~/Claude/v2-monorepo-v2.0
+   bash scripts/stellar/build-stellar-sdk.sh <v2-monorepo checkout at stellar/audit-readiness 1449fe37>
    bun install
    ```
 
 2. The app uses the environment's ASP (`EXPO_PUBLIC_ASP_URL`): asp-v2, which on the
-   2026-09-30 deployment is the registry's postman and approves whitelisted depositors
+   2026-10-29 deployment is the registry's postman and approves whitelisted depositors
    only. `EXPO_PUBLIC_STELLAR_RELAYER_URL` names the relayer (see `.env.production`);
-   without it withdrawals refuse.
+   without it withdrawals and sends refuse.
 
 3. Start the app and open it with `?stellar=true`, pick **Stellar Testnet** in the chain
    selector, and connect Freighter (set to Testnet, account funded with friendbot).
@@ -110,21 +110,23 @@ nothing in the request names the note, but the count of requests would follow th
 notes found. A sync runs inside `withEventPage` (`services/stellar/stellar-runtime.ts`): every
 whole-history pool read in the pass, and the activity index's, is answered from one page.
 
-## Relayed withdrawals
+## Relayed withdrawals and sends
 
-The relayer is the v2 relayer (v2-monorepo `v2.0`, `packages/relayer/relayer`), run by us
-for testnet with a Stellar-only config. A withdrawal is proved against the relay contract
-as processor and submitted by the relayer, so the user's account never appears on it. The
-fee is 50 bps on top of the amount (XLM `fee_bps: 50`), capped at XLM's on-chain
-`max_relay_fee` (0.1 XLM on the 2026-09-30 deployment).
+The relayer is the v2 relayer (`packages/relayer/relayer`), built from the same
+`stellar/audit-readiness` commit as the contracts and the SDK, run by us for testnet with a
+Stellar-only config. A withdrawal is proved against the relay contract as processor and a
+send (Send, `/pay`, keeping a claimed link) against the relayer itself as the pool's gated
+processor; the relayer submits both, so the user's account never appears on them. The
+withdrawal fee is 50 bps plus the transaction's cost for its proof shape, a send's is 0.02 XLM
+plus that cost, both capped at XLM's on-chain `max_relay_fee` (0.5 XLM on the 2026-10-29
+deployment). Quotes carry the proof `shape`, as the SDK asks for them.
 
-The app talks to it through `services/stellar/stellar-relayer.ts`, a copy of v2.0's SDK
-`StellarRelayerInteractor`: the vendored SDK (`c81ba9d5`) still speaks the old reference
-relayer's `/api/v1/relayer/*` protocol. Delete the copy once the SDK is re-vendored with
-v2.0's interactor. The SDK's withdraw builder checks that the quoted routing pays the user's
-recipient and that `amountSent` is amount + fee. The relayer is handed to the session only
-while a withdrawal runs: the SDK asks every relayer it has for a quote even on a
-self-submitted transfer, and the relayer refuses transfer quotes.
+The app talks to it through `services/stellar/stellar-relayer.ts`. The vendored SDK has its
+own `StellarRelayerInteractor` for these routes (it also validates responses); switching to it
+needs a relayer list, an HTTP client and the proof service wired in, and would retire the copy.
+The SDK's withdraw builder checks that the quoted routing pays the user's recipient and that
+`amountSent` is amount + fee. The relayer is handed to the session only while a relayed flow
+runs: the SDK asks every relayer it has for a quote even on a self-submitted transfer.
 
 ## Why events come from the ASP
 

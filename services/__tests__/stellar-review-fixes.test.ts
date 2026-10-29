@@ -74,7 +74,8 @@ describe('Stellar withdraw cap', () => {
   test('amount + fee always fits the inputs, and is close to the best', () => {
     for (const inputs of [0n, 1n, 10_000_000n, 123_456_789n, 999_999_999n, 50_000_000_000n, 1_000_000_000_000n]) {
       const max = maxStellarWithdrawForInputs(inputs);
-      expect(max + estimateStellarRelayFee(max)).toBeLessThanOrEqual(inputs);
+      // Inputs at or under the fee's fixed cost term cannot fund any withdrawal.
+      if (max > 0n) expect(max + estimateStellarRelayFee(max)).toBeLessThanOrEqual(inputs);
       if (inputs > 0n) {
         const next = max + 2n;
         expect(next + estimateStellarRelayFee(next)).toBeGreaterThan(inputs);

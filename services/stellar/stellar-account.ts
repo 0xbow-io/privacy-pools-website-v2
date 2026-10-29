@@ -40,14 +40,18 @@ import type {
   StellarLog,
   StellarProof,
   StellarWalletProvider,
+  TransferResult,
 } from '@privacy-pools-v2/stellar-sdk';
 
 import {
   STELLAR_KEY_APP_IDENTIFIER,
+  estimateStellarRelayFee,
   STELLAR_RELAYER_CHAIN_ID,
   STELLAR_TESTNET_CONTRACTS,
+  STELLAR_TESTNET_DEPLOYMENT_LEDGER,
   STELLAR_TESTNET_NETWORK,
   STELLAR_TESTNET_RPC_URL,
+  STELLAR_TRANSFER_RELAY_FEE_ESTIMATE,
   requireStellarRelayerUrl,
 } from '@/config/stellar-deployment';
 import { STELLAR_TESTNET_ID } from '@/config/chains';
@@ -68,7 +72,7 @@ import {
   type IndexedStellarRpcInteractor,
   type StellarRpcInteractor,
 } from '@/services/stellar/stellar-runtime';
-import { createStellarRelayer } from '@/services/stellar/stellar-relayer';
+import { createStellarRelayer, relayAwareRpc } from '@/services/stellar/stellar-relayer';
 import {
   decodeStellarBackup,
   decodeStellarRequestBackup,
@@ -165,8 +169,8 @@ class StellarAccount {
   private readonly listeners = new Set<() => void>();
   private signer: StellarWalletProvider | null = null;
   private sessionPromise: Promise<StellarPoolSession> | null = null;
-  // The relayer, set only while a withdrawal runs (see buildSession).
-  private withdrawRelayer: IRelayerInteractor<StellarAddress> | null = null;
+  // The relayer, set only while a relayed withdrawal or transfer runs (see buildSession).
+  private activeRelayer: IRelayerInteractor<StellarAddress> | null = null;
   private rpc: IndexedStellarRpcInteractor | null = null;
   private syncPromise: Promise<void> | null = null;
   // Serialises flows: two spends built from one note view would double-select.
@@ -177,8 +181,6 @@ class StellarAccount {
   // Memory only, like the session's own keys: matches this account's spends
   // in the pool's Transacted events (services/stellar-activity.ts).
   private nullifyingKey: string | null = null;
-  // Registrations re-sent from this page, so a caller-held copy is not sent twice.
-  private readonly labelsSent = new Set<string>();
   private poseidon: ReturnType<StellarSdk['PoseidonHashService']['create']> | null = null;
 
   getSnapshot = (): StellarAccountSnapshot => this.snapshot;
@@ -256,6 +258,86 @@ class StellarAccount {
     return this.sessionPromise;
   }
 
+  /** The session's RPC; while a relayer is active it never builds a `transact` from this account (see relayAwareRpc). */
+  private confirmingRpc(rpc: IndexedStellarRpcInteractor): IndexedStellarRpcInteractor {
+    return relayAwareRpc(rpc, STELLAR_TESTNET_CONTRACTS.poolContractId, () => this.activeRelayer !== null);
+  }
+
+  /** Reads the relayer's details and builds its client; refuses one serving another deployment. */
+  private async connectRelayer(sdk: StellarSdk): Promise<IRelayerInteractor<StellarAddress>> {
+    const url = requireStellarRelayerUrl();
+    let details: { relayerAddress: string; contracts?: { relay?: string } };
+    try {
+      const res = await fetch(`${url}/v1/details/stellar/${STELLAR_RELAYER_CHAIN_ID}`, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`relayer details ${res.status}`);
+      details = await res.json();
+    } catch {
+      throw new Error('The Stellar testnet relayer is not reachable. Try again later.');
+    }
+    if (details.contracts?.relay !== STELLAR_TESTNET_CONTRACTS.relayContractId) {
+      throw new Error('The Stellar testnet relayer serves another deployment.');
+    }
+    return createStellarRelayer(sdk, { url, relayerAddress: details.relayerAddress });
+  }
+
+  /** Runs `fn` with the relayer handed to the session; it is reachable only for this call, as for a withdrawal. */
+  private async withTransferRelayer<T>(relayer: IRelayerInteractor<StellarAddress>, fn: () => Promise<T>): Promise<T> {
+    this.activeRelayer = relayer;
+    try {
+      return await fn();
+    } finally {
+      this.activeRelayer = null;
+    }
+  }
+
+  /**
+   * Stamps claimed notes imported with the '0x0' creation stub. The pool's state-tree leaf is
+   * hash(tag, commitment, createdAt), so a stubbed note can never be anchored ("Leaf … not found in
+   * tree"). The time comes from the pool's own events (the whole-history index: no read names the
+   * note). Returns false when a note is not indexed yet; `required` makes that an error instead.
+   */
+  private async stampClaimedNotes(session: StellarPoolSession, commitments: readonly Hex[], required: boolean): Promise<boolean> {
+    const wanted = new Set(commitments.map((c) => BigInt(c)));
+    const account = await session.exportAccount();
+    const stubs = account.notes.filter((n) => wanted.has(BigInt(n.commitment)) && BigInt(n.createdAtBlock ?? 0) === 0n);
+    if (stubs.length === 0 || !this.rpc) return stubs.length === 0;
+    const sdk = await loadStellarSdk();
+    const pool = new sdk.StellarPoolVaultChainAdapter({
+      rpcInteractor: this.rpc,
+      contractId: STELLAR_TESTNET_CONTRACTS.poolContractId,
+      readSourcePublicKey: sdk.STELLAR_NEUTRAL_READ_SOURCE,
+      deploymentLedger: Number(STELLAR_TESTNET_DEPLOYMENT_LEDGER),
+    });
+    for (const note of stubs) {
+      const createdAt = await pool.getCommitmentValue(note.commitment as Hex);
+      if (createdAt === 0n) {
+        if (required) throw new Error('This payment is not on the pool index yet. Try again in a minute.');
+        return false;
+      }
+      note.createdAtBlock = `0x${createdAt.toString(16)}` as Hex;
+    }
+    await session.importAccount(account);
+    return true;
+  }
+
+  /** Relays the first quoted option; refuses a receipt that did not spend this transfer's notes. */
+  private async relayPreparedTransfer(
+    session: StellarPoolSession,
+    prepared: Awaited<ReturnType<StellarPoolSession['prepareTransfer']>>,
+  ): Promise<TransferResult<StellarAddress, StellarLog>> {
+    const option = prepared.relayOptions[0];
+    if (!option) throw new Error('The relayer did not return a quote.');
+    // Note selection and the UI reserve the estimate; a higher signed fee would come out of the slack.
+    if (BigInt(option.selectedQuote.quote.feeCommitment.feeAmount) > STELLAR_TRANSFER_RELAY_FEE_ESTIMATE) {
+      throw new Error('The relayer asks for more than the fee shown. Try again later.');
+    }
+    // The recipient's noteSecretsMap must stay: relayTransfer builds the note data itself, and without
+    // the map it encodes blind (secretless) notes the recipient can neither discover nor spend.
+    const result = await session.relayTransfer(option);
+    if (result.spentNullifiersConfirmed === false) throw new Error('The relayer reported a transaction that is not this transfer.');
+    return result;
+  }
+
   private async buildSession(address: string, signer: StellarWalletProvider): Promise<StellarPoolSession> {
     const sdk = await loadStellarSdk();
     this.rpc = createIndexedRpcInteractor(sdk, ASP_URL);
@@ -266,10 +348,12 @@ class StellarAccount {
       ownerAddress: address,
       rpcUrl: STELLAR_TESTNET_RPC_URL,
       // Event history from the testnet indexer (every event since the
-      // deployment); everything else is plain Soroban RPC.
-      rpcInteractor: this.rpc,
+      // deployment); everything else is plain Soroban RPC. A relayed
+      // transfer's receipt is confirmed from pool events, never by its hash.
+      rpcInteractor: this.confirmingRpc(this.rpc),
       networkPassphrase: STELLAR_TESTNET_NETWORK.networkPassphrase,
       poolContractId: STELLAR_TESTNET_CONTRACTS.poolContractId,
+      deploymentLedger: STELLAR_TESTNET_DEPLOYMENT_LEDGER,
       keystoreContractId: STELLAR_TESTNET_CONTRACTS.keystoreContractId,
       aspRegistryContractId: STELLAR_TESTNET_CONTRACTS.aspRegistryContractId,
       // Required by the config schema even with an ASP override; never fetched.
@@ -282,12 +366,15 @@ class StellarAccount {
       // sync (one JSON blob per account), which also restores notes saved by
       // builds from before the SDK's storage schema fix.
       persistentStorage: { type: 'memory' },
+      // The SDK's store is in memory, but every payment request record (with its note secrets) is
+      // kept in localStorage by stellar-request-storage.ts and imported back on each session build.
+      ephemeralPaymentRequests: true,
       aspDataProvider: new StellarTestnetAspProvider(sdk, ASP_URL),
       circuitArtifacts: new FetchCircuitArtifacts(),
-      // No relayer outside a withdrawal: the SDK asks every relayer for a quote even on a
-      // self-submitted transfer, and Stellar relayers refuse transfer quotes.
+      // No relayer outside a relayed flow: the SDK asks every relayer for a quote even on a
+      // self-submitted transfer, and a relayer without the transfer routes refuses it.
       relayerInteractor: new Proxy(createNoRelayerInteractor(sdk), {
-        get: (none, prop) => Reflect.get(this.withdrawRelayer ?? none, prop),
+        get: (none, prop) => Reflect.get(this.activeRelayer ?? none, prop),
       }),
     }) as StellarPoolSession;
     const saved = readSessionAccount<SavedAccount>(STELLAR_TESTNET_ID, address);
@@ -528,7 +615,6 @@ class StellarAccount {
       // asking for one would put signatures ahead of the recipient check.
       if (!params.recipient) await this.ensureRegistered(session, generation, onStage);
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
-      const sdk = await loadStellarSdk();
       onStage?.('proving');
       const base = { tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId, value: toHex(params.amount) };
       const prepared = params.recipient
@@ -539,34 +625,18 @@ class StellarAccount {
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       this.assertStillBound(generation);
       onStage?.('signing');
-      // executeDeposit submits the deposit, then registers its ASP label
-      // (`register_label`, a second wallet approval). If only the label step
-      // fails the deposit is already on-chain: that must not read as a failed
-      // deposit. The ciphertext is kept and re-sent by the next manual sync.
-      let labelRegistered = true;
-      let pendingLabel: PendingLabel | null = null;
-      let txHash: string;
-      try {
-        const receipt = await session.executeDeposit(prepared);
-        if (!receipt.status) throw new Error('The deposit transaction failed on-chain.');
-        txHash = receipt.txHash as string;
-      } catch (error) {
-        if (!(error instanceof sdk.DepositLabelRegistrationFailed)) throw error;
-        labelRegistered = false;
-        txHash = error.depositTxHash;
-        pendingLabel = { depositTxHash: error.depositTxHash, aspCiphertext: error.aspCiphertext as Hex };
-        markLabelPending(address, pendingLabel);
-        console.warn('[stellar] deposit landed but its ASP registration did not; Sync will retry', error);
-      }
+      // One transaction (`deposit_with_label`): the ASP label cannot fail on its own.
+      const receipt = await session.executeDeposit(prepared);
+      if (!receipt.status) throw new Error('The deposit transaction failed on-chain.');
+      const txHash = receipt.txHash as string;
       onStage?.('syncing');
       await this.refreshLocal(session, address);
       return {
         txHash,
         commitment: prepared.pendingNote.commitment,
         label: prepared.pendingNote.label,
-        labelRegistered,
-        // Held by the caller too: the stored retry marker is best-effort.
-        pendingLabel,
+        labelRegistered: true,
+        pendingLabel: null,
       };
     });
   }
@@ -585,25 +655,12 @@ class StellarAccount {
       // Relayed: the relayer submits through the relay contract, so the user's
       // account never appears on the withdrawal. Its details are read BEFORE
       // registration, so an unreachable relayer fails before the wallet is asked to sign.
-      const sdk = await loadStellarSdk();
-      const url = requireStellarRelayerUrl();
-      let details: { relayerAddress: string; contracts?: { relay?: string } };
-      try {
-        const res = await fetch(`${url}/v1/details/stellar/${STELLAR_RELAYER_CHAIN_ID}`, { cache: 'no-store' });
-        if (!res.ok) throw new Error(`relayer details ${res.status}`);
-        details = await res.json();
-      } catch {
-        throw new Error('The Stellar testnet relayer is not reachable. Try again later.');
-      }
-      if (details.contracts?.relay !== STELLAR_TESTNET_CONTRACTS.relayContractId) {
-        throw new Error('The Stellar testnet relayer serves another deployment.');
-      }
-      const relayer = createStellarRelayer(sdk, { url, relayerAddress: details.relayerAddress });
+      const relayer = await this.connectRelayer(await loadStellarSdk());
       await this.ensureRegistered(session, generation, onStage);
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       // The fee comes on top of `amount`, so the inputs must cover amount + fee.
       onStage?.('proving');
-      this.withdrawRelayer = relayer;
+      this.activeRelayer = relayer;
       let receipt;
       try {
         // One committed quote and one proof. prepareWithdraw would quote, then
@@ -620,7 +677,13 @@ class StellarAccount {
           recipient: params.recipient,
           extraGas: false,
           amount: params.amount.toString(),
+          // Priced by proof shape, as the SDK asks for it (n = m = inputs).
+          shape: { n: Math.min(params.inputCommitments.length, 5), m: Math.min(params.inputCommitments.length, 5) },
         });
+        // The inputs were selected for amount + this estimate; a higher fee would not be covered.
+        if (BigInt(quote.feeAmount) > estimateStellarRelayFee(params.amount)) {
+          throw new Error('The relayer asks for more than the fee shown. Try again later.');
+        }
         const option = {
           inputCommitments: params.inputCommitments,
           amount: toHex(params.amount),
@@ -634,7 +697,7 @@ class StellarAccount {
         onStage?.('relaying');
         receipt = await session.relayWithdraw(option);
       } finally {
-        this.withdrawRelayer = null;
+        this.activeRelayer = null;
       }
       if (!receipt.status) throw new Error('The relayed withdrawal failed on-chain.');
       onStage?.('syncing');
@@ -654,6 +717,8 @@ class StellarAccount {
       const { onStage } = params;
       const { address, generation } = this.requireSigner();
       const session = await this.ensureSession(onStage);
+      // The relayer is read before registration, so an unreachable one fails before the wallet signs.
+      const relayer = await this.connectRelayer(await loadStellarSdk());
       await this.ensureRegistered(session, generation, onStage);
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       this.assertStillBound(generation);
@@ -661,13 +726,20 @@ class StellarAccount {
       // The recipient's viewing key is resolved by the SDK here (it throws
       // RecipientViewingKeyUnregistered when there is none), so no separate
       // lookup naming the recipient is made beforehand.
-      const result = await session.transfer({
-        tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
-        amount: toHex(params.amount),
-        inputCommitments: params.inputCommitments,
-        // The field name is EVM-flavoured; the Stellar SDK resolves the
-        // recipient's viewing key from the Stellar keystore by this G-address.
-        recipientDiscoveryData: { evmAddress: params.recipient },
+      const result = await this.withTransferRelayer(relayer, async () => {
+        // Relayed: the relayer submits, its fee comes on top of `amount`.
+        const prepared = await session.prepareTransfer({
+          tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
+          amount: toHex(params.amount),
+          inputCommitments: params.inputCommitments,
+          // The field name is EVM-flavoured; the Stellar SDK resolves the
+          // recipient's viewing key from the Stellar keystore by this G-address.
+          recipientDiscoveryData: { evmAddress: params.recipient },
+        });
+        if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
+        this.assertStillBound(generation);
+        onStage?.('relaying');
+        return this.relayPreparedTransfer(session, prepared);
       });
       if (!result.txReceipt.status) throw new Error('The transfer transaction failed on-chain.');
       onStage?.('syncing');
@@ -772,6 +844,8 @@ class StellarAccount {
         await session.importReceivedNote(toImportableNote(n) as Parameters<StellarPoolSession['importReceivedNote']>[0]);
         imported++;
       }
+      // Best effort here (a just-sent note may not be indexed yet); saving requires it.
+      await this.stampClaimedNotes(session, notes.map((n) => n.commitment as Hex), false);
       await this.refreshLocal(session, address);
       return { imported, already: notes.length - imported };
     });
@@ -787,7 +861,9 @@ class StellarAccount {
     return this.enqueue(async () => {
       const { address, generation } = this.requireSigner();
       const session = await this.ensureSession(params?.onStage);
+      const relayer = await this.connectRelayer(await loadStellarSdk());
       await this.ensureRegistered(session, generation, params?.onStage);
+      await this.stampClaimedNotes(session, commitments, true);
       const { notes } = await session.exportAccount();
       const wanted = new Set(commitments.map((c) => BigInt(c)));
       const claimed = notes.filter((n) => wanted.has(BigInt(n.commitment)));
@@ -797,11 +873,19 @@ class StellarAccount {
       this.assertStillBound(generation);
       params?.onStage?.('proving');
       const total = claimed.reduce((sum, n) => sum + BigInt(n.value), 0n);
-      const result = await session.transfer({
-        tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
-        amount: toHex(total),
-        inputCommitments: claimed.map((n) => n.commitment as Hex),
-        recipientDiscoveryData: { evmAddress: address },
+      const result = await this.withTransferRelayer(relayer, async () => {
+        // Relayed: the fee comes out of the claimed notes, and whatever the
+        // estimate over-reserves returns to this account as change.
+        if (total <= STELLAR_TRANSFER_RELAY_FEE_ESTIMATE) throw new Error('This link holds less than the relayer fee.');
+        const prepared = await session.prepareTransfer({
+          tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
+          amount: toHex(total - STELLAR_TRANSFER_RELAY_FEE_ESTIMATE),
+          inputCommitments: claimed.map((n) => n.commitment as Hex),
+          recipientDiscoveryData: { evmAddress: address },
+        });
+        this.assertStillBound(generation);
+        params?.onStage?.('relaying');
+        return this.relayPreparedTransfer(session, prepared);
       });
       if (!result.txReceipt.status) throw new Error('The transaction failed on-chain.');
       params?.onStage?.('syncing');
@@ -828,105 +912,16 @@ class StellarAccount {
   }
 
   /**
-   * Re-sends ASP registrations that did not go through at deposit time (the
-   * second Freighter prompt declined, or the network failed). Needs a wallet
-   * approval per deposit, so it only runs from an explicit user action.
+   * Deposits carry their ASP label in the same transaction (`deposit_with_label`), so nothing is
+   * left to re-send. Markers stored by older builds belong to the replaced 2026-09-30 pool: sending
+   * them to the current registry would only register junk labels, so they are dropped.
    */
-  retryPendingLabels(extra: readonly PendingLabel[] = []): Promise<{ sent: number; failed: number; firstError: string | null }> {
-    const address = this.snapshot.address;
-    // A failure before the per-label loop (no signer, SDK load) is recorded on
-    // the session error too, so no caller can swallow it silently.
-    return this.enqueueRetryPendingLabels(extra).catch((error) => {
-      if (this.snapshot.address === address) this.set({ error: messageOf(error) });
-      throw error;
-    });
-  }
-
-  private enqueueRetryPendingLabels(extra: readonly PendingLabel[]): Promise<{ sent: number; failed: number; firstError: string | null }> {
+  retryPendingLabels(_extra: readonly PendingLabel[] = []): Promise<{ sent: number; failed: number; firstError: string | null }> {
     return this.enqueue(async () => {
-      const { address, signer, generation } = this.requireSigner();
-      // A caller-held ciphertext (from the deposit result) counts even when
-      // storage refused the marker.
-      const stored = readLabelPending(address);
-      const pending = [
-        ...stored,
-        ...extra.filter((e) => !this.labelsSent.has(e.depositTxHash) && !stored.some((p) => p.depositTxHash === e.depositTxHash)),
-      ];
-      const legacy = readLegacyLabelPending(address);
-      if (pending.length === 0 && legacy.length === 0) return { sent: 0, failed: 0, firstError: null };
-      const sdk = await loadStellarSdk();
-      const rpcInteractor = this.rpc ?? createIndexedRpcInteractor(sdk, ASP_URL);
-      const registry = new sdk.StellarASPRegistryInteractor({
-        rpcInteractor,
-        contractId: STELLAR_TESTNET_CONTRACTS.aspRegistryContractId,
-        readSourcePublicKey: address,
-      });
-      const wallet = new sdk.FreighterWalletInteractor({
-        provider: withSigningWindow(signer),
-        networkPassphrase: STELLAR_TESTNET_NETWORK.networkPassphrase,
-        rpcInteractor,
-      });
-      let sent = 0;
-      let failed = 0;
-      let firstError: string | null = null;
-      const register = async (ciphertext: Hex) => {
-        this.assertStillBound(generation);
-        // The SDK's own retry path: rebuild register_label from the
-        // ciphertext; the deposit itself is never resubmitted.
-        const unsignedXdr = await registry.encodeRegisterLabel(ciphertext, address);
-        const hash = await wallet.sendTransaction(unsignedXdr);
-        await rpcInteractor.waitForTransactionReceipt(hash);
-      };
-      // Each registration is independent: one declined or failed approval
-      // must not strand the deposits after it.
-      for (const item of pending) {
-        try {
-          await register(item.aspCiphertext);
-          clearLabelPending(address, item.depositTxHash);
-          this.labelsSent.add(item.depositTxHash);
-          sent++;
-        } catch (error) {
-          failed++;
-          firstError ??= messageOf(error);
-          console.warn('[stellar] ASP registration retry failed', error);
-        }
-      }
-      // Markers from builds before the ciphertext was kept hold only the
-      // deposit's commitment. The note (and its deposit secret) comes from
-      // this session's own state, which the preceding sync filled; the
-      // ciphertext is rebuilt locally. Settled notes just drop the marker.
-      if (legacy.length > 0 && this.sessionPromise) {
-        try {
-          const session = await this.sessionPromise;
-          const { notes } = await session.exportAccount();
-          const aspPublicKey = await new StellarTestnetAspProvider(sdk, ASP_URL).getASPPublicKey();
-          for (const commitment of legacy) {
-            const note = notes.find((n) => BigInt(n.commitment) === BigInt(commitment));
-            if (!note) continue; // not rediscovered yet: keep the marker
-            if (note.status !== NOTE_STATUS_PENDING || !note.depositSecret) {
-              clearLegacyLabelPending(address, commitment);
-              continue;
-            }
-            try {
-              const ciphertext = buildAspCiphertext(sdk, note, aspPublicKey);
-              await register(ciphertext);
-              clearLegacyLabelPending(address, commitment);
-              sent++;
-            } catch (error) {
-              failed++;
-              firstError ??= messageOf(error);
-              console.warn('[stellar] legacy ASP registration retry failed', error);
-            }
-          }
-        } catch (error) {
-          failed++;
-          firstError ??= messageOf(error);
-        }
-      }
-      if (firstError && this.snapshot.address === address) {
-        this.set({ error: `${failed} deposit${failed === 1 ? '' : 's'} still need ASP approval: ${firstError}` });
-      }
-      return { sent, failed, firstError };
+      const { address } = this.requireSigner();
+      for (const item of readLabelPending(address)) clearLabelPending(address, item.depositTxHash);
+      for (const commitment of readLegacyLabelPending(address)) clearLegacyLabelPending(address, commitment);
+      return { sent: 0, failed: 0, firstError: null };
     });
   }
 
@@ -1113,18 +1108,21 @@ class StellarAccount {
       const { address, generation } = this.requireSigner();
       if (params.request.tokenId !== STELLAR_TESTNET_CONTRACTS.nativeAssetContractId) throw new Error('This request is not for XLM.');
       const session = await this.ensureSession(onStage);
+      const relayer = await this.connectRelayer(await loadStellarSdk());
       await this.ensureRegistered(session, generation, onStage);
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       this.assertStillBound(generation);
       onStage?.('proving');
-      const prepared = await session.prepareFulfillPaymentRequest({
-        paymentRequest: params.request as Parameters<StellarPoolSession['prepareFulfillPaymentRequest']>[0]['paymentRequest'],
-        inputCommitments: params.inputCommitments,
+      const result = await this.withTransferRelayer(relayer, async () => {
+        const prepared = await session.prepareFulfillPaymentRequest({
+          paymentRequest: params.request as Parameters<StellarPoolSession['prepareFulfillPaymentRequest']>[0]['paymentRequest'],
+          inputCommitments: params.inputCommitments,
+        });
+        if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
+        this.assertStillBound(generation);
+        onStage?.('relaying');
+        return this.relayPreparedTransfer(session, prepared);
       });
-      if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
-      this.assertStillBound(generation);
-      onStage?.('signing');
-      const result = await session.executeTransfer(prepared.executeOptions);
       if (!result.txReceipt.status) throw new Error('The transfer transaction failed on-chain.');
       onStage?.('syncing');
       await this.refreshLocal(session, address);
@@ -1203,26 +1201,6 @@ function restoreStoredRows(address: string): boolean {
   return missing.length > 0;
 }
 
-// Same value as the SDK's NoteStatus.PENDING, without importing the SDK
-// eagerly (it is lazy-loaded with snarkjs).
-const NOTE_STATUS_PENDING = 'PENDING';
-
-/** The ASP ciphertext for a deposit note, as the SDK's executeDeposit builds it. */
-function buildAspCiphertext(sdk: StellarSdk, note: StellarNote, aspPublicKey: Hex): Hex {
-  const tokenId = new sdk.StellarAddressFieldConverter().toTokenIdField(STELLAR_TESTNET_CONTRACTS.nativeAssetContractId);
-  return sdk.encodeASPCipherText(
-    {
-      noteAddressHash: note.noteAddressHash,
-      tokenId,
-      value: note.value,
-      depositSecret: note.depositSecret as Hex,
-      metadata: '0x0' as Hex,
-    } as Parameters<StellarSdk['encodeASPCipherText']>[0],
-    { aspPublicKey } as Parameters<StellarSdk['encodeASPCipherText']>[1],
-    { cryptoService: new sdk.StellarCryptoService() } as unknown as Parameters<StellarSdk['encodeASPCipherText']>[2],
-  );
-}
-
 const LABEL_PENDING_KEY = (address: string) => `ppv2_stellar_label_pending_v2_${STELLAR_TESTNET_ID}_${address}`;
 
 /** A confirmed deposit whose `register_label` still has to be sent. */
@@ -1244,11 +1222,6 @@ function writeLabelPending(address: string, list: PendingLabel[]) {
   } catch {
     // storage unavailable: the retry list is best-effort
   }
-}
-
-function markLabelPending(address: string, item: PendingLabel) {
-  const list = readLabelPending(address);
-  if (!list.some((p) => p.depositTxHash === item.depositTxHash)) writeLabelPending(address, [...list, item]);
 }
 
 function clearLabelPending(address: string, depositTxHash: string) {

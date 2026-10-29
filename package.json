@@ -50,7 +50,7 @@
     "@noble/curves": "2.0.1",
     "@noble/hashes": "2.0.1",
     "@privacy-pools-v2/sdk": "file:./vendor/privacy-pools-v2-sdk-1.0.2.tgz",
-    "@privacy-pools-v2/stellar-sdk": "file:./vendor/privacy-pools-v2-stellar-sdk-0.0.0-prerelease.c81ba9d5.tgz",
+    "@privacy-pools-v2/stellar-sdk": "file:./vendor/privacy-pools-v2-stellar-sdk-0.0.0-prerelease.1449fe37.tgz",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-masked-view/masked-view": "0.3.2",
     "@sentry/react": "10.73.0",
