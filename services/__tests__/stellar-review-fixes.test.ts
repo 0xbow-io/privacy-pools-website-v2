@@ -153,13 +153,16 @@ describe('Stellar error copy', () => {
   test('an expired transaction says what happened and that a retry is safe', async () => {
     const message = stellarErrorMessage(await refusedSend('txTooLate'));
     expect(message).toMatch(/took too long/);
-    expect(message).toMatch(/Nothing was sent/);
+    // Scoped to this transaction: in the two-step account setup the first one may already be on chain.
+    expect(message).toMatch(/This transaction was not sent/);
+    expect(message).not.toMatch(/Nothing was sent/);
     expect(message).not.toMatch(/txTooLate|—/);
   });
 
   test('a stale sequence asks for a retry instead of printing the code', async () => {
     const message = stellarErrorMessage(await refusedSend('txBadSeq'));
-    expect(message).toMatch(/Nothing was sent/);
+    expect(message).toMatch(/This transaction was not sent/);
+    expect(message).not.toMatch(/Nothing was sent/);
     expect(message).not.toMatch(/txBadSeq|—/);
   });
 
