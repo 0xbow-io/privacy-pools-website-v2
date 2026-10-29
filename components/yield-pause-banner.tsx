@@ -4,8 +4,8 @@ import { SafeAreaInsetsContext, useSafeAreaInsets } from 'react-native-safe-area
 import { YIELD_PAUSE_BANNER_TEXT } from '@/config/yield-deposits-paused';
 
 /**
- * Slim notice strip at the top of the app while vault deposits are paused
- * (EXPO_PUBLIC_YIELD_DEPOSITS_PAUSED names a chain). The text is build
+ * Slim notice strip at the top of the app about the Aave deposit freeze. On by
+ * default (Ethereum and Base), independent of the pause itself. The text is build
  * configuration (EXPO_PUBLIC_YIELD_PAUSE_BANNER_TEXT, see
  * config/yield-deposits-paused.ts), plain text, and nothing here makes a request.
  *

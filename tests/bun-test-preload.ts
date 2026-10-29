@@ -12,8 +12,3 @@ process.env.EXPO_PUBLIC_APP_ENV ??= 'staging';
 // plain staging hides (config/staging-mainnet.ts). Run them as staging-mainnet;
 // services/__tests__/staging-mainnet.test.ts checks plain staging in a child.
 process.env.EXPO_PUBLIC_STAGING_MAINNET ??= 'true';
-// An unset vault-deposit pause means "Ethereum and Base paused"
-// (config/yield-deposits-paused.ts). The suite describes the open world, so pin
-// it off here; the default itself is asserted in yield-deposits-paused.test.ts
-// through the pure parser.
-process.env.EXPO_PUBLIC_YIELD_DEPOSITS_PAUSED ??= 'false';
