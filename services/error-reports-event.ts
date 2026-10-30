@@ -38,6 +38,16 @@ export type IncomingEvent = {
   [key: string]: unknown;
 };
 
+/**
+ * Sentry looks up a location (`user.geo`) from the connection's IP when an event
+ * arrives, unless the event itself says the IP is null. Our events carry no user,
+ * so without this Sentry fills one in: the "Prevent Storing of IP Addresses"
+ * project switch hides the IP but a location derived from it was still saved
+ * (2026-10-30, a team member's own crash report showed their city). An explicit
+ * null IP stops the lookup at the source. The project switch stays on as a second layer.
+ */
+export const NO_USER_IP = Object.freeze({ ip_address: null }) as { readonly ip_address: null };
+
 export type OutgoingEvent = {
   /** Carried over so the envelope header can address the event. Never ours. */
   event_id?: string;
@@ -47,6 +57,8 @@ export type OutgoingEvent = {
   release?: string;
   level: 'error' | 'warning';
   message: string;
+  /** Always `{ ip_address: null }`: no user, and no IP for Sentry to infer a location from. */
+  user: { readonly ip_address: null };
   contexts?: {
     flags?: Record<string, boolean>;
     egress?: Record<string, string>;
@@ -371,6 +383,7 @@ export function privateErrorReportEvent(
         ...(release ? { release } : {}),
         level: 'error',
         message,
+        user: NO_USER_IP,
         tags: { stage: tags.stage, reason: tags.reason },
         ...(exception ? { exception } : {}),
         ...(debugMeta ? { debug_meta: debugMeta } : {}),
@@ -386,6 +399,7 @@ export function privateErrorReportEvent(
     ...(release ? { release } : {}),
     level: key === 'egress-refused' ? 'warning' : 'error',
     message,
+    user: NO_USER_IP,
     contexts: {
       ...(Object.keys(flags).length > 0 ? { flags } : {}),
       ...(egress ? { egress } : {}),
