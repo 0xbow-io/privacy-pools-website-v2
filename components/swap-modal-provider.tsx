@@ -101,6 +101,7 @@ import { assertRelayerSwapProcessor } from '@/services/relayer-details';
 import { registerSwapHandoff } from '@/services/swap-handoff';
 import { noteShortfall, noteShortfallMessage } from '@/services/swap-note-shortfall';
 import { OpShell } from '@/components/op-shell';
+import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 import { FlowProgress } from '@/components/ui/flow-progress';
 import { useInlineOpsCapable } from '@/hooks/use-inline-ops-capable';
 import {
@@ -2719,6 +2720,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
           isDark={colorScheme === 'dark'}
           sheetAnim={sheetAnim}
           onClose={closeSwapModal}
+          closeBlocked={step === 'executing'}
           // Conflicting box props (width/max-w/padding/radius) live in exactly ONE
           // branch so class order can't flip the RN style-array override result.
           cardClassName={`relative max-h-[92%] items-center gap-[16px] overflow-hidden border border-border bg-card-background ${
@@ -3622,6 +3624,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
           deposit modal uses. The network pane IS the destination-chain
           picker; it lists one chain until cross-chain destinations exist. */}
       {isOpen && selectorOpen && (
+        <HubErrorBoundary onRetry={() => setSelectorOpen(false)}>
         <TokenNetworkSelector
           tokens={outputTokens}
           networks={destinationChains}
@@ -3647,6 +3650,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
           onClose={() => setSelectorOpen(false)}
           networkTitle="Destination network"
         />
+        </HubErrorBoundary>
       )}
     </SwapModalContext.Provider>
   );

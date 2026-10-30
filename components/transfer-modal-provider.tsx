@@ -90,6 +90,7 @@ import {
 import { ENS_UNSUPPORTED_MESSAGE, isPotentialEnsName, normalizeEnsName } from '@/services/ens';
 import { CopyIconButton } from '@/components/ui/copy-address';
 import { OpShell } from '@/components/op-shell';
+import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 import { ConsolidationShell } from '@/components/consolidation-shell';
 import { ConsolidationAssetList } from '@/components/consolidation-asset-list';
 import { ConsolidationPanel, ConsolidationSummary, ConsolidationGroupSummary } from '@/components/consolidation-panel';
@@ -3584,6 +3585,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           isDark={isDark}
           sheetAnim={sheetAnim}
           onClose={requestCloseTransferModal}
+          onCrashClose={closeTransferModal}
           cardClassName={`relative items-center overflow-hidden border border-border bg-card-background ${step === 'select-notes' ? 'gap-[16px]' : 'gap-[20px]'} ${(step === 'loading' || step === 'success') ? 'justify-center' : ''} ${
             isSheet
               ? 'w-full max-w-full rounded-t-card rounded-b-none border-b-0 mb-0 px-[16px] py-[24px] pt-[28px]'
@@ -4500,6 +4502,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           same-chain, so offering a chain switch would abandon the Send form for
           a route nothing can serve. */}
       {isOpen && receiveSelectorOpen && receiveAsAvailable && (
+        <HubErrorBoundary onRetry={() => setReceiveSelectorOpen(false)}>
         <TokenSelectSheet
           tokens={receiveTokens}
           networks={sendDestinations.map((id) => ({
@@ -4552,6 +4555,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           onClose={() => setReceiveSelectorOpen(false)}
           title="Receive as"
         />
+        </HubErrorBoundary>
       )}
     </TransferModalContext.Provider>
   );

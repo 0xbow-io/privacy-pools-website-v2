@@ -1,5 +1,6 @@
 import { SWAP_DEPOSIT_REFUND_NOTE } from '@/services/swap-deposit-copy';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
+import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 import { shieldHeadroomRoomText } from '@/services/shield-headroom-copy';
 import { relaunchReady } from '@/services/deposit-relaunch';
 import { simulateWithAllowanceOverride } from '@/services/allowance-override-sim';
@@ -4337,6 +4338,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
           // nw-keep(platform-css): web-only position:fixed to anchor the backdrop over scrolling content (empty on native)
           style={WEB_FIXED_POSITION}
         >
+          <HubErrorBoundary onRetry={closeDepositModal}>
           {/* Blur overlay */}
           <Pressable
             className={`absolute inset-0 ${isDark ? 'bg-[rgba(0,0,0,0.6)]' : 'bg-[rgba(255,255,255,0.6)]'}`}
@@ -4813,6 +4815,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
               </Pressable>
             </View>
           </Animated.View>
+          </HubErrorBoundary>
         </View>
       )}
 

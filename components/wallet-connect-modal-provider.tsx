@@ -20,6 +20,7 @@ import { PasskeySignInPanel } from '@/components/passkey-sign-in-panel';
 import { PASSKEY_EOA_CONNECTOR_ID } from '@/services/passkey-eoa/constants';
 import { useBackHandler } from '@/hooks/use-back-handler';
 import { armAutoSignAfterConnect } from '@/services/auto-sign-after-connect';
+import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 
 // Quick check for whether the current browser actually has a
 // window.ethereum-style provider attached. wagmi's generic `injected()`
@@ -646,6 +647,7 @@ export function WalletConnectModalProvider({ children }: { children: ReactNode }
           style={[WEB_FIXED_POSITION as ViewStyle, WEB_BLUR_BACKDROP as ViewStyle]}
           pointerEvents="auto"
         >
+          <HubErrorBoundary onRetry={close}>
           <Pressable className="absolute inset-0" onPress={close} />
           <View
             className={`w-full gap-[16px] border-border bg-card-background p-[24px] ${isMobile ? 'max-w-full rounded-t-[18px] rounded-b-none border-t pb-[32px] pt-[14px]' : 'max-w-[420px] rounded-card border'}`}
@@ -774,6 +776,7 @@ export function WalletConnectModalProvider({ children }: { children: ReactNode }
               <Text className="font-pp-regular text-[12px] text-[#E11D48]">{error}</Text>
             )}
           </View>
+          </HubErrorBoundary>
         </View>
       )}
     </WalletConnectModalContext.Provider>

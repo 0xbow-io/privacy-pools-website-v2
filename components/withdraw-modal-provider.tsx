@@ -182,6 +182,7 @@ import { PairArrow } from '@/components/ui/pair-arrow';
 import { TokenSelectSheet } from '@/components/ui/token-select-sheet';
 import { CopyIconButton } from '@/components/ui/copy-address';
 import { OpShell } from '@/components/op-shell';
+import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 import { useInlineOpsCapable } from '@/hooks/use-inline-ops-capable';
 import { isRelayerNullifierInFlight, isRelayerOutOfGas, isRelayerRateLimited, isRelayerUnreachable, isRelayWaitTimeout, relayerOutOfGasMessage, relayerRateLimitedMessage, relayInFlightMessage, timedOutRelayTxHash } from '@/services/transfer-outcome';
 import { aspBusyMessage } from '@/services/asp-backoff';
@@ -4974,6 +4975,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           isDark={isDark}
           sheetAnim={sheetAnim}
           onClose={closeWithdrawModal}
+          closeBlocked={step === 'loading'}
           cardClassName={`relative items-center overflow-hidden border border-border bg-card-background ${step === 'withdraw' ? 'gap-[20px]' : 'gap-[16px]'} ${(step === 'loading' || step === 'success') ? 'justify-center' : ''} ${
             isSheet
               ? 'w-full max-w-full px-[16px] py-[24px] pt-[28px] rounded-t-card rounded-b-none border-b-0 mb-0'
@@ -6203,6 +6205,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           the pair can route, in which case picking one turns the exit into a
           cross-chain delivery. */}
       {isOpen && receiveSelectorOpen && (
+        <HubErrorBoundary onRetry={() => setReceiveSelectorOpen(false)}>
         <TokenSelectSheet
           tokens={receiveTokens}
           networks={receiveDestinations.map((id) => ({
@@ -6313,6 +6316,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           onClose={() => setReceiveSelectorOpen(false)}
           title="Receive as"
         />
+        </HubErrorBoundary>
       )}
     </WithdrawModalContext.Provider>
   );

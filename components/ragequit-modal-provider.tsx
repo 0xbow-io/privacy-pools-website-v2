@@ -59,6 +59,7 @@ import { getTokenMetadata } from '@/config/tokens';
 
 import { useBackHandler } from '@/hooks/use-back-handler';
 import { useNativeMockBlock } from '@/hooks/use-native-mock-block';
+import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 
 const NATIVE_ASSET_ADDRESS = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 
@@ -748,6 +749,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
           // nw-keep(platform-css): web-only position:fixed anchors the overlay over scrolling content; empty object on native
           style={WEB_FIXED_POSITION as ViewStyle}
         >
+          <HubErrorBoundary onRetry={closeRagequitModal}>
           {/* Blur overlay */}
           <Pressable
             className={`absolute inset-0 ${isDark ? 'bg-[rgba(0,0,0,0.6)]' : 'bg-[rgba(255,255,255,0.6)]'}`}
@@ -1012,6 +1014,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
               </Pressable>
             </View>
           </Animated.View>
+          </HubErrorBoundary>
         </View>
       )}
     </RagequitModalContext.Provider>

@@ -20,7 +20,15 @@ import { reportErrorReport } from '@/services/error-reports';
 import { firstComponentName, firstFramePosition } from '@/services/crash-frame';
 import { errorShape } from '@/services/error-shape';
 
-type Props = { children: React.ReactNode };
+// onRetry: a modal shell keeps its open state in its provider, so a bare remount
+// would draw the same shell again. The provider passes its close, so Try again
+// leaves the user on a clean page.
+//
+// retryable=false is for a flow whose close is blocked (a swap mid-proof, a
+// withdrawal in flight): Try again would remount the same crashing shell and do
+// nothing, so no button is shown and the user is told to reload.
+// retryLabel: what the button says (a shell's retry is a close).
+type Props = { children: React.ReactNode; onRetry?: () => void; retryable?: boolean; retryLabel?: string };
 type State = { crashed: boolean; attempt: number };
 
 export class HubErrorBoundary extends React.Component<Props, State> {
@@ -48,12 +56,18 @@ export class HubErrorBoundary extends React.Component<Props, State> {
   }
 
   private retry = (): void => {
+    try {
+      this.props.onRetry?.();
+    } catch {
+      /* A failing close must not trap the user in the fallback. */
+    }
     // A new key remounts the card, so its own state starts clean.
     this.setState((s) => ({ crashed: false, attempt: s.attempt + 1 }));
   };
 
   render(): React.ReactNode {
     if (this.state.crashed) {
+      const retryable = this.props.retryable !== false;
       return (
         <View
           testID="hub-error-boundary"
@@ -61,16 +75,20 @@ export class HubErrorBoundary extends React.Component<Props, State> {
         >
           <Text className="text-center font-pp-bold text-[18px] text-text">Something broke here</Text>
           <Text className="max-w-[360px] text-center font-pp-regular text-[14px] leading-[20px] text-text-secondary">
-            Your funds are safe: this is the form failing to draw, not a transaction.
+            {retryable
+              ? 'Your funds are safe: this is the form failing to draw, not a transaction.'
+              : 'Reload the page. Your funds are safe: this is the form failing to draw, and the operation in progress is not interrupted.'}
           </Text>
-          <Pressable
-            onPress={this.retry}
-            accessibilityRole="button"
-            testID="hub-error-boundary-retry"
-            className="mt-[4px] rounded-control bg-text px-[20px] py-[11px]"
-          >
-            <Text className="font-pp-medium text-[14px] text-background">Try again</Text>
-          </Pressable>
+          {retryable && (
+            <Pressable
+              onPress={this.retry}
+              accessibilityRole="button"
+              testID="hub-error-boundary-retry"
+              className="mt-[4px] rounded-control bg-text px-[20px] py-[11px]"
+            >
+              <Text className="font-pp-medium text-[14px] text-background">{this.props.retryLabel ?? 'Try again'}</Text>
+            </Pressable>
+          )}
         </View>
       );
     }

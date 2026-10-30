@@ -4,10 +4,11 @@ import { CloseIcon } from '@/components/ui/modal-icons';
 import { useTheme } from '@/components/theme-provider';
 import { Colors } from '@/constants/theme';
 import { modalCardShadow } from '@/components/ui/web-style-shims';
+import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 import type { OpShell } from '@/components/op-shell';
 
 /** Same utility-modal dimensions and presentation as Import Notes. */
-export function ConsolidationShell({ children, isSheet, onClose }: Pick<Parameters<typeof OpShell>[0], 'children' | 'isSheet' | 'onClose'>) {
+export function ConsolidationShell({ children, isSheet, onClose, closeBlocked, onCrashClose }: Pick<Parameters<typeof OpShell>[0], 'children' | 'isSheet' | 'onClose' | 'closeBlocked' | 'onCrashClose'>) {
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   return (
@@ -21,7 +22,9 @@ export function ConsolidationShell({ children, isSheet, onClose }: Pick<Paramete
             {/* nw-keep(data-color): theme text color passed to the shared SVG close icon. */}
             <CloseIcon color={colors.text} />
           </Pressable>
-          {children}
+          <HubErrorBoundary onRetry={onCrashClose ?? onClose} retryable={!closeBlocked} retryLabel="Close">
+            {children}
+          </HubErrorBoundary>
         </View>
       </View>
     </Modal>
