@@ -107,30 +107,29 @@ describe('the reported event is constructed, not scrubbed', () => {
     expect(Object.keys(out.contexts?.flags ?? {}).sort()).toEqual(['hasAmount', 'hasRecipient']);
   });
 
-  test('the event says the IP is null, so Sentry has nothing to look a location up from', () => {
-    // Sentry derives user.geo from the connection IP when the event has no
-    // user.ip_address. The project's "Prevent Storing of IP Addresses" switch
-    // hid the IP but a team member's own crash report still showed their city.
-    // Only an explicit null stops the lookup. Whatever the caller stuffed in
+  test('the event carries a placeholder location and a null IP, so Sentry looks nothing up', () => {
+    // Sentry derives user.geo from the connection IP at ingest, and neither a
+    // null IP nor the project switch stops it (a team member's own crash report
+    // showed their city). A user.geo already on the event skips the lookup, so
+    // the wire carries a fixed placeholder. Whatever the caller stuffed in
     // (a user, an ip, a geo), the wire carries exactly this and nothing else.
     const stuffed = { ...stuffedEvent(), user: { id: 'u-1', ip_address: '203.0.113.9', geo: { city: 'Somewhere' } } };
     const out = privateErrorReportEvent(stuffed, { environment: 'prod', release: 'deadbeef' })!;
-    expect(out.user).toEqual({ ip_address: null });
+    expect(out.user).toEqual({ ip_address: null, geo: { country_code: 'ZZ' } });
     const wire = serialise(out);
     expect(wire).not.toContain('203.0.113.9');
     expect(wire).not.toContain('Somewhere');
-    expect(wire).not.toContain('"geo"');
     expect(wire).not.toContain('u-1');
   });
 
-  test('the shorter relayed-spend event carries the same null IP', () => {
+  test('the shorter relayed-spend event carries the same placeholder', () => {
     const out = privateErrorReportEvent(
       { contexts: { errorReport: { message: 'withdraw-failed', diagnostic: { stage: 'broadcast', reason: 'unknown' } } } },
       { environment: 'prod', release: 'deadbeef' },
       new Error('boom'),
     );
     expect(out).not.toBeNull();
-    expect(out!.user).toEqual({ ip_address: null });
+    expect(out!.user).toEqual({ ip_address: null, geo: { country_code: 'ZZ' } });
   });
 
   test('a flag is kept only when it is really a boolean', () => {
