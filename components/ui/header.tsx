@@ -54,6 +54,8 @@ import { NotificationCenter } from '@/components/ui/notification-center';
 import { AccountKeyExportModal } from '@/components/account-key-export-modal';
 import { ErrorReportsModal, useErrorReportsEnabled } from '@/components/error-reports-modal';
 import { errorReportsMenuLabel } from '@/services/error-reports-setting';
+import { SelfWithdrawalModal, useSelfWithdrawalEnabled } from '@/components/self-withdrawal-modal';
+import { selfWithdrawalMenuLabel, writeSelfWithdrawalEnabled } from '@/services/self-withdrawal-setting';
 import { AccountKeyToMobileModal } from '@/components/account-key-to-mobile-modal';
 import { useMobileAccountKeys } from '@/components/mobile-account-keys-context';
 import { useTransferModal } from '@/components/transfer-modal-provider';
@@ -233,6 +235,8 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
   const [exportKeyOpen, setExportKeyOpen] = useState(false);
   const [errorReportsOpen, setErrorReportsOpen] = useState(false);
   const errorReportsEnabled = useErrorReportsEnabled();
+  const [selfWithdrawalOpen, setSelfWithdrawalOpen] = useState(false);
+  const selfWithdrawalEnabled = useSelfWithdrawalEnabled();
   const [exportToMobileOpen, setExportToMobileOpen] = useState(false);
   const mobileAccountKeys = useMobileAccountKeys();
   const {
@@ -899,6 +903,24 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                           {errorReportsMenuLabel(errorReportsEnabled)}
                         </Text>
                       </Pressable>
+                      {/* EVM only: the withdraw form's own-wallet option. Turning it
+                          on asks first; turning it off needs no warning. */}
+                      {!connectedIsNonEvm && (
+                      <Pressable
+                        className="flex-row items-center gap-[10px] rounded-pill px-[12px] py-[10px] hover:bg-background-secondary"
+                        onPress={() => {
+                          setActionsDropdownOpen(false);
+                          if (selfWithdrawalEnabled) writeSelfWithdrawalEnabled(false);
+                          else setSelfWithdrawalOpen(true);
+                        }}
+                        testID="menu-self-withdrawal"
+                      >
+                        <Ionicons name="log-out-outline" size={16} color={colors.text} />
+                        <Text className="font-pp-sans text-[14px] text-text">
+                          {selfWithdrawalMenuLabel(selfWithdrawalEnabled)}
+                        </Text>
+                      </Pressable>
+                      )}
                     </>
                   ) : (
                   <>
@@ -1182,6 +1204,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
 
       <AccountKeyExportModal visible={exportKeyOpen} onClose={() => setExportKeyOpen(false)} />
       <ErrorReportsModal visible={errorReportsOpen} onClose={() => setErrorReportsOpen(false)} />
+      <SelfWithdrawalModal visible={selfWithdrawalOpen} onClose={() => setSelfWithdrawalOpen(false)} />
       {/* Mounted only while open: closing unmounts it, so the code, key and QR go with it. */}
       {Platform.OS === 'web' && exportToMobileOpen ? (
         <AccountKeyToMobileModal visible onClose={() => setExportToMobileOpen(false)} />
