@@ -6,10 +6,6 @@
   "framework": null,
   "rewrites": [
     {
-      "source": "/artifacts/:version/:path*",
-      "destination": "https://privacy-pools-artifacts.vercel.app/artifacts/:version/:path*"
-    },
-    {
       "source": "/((?!\\.well-known/).*)",
       "destination": "/"
     }
@@ -18,12 +14,6 @@
     {
       "source": "/.well-known/webauthn",
       "headers": [{ "key": "Content-Type", "value": "application/json" }]
-    },
-    {
-      "source": "/artifacts/:version/:path*",
-      "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
-      ]
     },
     {
       "source": "/assets/:path*",

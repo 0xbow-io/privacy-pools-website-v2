@@ -4,9 +4,13 @@
 // Only runs on Vercel (VERCEL=1); a local `expo export` keeps its dist/artifacts.
 // Before dropping them it checks that the artifacts project really serves this
 // version, so a build can never go live pointing at files that are not there.
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 
-const ORIGIN = (process.env.ARTIFACTS_ORIGIN || 'https://privacy-pools-artifacts.vercel.app').replace(/\/+$/, '');
+// The same origin the app will read from: EXPO_PUBLIC_ARTIFACTS_ORIGIN, else the
+// default in config/artifacts-origin.json (config/artifacts.ts resolves it the same way).
+const DEFAULT_ORIGIN = JSON.parse(readFileSync(new URL('../config/artifacts-origin.json', import.meta.url), 'utf8')).default;
+const envOrigin = process.env.EXPO_PUBLIC_ARTIFACTS_ORIGIN?.trim().replace(/\/+$/, '') ?? '';
+const ORIGIN = envOrigin.startsWith('https://') ? envOrigin : DEFAULT_ORIGIN;
 const VERSION = process.env.EXPO_PUBLIC_ARTIFACTS_VERSION?.trim();
 const DIST = new URL('../dist/artifacts', import.meta.url).pathname;
 
@@ -23,7 +27,7 @@ if (!VERSION) {
 const probe = `${ORIGIN}/artifacts/${VERSION}/deposit/groth16_pkey.zkey`;
 const res = await fetch(probe, { method: 'HEAD' });
 if (!res.ok) {
-  console.error(`[artifacts-offload] ${probe} answered ${res.status}. Deploy the artifacts first: bun scripts/deploy-artifacts.mjs`);
+  console.error(`[artifacts-offload] ${probe} answered ${res.status}. Deploy the artifacts first: node scripts/deploy-artifacts.mjs`);
   process.exit(1);
 }
 

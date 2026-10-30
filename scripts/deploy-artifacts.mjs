@@ -1,45 +1,75 @@
 // Publish public/artifacts to the privacy-pools-artifacts Vercel project under
-// /artifacts/<version>/. Run it when a circuit changes (almost never), BEFORE the
-// app build that picks the new version up (that build refuses to ship otherwise).
+// /artifacts/<version>/. Run it when a circuit changes (almost never). It is
+// ADDITIVE: the versions already published stay served (see artifacts-manifest.mjs),
+// so the live app, a rollback and open PRs keep working while a new one goes out.
+// Publish BEFORE the app build that picks the new version up: that build refuses to
+// ship until the artifacts project serves its version.
 //
-//   bun scripts/deploy-artifacts.mjs            deploy to production
-//   bun scripts/deploy-artifacts.mjs --dry-run  stage only, print the version
+//   node scripts/deploy-artifacts.mjs            deploy to production
+//   node scripts/deploy-artifacts.mjs --dry-run  stage only, print the version
 //
 // Needs `vercel` logged in with access to the 0xbow team, and the real files
 // (git lfs pull), not pointers.
-import { cpSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { copyFileSync, linkSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { computeArtifactsVersion } from './artifacts-version.mjs';
+import { collectArtifactEntries, versionFromEntries } from './artifacts-version.mjs';
+import { artifactsVercelConfig, blobShas, mergeManifests } from './artifacts-manifest.mjs';
 
 const SRC = new URL('../public/artifacts', import.meta.url).pathname;
 const STAGE = new URL('../.artifacts-stage', import.meta.url).pathname;
 const PROJECT = 'privacy-pools-artifacts';
 const SCOPE = '0xbow';
+const DEFAULT_ORIGIN = JSON.parse(readFileSync(new URL('../config/artifacts-origin.json', import.meta.url), 'utf8')).default;
+const envOrigin = process.env.EXPO_PUBLIC_ARTIFACTS_ORIGIN?.trim().replace(/\/+$/, '') ?? '';
+const ORIGIN = envOrigin.startsWith('https://') ? envOrigin : DEFAULT_ORIGIN;
 
-const version = await computeArtifactsVersion(SRC);
-if (!version) throw new Error('no artifacts found');
+const entries = await collectArtifactEntries(SRC);
+if (entries.length === 0) throw new Error('no artifacts found');
+const version = versionFromEntries(entries);
+const files = Object.fromEntries(entries);
 
 // A pointer file means lfs was skipped: deploying it would publish 130 bytes of text.
-const probe = join(SRC, 'transact_1x1', 'groth16_pkey.zkey');
-if (statSync(probe).size < 1_000_000) throw new Error('artifacts are lfs pointers, run git lfs pull first');
+if (statSync(join(SRC, 'transact_1x1', 'groth16_pkey.zkey')).size < 1_000_000) {
+  throw new Error('artifacts are lfs pointers, run git lfs pull first');
+}
+
+// The versions already live. The list is a file of the project itself; none yet is fine.
+let existing = {};
+const listed = await fetch(`${ORIGIN}/artifacts/manifests.json`, { cache: 'no-store' });
+if (listed.ok) existing = await listed.json();
+else if (listed.status !== 404) throw new Error(`cannot read ${ORIGIN}/artifacts/manifests.json: ${listed.status}`);
+const manifests = mergeManifests(existing, version, files);
 
 rmSync(STAGE, { recursive: true, force: true });
+mkdirSync(join(STAGE, 'blobs'), { recursive: true });
 mkdirSync(join(STAGE, 'artifacts'), { recursive: true });
-// Hard links when the stage is on the same disk, a copy otherwise.
-cpSync(SRC, join(STAGE, 'artifacts', version), { recursive: true });
-writeFileSync(join(STAGE, 'vercel.json'), JSON.stringify({
-  cleanUrls: false,
-  headers: [{
-    source: '/artifacts/(.*)',
-    headers: [
-      { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
-      { key: 'Access-Control-Allow-Origin', value: '*' },
-    ],
-  }],
-}, null, 2));
 
-console.log(`staged artifacts version ${version} in ${STAGE}`);
+// One stored file per distinct content. A blob this checkout has comes from disk,
+// one only an older version has is downloaded from the live project and verified.
+const local = new Map(entries.map(([path, sha]) => [sha, join(SRC, path)]));
+let downloaded = 0;
+for (const sha of blobShas(manifests)) {
+  const target = join(STAGE, 'blobs', sha);
+  const from = local.get(sha);
+  if (from) {
+    try { linkSync(from, target); } catch { copyFileSync(from, target); }
+    continue;
+  }
+  const res = await fetch(`${ORIGIN}/blobs/${sha}`);
+  if (!res.ok) throw new Error(`blob ${sha} of an older version is gone from ${ORIGIN} (${res.status})`);
+  const bytes = Buffer.from(await res.arrayBuffer());
+  if (createHash('sha256').update(bytes).digest('hex') !== sha) throw new Error(`blob ${sha} came back with other content`);
+  writeFileSync(target, bytes);
+  downloaded += 1;
+}
+
+writeFileSync(join(STAGE, 'artifacts', 'manifests.json'), JSON.stringify(manifests));
+writeFileSync(join(STAGE, 'vercel.json'), JSON.stringify(artifactsVercelConfig(manifests), null, 2));
+
+const kept = Object.keys(manifests);
+console.log(`staged version ${version}, serving ${kept.length} versions (${kept.join(', ')}), ${downloaded} older blobs fetched`);
 if (process.argv.includes('--dry-run')) process.exit(0);
 
 const run = (args) => {

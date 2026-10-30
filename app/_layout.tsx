@@ -53,6 +53,7 @@ import { getSupportedChains } from '@/config/chains';
 import { ACTIVE_ENVIRONMENT } from '@/config/environments';
 import { ToastProvider } from '@/components/toast-provider';
 import { StatusNotifier } from '@/components/status-notifier';
+import { StaleAssetsNotifier } from '@/components/stale-assets-notifier';
 import { WalletConnectModalProvider } from '@/components/wallet-connect-modal-provider';
 import { MobileAccountKeysProvider } from '@/components/mobile-account-keys-provider';
 import { SeedDerivationModalProvider } from '@/components/seed-derivation-modal-provider';
@@ -342,6 +343,7 @@ export default function RootLayout() {
                                             <OriginProofModalProvider>
                                               <PaymentRequestsModalProvider>
                                                 <StatusNotifier />
+                                                <StaleAssetsNotifier />
                                                 <ModalUrlBridge />
                                                 <RootLayoutNav />
                                                 {/* Phone navigation, app-wide: it replaces the

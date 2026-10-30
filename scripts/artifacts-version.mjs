@@ -53,12 +53,18 @@ export function versionFromEntries(entries) {
   return createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 12);
 }
 
-export async function computeArtifactsVersion(dir) {
-  if (!existsSync(dir)) return '';
+/** Every file under dir as [relativePath, sha256], sorted by path. Empty when dir is missing. */
+export async function collectArtifactEntries(dir) {
+  if (!existsSync(dir)) return [];
   const entries = [];
   for (const file of walk(dir).sort()) {
     entries.push([relative(dir, file).split(sep).join('/'), await contentSha256(file)]);
   }
+  return entries;
+}
+
+export async function computeArtifactsVersion(dir) {
+  const entries = await collectArtifactEntries(dir);
   return entries.length > 0 ? versionFromEntries(entries) : '';
 }
 

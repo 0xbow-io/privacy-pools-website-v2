@@ -198,6 +198,44 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   return context.resolveRequest(context, moduleName, platform);
 };
 
+// Persist Metro's transform cache where Vercel's build cache restores it.
+// Expo's default store lives in os.tmpdir(), which a fresh build machine never
+// has, so every deploy re-transformed all ~5.9k modules (about 2 minutes on the
+// 4-core machine). node_modules/.cache rides along with the cached node_modules.
+//
+// babel-preset-expo inlines process.env.EXPO_PUBLIC_* at TRANSFORM time and the
+// cache key does not include those values, so a warm cache would keep an old
+// EXPO_PUBLIC_YIELD_PAUSE_BANNER_TEXT after someone edits it in Vercel. The
+// cache folder is therefore named after a hash of every value that changes the
+// transformed output: an env change starts a cold cache, anything else stays warm.
+// If Expo moves its internal store class this falls back to the default cache.
+try {
+  const crypto = require('crypto');
+  const { FileStore } = require('@expo/metro-config/build/binary-file-store');
+  const envKey = crypto
+    .createHash('sha1')
+    .update(JSON.stringify(
+      Object.keys(process.env)
+        .filter((key) => key.startsWith('EXPO_PUBLIC_') || key.startsWith('EXPO_UNSTABLE_') || key === 'NODE_ENV')
+        .sort()
+        .map((key) => [key, process.env[key]]),
+    ))
+    .digest('hex')
+    .slice(0, 12);
+  const cacheParent = path.join(__dirname, 'node_modules', '.cache', 'metro');
+  // Drop the folders of earlier env hashes so the Vercel build cache does not
+  // keep growing with every env edit.
+  const fs = require('fs');
+  if (fs.existsSync(cacheParent)) {
+    for (const name of fs.readdirSync(cacheParent)) {
+      if (name !== envKey) fs.rmSync(path.join(cacheParent, name), { recursive: true, force: true });
+    }
+  }
+  config.cacheStores = [new FileStore({ root: path.join(cacheParent, envKey) })];
+} catch {
+  // keep Expo's default os.tmpdir() cache
+}
+
 // Inject Buffer/process polyfills before any application code.
 const defaultGetPolyfills = config.serializer?.getPolyfills || (() => []);
 config.serializer = {
