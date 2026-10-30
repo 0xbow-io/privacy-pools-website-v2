@@ -23,15 +23,23 @@ It lives in its own Vercel project, `privacy-pools-artifacts`, under `/artifacts
 `node scripts/deploy-artifacts.mjs` (node, not safewrap bun: it needs the network) publishes the version of the
 checked-out files. A deploy of the artifacts project replaces its whole production deployment, so the script
 stages every version still in use: it reads `/artifacts/manifests.json` (version to path to sha256) from the live
-project, adds the new version, keeps the newest 8, stores each distinct file once as `/blobs/<sha256>` and
+project, adds the new version, keeps the newest 15, stores each distinct file once as `/blobs/<sha256>` and
 rewrites `/artifacts/<version>/<path>` onto it. A circuit change only uploads the files that changed. Older
 blobs the checkout no longer has are downloaded from the live project and verified against their hash.
 
 ## When a circuit changes
 
-1. Commit the new files (lfs).
-2. `node scripts/deploy-artifacts.mjs`. The live app, a rollback and open PRs keep their version.
-3. Merge the app change. A tab left open across the change gets the reload toast on its next proof.
+Nothing to remember: the **Publish circuit artifacts** workflow (`.github/workflows/artifacts.yml`) does it.
+
+1. Commit the new files (lfs) in a PR.
+2. The workflow runs on the PR (so its own preview works) and on every push to `dev` or `main` that touches `public/artifacts`.
+   It asks the live project whether the checked-out version is served (from the lfs pointer hashes, no download) and only
+   when it is not fetches the files and publishes. Runs are queued, never cancelled, because two at once would drop each other's version.
+3. The app build waits up to 10 minutes for the version, then fails with a message, so a preview that starts at the same time as the workflow still passes.
+4. A tab left open across the change gets the reload toast on its next proof.
+
+It needs one repo secret, `VERCEL_TOKEN`: a Vercel token with access to the 0xbow team.
+By hand (same script, needs `vercel` logged in and `git lfs pull`): `node scripts/deploy-artifacts.mjs`.
 
 ## Build modes (`scripts/build-web.mjs`, `scripts/build-mode.mjs`)
 

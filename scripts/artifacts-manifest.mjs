@@ -8,8 +8,8 @@
 // (/blobs/<sha256>), a circuit change only adds the files that changed, and
 // /artifacts/<version>/<path> is a rewrite onto the blob.
 
-/** How many versions stay served. 93 rewrites each, far under Vercel's 2048 routes. */
-export const KEEP_VERSIONS = 8;
+/** How many versions stay served. 93 rewrites each, 1395 of Vercel's 2048 routes. */
+export const KEEP_VERSIONS = 15;
 
 /** Pure: existing is { version: { path: sha } }; the new version goes last, the oldest fall off. */
 export function mergeManifests(existing, version, files, keep = KEEP_VERSIONS) {

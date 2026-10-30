@@ -7,11 +7,12 @@
 //
 //   node scripts/deploy-artifacts.mjs            deploy to production
 //   node scripts/deploy-artifacts.mjs --dry-run  stage only, print the version
+//   node scripts/deploy-artifacts.mjs --check-only  is this version already served? (no lfs needed)
 //
 // Needs `vercel` logged in with access to the 0xbow team, and the real files
 // (git lfs pull), not pointers.
 import { createHash } from 'node:crypto';
-import { copyFileSync, linkSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, linkSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { collectArtifactEntries, versionFromEntries } from './artifacts-version.mjs';
@@ -29,6 +30,17 @@ const entries = await collectArtifactEntries(SRC);
 if (entries.length === 0) throw new Error('no artifacts found');
 const version = versionFromEntries(entries);
 const files = Object.fromEntries(entries);
+
+// Is this version already served? Decided from the content hashes alone, so a
+// checkout that skipped lfs can ask it too (the .github/workflows/artifacts.yml job
+// does, and only fetches the 1.2 GB when the answer is no).
+const probe = await fetch(`${ORIGIN}/artifacts/${version}/deposit/groth16_pkey.zkey`, { method: 'HEAD' });
+const published = probe.ok;
+if (process.argv.includes('--check-only')) {
+  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `needed=${!published}\nversion=${version}\n`);
+  console.log(`version ${version} ${published ? 'is already published' : 'needs publishing'}`);
+  process.exit(0);
+}
 
 // A pointer file means lfs was skipped: deploying it would publish 130 bytes of text.
 if (statSync(join(SRC, 'transact_1x1', 'groth16_pkey.zkey')).size < 1_000_000) {
@@ -72,8 +84,10 @@ const kept = Object.keys(manifests);
 console.log(`staged version ${version}, serving ${kept.length} versions (${kept.join(', ')}), ${downloaded} older blobs fetched`);
 if (process.argv.includes('--dry-run')) process.exit(0);
 
+// CI has no login: a team token comes in through VERCEL_TOKEN and is passed as a flag.
+const tokenArgs = process.env.VERCEL_TOKEN ? ['--token', process.env.VERCEL_TOKEN] : [];
 const run = (args) => {
-  const out = spawnSync('vercel', args, { cwd: STAGE, stdio: 'inherit' });
+  const out = spawnSync('vercel', [...args, ...tokenArgs], { cwd: STAGE, stdio: 'inherit' });
   if (out.status !== 0) process.exit(out.status ?? 1);
 };
 run(['link', '--yes', '--project', PROJECT, '--scope', SCOPE]);

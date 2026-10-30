@@ -25,9 +25,18 @@ if (!VERSION) {
 
 // The smallest file of the set is enough: a deployment is atomic.
 const probe = `${ORIGIN}/artifacts/${VERSION}/deposit/groth16_pkey.zkey`;
-const res = await fetch(probe, { method: 'HEAD' });
+// A PR that changes circuits starts this build and the "Publish circuit artifacts"
+// workflow together: give the publish up to 10 minutes before failing the build.
+const WAIT_MS = 10 * 60 * 1000;
+const started = Date.now();
+let res = await fetch(probe, { method: 'HEAD' });
+while (!res.ok && Date.now() - started < WAIT_MS) {
+  console.log(`[artifacts-offload] ${probe} answered ${res.status}, waiting for the artifacts workflow to publish it`);
+  await new Promise((resolve) => setTimeout(resolve, 20_000));
+  res = await fetch(probe, { method: 'HEAD' });
+}
 if (!res.ok) {
-  console.error(`[artifacts-offload] ${probe} answered ${res.status}. Deploy the artifacts first: node scripts/deploy-artifacts.mjs`);
+  console.error(`[artifacts-offload] ${probe} answered ${res.status} after 10 minutes. The "Publish circuit artifacts" workflow publishes it, or run: node scripts/deploy-artifacts.mjs`);
   process.exit(1);
 }
 
