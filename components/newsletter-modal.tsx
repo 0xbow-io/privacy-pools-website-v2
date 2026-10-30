@@ -5,6 +5,7 @@ import { Modal } from '@/components/ui/modal';
 import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import { useBackHandler } from '@/hooks/use-back-handler';
+import { TURNSTILE_SCRIPT_PATH, TURNSTILE_SCRIPT_SRC } from '@/config/turnstile';
 
 const TURNSTILE_SITE_KEY = process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY || '';
 const NEWSLETTER_API_URL =
@@ -98,7 +99,7 @@ export function NewsletterModal({ visible, onClose }: { visible: boolean; onClos
       }
     };
     let script = document.querySelector<HTMLScriptElement>(
-      'script[src^="https://challenges.cloudflare.com/turnstile/v0/api.js"]',
+      `script[src^="${TURNSTILE_SCRIPT_PATH}"]`,
     );
     const scriptFailed = () => {
       script?.remove();
@@ -112,7 +113,7 @@ export function NewsletterModal({ visible, onClose }: { visible: boolean; onClos
       script.addEventListener('load', mountWidget);
       script.addEventListener('error', scriptFailed);
       if (isNew) {
-        script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+        script.src = TURNSTILE_SCRIPT_SRC;
         script.async = true;
         // This listener belongs to the script, not the modal. A failed load
         // must be retryable even if every modal listener has been removed.

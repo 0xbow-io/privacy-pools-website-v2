@@ -146,6 +146,8 @@ test('Turnstile can retry a script that fails after the modal closes', () => {
     Platform: { OS: 'web' },
     visible: true,
     TURNSTILE_SITE_KEY: 'test-key',
+    TURNSTILE_SCRIPT_PATH: '/vendor/turnstile-api.js',
+    TURNSTILE_SCRIPT_SRC: '/vendor/turnstile-api.js?render=explicit',
     step: 'form',
     captchaNode: new Element(),
     HTMLElement: Element,
