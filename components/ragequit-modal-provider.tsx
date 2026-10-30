@@ -744,12 +744,12 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
     <RagequitModalContext.Provider value={{ openRagequitModal, closeRagequitModal }}>
       {children}
       {isOpen && (
-        <HubErrorBoundary onRetry={closeRagequitModal}>
         <View
           className={`inset-0 z-[999999] items-center ${isSheet ? 'justify-end' : 'justify-center'}`}
           // nw-keep(platform-css): web-only position:fixed anchors the overlay over scrolling content; empty object on native
           style={WEB_FIXED_POSITION as ViewStyle}
         >
+          <HubErrorBoundary onRetry={closeRagequitModal}>
           {/* Blur overlay */}
           <Pressable
             className={`absolute inset-0 ${isDark ? 'bg-[rgba(0,0,0,0.6)]' : 'bg-[rgba(255,255,255,0.6)]'}`}
@@ -1014,8 +1014,8 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
               </Pressable>
             </View>
           </Animated.View>
+          </HubErrorBoundary>
         </View>
-        </HubErrorBoundary>
       )}
     </RagequitModalContext.Provider>
   );

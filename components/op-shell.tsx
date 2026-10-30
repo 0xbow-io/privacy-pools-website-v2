@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { WEB_FIXED_POSITION, WEB_BLUR_BACKDROP } from '@/components/ui/web-style-shims';
 import { Animated, Pressable, View, type ViewStyle } from 'react-native';
 import { InlineOpPortal } from '@/components/inline-op-portal';
+import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 import { useBackHandler } from '@/hooks/use-back-handler';
 
 
@@ -20,6 +21,8 @@ export function OpShell({
   onClose,
   cardClassName,
   cardStyle,
+  closeBlocked,
+  onCrashClose,
   children,
 }: {
   inline: boolean;
@@ -29,10 +32,22 @@ export function OpShell({
   onClose: () => void;
   cardClassName: string;
   cardStyle?: ViewStyle | ViewStyle[];
+  /** The provider's close is refused right now (swap executing, withdrawal loading). */
+  closeBlocked?: boolean;
+  /** What the crash fallback's button runs; the provider's real close, not a leave-confirm. */
+  onCrashClose?: () => void;
   children: ReactNode;
 }) {
   // Android back closes the sheet (the inline desktop host has no back).
   useBackHandler(!inline, onClose);
+  // The boundary lives HERE, around the children, so a crash is drawn where the
+  // card was: inside the hub's inline host, or inside the sheet / modal overlay.
+  // Outside the shell it would land in the page flow, with the overlay gone.
+  children = (
+    <HubErrorBoundary onRetry={onCrashClose ?? onClose} retryable={!closeBlocked} retryLabel="Close">
+      {children}
+    </HubErrorBoundary>
+  );
   if (inline) {
     return (
       <InlineOpPortal>

@@ -3579,13 +3579,13 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         testID="receipt-leave-confirm"
       />
       {isOpen && (
-        <HubErrorBoundary onRetry={closeTransferModal}>
         <TransferShell
           inline={inlineHubActive}
           isSheet={isSheet}
           isDark={isDark}
           sheetAnim={sheetAnim}
           onClose={requestCloseTransferModal}
+          onCrashClose={closeTransferModal}
           cardClassName={`relative items-center overflow-hidden border border-border bg-card-background ${step === 'select-notes' ? 'gap-[16px]' : 'gap-[20px]'} ${(step === 'loading' || step === 'success') ? 'justify-center' : ''} ${
             isSheet
               ? 'w-full max-w-full rounded-t-card rounded-b-none border-b-0 mb-0 px-[16px] py-[24px] pt-[28px]'
@@ -4494,7 +4494,6 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
             )}
 
         </TransferShell>
-        </HubErrorBoundary>
       )}
 
       {/* "Receive as" picker — the same sheet the Shield tab uses, with its
@@ -4503,7 +4502,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           same-chain, so offering a chain switch would abandon the Send form for
           a route nothing can serve. */}
       {isOpen && receiveSelectorOpen && receiveAsAvailable && (
-        <HubErrorBoundary onRetry={closeTransferModal}>
+        <HubErrorBoundary onRetry={() => setReceiveSelectorOpen(false)}>
         <TokenSelectSheet
           tokens={receiveTokens}
           networks={sendDestinations.map((id) => ({

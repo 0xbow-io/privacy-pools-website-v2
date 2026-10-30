@@ -4331,7 +4331,6 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
         testID="claim-link-leave-confirm"
       />
       {sheetVisible && (
-        <HubErrorBoundary onRetry={closeDepositModal}>
         <View
           // justify branches are mutually exclusive: co-active `justify-center`+`justify-end`
           // resolve by CSS file order on web (center wins) — old style array was later-wins (end).
@@ -4339,6 +4338,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
           // nw-keep(platform-css): web-only position:fixed to anchor the backdrop over scrolling content (empty on native)
           style={WEB_FIXED_POSITION}
         >
+          <HubErrorBoundary onRetry={closeDepositModal}>
           {/* Blur overlay */}
           <Pressable
             className={`absolute inset-0 ${isDark ? 'bg-[rgba(0,0,0,0.6)]' : 'bg-[rgba(255,255,255,0.6)]'}`}
@@ -4815,8 +4815,8 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
               </Pressable>
             </View>
           </Animated.View>
+          </HubErrorBoundary>
         </View>
-        </HubErrorBoundary>
       )}
 
       {/* Token picker — a layer ON TOP of the deposit modal: full-screen on

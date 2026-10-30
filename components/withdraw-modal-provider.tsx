@@ -4969,13 +4969,13 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     <WithdrawModalContext.Provider value={{ openWithdrawModal, closeWithdrawModal, isOpen, inlineActive: isOpen && inlineHubActive, inlineStep: step, syncInlineAmount, inlineAmount: amount, inlineToken: selectedToken, syncInlineToken, spendabilityLoading, spendabilityError, retrySpendability: retryAssociationSetLeaves, getSpendableBalanceWei, getWithdrawMaxWei }}>
       {children}
       {isOpen && (
-        <HubErrorBoundary onRetry={closeWithdrawModal}>
         <OpShell
           inline={inlineHubActive}
           isSheet={isSheet}
           isDark={isDark}
           sheetAnim={sheetAnim}
           onClose={closeWithdrawModal}
+          closeBlocked={step === 'loading'}
           cardClassName={`relative items-center overflow-hidden border border-border bg-card-background ${step === 'withdraw' ? 'gap-[20px]' : 'gap-[16px]'} ${(step === 'loading' || step === 'success') ? 'justify-center' : ''} ${
             isSheet
               ? 'w-full max-w-full px-[16px] py-[24px] pt-[28px] rounded-t-card rounded-b-none border-b-0 mb-0'
@@ -6194,7 +6194,6 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
             )}
 
         </OpShell>
-        </HubErrorBoundary>
       )}
 
       {/* "Receive as" picker — the SAME sheet the Shield tab uses to pick an
@@ -6206,7 +6205,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           the pair can route, in which case picking one turns the exit into a
           cross-chain delivery. */}
       {isOpen && receiveSelectorOpen && (
-        <HubErrorBoundary onRetry={closeWithdrawModal}>
+        <HubErrorBoundary onRetry={() => setReceiveSelectorOpen(false)}>
         <TokenSelectSheet
           tokens={receiveTokens}
           networks={receiveDestinations.map((id) => ({

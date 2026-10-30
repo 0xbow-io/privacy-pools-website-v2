@@ -641,13 +641,13 @@ export function WalletConnectModalProvider({ children }: { children: ReactNode }
     <WalletConnectModalContext.Provider value={value}>
       {children}
       {isOpen && (
-        <HubErrorBoundary onRetry={close}>
         <View
           className={`absolute inset-0 z-[9999] bg-[rgba(0,0,0,0.5)] ${isMobile ? 'items-stretch justify-end' : 'items-center justify-center'}`}
           // nw-keep(platform-css): web-only position:fixed (anchor over scrolling content) + backdrop blur — no className path; empty on native
           style={[WEB_FIXED_POSITION as ViewStyle, WEB_BLUR_BACKDROP as ViewStyle]}
           pointerEvents="auto"
         >
+          <HubErrorBoundary onRetry={close}>
           <Pressable className="absolute inset-0" onPress={close} />
           <View
             className={`w-full gap-[16px] border-border bg-card-background p-[24px] ${isMobile ? 'max-w-full rounded-t-[18px] rounded-b-none border-t pb-[32px] pt-[14px]' : 'max-w-[420px] rounded-card border'}`}
@@ -776,8 +776,8 @@ export function WalletConnectModalProvider({ children }: { children: ReactNode }
               <Text className="font-pp-regular text-[12px] text-[#E11D48]">{error}</Text>
             )}
           </View>
+          </HubErrorBoundary>
         </View>
-        </HubErrorBoundary>
       )}
     </WalletConnectModalContext.Provider>
   );

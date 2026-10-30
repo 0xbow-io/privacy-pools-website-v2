@@ -2714,13 +2714,13 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         testID="swap-claim-link-leave-confirm"
       />
       {isOpen && (
-        <HubErrorBoundary onRetry={closeSwapModal}>
         <OpShell
           inline={inlineHubActive}
           isSheet={isSheet}
           isDark={colorScheme === 'dark'}
           sheetAnim={sheetAnim}
           onClose={closeSwapModal}
+          closeBlocked={step === 'executing'}
           // Conflicting box props (width/max-w/padding/radius) live in exactly ONE
           // branch so class order can't flip the RN style-array override result.
           cardClassName={`relative max-h-[92%] items-center gap-[16px] overflow-hidden border border-border bg-card-background ${
@@ -3618,14 +3618,13 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
               </View>
             )}
         </OpShell>
-        </HubErrorBoundary>
       )}
 
       {/* Output token + destination network — the SAME two-pane selector the
           deposit modal uses. The network pane IS the destination-chain
           picker; it lists one chain until cross-chain destinations exist. */}
       {isOpen && selectorOpen && (
-        <HubErrorBoundary onRetry={closeSwapModal}>
+        <HubErrorBoundary onRetry={() => setSelectorOpen(false)}>
         <TokenNetworkSelector
           tokens={outputTokens}
           networks={destinationChains}
