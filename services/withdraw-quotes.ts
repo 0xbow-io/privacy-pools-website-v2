@@ -22,7 +22,7 @@
 
 import { tokenKey } from '@/services/note-token-id';
 
-export type WithdrawQuoteMode = 'plain' | 'batch' | 'swap' | 'sui';
+export type WithdrawQuoteMode = 'plain' | 'batch' | 'swap' | 'sui' | 'direct';
 
 /**
  * Canonical identity of a withdraw quote request. Any change to any field

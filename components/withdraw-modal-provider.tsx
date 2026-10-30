@@ -41,7 +41,8 @@ import { View, Text, Pressable, Platform, useWindowDimensions, TextInput, Animat
 import type { ViewStyle, TextStyle } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useAccount, usePublicClient, useSignTypedData } from 'wagmi';
+import { useAccount, usePublicClient, useSendTransaction, useSignTypedData } from 'wagmi';
+import { useSelfWithdrawalEnabled } from '@/components/self-withdrawal-modal';
 import { isAddress, formatUnits } from 'viem';
 import { NoteStatus, type Address, type Hex, type Note, type PendingNote, type PoolSession, type TxReceiptLike } from '@/services/sdk-types';
 import { Colors, TokenHues } from '@/constants/theme';
@@ -614,10 +615,17 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // ~376 KB / 4.7k leaves per withdraw-modal mount for nothing.
 
   const { notes, refetch: refetchNotes, isLoading: isLoadingNotes } = useNotes();
-  const { poolSession, noteManager, keystoreManager, isInitialized: sdkReady, isInitializing, exportAccount, ensureInitialized, getBatchWithdrawSession, isSyncing, retryAssociationSetLeaves } = usePoolSession();
+  const { poolSession, noteManager, keystoreManager, isInitialized: sdkReady, isInitializing, exportAccount, ensureInitialized, getBatchWithdrawSession, getSelfSubmitTransferSession, isSyncing, retryAssociationSetLeaves } = usePoolSession();
   const { address: walletAddress } = useAccount();
+  const { sendTransactionAsync } = useSendTransaction();
+  // "Self withdrawal" (Privacy and keys): when on, the form offers a checkbox
+  // that sends the withdrawal from the connected wallet instead of the relayer.
+  const selfWithdrawalEnabled = useSelfWithdrawalEnabled();
   // Relayed flow: an account-key session is enough — no wallet tx is posted.
   const ensureConnected = useRequireConnection({ allowAccountKey: true });
+  // Own-wallet withdrawal posts a wallet transaction, so a key session alone is
+  // not enough: a real wallet has to be connected.
+  const ensureWalletConnected = useRequireConnection();
   // Key gate: actions that need the derived keys prompt for the one-time
   // signature on demand (the modal no longer auto-opens on connect). Read
   // through a ref so the onSigned continuation re-enters with fresh state.
@@ -687,6 +695,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // from a typed amount's closeness to the balance). Drives the batch route.
   const [maxSelected, setMaxSelected] = useState(false);
   const [gasTokenChecked, setGasTokenChecked] = useState(false);
+  // "Withdraw without relayer privacy protection": unchecked every time the
+  // modal opens, and only offered while the Privacy and keys setting is on.
+  const [selfWithdrawChecked, setSelfWithdrawChecked] = useState(false);
   const [feeExpanded, setFeeExpanded] = useState(false);
   // FullWithdrawalGuard (privacy spec A3). Production consumes the tested
   // guardNext reducer (codex finding 10) so its trip/ack/escape semantics are
@@ -922,6 +933,15 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     && (crossChainReceive
       ? !!receiveAsset
       : isSwapExitSelection(receiveAsset?.address, selectedTokenAddress));
+  // Own-wallet withdrawal is the plain same-chain exit of a plain pool only: a
+  // swap exit, a cross-chain exit and a share (its exit redeems through the
+  // router) keep the relayer.
+  const selfWithdrawSupported = selfWithdrawalEnabled && !isSui && !isSwapExit && !crossChainReceive
+    && !isShareSymbol(selectedToken);
+  const directMode = selfWithdrawSupported && selfWithdrawChecked;
+  useEffect(() => {
+    if (!selfWithdrawSupported && selfWithdrawChecked) setSelfWithdrawChecked(false);
+  }, [selfWithdrawSupported, selfWithdrawChecked]);
   // Picker rows: the pool asset first (= plain withdrawal), then the chain's
   // swap output tokens. Synthesizes the pool-asset row if the output list
   // doesn't carry it, so "back to plain" is always offered.
@@ -2234,9 +2254,13 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     // chain, tokens, amount, recipient, gas-token and slippage; every edit
     // handler invalidates the shared guard, and this handler re-checks
     // after EVERY await and immediately before committing Review.
-    const resolvedRecipient = (targetAddress && isAddress(targetAddress))
-      ? targetAddress
-      : connectedAddress;
+    // Own-wallet withdrawal pays the wallet that sends it: the proof binds that
+    // wallet as processor, so there is no other recipient to name.
+    const resolvedRecipient = (directMode && walletAddress)
+      ? walletAddress
+      : (targetAddress && isAddress(targetAddress))
+        ? targetAddress
+        : connectedAddress;
     // A cross-chain exit is only ever a swap exit. Without an output asset
     // there is nothing to route, and resolveWithdrawMode would fall back to the
     // plain (same-chain) withdrawal while the card promises another network.
@@ -2268,7 +2292,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     const requestKey = buildWithdrawQuoteKey({
       sessionKey,
       epoch: reviewEpoch,
-      mode: reviewMode,
+      mode: directMode ? 'direct' : reviewMode,
       poolChainId: chainId,
       inputToken: selectedTokenAddress,
       amount,
@@ -2328,7 +2352,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           // user signs SetAuthPolicy (free) and the relayer registers the
           // keystore and withdraws in ONE transaction, taking its fee from the
           // note. Fall through to the quote fetch; Confirm branches on this.
-          const claimDecision = await resolveColdStartClaim(walletAddress);
+          const claimDecision = directMode ? null : await resolveColdStartClaim(walletAddress);
           if (!isCurrent()) return;
           if (claimDecision) {
             setColdStartClaim(claimDecision);
@@ -2367,6 +2391,34 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       reportWithdrawError(stale ?? `Couldn't verify keystore registration: ${message}`);
       submittedRef.current = false;
       setStep('error');
+      return;
+    }
+
+    // === Own-wallet withdrawal ===
+    // No relayer: nothing is quoted and nothing expires. The connected wallet
+    // sends the transaction and receives the funds, and Confirm proves with that
+    // wallet as processor. Review is committed here and Confirm re-checks it.
+    if (directMode) {
+      if (!ensureWalletConnected() || !walletAddress) {
+        reportWithdrawError('Connect the wallet that will send this withdrawal.');
+        return;
+      }
+      setBatchPlan(null);
+      setSwapSnapshot(null);
+      setColdStartClaim(null);
+      setActiveFeeCommitment(null);
+      setCountdown(0);
+      reportWithdrawError(null);
+      if (!isCurrent() || !canAdvanceToReview()) return;
+      setReviewContext({
+        mode: 'direct',
+        poolChainId: chainId,
+        sessionKey,
+        epoch: reviewEpoch,
+        recipient: walletAddress,
+        spendabilityKey,
+      });
+      setStep('review');
       return;
     }
 
@@ -2769,7 +2821,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     } finally {
       if (isCurrent()) setIsQuoteLoading(false);
     }
-  }, [isSui, suiSession, suiAmountError, connectedAddress, walletAddress, targetAddress, amount, selectedToken, selectedTokenAddress, chainId, gasTokenChecked, getQuote, identityMode, log, sdkReady, poolSession, ensureInitialized, openKeystoreRegistrationModal, openSeedDerivationModal, resolveColdStartClaim, batchEnabled, fullBalanceRequested, grossWithdrawn, availableNum, availableWei, effectiveReceiveExact, spendabilityLoading, spendabilityError, spendabilityKey, spendableCommitments, noteManager, isSwapExit, receiveAsset, crossChainReceive, receiveChainId, receiveChainName]);
+  }, [isSui, suiSession, suiAmountError, connectedAddress, walletAddress, targetAddress, amount, selectedToken, selectedTokenAddress, chainId, gasTokenChecked, getQuote, identityMode, log, sdkReady, poolSession, ensureInitialized, openKeystoreRegistrationModal, openSeedDerivationModal, resolveColdStartClaim, batchEnabled, fullBalanceRequested, grossWithdrawn, availableNum, availableWei, effectiveReceiveExact, spendabilityLoading, spendabilityError, spendabilityKey, spendableCommitments, noteManager, isSwapExit, receiveAsset, crossChainReceive, receiveChainId, receiveChainName, directMode, ensureWalletConnected]);
 
   const handleConfirmUnlocked = useCallback(async () => {
     log('info', 'Withdraw', 'step 3/6 confirm pressed', {
@@ -3225,7 +3277,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       return;
     }
 
-    if (!activeFeeCommitment && !batchPlan) {
+    if (!activeFeeCommitment && !batchPlan && reviewContext?.mode !== 'direct') {
       reportWithdrawError('No active fee quote. Please go back and request a new quote.');
       submittedRef.current = false;
       setStep('error');
@@ -3233,7 +3285,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     }
 
     // Check if quote has expired (batch plans carry their own expiry)
-    if (Date.now() > (batchPlan?.expiration ?? activeFeeCommitment?.expiration ?? 0)) {
+    if (reviewContext?.mode !== 'direct' && Date.now() > (batchPlan?.expiration ?? activeFeeCommitment?.expiration ?? 0)) {
       log('warn', 'Withdraw', 'Fee quote expired before confirm');
       reportWithdrawError('Fee quote has expired. Please request a new quote.');
       submittedRef.current = false;
@@ -3859,6 +3911,132 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           submittedRef.current = false;
         setStep('error');
         }
+        return;
+      }
+
+      // === Own-wallet withdrawal (Privacy and keys: self withdrawal) ===
+      // No relayer. The proof binds the connected wallet as processor, so
+      // PoolVault's `processor == msg.sender` holds when that same wallet posts
+      // the transaction, and the pool pays the withdrawn amount to it. The
+      // wallet need not be the account's wallet: an account-key session pays out
+      // to whichever wallet is connected. Same shape as the disclosed transfer
+      // in the transfer modal, and it never touches the relayer, so it is not
+      // private: the chain links this withdrawal to that wallet.
+      if (reviewContext?.mode === 'direct') {
+        const sender = walletAddress;
+        if (!sender || sender.toLowerCase() !== resolvedRecipient.toLowerCase()) {
+          throw new Error('The connected wallet changed since review. Review the withdrawal again. Nothing was sent.');
+        }
+        const directDecimals = withdrawTokenDecimals(selectedToken, chainId, isSui);
+        const directAmountWei = parseTokenAmount(amount, directDecimals);
+        if (directAmountWei <= 0n) throw new Error('Enter an amount greater than zero. Nothing was sent.');
+        const directDustWei = parseTokenAmount(
+          String(DUST_THRESHOLD[selectedToken] ?? DEFAULT_DUST_THRESHOLD),
+          directDecimals,
+        );
+        const directSelection = selectWithdrawInputs(withdrawableNotes, directAmountWei, directDustWei);
+        if (directSelection.notes.length === 0 || directSelection.total < directAmountWei) {
+          const directMax = formatUnits(directSelection.total, directDecimals);
+          throw new Error(
+            directSelection.total > 0n
+              ? `That's more than one transaction can carry. Enter at most ${tokenAmountLabel(directMax, selectedToken)} (up to ${WITHDRAW_MAX_INPUTS} notes per proof). Nothing was sent.`
+              : `Your ${displayTokenSymbol(selectedToken)} notes don't have enough active balance for this withdrawal. Nothing was sent.`,
+          );
+        }
+        const directInputs: Note[] = directSelection.notes;
+        const directAmountHex = `0x${directAmountWei.toString(16)}` as `0x${string}`;
+        // A relayer-less session proves without asking a relayer for a quote
+        // this path would throw away. Fall back to the main session if it cannot
+        // be built; the note state is shared either way.
+        let directSession: typeof session = session;
+        try {
+          const relayerless = await getSelfSubmitTransferSession();
+          if (relayerless) directSession = relayerless as unknown as typeof session;
+        } catch (siblingErr) {
+          log('warn', 'Withdraw', 'Relayer-less session could not be built for the own-wallet withdrawal, using the main session', {
+            err: siblingErr instanceof Error ? siblingErr.message : String(siblingErr),
+          });
+        }
+        withdrawPhaseRef.current = 'proof';
+        setLoadingMessage('Generating ZK proof...');
+        log('info', 'Withdraw', 'Preparing own-wallet withdrawal', {
+          inputCount: directInputs.length,
+          amount: directAmountHex,
+          processor: sender,
+        });
+        const directPrepared = await directSession.prepareWithdraw({
+          inputCommitments: directInputs.map((n) => n.commitment),
+          amount: directAmountHex,
+          tokenId: directInputs[0].tokenId,
+          recipientAddress: sender,
+          relayAddress: sender,
+          feeAmount: '0x0',
+          processorAddress: sender,
+        });
+        if (!isSameOperation()) { log('warn', 'Withdraw', 'Stale run aborted before the own-wallet broadcast'); return; }
+        setLoadingMessage('Confirm the withdrawal in your wallet...');
+        withdrawPhaseRef.current = 'submit';
+        submittedRef.current = true;
+        // Pin the sender to the proof-bound wallet: a different active account
+        // would revert with PoolVault_InvalidProcessor.
+        const directHash = (await sendTransactionAsync({
+          account: sender as `0x${string}`,
+          chainId,
+          to: directPrepared.transactTx.to as `0x${string}`,
+          data: directPrepared.transactTx.data as `0x${string}`,
+        })) as `0x${string}`;
+        log('info', 'Withdraw', 'Own-wallet withdrawal submitted', { txHash: directHash });
+        setTxHash(directHash);
+        setTxChainId(chainId);
+        withdrawPhaseRef.current = 'confirm';
+        setLoadingMessage('Waiting for confirmation...');
+        // This wallet broadcast the transaction itself, so its RPC provider has
+        // already seen the hash arrive from this client: the receipt is the
+        // answer, revert included (the relayed path avoids this poll because
+        // there the hash is the relayer's and naming it would link this client).
+        if (!publicClient) {
+          throw new Error(`The withdrawal was sent (tx ${directHash}) but cannot be confirmed here. Check your wallet or the explorer before retrying.`);
+        }
+        let directReceipt: Awaited<ReturnType<typeof publicClient.waitForTransactionReceipt>>;
+        try {
+          directReceipt = await publicClient.waitForTransactionReceipt({ hash: directHash });
+        } catch (waitErr) {
+          log('warn', 'Withdraw', 'Own-wallet receipt wait failed', { err: waitErr instanceof Error ? waitErr.message : String(waitErr) });
+          throw new Error(`The withdrawal was sent (tx ${directHash}) but is not confirmed yet. Check your wallet or the explorer before retrying.`);
+        }
+        if (directReceipt.status === 'reverted') {
+          throw new Error('Withdrawal transaction reverted on-chain. Your notes were NOT spent.');
+        }
+        // The SDK would persist this after its own submit; this path posted the
+        // transaction itself, so mark the inputs spent and add the change note
+        // the way the router redemption does. Bookkeeping after a CONFIRMED
+        // spend: a failure here is logged and the next sync re-derives it.
+        try {
+          const spentAtBlock = `0x${directReceipt.blockNumber.toString(16)}` as `0x${string}`;
+          await session.markNotesSpent(directInputs.map((n) => ({ commitment: n.commitment as `0x${string}`, spentAtBlock })));
+          if (directPrepared.changePendingNotes.length > 0) {
+            await session.addNotes(directPrepared.changePendingNotes.map((pendingNote) => ({ pendingNote: pendingNote as unknown as PendingNote, txHash: directHash })));
+          }
+        } catch (persistErr) {
+          log('warn', 'Withdraw', 'Persisting notes after an own-wallet withdrawal failed; the next sync reconciles', { err: persistErr });
+        }
+        if (noteManager && connectedAddress) {
+          await exportAccount(session).catch((e) => log('warn', 'Withdraw', 'Post-confirm export failed; next sync will persist', e));
+          refetchNotes();
+        }
+        try {
+          recordOwnWithdrawal({
+            chainId,
+            txHash: directHash,
+            recipient: sender,
+            tokenAddress: selectedTokenAddress,
+            feeAmount: null,
+            stampOwnAction: true,
+            now: Date.now(),
+          }, { recordOwnAction, recordWithdrawFee, recordWithdrawRecipient });
+        } catch { /* non-fatal */ }
+        if (isSameOperation()) setStep('success');
+        await invalidateTransactionCaches(queryClient);
         return;
       }
 
@@ -4625,7 +4803,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       settleWatch.release();
       endTx();
     }
-  }, [isSui, suiSession, sdkReady, poolSession, noteManager, keystoreManager, notes, amount, effectiveReceiveExact, selectedToken, selectedTokenAddress, targetAddress, connectedAddress, activeFeeCommitment, batchPlan, swapSnapshot, reviewContext, getBatchWithdrawSession, withdrawalProcessorAddress, chainId, log, resetQuote, selectedPA, refetchNotes, exportAccount, preferredTransaction, preferredWithdrawNote, ensureInitialized, spendabilityKey, spendableCommitments, publicClient, queryClient, beginTx, endTx, coldStartClaim, getQuote, gasTokenChecked, signTypedDataAsync, markRegistered, crossChainReceive, receiveChainId]);
+  }, [isSui, suiSession, sdkReady, poolSession, noteManager, keystoreManager, notes, amount, effectiveReceiveExact, selectedToken, selectedTokenAddress, targetAddress, connectedAddress, activeFeeCommitment, batchPlan, swapSnapshot, reviewContext, getBatchWithdrawSession, withdrawalProcessorAddress, chainId, log, resetQuote, selectedPA, refetchNotes, exportAccount, preferredTransaction, preferredWithdrawNote, ensureInitialized, spendabilityKey, spendableCommitments, publicClient, queryClient, beginTx, endTx, coldStartClaim, getQuote, gasTokenChecked, signTypedDataAsync, markRegistered, crossChainReceive, receiveChainId, walletAddress, sendTransactionAsync, getSelfSubmitTransferSession]);
 
   // Same-tick double-press guard — see hooks/use-op-lock.ts.
   const handleConfirm = useMemo(() => withOpLock(handleConfirmUnlocked), [withOpLock, handleConfirmUnlocked]);
@@ -4717,6 +4895,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     setSelectedTab(null);
     setMaxSelected(false);
     setGasTokenChecked(false);
+    setSelfWithdrawChecked(false);
     setReceiveExact(true); // DEV-229: reset to "recipient receives exact amount" per open
     setRelayerSelectorOpen(false); // DEV-233
     setFeeExpanded(false);
@@ -4914,6 +5093,22 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     bumpSelection();
     // Review was priced and admitted under the previous net/gross semantics.
     // Return to the form so the new choice gets a fresh fee-bound review.
+    if (stepRef.current === 'review') setStep('withdraw');
+  };
+
+  // The own-wallet option changes what Review commits to (no relayer quote,
+  // the connected wallet sends and receives), so a review made under the other
+  // choice is dropped, exactly like the gas and net-vs-gross toggles.
+  const handleSelfWithdrawToggle = () => {
+    setSelfWithdrawChecked((value) => !value);
+    setGasTokenChecked(false);
+    invalidateQuoteRequests();
+    setActiveFeeCommitment(null);
+    setColdStartClaim(null);
+    setBatchPlan(null);
+    setReviewContext(null);
+    resetQuote();
+    bumpSelection();
     if (stepRef.current === 'review') setStep('withdraw');
   };
 
@@ -5422,7 +5617,31 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     NativeGasMismatch + sendValue). Every prod pool is a share
                     pool, so without this nobody on prod could be funded for gas
                     on the way out. */}
-                {supportsGasTokenOption && !isSwapExit && (
+                {selfWithdrawSupported && (
+                  <View className="w-full gap-[3px]">
+                    <Pressable
+                      className="w-full flex-row items-center gap-[6px]"
+                      onPress={handleSelfWithdrawToggle}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: selfWithdrawChecked }}
+                      testID="withdraw-self-withdrawal"
+                    >
+                      <CheckboxIcon checked={selfWithdrawChecked} color={colors.textMuted} />
+                      <Text className="text-[14px] text-text font-pp-medium">
+                        Withdraw without relayer privacy protection
+                      </Text>
+                    </Pressable>
+                    {selfWithdrawChecked ? (
+                      <Text className="text-[12px] text-[#737373] font-pp-regular" testID="withdraw-self-withdrawal-wallet">
+                        {walletAddress
+                          ? `Sent from and paid to ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}, the connected wallet.`
+                          : 'Connect the wallet that will send this withdrawal.'}
+                      </Text>
+                    ) : null}
+                  </View>
+                )}
+
+                {supportsGasTokenOption && !isSwapExit && !directMode && (
                   <Pressable
                     className="w-full flex-row items-center gap-[6px]"
                     onPress={handleGasTokenToggle}
@@ -5447,7 +5666,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     A full-balance or one-proof-Max entry has nothing to
                     add a fee on top of, so it states the real semantics instead
                     of showing a checkbox whose state would lie. */}
-                {!isSui && !isSwapExit && !batchPlan ? (
+                {!isSui && !isSwapExit && !batchPlan && !directMode ? (
                   maxGrossIntent ? (
                     <Text className="text-[11px] text-[#737373] font-pp-regular">
                       {fullBalanceIntent ? 'Full balance' : 'One-transaction maximum'}: the relayer fee comes out of the withdrawn amount.
@@ -5585,6 +5804,10 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     <Text className="py-[9px] font-pp-sans text-[11.5px] text-text-muted">
                       {`Relayer fee up to ${formatUnits(estimateStellarRelayFee(parseTokenAmount(amount, altDecimals)), altDecimals)} XLM (0.5% plus network cost), added on top; any unused part returns as change. Sent by the testnet relayer, not your account.`}
                     </Text>
+                  ) : reviewContext?.mode === 'direct' ? (
+                    <Text className="py-[9px] font-pp-sans text-[11.5px] text-text-muted">
+                      No relayer fee. Network gas is paid from your wallet.
+                    </Text>
                   ) : (
                   <View className="flex-row flex-wrap items-center justify-between gap-[6px] py-[9px]">
                     <Text className="font-pp-sans text-[11.5px] text-text-muted">
@@ -5654,7 +5877,11 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                 ) : null}
 
                 {/* Special-case withdrawal disclosures. */}
-                {batchPlan ? (
+                {reviewContext?.mode === 'direct' ? (
+                  <Text className="text-[12px] leading-[17px] text-danger font-pp-regular" testID="withdraw-self-withdrawal-review-note">
+                    No relayer. This withdrawal is sent from and paid to your wallet, so it is linked to it on-chain.
+                  </Text>
+                ) : batchPlan ? (
                   <Text className="text-[11px] text-[#737373] font-pp-regular">
                     Full withdrawal: {batchPlan.groupCount} proofs, 1 transaction.
                   </Text>
@@ -5775,7 +6002,11 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                 ) : null}
 
                 {/* Special-case withdrawal disclosures. */}
-                {batchPlan ? (
+                {reviewContext?.mode === 'direct' ? (
+                  <Text className="text-[12px] leading-[17px] text-danger font-pp-regular" testID="withdraw-self-withdrawal-review-note">
+                    No relayer. This withdrawal is sent from and paid to your wallet, so it is linked to it on-chain.
+                  </Text>
+                ) : batchPlan ? (
                   <Text className="text-[11px] text-[#737373] font-pp-regular">
                     Full withdrawal: {batchPlan.groupCount} proofs, 1 transaction.
                   </Text>
@@ -5805,8 +6036,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                   )}
                 </View>
 
-                {/* DEV-233: relayer selector (replaces the old static Fees Collector line) */}
-                <View className="w-full z-[30]">
+                {/* DEV-233: relayer selector (replaces the old static Fees Collector line).
+                    Own-wallet withdrawal has no relayer, so it is not drawn. */}
+                <View className={`${reviewContext?.mode === 'direct' ? 'hidden ' : ''}w-full z-[30]`}>
                   <View className="flex-row items-center flex-wrap">
                     <Text className="text-[16px] text-[#737373] font-pp-bold">Relayer: </Text>
                     <Pressable
@@ -5851,7 +6083,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
 
                 {/* Fees & Expiry */}
                 {/* Fees & Expiry (EVM relayer quote only — Sui has no fee commitment) */}
-                {!isSui && (
+                {!isSui && reviewContext?.mode !== 'direct' && (
                   <View className="w-full">
                     <Text className="text-[16px] leading-[24px]">
                       <Text className="text-[16px] text-[#737373] font-pp-bold">Quote expires </Text>
@@ -5865,7 +6097,12 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                   {/* Relayer-fee header row. Swap exit: every figure comes from
                       the validated quote snapshot (services/intent-swaps
                       shaping), never live form state. */}
-                  <View className="flex-row items-center justify-between">
+                  {reviewContext?.mode === 'direct' ? (
+                    <Text className="text-[14px] leading-[20px] text-text font-pp-regular">
+                      No relayer fee. Network gas is paid from your wallet.
+                    </Text>
+                  ) : null}
+                  <View className={`${reviewContext?.mode === 'direct' ? 'hidden ' : ''}flex-row items-center justify-between`}>
                     <Text className="text-[16px] leading-[19.2px] flex-1 text-text font-pp-bold">
                       {/* The fee's OWN asset and decimals (services/relayer-fee.ts),
                           not the withdrawn token's. When they differ the symbol
@@ -5873,7 +6110,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       Relayer fee: {swapSnapshot ? `${balanceDisplay(swapSnapshot.display.relayerFee, swapReviewInputSymbol, swapSnapshot.poolChainId).text}` : (batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text} (~${balanceDisplay(swapSnapshot ? swapSnapshot.display.relayerFee : String(reviewFee), swapSnapshot ? swapReviewInputSymbol : (batchPlan || isStellar) ? selectedToken : resolvedFee.symbol, swapSnapshot?.poolChainId ?? chainId).usd.toFixed(2)})
                     </Text>
                   </View>
-                  <FeeWarning breakdown={withdrawFeeBreakdown} testID="withdraw-fee-warning" />
+                  {reviewContext?.mode !== 'direct' && <FeeWarning breakdown={withdrawFeeBreakdown} testID="withdraw-fee-warning" />}
                   {coldStartClaim && (
                     <Text className="text-[13px] leading-[19px] text-[#737373] font-pp-regular">
                       {describeRelayedClaim((batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text)}
@@ -6241,6 +6478,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
               setReceiveAsset(token);
               // A swap exit never uses the gas-token top-up.
               setGasTokenChecked(false);
+              setSelfWithdrawChecked(false);
             } else {
               // Pool asset picked → back to the plain withdrawal (default).
               setReceiveAsset(null);
