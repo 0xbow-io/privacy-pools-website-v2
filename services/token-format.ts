@@ -120,3 +120,39 @@ export function detailAmountDigits(value: string, symbol: string | undefined | n
   const digits = trimmed.length >= floor ? trimmed : trimmed.padEnd(floor, '0');
   return `${negative ? '-' : ''}${whole}${digits ? `.${digits}` : ''}`;
 }
+
+/**
+ * Thousands separators for a figure that is only DISPLAYED ("4526.74 USDC" to
+ * "4,526.74 USDC"). Every number in the text is grouped, the decimals and the
+ * symbol untouched, and an already grouped figure stays as it is.
+ *
+ * Display only: the result is not a number any more. Never feed it back into an
+ * input, a quote or a submit, and never run it over text that can hold an
+ * address or a hash (hex digit runs would be grouped).
+ */
+export function groupThousands(text: string): string {
+  return text.replace(/(\d+)(\.\d+)?/g, (_match, whole: string, fraction?: string) => {
+    if (whole.length <= 3) return `${whole}${fraction ?? ''}`;
+    return `${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${fraction ?? ''}`;
+  });
+}
+
+/**
+ * The amount input's text while the field is NOT being typed in: grouped when it
+ * is a plain decimal ("4526.5" to "4,526.5", "4526." to "4,526."), as is
+ * otherwise. While focused the field keeps the raw text, so the caret and the
+ * keystrokes are never fought by the separators.
+ */
+export function amountInputDisplay(raw: string, focused: boolean): string {
+  if (focused || !/^\d+\.?\d*$/.test(raw)) return raw;
+  return groupThousands(raw);
+}
+
+/**
+ * What a typed or pasted amount means: separators dropped, nothing else
+ * changed, so "4,526.50" reads as "4526.50". The only place display commas turn
+ * back into an amount.
+ */
+export function stripAmountSeparators(text: string): string {
+  return text.replace(/,/g, '');
+}
