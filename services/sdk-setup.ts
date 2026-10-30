@@ -83,6 +83,8 @@ import { resolveConfiguredEntrypoint } from '@/services/pool-entrypoint';
 import { emitTransactProofGenerated } from '@/services/proof-progress';
 import { recordAspBlockTimestamps } from '@/services/asp-block-timestamps';
 import { FetchHTTPClient } from '@/services/egress-http-client';
+import { ARTIFACTS_VERSION } from '@/config/artifacts';
+import { isStaleAssetResponse, reportStaleAssets, STALE_ASSETS_ERROR } from '@/services/stale-assets';
 
 // ---------------------------------------------------------------------------
 // Primitive / stateless services
@@ -415,6 +417,11 @@ class RemoteCircuitArtifacts implements ICircuitArtifacts {
   private async fetchBinary(url: string): Promise<Uint8Array> {
     const response = await fetch(url);
     if (!response.ok) {
+      // A versioned URL that 404s is a tab older than the deployed circuits: say so.
+      if (isStaleAssetResponse({ versioned: ARTIFACTS_VERSION !== '', status: response.status })) {
+        reportStaleAssets();
+        throw new Error(`${STALE_ASSETS_ERROR} (${response.status})`);
+      }
       throw new Error(`Failed to fetch circuit artifact: ${response.status} ${url}`);
     }
     const buffer = await response.arrayBuffer();

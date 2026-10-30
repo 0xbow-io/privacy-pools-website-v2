@@ -77,6 +77,7 @@ import { getNativeMockSession } from '@/services/native-mock-data';
 import { allowPaymentRequestWrites, purgePaymentRequestsOnSignOut } from '@/services/payment-request-signout';
 import { signedOutOwner } from '@/services/payment-request-signout-purge';
 import { noteManagerLimitedTo } from '@/services/batch-withdrawals';
+import { ARTIFACTS_BASE, artifactsBaseUrl } from '@/config/artifacts';
 
 // Key derivation now uses the SDK's canonical HKDF scheme via
 // services/sdk-setup (buildSecretDerivationPayload +
@@ -88,7 +89,7 @@ import { noteManagerLimitedTo } from '@/services/batch-withdrawals';
 // ---------------------------------------------------------------------------
 
 const CIRCUIT_ARTIFACTS_BASE_URL =
-  typeof window !== 'undefined' ? `${window.location.origin}/artifacts` : '/artifacts';
+  artifactsBaseUrl(ARTIFACTS_BASE, typeof window !== 'undefined' ? window.location.origin : undefined);
 
 // ---------------------------------------------------------------------------
 // Cross-platform storage for account export persistence

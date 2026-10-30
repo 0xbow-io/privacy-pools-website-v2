@@ -1,0 +1,74 @@
+name: Publish circuit artifacts
+
+# public/artifacts (1.2 GB of .wasm/.zkey, git lfs) is served by the
+# privacy-pools-artifacts Vercel project under /artifacts/<version>/, and the app
+# build refuses to ship a version that project does not serve. This job publishes
+# it so nobody has to remember: it asks the live project whether the checked-out
+# version is there (from the lfs pointer hashes, no download) and only fetches the
+# real files and deploys when it is not. See docs/artifact-hosting.md.
+#
+# Needs one repo secret: VERCEL_TOKEN, a Vercel token with access to the 0xbow team.
+
+on:
+  push:
+    branches: [dev, main]
+    paths:
+      - 'public/artifacts/**'
+      - 'scripts/deploy-artifacts.mjs'
+      - 'scripts/artifacts-manifest.mjs'
+      - 'scripts/artifacts-version.mjs'
+      - 'config/artifacts-origin.json'
+      - '.github/workflows/artifacts.yml'
+  # A PR that changes circuits needs its version live for its own preview build.
+  pull_request:
+    paths:
+      - 'public/artifacts/**'
+  workflow_dispatch:
+
+# Publishing reads the live version list and replaces the project's deployment:
+# two runs at once would drop each other's version. Queue them, never cancel one.
+concurrency:
+  group: artifacts-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # A fork's PR gets no secrets and must not publish to our project.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      # lfs off: the pointers are enough to know the version.
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Is this version already published?
+        id: check
+        run: node scripts/deploy-artifacts.mjs --check-only
+
+      - name: Fetch the real files
+        if: steps.check.outputs.needed == 'true'
+        run: git lfs pull --include="public/artifacts/**"
+
+      - name: Publish ${{ steps.check.outputs.version }}
+        if: steps.check.outputs.needed == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "::error::VERCEL_TOKEN is not set. Add a Vercel token with access to the 0xbow team as a repo secret."
+            exit 1
+          fi
+          npm install --global vercel@65.8.0
+          node scripts/deploy-artifacts.mjs
+
+      - name: Already published
+        if: steps.check.outputs.needed == 'false'
+        run: echo "version ${{ steps.check.outputs.version }} is already served, nothing to do"
