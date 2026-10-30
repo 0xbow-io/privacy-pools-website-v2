@@ -209,7 +209,7 @@ const DIAGNOSTIC_VALUE_MAX = 300;
  * whose value is interpolated at runtime would defeat it however innocent the
  * name looks.
  */
-export const ALLOWED_CODE_KEYS = Object.freeze(['errorName', 'componentFrame'] as const);
+export const ALLOWED_CODE_KEYS = Object.freeze(['errorName', 'componentFrame', 'errorShape', 'componentPosition'] as const);
 
 /**
  * A bare JS identifier, and nothing else.

@@ -23,6 +23,7 @@ import { Header } from '@/components/ui/header';
 import { Footer } from '@/components/ui/footer';
 import { Card } from '@/components/ui/card';
 import { ActionHub } from '@/components/home/action-hub';
+import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 import {
   EMPTY_SELECTION,
   ExplorePanelProvider,
@@ -659,7 +660,9 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
             // (SPLIT_LEFT_WIDTH is the shared constant's name, not its side)
             style={{ width: SPLIT_LEFT_WIDTH }}
           >
-            <ActionHub />
+            <HubErrorBoundary>
+              <ActionHub />
+            </HubErrorBoundary>
           </View>
         )}
 

@@ -45,6 +45,10 @@ export type ErrorReportDiagnostic = {
 export type ErrorReportCode = {
   errorName?: string;
   componentFrame?: string;
+  /** The message's shape as one identifier (services/error-shape.ts), never the message. */
+  errorShape?: string;
+  /** Where in the build the first frame is, as one identifier (services/crash-frame.ts). */
+  componentPosition?: string;
 };
 
 /**
