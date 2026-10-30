@@ -196,7 +196,7 @@ import { feeWithinReviewed, relayerFeeJitterAllowance } from '@/services/relayer
 import { quoteMatchesSignedCommitment } from '@/services/relayer-quote-integrity';
 import { decodeGasTopUpWei, formatGasTopUp } from '@/services/gas-top-up';
 import { setReceiveSetup } from '@/services/receive-setup';
-import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, netSharesWei, shareRedemptionDisclosure, shareReviewHeadline } from '@/services/share-display';
+import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, netSharesWei, previewReceiveFigure, shareRedemptionDisclosure, shareReviewHeadline } from '@/services/share-display';
 import { sdkErrorText, type ErrorUnits } from '@/services/sdk-error-amounts';
 import { RelayFeeIncreasedError, relayWithdrawalWithFreshQuote } from '@/services/relayed-withdrawal';
 import { PREVIEW_REDEEM_ABI } from '@/services/deposit-limits';
@@ -1853,6 +1853,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     pending: reviewRedeemEnabled && !reviewRedeemFailed && reviewNetUnderlyingNum == null,
     format: sharedFormatTokenBalance,
   });
+  // The greyed receive figure on the form, before Review: the same redeemed
+  // underlying, never the share count under the coin's name.
+  const previewNet = previewReceiveFigure({ isShare: selectedIsShare, amount: reviewNet, underlying: reviewNetUnderlyingNum });
   // The dollar total beside it: the redeemed underlying at the underlying's
   // price, never shares × that price (codex P2 on 0cea0b3). Null hides the
   // line while the conversion is unknown.
@@ -5241,7 +5244,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                               {enteredAmount > 0
                                 ? (isSwapExit
                                   ? (swapExitEstimateText ?? '—')
-                                  : reviewNet.toLocaleString('en-US', { maximumFractionDigits: 6 }))
+                                  : (previewNet == null ? '—' : previewNet.toLocaleString('en-US', { maximumFractionDigits: 6 })))
                                 : '0'}
                             </Text>
                             <Pressable
