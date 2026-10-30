@@ -1,3 +1,6 @@
+import { estimatedUsdLabel } from '@/services/estimated-usd';
+import { useAssetStatistics } from '@/hooks/use-asset-statistics';
+import { DEPOSIT_FAQ_URL } from '@/config/support';
 import { spendableBalanceLabel } from '@/services/spendable-balance-label';
 import { useShareAmountField } from '@/hooks/use-share-amount-field';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
@@ -92,7 +95,7 @@ import { listShieldPools, defaultPoolFor, type ShieldPool } from '@/services/shi
 import { fetchLifiContractCallDeliverable } from '@/services/lifi-quote';
 import { useSwapPreview } from '@/hooks/use-swap-preview';
 import { useShareRates } from '@/hooks/use-share-rates';
-import { previewInputAmount, previewIsIdentity } from '@/services/swap-preview-input';
+import { previewInputAmount, previewIsIdentity, previewOutputUsd } from '@/services/swap-preview-input';
 import { formatSwapExitEstimate } from '@/services/swap-exit-estimate';
 import { sizeConvertingDeposit } from '@/services/cross-pay-sizing';
 import { useTxActivity } from '@/components/tx-activity-provider';
@@ -1258,6 +1261,11 @@ export function ActionHub({
   // (ppUSDC / ppUSDT on prod). Null for every plain asset.
   const shieldShareYield = useShareYield({ chainId: shieldPool?.chainId, tokenAddress: shieldPool?.address });
   const shieldHasYield = !!getYieldShareToken(shieldPool?.chainId, shieldPool?.address);
+  // The scheduler already holds all catalogued assets, independent of this tab.
+  const { assetStats: shieldAssetStats } = useAssetStatistics({
+    chainId: shieldPool?.chainId ?? chainId,
+    tokenAddress: shieldPool?.address,
+  });
   // An explicit pool pick is FULLY sticky (QA 2026-08-18: 'don't switch pool
   // automatically if I change it once manually') — only another manual pick
   // replaces it. The defaulting rule covers the no-pick state; a pick parked
@@ -3226,6 +3234,14 @@ export function ActionHub({
                       : `${depositFlow.depositAmountFormatted} ${depositFlow.crossChainDestination ? `is on its way to ${depositFlow.crossChainDestination}` : 'was shielded'} for ${depositFlow.recipientAddress.slice(0, 6)}...${depositFlow.recipientAddress.slice(-4)}. They can discover it on their next sync. Then it needs approval.`
                     : `${depositFlow.depositAmountFormatted} is pending approval. Spendable once approved.`}
               </Text>
+              <View className="flex-row flex-wrap items-center justify-center gap-[6px]">
+                <Text className="text-center font-pp-sans text-[12px] leading-[17px] text-text-secondary">
+                  0xbow&apos;s ASP reviews deposits before private use.
+                </Text>
+                <Pressable onPress={() => Linking.openURL(DEPOSIT_FAQ_URL)} accessibilityRole="link">
+                  <Text className="font-pp-sans-medium text-[12px] text-primary underline">About approval</Text>
+                </Pressable>
+              </View>
               {depositFlow.claimReceiptUrl ? (
                 /* The claim link leads this card (DEV-491); leaving it
                    uncopied asks first (depositFlow.guardClaimLeave). */
@@ -3370,7 +3386,7 @@ export function ActionHub({
                   <View className="flex-row items-center gap-[3px]">
                     <Text className="font-pp-sans text-[10.5px] text-text-muted">Recommended amounts</Text>
                     <HoverHint
-                      hint="Blend into the crowd smoothly by using a recommended amount."
+                      hint="Common amounts can help you blend in. Timing and other activity still matter."
                       testID="hub-recommended-amounts-hint"
                     >
                       {/* nw-keep(data-color): glyph colour is a runtime theme token (vector-icon sink) */}
@@ -3864,6 +3880,23 @@ export function ActionHub({
         </>
       )}
 
+      {a === 'shield' && !isSuiChain && !isStellar && !shieldBusy && shieldPool && (
+        <View className="flex-row flex-wrap items-center gap-[6px]" testID="hub-shield-privacy-context">
+          <Text className="font-pp-sans text-[12px] text-text-secondary">
+            {shieldAssetStats ? `${shieldAssetStats.allTime.totalDepositsCount.toLocaleString('en-US')} pool deposits` : 'Pool activity unavailable'}
+          </Text>
+          <HoverHint hint="Deposit activity, not an anonymity score. Amounts, timing and eligible deposits affect privacy." wrap>
+            {/* nw-keep(data-color): hint glyph color is a theme token into the vector-icon sink */}
+            <Ionicons name="information-circle-outline" size={13} color={colors.textMuted} />
+          </HoverHint>
+          <Text className="font-pp-sans text-[12px] text-text-muted">· Approval required</Text>
+          <HoverHint hint="0xbow's Association Set Provider (ASP) reviews deposits after confirmation, before private use." wrap>
+            {/* nw-keep(data-color): hint glyph color is a theme token into the vector-icon sink */}
+            <Ionicons name="information-circle-outline" size={13} color={colors.textMuted} />
+          </HoverHint>
+        </View>
+      )}
+
       {/* Optional recipient (depositFor): a deposit for another address. A
           registered one is announced to; an unregistered one ends in a claim
           link, and the hint under the field says so while typing. Collapsed by
@@ -4152,6 +4185,11 @@ export function ActionHub({
               </Pressable>
             </View>
 
+            {swapOutToken && swapOutUnits && swapPreviewText && (() => {
+              const output = swapPreviewIdentity ? swapPreviewInWei : swapPreview.status === 'ok' ? swapPreview.toAmount : null;
+              const label = output == null ? null : estimatedUsdLabel(previewOutputUsd(output, swapOutUnits.decimals, feePricing.tokenUsdOf(swapDestChainId, swapToFunding, swapOutUnits.symbol)) ?? 0);
+              return label ? <Text className="font-pp-sans text-[12px] text-text-secondary" testID="hub-swap-output-usd">{label}</Text> : null;
+            })()}
             <View className="flex-row flex-wrap items-center gap-[6px]">
               {(() => {
                 const note = swapPreviewText
