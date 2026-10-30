@@ -200,8 +200,9 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
 
 // Persist Metro's transform cache where Vercel's build cache restores it.
 // Expo's default store lives in os.tmpdir(), which a fresh build machine never
-// has, so every deploy re-transformed all ~5.9k modules (about 2 minutes on the
-// 4-core machine). node_modules/.cache rides along with the cached node_modules.
+// has, so every deploy re-transformed all ~5.9k modules (about 4 to 6 minutes
+// on the 4-core machine). node_modules/.cache rides along with the cached
+// node_modules.
 //
 // babel-preset-expo inlines process.env.EXPO_PUBLIC_* at TRANSFORM time and the
 // cache key does not include those values, so a warm cache would keep an old
