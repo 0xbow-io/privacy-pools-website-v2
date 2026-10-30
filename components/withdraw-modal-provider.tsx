@@ -943,11 +943,10 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     && (crossChainReceive
       ? !!receiveAsset
       : isSwapExitSelection(receiveAsset?.address, selectedTokenAddress));
-  // Own-wallet withdrawal is the plain same-chain exit of a plain pool only: a
-  // swap exit, a cross-chain exit and a share (its exit redeems through the
-  // router) keep the relayer.
-  const selfWithdrawSupported = selfWithdrawalEnabled && !isSui && !isSwapExit && !crossChainReceive
-    && !isShareSymbol(selectedToken);
+  // Own-wallet withdrawal is the plain same-chain exit: a swap exit and a
+  // cross-chain exit keep the relayer. A share note sends the router's
+  // self-submit redemption (withdrawToUnderlying) from the wallet instead.
+  const selfWithdrawSupported = selfWithdrawalEnabled && !isSui && !isSwapExit && !crossChainReceive;
   const directMode = selfWithdrawSupported && selfWithdrawChecked;
   useEffect(() => {
     if (!selfWithdrawSupported && selfWithdrawChecked) setSelfWithdrawChecked(false);
@@ -4068,15 +4067,60 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           amount: directAmountHex,
           processor: sender,
         });
-        const directPrepared = await directSession.prepareWithdraw({
-          inputCommitments: directInputs.map((n) => n.commitment),
-          amount: directAmountHex,
-          tokenId: directInputs[0].tokenId,
-          recipientAddress: sender,
-          relayAddress: sender,
-          feeAmount: '0x0',
-          processorAddress: sender,
-        });
+        // A share note leaves as its underlying through the PPRouter, so the
+        // wallet sends the router's own redemption (no relayer, zero fee leg).
+        // It needs the same verified vault the relayed redemption does; without
+        // one there is no router route and the share would be paid out raw.
+        const directShareDeployment = isShareSymbol(selectedToken)
+          ? getYieldDeploymentForAsset(chainId, selectedTokenAddress)
+          : undefined;
+        const directYieldNs = directShareDeployment
+          && directShareDeployment.ppUSDC.toLowerCase() === selectedTokenAddress.toLowerCase()
+          ? (directSession.yieldFor ? directSession : session).yieldFor?.(directShareDeployment.ppUSDC)
+          : undefined;
+        if (isShareSymbol(selectedToken) && !directYieldNs) {
+          throw new Error(`${displayTokenSymbol(selectedToken)} withdrawals need a verified vault. This session could not verify it. Reload the app and try again. Nothing was sent.`);
+        }
+        type DirectPrepared = {
+          tx: { to: `0x${string}`; data: `0x${string}`; value?: bigint };
+          spentNullifiers: string[];
+          changePendingNotes: unknown[];
+        };
+        let directPrepared: DirectPrepared;
+        if (directYieldNs && directShareDeployment) {
+          const nullifyingKey = keystoreManager?.getPrivateNullifyingKey();
+          if (!nullifyingKey) throw new Error('Your account keys are not loaded. Unlock your account and try again. Nothing was sent.');
+          const { createNoteComputationService } = await import('@/services/sdk-runtime');
+          const noteComputation = await createNoteComputationService();
+          const redeem = await directYieldNs.withdraw.prepareYieldWithdraw({
+            inputCommitments: directInputs.map((n) => n.commitment),
+            amount: directAmountHex,
+            amountOut: directAmountHex,
+            recipient: sender,
+            feeAmount: '0x0',
+          });
+          const redeemValue = redeem.withdrawTx.value ? BigInt(redeem.withdrawTx.value) : 0n;
+          directPrepared = {
+            tx: { to: redeem.withdrawTx.to, data: redeem.withdrawTx.data, ...(redeemValue > 0n ? { value: redeemValue } : {}) },
+            spentNullifiers: directInputs.map((n) => String(noteComputation.computeNullifier(nullifyingKey, n.commitment))),
+            changePendingNotes: redeem.changePendingNotes,
+          };
+        } else {
+          const plain = await directSession.prepareWithdraw({
+            inputCommitments: directInputs.map((n) => n.commitment),
+            amount: directAmountHex,
+            tokenId: directInputs[0].tokenId,
+            recipientAddress: sender,
+            relayAddress: sender,
+            feeAmount: '0x0',
+            processorAddress: sender,
+          });
+          directPrepared = {
+            tx: { to: plain.transactTx.to as `0x${string}`, data: plain.transactTx.data as `0x${string}` },
+            spentNullifiers: plain.spentNullifiers,
+            changePendingNotes: plain.changePendingNotes as unknown[],
+          };
+        }
         if (!isSameOperation()) { log('warn', 'Withdraw', 'Stale run aborted before the own-wallet broadcast'); return; }
         // An earlier wallet transaction on these notes that is still unconfirmed
         // blocks a second one: it would only revert on the spent nullifier and
@@ -4090,8 +4134,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         const directHash = (await sendTransactionAsync({
           account: sender as `0x${string}`,
           chainId,
-          to: directPrepared.transactTx.to as `0x${string}`,
-          data: directPrepared.transactTx.data as `0x${string}`,
+          to: directPrepared.tx.to,
+          data: directPrepared.tx.data,
+          ...(directPrepared.tx.value ? { value: directPrepared.tx.value } : {}),
         })) as `0x${string}`;
         log('info', 'Withdraw', 'Own-wallet withdrawal submitted', { txHash: directHash });
         setTxHash(directHash);
