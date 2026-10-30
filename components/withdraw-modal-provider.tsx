@@ -188,7 +188,8 @@ import { aspBusyMessage } from '@/services/asp-backoff';
 import { aspBackoff } from '@/services/egress-fetch';
 import { onRelayedTxHash } from '@/services/relayed-receipt';
 import { isPendingRelayBlocked, landedTxHash } from '@/services/pending-relays-core';
-import { createPendingRelaySettleWatch } from '@/services/pending-relays-store';
+import { assertNoPendingRelay, createPendingRelaySettleWatch, recordPendingRelay, settlePendingRelayByReceipt } from '@/services/pending-relays-store';
+import { classifyDirectReceipt, directPendingMessage, isDirectPendingMessage, releasesSubmitGuard, SELF_WITHDRAW_METHOD } from '@/services/self-withdrawal-pending';
 import { PendingRelayNotice } from '@/components/pending-relay-notice';
 import { getYieldDeploymentForAsset } from '@/config/yield';
 import { recordOwnAction } from '@/services/own-actions-store';
@@ -209,6 +210,15 @@ import { buildFeeBreakdown, gasCostUsd, quoteGas, splitRelayerFee, swapLossUsd, 
 
 const WITHDRAW_RELAY_METHOD = /^relay(Withdrawal|RegisterAndWithdrawal|WithAnnounce)$/;
 const SWAP_EXIT_PENDING_MESSAGE = 'The relayer accepted this withdrawal, but it has not been included in a block yet. It has not failed and can still land, so these funds are held for it. Your balance and history update on their own once it settles; if it is still pending after 10 minutes, report it from the pending notice.';
+/** An own-wallet withdrawal whose transaction was broadcast (see recheckDirectWithdrawal). */
+type DirectWithdrawalInFlight = {
+  hash: `0x${string}`;
+  sender: `0x${string}`;
+  tokenAddress: string;
+  inputs: Note[];
+  changePendingNotes: PendingNote[];
+};
+
 const WITHDRAW_PENDING_MESSAGE = 'The relayer accepted this withdrawal, but it has not been included in a block yet. It has not failed and can still land. This screen, your balance and your history update on their own when it does. Do not withdraw these funds again: they are held for this withdrawal until it settles.';
 
 // react-native-web supports CSS properties (position:'fixed', backdropFilter, outlineStyle)
@@ -2823,6 +2833,98 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     }
   }, [isSui, suiSession, suiAmountError, connectedAddress, walletAddress, targetAddress, amount, selectedToken, selectedTokenAddress, chainId, gasTokenChecked, getQuote, identityMode, log, sdkReady, poolSession, ensureInitialized, openKeystoreRegistrationModal, openSeedDerivationModal, resolveColdStartClaim, batchEnabled, fullBalanceRequested, grossWithdrawn, availableNum, availableWei, effectiveReceiveExact, spendabilityLoading, spendabilityError, spendabilityKey, spendableCommitments, noteManager, isSwapExit, receiveAsset, crossChainReceive, receiveChainId, receiveChainName, directMode, ensureWalletConnected]);
 
+  // An own-wallet withdrawal whose transaction exists but is not confirmed yet.
+  // Kept so the pending screen can re-check the receipt and finish the
+  // bookkeeping later, instead of offering a second Confirm over the same notes.
+  const directPendingRef = useRef<DirectWithdrawalInFlight | null>(null);
+  const [directPendingHash, setDirectPendingHash] = useState<`0x${string}` | null>(null);
+  const [directRechecking, setDirectRechecking] = useState(false);
+
+  // The confirmed half of an own-wallet withdrawal. The SDK would persist this
+  // after its own submit; this path posted the transaction itself, so mark the
+  // inputs spent and add the change note the way the router redemption does.
+  // Bookkeeping after a CONFIRMED spend: a failure here is logged and the next
+  // sync re-derives it. Shared by Confirm and the pending screen's re-check.
+  const finishDirectWithdrawal = useCallback(async (
+    flight: DirectWithdrawalInFlight,
+    blockNumber: bigint,
+    session: PoolSession,
+    live: () => boolean,
+  ) => {
+    settlePendingRelayByReceipt(flight.hash, true);
+    try {
+      const spentAtBlock = `0x${blockNumber.toString(16)}` as `0x${string}`;
+      await session.markNotesSpent(flight.inputs.map((n) => ({ commitment: n.commitment as `0x${string}`, spentAtBlock })));
+      if (flight.changePendingNotes.length > 0) {
+        await session.addNotes(flight.changePendingNotes.map((pendingNote) => ({ pendingNote, txHash: flight.hash })));
+      }
+    } catch (persistErr) {
+      log('warn', 'Withdraw', 'Persisting notes after an own-wallet withdrawal failed; the next sync reconciles', { err: persistErr });
+    }
+    if (noteManager && connectedAddress) {
+      await exportAccount(session).catch((e) => log('warn', 'Withdraw', 'Post-confirm export failed; next sync will persist', e));
+      refetchNotes();
+    }
+    try {
+      recordOwnWithdrawal({
+        chainId,
+        txHash: flight.hash,
+        recipient: flight.sender,
+        tokenAddress: flight.tokenAddress,
+        feeAmount: null,
+        stampOwnAction: true,
+        now: Date.now(),
+      }, { recordOwnAction, recordWithdrawFee, recordWithdrawRecipient });
+    } catch { /* non-fatal */ }
+    directPendingRef.current = null;
+    setDirectPendingHash(null);
+    setWithdrawPending(false);
+    if (live()) {
+      reportWithdrawError(null);
+      setTxHash(flight.hash);
+      setTxChainId(chainId);
+      setStep('success');
+    }
+    await invalidateTransactionCaches(queryClient);
+  }, [log, noteManager, connectedAddress, exportAccount, refetchNotes, chainId, queryClient]);
+
+  // The pending screen's "Check again": one receipt lookup, never a resubmit.
+  const recheckDirectWithdrawal = useCallback(async () => {
+    const flight = directPendingRef.current;
+    if (!flight || directRechecking) return;
+    setDirectRechecking(true);
+    const epoch = modalEpochRef.current;
+    try {
+      let receipt: { status: 'success' | 'reverted'; blockNumber: bigint } | null = null;
+      let failed = !publicClient;
+      if (publicClient) {
+        try {
+          receipt = await publicClient.getTransactionReceipt({ hash: flight.hash });
+        } catch {
+          // Not mined yet (or the RPC could not answer): still pending.
+          failed = true;
+        }
+      }
+      const outcome = classifyDirectReceipt(receipt, failed);
+      if (outcome.kind === 'confirmed') {
+        const session = sdkReady && poolSession ? poolSession : await ensureInitialized();
+        if (!session) throw new Error('SDK initialization did not complete.');
+        await finishDirectWithdrawal(flight, outcome.blockNumber, session, () => modalEpochRef.current === epoch);
+      } else if (outcome.kind === 'reverted') {
+        settlePendingRelayByReceipt(flight.hash, false);
+        directPendingRef.current = null;
+        setDirectPendingHash(null);
+        setWithdrawPending(false);
+        submittedRef.current = false;
+        reportWithdrawError('Withdrawal transaction reverted on-chain. Your notes were NOT spent. You can try again.');
+      } else {
+        reportWithdrawError(directPendingMessage(flight.hash));
+      }
+    } finally {
+      setDirectRechecking(false);
+    }
+  }, [directRechecking, publicClient, sdkReady, poolSession, ensureInitialized, finishDirectWithdrawal]);
+
   const handleConfirmUnlocked = useCallback(async () => {
     log('info', 'Withdraw', 'step 3/6 confirm pressed', {
       amount,
@@ -2870,6 +2972,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     setStep('loading');
     reportWithdrawError(null);
     setWithdrawPending(false);
+    directPendingRef.current = null;
+    setDirectPendingHash(null);
     stopHearingWithdrawSettleRef.current?.();
     stopHearingWithdrawSettleRef.current = null;
     // This attempt is accepted: drop the previous attempt's hash/chain pair so
@@ -3974,6 +4078,10 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           processorAddress: sender,
         });
         if (!isSameOperation()) { log('warn', 'Withdraw', 'Stale run aborted before the own-wallet broadcast'); return; }
+        // An earlier wallet transaction on these notes that is still unconfirmed
+        // blocks a second one: it would only revert on the spent nullifier and
+        // cost gas while the first may land.
+        assertNoPendingRelay(chainId, directPrepared.spentNullifiers);
         setLoadingMessage('Confirm the withdrawal in your wallet...');
         withdrawPhaseRef.current = 'submit';
         submittedRef.current = true;
@@ -3988,55 +4096,56 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         log('info', 'Withdraw', 'Own-wallet withdrawal submitted', { txHash: directHash });
         setTxHash(directHash);
         setTxChainId(chainId);
+        // From here a hash exists, so the transaction may land whatever happens
+        // to this screen. Record it BEFORE waiting: the record blocks a second
+        // proof over the same notes (assertNoPendingRelay above and in the
+        // relayed paths), survives a reload, and settles when the nullifiers are
+        // seen spent.
+        const directFlight: DirectWithdrawalInFlight = {
+          hash: directHash,
+          sender: sender as `0x${string}`,
+          tokenAddress: selectedTokenAddress,
+          inputs: directInputs,
+          changePendingNotes: directPrepared.changePendingNotes as unknown as PendingNote[],
+        };
+        directPendingRef.current = directFlight;
+        recordPendingRelay({
+          chainId,
+          method: SELF_WITHDRAW_METHOD,
+          nullifiers: directPrepared.spentNullifiers,
+          txHash: directHash,
+        });
         withdrawPhaseRef.current = 'confirm';
         setLoadingMessage('Waiting for confirmation...');
         // This wallet broadcast the transaction itself, so its RPC provider has
         // already seen the hash arrive from this client: the receipt is the
         // answer, revert included (the relayed path avoids this poll because
         // there the hash is the relayer's and naming it would link this client).
-        if (!publicClient) {
-          throw new Error(`The withdrawal was sent (tx ${directHash}) but cannot be confirmed here. Check your wallet or the explorer before retrying.`);
+        let directReceipt: { status: 'success' | 'reverted'; blockNumber: bigint } | null = null;
+        let directWaitFailed = !publicClient;
+        if (publicClient) {
+          try {
+            directReceipt = await publicClient.waitForTransactionReceipt({ hash: directHash });
+          } catch (waitErr) {
+            directWaitFailed = true;
+            log('warn', 'Withdraw', 'Own-wallet receipt wait failed; keeping the withdrawal pending', { err: waitErr instanceof Error ? waitErr.message : String(waitErr) });
+          }
         }
-        let directReceipt: Awaited<ReturnType<typeof publicClient.waitForTransactionReceipt>>;
-        try {
-          directReceipt = await publicClient.waitForTransactionReceipt({ hash: directHash });
-        } catch (waitErr) {
-          log('warn', 'Withdraw', 'Own-wallet receipt wait failed', { err: waitErr instanceof Error ? waitErr.message : String(waitErr) });
-          throw new Error(`The withdrawal was sent (tx ${directHash}) but is not confirmed yet. Check your wallet or the explorer before retrying.`);
+        const directOutcome = classifyDirectReceipt(directReceipt, directWaitFailed);
+        if (directOutcome.kind === 'sent-unconfirmed') {
+          // NOT a failure and never retryable: the transaction can still land.
+          // The pending screen names the hash and offers a re-check instead of
+          // a second Confirm.
+          setDirectPendingHash(directHash);
+          setWithdrawPending(true);
+          throw new Error(directPendingMessage(directHash));
         }
-        if (directReceipt.status === 'reverted') {
+        if (directOutcome.kind === 'reverted') {
+          settlePendingRelayByReceipt(directHash, false);
+          directPendingRef.current = null;
           throw new Error('Withdrawal transaction reverted on-chain. Your notes were NOT spent.');
         }
-        // The SDK would persist this after its own submit; this path posted the
-        // transaction itself, so mark the inputs spent and add the change note
-        // the way the router redemption does. Bookkeeping after a CONFIRMED
-        // spend: a failure here is logged and the next sync re-derives it.
-        try {
-          const spentAtBlock = `0x${directReceipt.blockNumber.toString(16)}` as `0x${string}`;
-          await session.markNotesSpent(directInputs.map((n) => ({ commitment: n.commitment as `0x${string}`, spentAtBlock })));
-          if (directPrepared.changePendingNotes.length > 0) {
-            await session.addNotes(directPrepared.changePendingNotes.map((pendingNote) => ({ pendingNote: pendingNote as unknown as PendingNote, txHash: directHash })));
-          }
-        } catch (persistErr) {
-          log('warn', 'Withdraw', 'Persisting notes after an own-wallet withdrawal failed; the next sync reconciles', { err: persistErr });
-        }
-        if (noteManager && connectedAddress) {
-          await exportAccount(session).catch((e) => log('warn', 'Withdraw', 'Post-confirm export failed; next sync will persist', e));
-          refetchNotes();
-        }
-        try {
-          recordOwnWithdrawal({
-            chainId,
-            txHash: directHash,
-            recipient: sender,
-            tokenAddress: selectedTokenAddress,
-            feeAmount: null,
-            stampOwnAction: true,
-            now: Date.now(),
-          }, { recordOwnAction, recordWithdrawFee, recordWithdrawRecipient });
-        } catch { /* non-fatal */ }
-        if (isSameOperation()) setStep('success');
-        await invalidateTransactionCaches(queryClient);
+        await finishDirectWithdrawal(directFlight, directOutcome.blockNumber, session, isSameOperation);
         return;
       }
 
@@ -4790,13 +4899,15 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         isRelayerOutOfGas(message) ? relayerOutOfGasMessage('withdrawal')
           : isPendingRelayBlocked(message) ? message
             : isRelayerNullifierInFlight(message) ? relayInFlightMessage('withdrawal')
-              : message === WITHDRAW_PENDING_MESSAGE ? message
+              : message === WITHDRAW_PENDING_MESSAGE || isDirectPendingMessage(message) ? message
                 : `Withdrawal failed: ${shownError(err)}`,
         err,
         'relay',
       );
       setYieldRedemption(null);
-      submittedRef.current = false;
+      // A wallet-sent withdrawal that is only unconfirmed is still in flight:
+      // keep the submit guard set (and the pending screen), never offer a retry.
+      if (releasesSubmitGuard(message)) submittedRef.current = false;
       setStep('error');
     } finally {
       stopHearingWithdrawRelay();
@@ -4902,6 +5013,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     setCountdown(0);
     reportWithdrawError(null);
     setWithdrawPending(false);
+    directPendingRef.current = null;
+    setDirectPendingHash(null);
     // A launcher may hand over the wallet to pay (the Send tab's swap-send is
     // a public payout, so it continues here). Only a well-formed EVM address
     // is taken; anything else leaves the field empty for the user.
@@ -6286,6 +6399,27 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                   </Text>
                 </View>
                 <PendingRelayNotice chainId={chainId} owner={connectedAddress} />
+                {directPendingHash ? (
+                  <>
+                    <View className="w-full flex-row items-center justify-center gap-[6px]">
+                      <Text className="text-[12px] text-text-secondary font-pp-regular" testID="withdraw-self-pending-hash">
+                        Tx {directPendingHash.slice(0, 10)}...{directPendingHash.slice(-8)}
+                      </Text>
+                      <CopyIconButton value={directPendingHash} />
+                    </View>
+                    <Pressable
+                      className={`border rounded-control px-[20px] py-[10px] items-center justify-center border-[#B8BBBF] bg-card-background ${directRechecking ? 'opacity-50' : ''}`}
+                      onPress={recheckDirectWithdrawal}
+                      disabled={directRechecking}
+                      accessibilityRole="button"
+                      testID="withdraw-self-recheck"
+                    >
+                      <Text className="text-[14px] text-text font-pp-medium">
+                        {directRechecking ? 'Checking...' : 'Check again'}
+                      </Text>
+                    </Pressable>
+                  </>
+                ) : null}
                 <Pressable
                   className="border rounded-control px-[20px] py-[10px] items-center justify-center border-[#B8BBBF] bg-card-background"
                   onPress={() => {

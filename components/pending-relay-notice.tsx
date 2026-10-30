@@ -20,6 +20,7 @@ const METHOD_LABEL: Record<string, string> = {
   relayWithAnnounce: 'Withdrawal',
   relayBatchWithdrawal: 'Withdrawal',
   relaySwap: 'Swap',
+  selfWithdraw: 'Withdrawal',
 };
 
 function reportText(record: PendingRelay): string {
