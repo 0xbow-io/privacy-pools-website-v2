@@ -428,7 +428,7 @@ export function useGaslessRegistration(options?: {
     let mode: GaslessRegistrationMode;
     try {
       const status = await keystoreStatusForChain(chainId);
-      if (status === 'unknown') throw new Error(`Registration on chain ${chainId} could not be read.`);
+      if (status === 'unknown') throw new Error(`Registration on chain ${chainId} is still syncing. Try again in a moment.`);
       setReceiveSetup(sessionAddress ?? owner, chainId, receiveSetupFromIdentity(status), 'onchain');
       // 'incompatible' is registered under another unlock: nothing to register or finish.
       if (status === 'compatible' || status === 'incompatible') {

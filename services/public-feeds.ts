@@ -80,6 +80,12 @@ import {
   refreshPoolLeaves,
 } from '@/services/snapshot-source';
 import { FULL_RESYNC_INTERVAL_MS, refreshViewingKeyRegistry, type SyncOutcome } from '@/services/viewing-key-cache';
+import {
+  NULLIFYING_KEY_HASH_INTERVAL_MS,
+  NULLIFYING_KEY_HASH_RETRY_MS,
+  syncNullifyingKeyHashes,
+  type NullifyingKeyHashSyncOutcome,
+} from '@/services/nullifying-key-hash-cache';
 import { ASP_URL, LEGACY_CONFIG } from '@/config/env';
 import {
   feedLifiVerifiedTokens,
@@ -115,6 +121,7 @@ export const FEED_ENTRYPOINTS = 'entrypoints';
 export const feedTokenPrices = (chainId: number | string) => `token-prices:${chainId}`;
 export const feedPriceMap = (chainId: number | string) => `price-map:${chainId}`;
 export const feedViewingKeyRegistry = (chainId: number | string) => `viewing-key-registry:${chainId}`;
+export const feedNullifyingKeyHashRegistry = (chainId: number | string) => `nullifying-key-hash-registry:${chainId}`;
 
 let registered = false;
 let unsubscribeBackoff: (() => void) | undefined;
@@ -305,6 +312,24 @@ export function startPublicFeeds(): void {
         key: feedViewingKeyRegistry(chainId),
         intervalMs: FULL_RESYNC_INTERVAL_MS,
         fetch: () => refreshViewingKeyRegistry(chainId, chainKeystoreAddress),
+      });
+      // The nullifying-key-hash registry (services/nullifying-key-hash-cache.ts).
+      // The keystore identity check at sign-in and before a deposit reads this
+      // local copy instead of asking the chain RPC about the user's own
+      // account; pulled here so its timing is the grid's, not the sign-in's.
+      publicFeeds.register<NullifyingKeyHashSyncOutcome>({
+        key: feedNullifyingKeyHashRegistry(chainId),
+        intervalMs: NULLIFYING_KEY_HASH_INTERVAL_MS,
+        // A failed pull retries on the short grid so a write waiting on a
+        // current registry is not left for a whole window. A 404 (feed not
+        // deployed on this ASP) is not retried.
+        retryMs: NULLIFYING_KEY_HASH_RETRY_MS,
+        retryOnError: true,
+        fetch: async () => {
+          const outcome = await syncNullifyingKeyHashes(chainId, chainKeystoreAddress);
+          if (!outcome.ok && outcome.reason !== 'not-deployed') throw new Error(`nullifying-key-hashes sync failed: ${outcome.reason}`);
+          return outcome;
+        },
       });
       // Yield earned (services/yield-earned.ts). For every chain this build
       // configures a yield deployment on: the whole deposits feed, and the

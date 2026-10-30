@@ -25,6 +25,8 @@ import { envScopedStorageKey } from '@/config/app-environment';
 import * as SecureStore from 'expo-secure-store';
 import type { Address, Hex, PublicKey } from '@/services/sdk-types';
 import { ASP_URL } from '@/config/env';
+import { notifyRegistrySynced } from '@/services/keystore-registry-events';
+import { resolveConfiguredEntrypoint } from '@/services/pool-entrypoint';
 
 type AspKey = {
   id: string;
@@ -35,6 +37,7 @@ type AspKey = {
 
 interface ViewingKeysResponse {
   keys: AspKey[];
+  keystore?: string;
   lastSyncedId: string;
 }
 
@@ -50,6 +53,9 @@ interface CachedRegistry {
   // (e.g., misconfigured deployment) and the cache might be wrong
   // about freshness — a soft hint, not a correctness boundary.
   lastSyncedAt: number;
+  // ms epoch of the last successful FULL re-pull (the grid's). Only this one
+  // makes the map complete, so only this one counts as current after a reload.
+  lastFullSyncedAt?: number;
 }
 
 const STORAGE_PREFIX = 'ppv2_viewing_keys_v1_';
@@ -106,6 +112,7 @@ function readRegistry(chainId: number, keystoreAddress?: string): CachedRegistry
       byAccount: parsed.byAccount ?? {},
       lastSyncedId: parsed.lastSyncedId ?? '0',
       lastSyncedAt: parsed.lastSyncedAt ?? 0,
+      lastFullSyncedAt: parsed.lastFullSyncedAt ?? 0,
     };
   } catch {
     return { byAccount: {}, lastSyncedId: '0', lastSyncedAt: 0 };
@@ -114,6 +121,29 @@ function readRegistry(chainId: number, keystoreAddress?: string): CachedRegistry
 
 function writeRegistry(chainId: number, registry: CachedRegistry, keystoreAddress?: string): void {
   storageSetItem(storageKey(chainId, keystoreAddress), JSON.stringify(registry));
+}
+
+/**
+ * `&entrypoint=…` naming the configured pool (public build config, the same for
+ * every client), so the ASP serves that pool's keystore registry. Without it a
+ * chain whose pools use different keystores (Sepolia staging) answers 400.
+ * '' when unresolved.
+ */
+export async function registryEntrypointParam(
+  chainId: number,
+  resolve: (chainId: number) => Promise<string | undefined> = resolveConfiguredEntrypoint,
+): Promise<string> {
+  try {
+    const entrypoint = await resolve(chainId);
+    return entrypoint ? `&entrypoint=${encodeURIComponent(entrypoint.toLowerCase())}` : '';
+  } catch {
+    return '';
+  }
+}
+
+/** The ASP answered for another keystore than this scope's: never cache that under this scope. */
+export function isOtherKeystore(served: unknown, keystoreAddress?: string): boolean {
+  return typeof served === 'string' && !!keystoreAddress && served.toLowerCase() !== keystoreAddress.toLowerCase();
 }
 
 // Per-process flag set when the ASP returns 404 once. Avoids
@@ -170,7 +200,11 @@ export async function refreshViewingKeyRegistry(chainId: number, keystoreAddress
   const outcome = await syncViewingKeys(chainId, keystoreAddress, true);
   if (outcome.ok) {
     lastFullResyncOk.set(scope, Date.now());
+    const synced = readRegistry(chainId, keystoreAddress);
+    synced.lastFullSyncedAt = Date.now();
+    writeRegistry(chainId, synced, keystoreAddress);
     fullResyncFailed.delete(scope);
+    notifyRegistrySynced();
   } else {
     fullResyncFailed.set(scope, true);
   }
@@ -202,7 +236,7 @@ export async function syncViewingKeys(
   }
   const registry = readRegistry(chainId, keystoreAddress);
   const sinceId = fromStart ? '0' : registry.lastSyncedId;
-  const url = `${ASP_URL}/${chainId}/public/viewing-keys?sinceId=${sinceId}`;
+  const url = `${ASP_URL}/${chainId}/public/viewing-keys?sinceId=${sinceId}${await registryEntrypointParam(chainId)}`;
   let response: Response;
   try {
     response = await policedFetch('asp', ASP_URL, url, {
@@ -227,6 +261,10 @@ export async function syncViewingKeys(
   }
   if (!payload || !Array.isArray(payload.keys) || typeof payload.lastSyncedId !== 'string') {
     return { ok: false, reason: 'parse' };
+  }
+  if (isOtherKeystore(payload.keystore, keystoreAddress)) {
+    aspUnavailable.set(scope, true);
+    return { ok: false, reason: 'not-deployed' };
   }
 
   let applied = 0;
@@ -398,4 +436,17 @@ export function clearViewingKeysCache(chainId: number, keystoreAddress?: string)
     }
   }
   aspUnavailable.delete(cacheScope(chainId, keystoreAddress));
+}
+
+/**
+ * True when the grid's full re-pull for this scope succeeded within the last two
+ * windows and has not failed since, so the local map can stand in for the chain
+ * (a hit is current, a miss means unregistered). Pure local state, no request.
+ */
+export function isViewingKeyRegistryFresh(chainId: number, keystoreAddress?: string, now = Date.now()): boolean {
+  const scope = cacheScope(chainId, keystoreAddress);
+  // The persisted stamp lets a reload inside the window answer at once; this
+  // process's own failed full pull still wins.
+  const at = Math.max(lastFullResyncOk.get(scope) ?? 0, readRegistry(chainId, keystoreAddress).lastFullSyncedAt ?? 0);
+  return at > 0 && !fullResyncFailed.get(scope) && now - at <= 2 * FULL_RESYNC_INTERVAL_MS + 60_000;
 }

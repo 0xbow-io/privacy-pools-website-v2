@@ -373,7 +373,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
       // Reads the named chain's keystore, not the active session's. Also the
       // only load-time viewing-key read the receive prompts rely on.
       const identity = await keystoreStatusForChain(chainId);
-      if (identity === 'unknown') throw new Error(`Registration on chain ${chainId} could not be read.`);
+      if (identity === 'unknown') throw new Error(`Registration on chain ${chainId} is still syncing. Try again in a moment.`);
       setReceiveSetup(sessionAddress ?? address, chainId, receiveSetupFromIdentity(identity), 'onchain');
       // 'partial' and 'incompatible' both have an auth policy.
       const registered = identity !== 'unregistered';

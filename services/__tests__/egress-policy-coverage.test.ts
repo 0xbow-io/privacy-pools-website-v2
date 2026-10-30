@@ -118,7 +118,7 @@ describe('real request construction reaches the egress allowlist', () => {
       // The epoch rows carry Hex epoch numbers; the rate-leaves path stays decimal.
       expect(sent.some((r) => new URL(r.url).pathname === '/11155111/public/points/epochs/3/rate-leaves')).toBe(true);
       expect(sent.some((r) => r.url.includes('include=deposits%2Ctransacts%2Cragequits%2Cleaves%2CkeystoreLeaves%2Cnotes&sinceBlock=10930000&entrypoint='))).toBe(true);
-      const paths = [...sent.map((r) => new URL(r.url).pathname), '/11155111/public/note-events', '/11155111/public/viewing-keys'];
+      const paths = [...sent.map((r) => new URL(r.url).pathname), '/11155111/public/note-events', '/11155111/public/viewing-keys', '/11155111/public/nullifying-key-hashes'];
       expect(policy.ASP_ROUTES.filter((route) => !paths.some((path) => route.path.test(path)))).toEqual([]);
     });
   }, 20_000);

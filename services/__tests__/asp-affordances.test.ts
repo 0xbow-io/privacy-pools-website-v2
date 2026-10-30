@@ -231,6 +231,9 @@ test('public price and gas price feeds register every build-supported EVM chain 
     fetchPpUsdcVaultMetricsFeed: (chain: number) => `vault-metrics-fetch:${chain}`,
     FULL_RESYNC_INTERVAL_MS: 60_000,
     refreshViewingKeyRegistry: (chain: number) => `viewing-key-refresh:${chain}`,
+    NULLIFYING_KEY_HASH_INTERVAL_MS: 300_000,
+    NULLIFYING_KEY_HASH_RETRY_MS: 30_000,
+    syncNullifyingKeyHashes: async (chain: number) => ({ ok: true, appliedEntries: 0, lastSyncedId: `nullifying-key-hash-sync:${chain}` }),
     getChainConfig: () => undefined,
     LEGACY_CONFIG: undefined,
     feedYieldDeposits: (chain: number | string) => `yield-deposits:${chain}`,
@@ -302,6 +305,9 @@ test('public price and gas price feeds register every build-supported EVM chain 
     // The viewing-key registry's full re-pull rides the grid too, not a
     // per-lookup trigger — see services/viewing-key-cache.ts (review of #130).
     expect(registrations.filter((f) => f.key === `viewing-key-registry:${chain}`).map((f) => f.fetch())).toEqual([`viewing-key-refresh:${chain}`]);
+    // So does the nullifying-key-hash registry the identity check reads.
+    expect(await Promise.all(registrations.filter((f) => f.key === `nullifying-key-hash-registry:${chain}`).map((f) => f.fetch())))
+      .toEqual([{ ok: true, appliedEntries: 0, lastSyncedId: `nullifying-key-hash-sync:${chain}` }]);
     // Points epochs: every chain, whatever the wallet holds.
     expect(registrations.filter((f) => f.key === `points-epochs:${chain}`).map((f) => f.fetch())).toEqual([`points-fetch:${chain}`]);
   }
