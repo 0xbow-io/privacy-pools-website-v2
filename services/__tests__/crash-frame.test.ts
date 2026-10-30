@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { privateErrorReportEvent } from '../error-reports-event';
 import { firstComponentName, firstFramePosition, parseComponentFrames } from '../crash-frame';
 
 // The shapes a real stack has: Chrome's production web stack (React 19), where the
@@ -32,6 +33,22 @@ describe('component stack frames', () => {
     expect(firstFramePosition('    at Foo (https://h/a/b/c.js?token=0xabc:1:2)')).toBeUndefined();
     // The path is dropped: only the final segment is read.
     expect(firstFramePosition('    at Foo (https://h/a/b/index-ab.js:1:2)')).toBe('at_index_ab_js_1_2');
+  });
+
+  test('a Firefox anonymous frame still gives a position', () => {
+    expect(firstFramePosition('@https://host/index-ab.js:1:2')).toBe('at_index_ab_js_1_2');
+    expect(firstComponentName('@https://host/index-ab.js:1:2')).toBeUndefined();
+  });
+
+  test('a long build file name keeps the position under the limit, line and column whole', () => {
+    const file = `index-${'a'.repeat(60)}.js`;
+    const position = firstFramePosition(`    at Foo (https://h/${file}:123456:789)`);
+    expect(position).toBeDefined();
+    expect(position!.length).toBeLessThanOrEqual(64);
+    expect(position!.endsWith('_123456_789')).toBe(true);
+    expect(/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(position!)).toBe(true);
+    const event = privateErrorReportEvent({ contexts: { errorReport: { message: 'client-failed', code: { componentPosition: position } } } }, {});
+    expect(JSON.stringify(event)).toContain(position!);
   });
 
   test('nothing in, nothing out', () => {

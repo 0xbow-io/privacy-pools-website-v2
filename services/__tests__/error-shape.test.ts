@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { errorShape, isCodeName } from '../error-shape';
+import { errorShape, isCodeName, isReportableName } from '../error-shape';
+import { forbiddenCrashNames } from '../crash-name-denylist';
 import { privateErrorReportEvent } from '../error-reports-event';
 
 const CODE_IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
@@ -25,6 +26,24 @@ describe('the shape of a crash message', () => {
     expect(errorShape("Cannot read properties of undefined (reading 'ppUSDT')")).toBeUndefined();
     expect(errorShape("Cannot read properties of undefined (reading '4001.21')")).toBeUndefined();
     expect(errorShape("Cannot read properties of undefined (reading '12 USDC')")).toBeUndefined();
+  });
+
+  test('a token or chain name is refused in ANY case, derived from the real config', () => {
+    for (const name of ['fdusd', 'ppusdt', 'usdc', 'weth', 'eth', 'bnb', 'ppeth', 'Ppusdc']) {
+      expect(errorShape(`Cannot read properties of undefined (reading '${name}')`)).toBeUndefined();
+      expect(errorShape(`${name} is not a function`)).toBeUndefined();
+      expect(isReportableName(name)).toBe(false);
+    }
+    // A chain name from the registry, whatever its case.
+    const chain = [...forbiddenCrashNames()].find((n) => /^[a-z]{4,}$/.test(n) && !['eth', 'bnb'].includes(n));
+    expect(chain).toBeDefined();
+    expect(errorShape(`Cannot read properties of undefined (reading '${chain}')`)).toBeUndefined();
+    // The set comes from the registry: it holds the symbols the app really lists.
+    const names = forbiddenCrashNames();
+    for (const n of ['fdusd', 'usdc', 'eth']) expect(names.has(n)).toBe(true);
+    // Ordinary code names still pass.
+    expect(isReportableName('decimals')).toBe(true);
+    expect(errorShape("Cannot read properties of undefined (reading 'decimals')")).toBe('read_undefined_decimals');
   });
 
   test('an unrecognised message is not reported, and a number or nothing is not either', () => {
