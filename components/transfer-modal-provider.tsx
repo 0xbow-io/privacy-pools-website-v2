@@ -90,6 +90,7 @@ import {
 import { ENS_UNSUPPORTED_MESSAGE, isPotentialEnsName, normalizeEnsName } from '@/services/ens';
 import { CopyIconButton } from '@/components/ui/copy-address';
 import { OpShell } from '@/components/op-shell';
+import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 import { ConsolidationShell } from '@/components/consolidation-shell';
 import { ConsolidationAssetList } from '@/components/consolidation-asset-list';
 import { ConsolidationPanel, ConsolidationSummary, ConsolidationGroupSummary } from '@/components/consolidation-panel';
@@ -3578,6 +3579,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         testID="receipt-leave-confirm"
       />
       {isOpen && (
+        <HubErrorBoundary onRetry={closeTransferModal}>
         <TransferShell
           inline={inlineHubActive}
           isSheet={isSheet}
@@ -4492,6 +4494,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
             )}
 
         </TransferShell>
+        </HubErrorBoundary>
       )}
 
       {/* "Receive as" picker — the same sheet the Shield tab uses, with its
@@ -4500,6 +4503,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           same-chain, so offering a chain switch would abandon the Send form for
           a route nothing can serve. */}
       {isOpen && receiveSelectorOpen && receiveAsAvailable && (
+        <HubErrorBoundary onRetry={closeTransferModal}>
         <TokenSelectSheet
           tokens={receiveTokens}
           networks={sendDestinations.map((id) => ({
@@ -4552,6 +4556,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           onClose={() => setReceiveSelectorOpen(false)}
           title="Receive as"
         />
+        </HubErrorBoundary>
       )}
     </TransferModalContext.Provider>
   );

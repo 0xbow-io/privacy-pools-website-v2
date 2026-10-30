@@ -20,7 +20,10 @@ import { reportErrorReport } from '@/services/error-reports';
 import { firstComponentName, firstFramePosition } from '@/services/crash-frame';
 import { errorShape } from '@/services/error-shape';
 
-type Props = { children: React.ReactNode };
+// onRetry: a modal shell keeps its open state in its provider, so a bare remount
+// would draw the same shell again. The provider passes its close, so Try again
+// leaves the user on a clean page.
+type Props = { children: React.ReactNode; onRetry?: () => void };
 type State = { crashed: boolean; attempt: number };
 
 export class HubErrorBoundary extends React.Component<Props, State> {
@@ -48,6 +51,11 @@ export class HubErrorBoundary extends React.Component<Props, State> {
   }
 
   private retry = (): void => {
+    try {
+      this.props.onRetry?.();
+    } catch {
+      /* A failing close must not trap the user in the fallback. */
+    }
     // A new key remounts the card, so its own state starts clean.
     this.setState((s) => ({ crashed: false, attempt: s.attempt + 1 }));
   };

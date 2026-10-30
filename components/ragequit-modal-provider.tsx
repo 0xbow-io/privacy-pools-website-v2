@@ -59,6 +59,7 @@ import { getTokenMetadata } from '@/config/tokens';
 
 import { useBackHandler } from '@/hooks/use-back-handler';
 import { useNativeMockBlock } from '@/hooks/use-native-mock-block';
+import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 
 const NATIVE_ASSET_ADDRESS = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 
@@ -743,6 +744,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
     <RagequitModalContext.Provider value={{ openRagequitModal, closeRagequitModal }}>
       {children}
       {isOpen && (
+        <HubErrorBoundary onRetry={closeRagequitModal}>
         <View
           className={`inset-0 z-[999999] items-center ${isSheet ? 'justify-end' : 'justify-center'}`}
           // nw-keep(platform-css): web-only position:fixed anchors the overlay over scrolling content; empty object on native
@@ -1013,6 +1015,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
             </View>
           </Animated.View>
         </View>
+        </HubErrorBoundary>
       )}
     </RagequitModalContext.Provider>
   );

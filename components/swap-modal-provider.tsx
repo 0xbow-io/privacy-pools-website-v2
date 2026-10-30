@@ -101,6 +101,7 @@ import { assertRelayerSwapProcessor } from '@/services/relayer-details';
 import { registerSwapHandoff } from '@/services/swap-handoff';
 import { noteShortfall, noteShortfallMessage } from '@/services/swap-note-shortfall';
 import { OpShell } from '@/components/op-shell';
+import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 import { FlowProgress } from '@/components/ui/flow-progress';
 import { useInlineOpsCapable } from '@/hooks/use-inline-ops-capable';
 import {
@@ -2713,6 +2714,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         testID="swap-claim-link-leave-confirm"
       />
       {isOpen && (
+        <HubErrorBoundary onRetry={closeSwapModal}>
         <OpShell
           inline={inlineHubActive}
           isSheet={isSheet}
@@ -3616,12 +3618,14 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
               </View>
             )}
         </OpShell>
+        </HubErrorBoundary>
       )}
 
       {/* Output token + destination network — the SAME two-pane selector the
           deposit modal uses. The network pane IS the destination-chain
           picker; it lists one chain until cross-chain destinations exist. */}
       {isOpen && selectorOpen && (
+        <HubErrorBoundary onRetry={closeSwapModal}>
         <TokenNetworkSelector
           tokens={outputTokens}
           networks={destinationChains}
@@ -3647,6 +3651,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
           onClose={() => setSelectorOpen(false)}
           networkTitle="Destination network"
         />
+        </HubErrorBoundary>
       )}
     </SwapModalContext.Provider>
   );

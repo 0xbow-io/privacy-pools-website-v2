@@ -182,6 +182,7 @@ import { PairArrow } from '@/components/ui/pair-arrow';
 import { TokenSelectSheet } from '@/components/ui/token-select-sheet';
 import { CopyIconButton } from '@/components/ui/copy-address';
 import { OpShell } from '@/components/op-shell';
+import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 import { useInlineOpsCapable } from '@/hooks/use-inline-ops-capable';
 import { isRelayerNullifierInFlight, isRelayerOutOfGas, isRelayerRateLimited, isRelayerUnreachable, isRelayWaitTimeout, relayerOutOfGasMessage, relayerRateLimitedMessage, relayInFlightMessage, timedOutRelayTxHash } from '@/services/transfer-outcome';
 import { aspBusyMessage } from '@/services/asp-backoff';
@@ -4968,6 +4969,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     <WithdrawModalContext.Provider value={{ openWithdrawModal, closeWithdrawModal, isOpen, inlineActive: isOpen && inlineHubActive, inlineStep: step, syncInlineAmount, inlineAmount: amount, inlineToken: selectedToken, syncInlineToken, spendabilityLoading, spendabilityError, retrySpendability: retryAssociationSetLeaves, getSpendableBalanceWei, getWithdrawMaxWei }}>
       {children}
       {isOpen && (
+        <HubErrorBoundary onRetry={closeWithdrawModal}>
         <OpShell
           inline={inlineHubActive}
           isSheet={isSheet}
@@ -6192,6 +6194,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
             )}
 
         </OpShell>
+        </HubErrorBoundary>
       )}
 
       {/* "Receive as" picker — the SAME sheet the Shield tab uses to pick an
@@ -6203,6 +6206,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           the pair can route, in which case picking one turns the exit into a
           cross-chain delivery. */}
       {isOpen && receiveSelectorOpen && (
+        <HubErrorBoundary onRetry={closeWithdrawModal}>
         <TokenSelectSheet
           tokens={receiveTokens}
           networks={receiveDestinations.map((id) => ({
@@ -6313,6 +6317,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           onClose={() => setReceiveSelectorOpen(false)}
           title="Receive as"
         />
+        </HubErrorBoundary>
       )}
     </WithdrawModalContext.Provider>
   );

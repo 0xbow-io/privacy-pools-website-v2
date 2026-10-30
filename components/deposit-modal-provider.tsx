@@ -1,5 +1,6 @@
 import { SWAP_DEPOSIT_REFUND_NOTE } from '@/services/swap-deposit-copy';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
+import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 import { shieldHeadroomRoomText } from '@/services/shield-headroom-copy';
 import { relaunchReady } from '@/services/deposit-relaunch';
 import { simulateWithAllowanceOverride } from '@/services/allowance-override-sim';
@@ -4330,6 +4331,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
         testID="claim-link-leave-confirm"
       />
       {sheetVisible && (
+        <HubErrorBoundary onRetry={closeDepositModal}>
         <View
           // justify branches are mutually exclusive: co-active `justify-center`+`justify-end`
           // resolve by CSS file order on web (center wins) — old style array was later-wins (end).
@@ -4814,6 +4816,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
             </View>
           </Animated.View>
         </View>
+        </HubErrorBoundary>
       )}
 
       {/* Token picker — a layer ON TOP of the deposit modal: full-screen on
