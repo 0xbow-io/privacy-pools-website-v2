@@ -6,12 +6,12 @@ It lives in its own Vercel project, `privacy-pools-artifacts`, under `/artifacts
 - **Version** is 12 hex chars of a sha256 over every file's path and content hash
   (`scripts/artifacts-version.mjs`). It works on an lfs pointer checkout too, so a build never needs the 1.2 GB.
 - **Origin** is `EXPO_PUBLIC_ARTIFACTS_ORIGIN`, default `config/artifacts-origin.json`
-  (https only, anything else falls back to the default). Point it at `artifacts.privacypools.com` once that domain exists.
+  (https only, anything else falls back to the default). It is `https://artifacts.privacypools.com`, a first-party subdomain attached to the `privacy-pools-artifacts` Vercel project.
 - **App build on Vercel** sets `EXPO_PUBLIC_ARTIFACTS_VERSION`, the app reads
   `<origin>/artifacts/<version>/...` directly (`config/artifacts.ts`), and `scripts/artifacts-offload.mjs`
   checks the artifacts project serves that version, then removes `dist/artifacts`. If the version is not
   published the build fails, so nothing can go live pointing at missing files.
-  The browser therefore contacts the artifacts origin (the 0xbow Vercel project, the same operator as the app).
+  The browser therefore contacts the artifacts origin, a first-party subdomain served by the same operator as the app.
   Responses are `immutable, max-age=1 year` with `Access-Control-Allow-Origin: *`.
 - **Local dev and e2e** leave the version empty and read the flat `/artifacts/...` that `public/` serves.
 - **A 404 on a versioned file** means the tab is older than the deployed circuits: the loader reports it

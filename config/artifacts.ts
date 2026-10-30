@@ -8,8 +8,8 @@
 // (services/stale-assets.ts).
 //
 // The origin is EXPO_PUBLIC_ARTIFACTS_ORIGIN, default config/artifacts-origin.json
-// (the privacy-pools-artifacts Vercel project; point it at artifacts.privacypools.com
-// once that domain exists). Local dev and e2e leave the version empty and read the
+// (artifacts.privacypools.com, the privacy-pools-artifacts Vercel project on a
+// first-party subdomain). Local dev and e2e leave the version empty and read the
 // flat /artifacts that public/ serves on the app's own origin.
 //
 // Static `process.env.EXPO_PUBLIC_*` members: Expo only inlines those.
