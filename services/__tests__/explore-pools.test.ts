@@ -5,6 +5,7 @@ import {
   EXPLORE_POOLS_PAGE_SIZE,
   applyChainFilter,
   filterRowsToChains,
+  formatCompactTokenAmount,
   formatPoolTokenAmount,
   poolChainFilterOptions,
   poolTableChains,
@@ -244,5 +245,20 @@ describe('showMoreLabel', () => {
   test('counts only when one tap leaves rows hidden', () => {
     expect(showMoreLabel(50, 71)).toBe('Show more (50 of 71)');
     expect(showMoreLabel(5, 5)).toBe('Show more');
+  });
+});
+
+describe('formatCompactTokenAmount', () => {
+  test('one shape for every pool size', () => {
+    expect(formatCompactTokenAmount(134.36539, 'ETH')).toBe('134.37 ETH');
+    expect(formatCompactTokenAmount(55414.12, 'USDC')).toBe('55.41K USDC');
+    expect(formatCompactTokenAmount(12.02698, 'ETH')).toBe('12.02698 ETH');
+  });
+
+  test('picks the unit from the rounded figure', () => {
+    expect(formatCompactTokenAmount(999.996, 'ETH')).toBe('1.00K ETH');
+    expect(formatCompactTokenAmount(999_996, 'USDC')).toBe('1.00M USDC');
+    expect(formatCompactTokenAmount(999.99, 'ETH')).toBe('999.99 ETH');
+    expect(formatCompactTokenAmount(999_990, 'USDC')).toBe('999.99K USDC');
   });
 });

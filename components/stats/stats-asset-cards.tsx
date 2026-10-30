@@ -47,7 +47,7 @@ const CARD_OVERFLOW = { overflow: 'visible' } as const;
  */
 function MiniStat({ label, value, stacked }: { label: string; value: string | null; stacked: boolean }) {
   return (
-    <View className={stacked ? 'min-w-[84px] flex-1 gap-[2px]' : 'flex-1 gap-[2px]'}>
+    <View className={stacked ? 'w-1/3 gap-[2px] pr-[8px]' : 'flex-1 gap-[2px]'}>
       <Text
         numberOfLines={1}
         className="font-pp-semi-bold text-[10px] uppercase leading-[12px] tracking-[0.4px] text-text-muted"
@@ -130,7 +130,7 @@ function AssetRow({
         {/* The figures, spread across the rest of the row rather than packed
             against the identity block. On a wide screen the old fixed-width
             strip left most of the card empty. */}
-        <View className={stacked ? 'flex-row flex-wrap gap-x-[14px] gap-y-[10px]' : 'flex-[3] flex-row items-center gap-[12px]'}>
+        <View className={stacked ? 'flex-row flex-wrap gap-y-[10px]' : 'flex-[3] flex-row items-center gap-[12px]'}>
           {columns.map((column) => (
             <MiniStat key={column.key} label={column.label} value={column.get(row)} stacked={stacked} />
           ))}
