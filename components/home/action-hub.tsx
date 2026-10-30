@@ -77,7 +77,7 @@ import { getUiParam, pushUiParamEntry, retireUiParamEntry, rebaseUiParamEntry, s
 import { useShareYield } from '@/hooks/use-share-yield';
 import { useYieldVaultProbeVersion } from '@/hooks/use-yield-vault-probe';
 import { displayTokenSymbol, isShareSymbol, shareRedemptionDisclosure } from '@/services/share-display';
-import { formatTokenBalance, isStablecoin } from '@/services/token-format';
+import { amountInputDisplay, formatTokenBalance, groupThousands, isStablecoin, stripAmountSeparators } from '@/services/token-format';
 import { conversionFundingToken, targetAcceptsConversion } from '@/config/intent-targets';
 import { getYieldShareToken } from '@/services/share-yield';
 import { compactPhoneLayout } from '@/services/header-nav';
@@ -299,6 +299,9 @@ export function ActionHub({
   // component's life: a fresh arrow each render would make React call it with
   // null on every keystroke and report a blur mid-typing.
   const amountFieldFocused = useRef(false);
+  // The same focus as state: the amount field shows grouped figures (4,526.5)
+  // only while nobody types in it, raw text while focused (services/token-format).
+  const [amountFocused, setAmountFocused] = useState(false);
   const onInputBlurRef = useRef(onInputBlur);
   useEffect(() => { onInputBlurRef.current = onInputBlur; }, [onInputBlur]);
   const amountFieldRef = useCallback((node: unknown) => {
@@ -3193,7 +3196,7 @@ export function ActionHub({
           className={`items-center rounded-[6px] border px-[7px] py-[3px] ${activePreset ? 'border-tint' : 'border-border bg-card-background'} ${outOfReach ? 'opacity-40' : ''}`}
         >
           <Text className={`text-[11px] font-pp-regular ${activePreset ? 'text-tint' : outOfReach ? 'text-text-secondary' : 'text-text'}`}>
-            {zoneFiatEntry ? usdChipLabel(preset, fiatPrice) : a === 'withdraw' && isShareSymbol(tokenMeta.symbol) ? `${preset} ${amountField.symbol}` : preset}
+            {zoneFiatEntry ? usdChipLabel(preset, fiatPrice) : groupThousands(a === 'withdraw' && isShareSymbol(tokenMeta.symbol) ? `${preset} ${amountField.symbol}` : preset)}
           </Text>
         </Pressable>
       );
@@ -3435,8 +3438,10 @@ export function ActionHub({
             <Text testID="hub-fiat-prefix" className={`py-[2px] font-pp-sans-bold ${heroText} tracking-[-1px] text-text-secondary`}>$</Text>
           ) : null}
           <TextInput
-            value={zoneFiatEntry ? shareFiatEntry ? amountField.usdValue : usdInput : isRequestCard ? requestAmount : amountField.value}
-            onChangeText={(text) => {
+            value={amountInputDisplay(zoneFiatEntry ? shareFiatEntry ? amountField.usdValue : usdInput : isRequestCard ? requestAmount : amountField.value, amountFocused)}
+            onChangeText={(typed) => {
+              // A pasted "4,526.50" is "4526.50": separators are display only.
+              const text = stripAmountSeparators(typed);
               // Request: the provider owns the figure (it is the value the
               // created payload carries), so push instead of storing a second
               // copy here. It sanitises with the REQUEST token's decimals —
@@ -3477,8 +3482,8 @@ export function ActionHub({
             // node's own lifecycle: React calls it with null exactly once, on
             // unmount, so an input that dies focused still reports its blur.
             ref={amountFieldRef}
-            onFocus={() => { amountFieldFocused.current = true; onEngage?.(); onInputFocus?.(); }}
-            onBlur={() => { amountFieldFocused.current = false; onInputBlur?.(); setCtaRevealTick((n) => n + 1); }}
+            onFocus={() => { amountFieldFocused.current = true; setAmountFocused(true); onEngage?.(); onInputFocus?.(); }}
+            onBlur={() => { amountFieldFocused.current = false; setAmountFocused(false); onInputBlur?.(); setCtaRevealTick((n) => n + 1); }}
             placeholder="0"
             // nw-keep(data-color): placeholder color is a TextInput sink (theme token, no className path)
             placeholderTextColor={colors.textMuted}
@@ -3493,7 +3498,7 @@ export function ActionHub({
             // nw-keep(measured-or-inset): font size shrinks to the measured field width for long figures
             style={[WEB_NO_OUTLINE, {
               fontSize: fitAmountFontSize(
-                zoneFiatEntry ? shareFiatEntry ? amountField.usdValue : usdInput : isRequestCard ? requestAmount : amountField.value,
+                amountInputDisplay(zoneFiatEntry ? shareFiatEntry ? amountField.usdValue : usdInput : isRequestCard ? requestAmount : amountField.value, amountFocused),
                 amountFieldWidths[a] ?? 0,
                 tight ? 34 : 44,
               ),
@@ -3638,7 +3643,7 @@ export function ActionHub({
                       : 'Shielded balance'}
               </Text>
               <Text className="font-pp-mono text-[12.5px] text-primary">
-                {a === 'shield'
+                {groupThousands(a === 'shield'
                   ? (walletBalanceLoading
                     ? '—'
                     // walletBalanceText is the PAY token's balance (formatted with
@@ -3655,7 +3660,7 @@ export function ActionHub({
                         : spendableBalanceLabel(withdrawSpendableExact, pageTargetSymbol, () => pageBalanceView.text))
                     : (poolsLoading
                       ? '—'
-                      : pageBalanceView.text)}
+                      : pageBalanceView.text))}
               </Text>
             </Pressable>
             {a !== 'shield' && !poolsLoading && !stellarLocked && !(a === 'withdraw' && withdrawBalanceBlocked) ? <ShareCountHint hint={pageBalanceView.hint} /> : null}
@@ -3687,7 +3692,7 @@ export function ActionHub({
                       ? 'sign in to view'
                       : poolsLoading
                       ? '—'
-                      : pageBalanceView.text}
+                      : groupThousands(pageBalanceView.text)}
                   </Text>
                   {!poolsLoading && pageBalanceView.hint ? <Text className="text-text-muted">{' ⓘ'}</Text> : null}
                   {!poolsLoading && pageShielded.pending > 0 ? (
@@ -3698,7 +3703,7 @@ export function ActionHub({
               </HoverHint>
             ) : pageShielded.pending > 0 ? (
               <View className="flex-row items-center gap-[4px]">
-                <Pill tone="warning" label={`+${pagePendingView.text} pending`} />
+                <Pill tone="warning" label={`+${groupThousands(pagePendingView.text)} pending`} />
                 <ShareCountHint hint={pagePendingView.hint} />
               </View>
             ) : null}
@@ -3758,7 +3763,7 @@ export function ActionHub({
                 className={`items-center px-[12px] py-[6px] rounded-[8px] border ${activePreset ? 'border-tint' : 'border-border-light bg-transparent'}`}
               >
                 <Text className={`text-[13px] font-pp-regular ${activePreset ? 'text-tint' : 'text-text'}`}>
-                  {preset}
+                  {groupThousands(preset)}
                 </Text>
               </Pressable>
             );

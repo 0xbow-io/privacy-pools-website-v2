@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { approxUnderlyingText, displayTokenSymbol, isShareSymbol, shareAmountText, shareRedemptionDisclosure, shareSubtitle, wrapsIntoShareSubtitle } from '@/services/share-display';
+import { approxUnderlyingText, displayTokenSymbol, isShareSymbol, previewReceiveFigure, shareAmountText, shareRedemptionDisclosure, shareSubtitle, wrapsIntoShareSubtitle } from '@/services/share-display';
 
 describe('share display', () => {
   test('a share is headlined by its underlying; everything else keeps its symbol', () => {
@@ -121,5 +121,13 @@ describe('share review figures', () => {
     expect(shareReviewHeadline({ ...base, underlying: null, pending: false })).toBe('100 ppUSDC');
     expect(shareReviewHeadline({ ...base, underlying: null, pending: false })).toContain('ppUSDC');
     expect(shareReviewHeadline({ ...base, isShare: false, shareSymbol: 'ETH', underlyingSymbol: 'ETH', underlying: null, pending: false })).toBe('100 ETH');
+  });
+  test('the greyed receive preview is the redeemed underlying, never the share count', () => {
+    // 4000 USDC typed at a 1.005 rate is 3,980.01 shares: the preview must read 4000.
+    expect(previewReceiveFigure({ isShare: true, amount: 3980.012378, underlying: 4000 })).toBe(4000);
+    // The rate is not known yet: no number rather than a wrong one.
+    expect(previewReceiveFigure({ isShare: true, amount: 3980.012378, underlying: null })).toBeNull();
+    // A plain pool has no rate: the amount itself.
+    expect(previewReceiveFigure({ isShare: false, amount: 4000, underlying: null })).toBe(4000);
   });
 });

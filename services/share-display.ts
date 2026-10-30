@@ -162,6 +162,18 @@ export function shareReviewHeadline(args: {
 }
 
 /**
+ * The number in the greyed "Receive publicly as USDC" preview on the Withdraw
+ * form, shown before Review. A share pool holds the amount in SHARES, so the
+ * figure must be the redeemed underlying: printing the share count under the
+ * coin's name understated a 4000 USDC exit as 3,980.01 when the rate was 1.005.
+ * Null while the redeem read is unknown, so the caller shows a dash rather than
+ * a wrong number.
+ */
+export function previewReceiveFigure(args: { isShare: boolean; amount: number; underlying: number | null }): number | null {
+  return args.isShare ? args.underlying : args.amount;
+}
+
+/**
  * Preformatted raw units at a display boundary, without claiming a share is
  * 1:1. Renames and marks only; convert first where a rate is available.
  */
