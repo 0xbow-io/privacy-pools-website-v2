@@ -119,3 +119,6 @@ scripts/stellar/.state/
 /try-device.sh
 *.log
 .gradle/
+
+# staged copy for scripts/deploy-artifacts.mjs
+.artifacts-stage

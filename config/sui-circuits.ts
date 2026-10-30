@@ -20,13 +20,15 @@
  * EXPO_PUBLIC_SUI_ARTIFACT_BASE_URL instead of bundling them into the build.
  */
 
+import { ARTIFACTS_PATH } from '@/config/artifacts';
+
 /**
  * Base URL where SUI circuit artifacts are hosted. Defaults to same-origin
  * /artifacts/sui — namespaced apart from the EVM circuits at /artifacts (the
  * Sui pool registers DIFFERENT transact VKs: tagged SuiTransact wrappers).
  */
 export const CIRCUIT_ARTIFACT_BASE_URL =
-  process.env.EXPO_PUBLIC_SUI_ARTIFACT_BASE_URL?.trim().replace(/\/+$/, '') || '/artifacts/sui';
+  process.env.EXPO_PUBLIC_SUI_ARTIFACT_BASE_URL?.trim().replace(/\/+$/, '') || `${ARTIFACTS_PATH}/sui`;
 
 export type SuiCircuitType = 'deposit' | 'ragequit' | 'transact';
 
