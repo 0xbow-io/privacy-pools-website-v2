@@ -119,9 +119,9 @@ export const TOR_PROVIDERS: readonly TorProvider[] = ([
     // client there is Arti, so the label names the network instead.
     id: 'tor-js',
     label: TOR_ON_DEVICE ? 'Tor' : 'tor-js',
-    // tor-js 0.4.3, as the specifier named it on 2026-10-07 (verified 2026-10-15:
-    // same owner, bundle keccak matches on all three resolvers).
-    workerHash: '0xe39f8c42ed72b7f580a73c46c3300f6d3ad3954bbc26e5fe075b18c48fedc8b5',
+    // tor-js 0.4.4, as the specifier named it on 2026-10-30 (verified that day:
+    // the bundle keccak matches on the jsDelivr, unpkg and GitHub resolvers).
+    workerHash: '0x5b62f358ce7a2b94ee9bc3a0e6a08757db68fa08fc348276f31eda788aec818b',
     needsGateway: true,
     webOnly: false,
     hint: 'Tor, run in your browser. It connects through a gateway, which sees that you connected but not what you asked for.',

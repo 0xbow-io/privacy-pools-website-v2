@@ -137,7 +137,7 @@ describe('Tor configuration', () => {
     expect(harness.KNOWN_WORKERS.filter(w => w.kind === 'network').map(w => w.id)).toEqual(settings.TOR_PROVIDERS.map(p => p.id));
     for (const p of settings.TOR_PROVIDERS) expect(harness.knownWorker(p.id).requiredConfig.length > 0).toBe(p.needsGateway);
     expect(settings.TOR_PROVIDERS.map(p => [p.id, p.workerHash])).toEqual([
-      ['tor-js', '0xe39f8c42ed72b7f580a73c46c3300f6d3ad3954bbc26e5fe075b18c48fedc8b5'],
+      ['tor-js', '0x5b62f358ce7a2b94ee9bc3a0e6a08757db68fa08fc348276f31eda788aec818b'],
       ['nym', '0xf13a448a8721b9d0b20da3d5b80ffe00bf4c5bb3aae812a38d3d1e3bc81fceb8'],
       ['nox', '0xd9fa04b080a33062680a27cad828196bfb04615a0ebc76bcbffedb6dcbe838d4'],
     ]);
