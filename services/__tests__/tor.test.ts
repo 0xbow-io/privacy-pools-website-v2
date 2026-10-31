@@ -1231,6 +1231,23 @@ describe('isolation groups over the worker pool', () => {
     expect(agents).toEqual(['', '', null, null]);
   });
 
+  test('a start Arti reports blocked by the device clock says to correct the date and time, on a device and on the web', async () => {
+    const CLOCK = "Tor could not start because this device's date and time are wrong. Correct them and try again.";
+    const skew = () => Object.assign(new Error('bootstrap blocked: clock skew'), { code: 'network-error', torKind: 'ClockSkew' });
+    for (const failure of [skew, () => new Error('start failed', { cause: skew() })]) {
+      const device = () => ({ ReplacingWorker: class { close() {} fetch = async () => { throw failure(); }; } });
+      expect(await transport(false, device, { device: true }).tor.probeTorGateway(GATEWAY, 5_000, 'tor-js')).toEqual({ ok: false, message: CLOCK });
+      const page = transport(true, device, { device: true }).tor.torFetchFor('rpc', '')!('https://rpc.example/', {});
+      expect(String(await page.catch((error: unknown) => error))).toContain(CLOCK);
+      const web = transport(false, () => ({ AnonRpcWorker: class { ready = Promise.reject(failure()); close() {} fetch = record; } }));
+      expect(await web.tor.probeTorGateway(GATEWAY, 5_000, 'tor-js')).toEqual({ ok: false, message: CLOCK });
+    }
+    // Any other start failure keeps its message.
+    const other = () => ({ ReplacingWorker: class { close() {} fetch = async () => { throw new Error('bootstrap failed'); }; } });
+    expect(await transport(false, other, { device: true }).tor.probeTorGateway(GATEWAY, 5_000, 'tor-js')).toEqual({ ok: false, message: 'Could not reach the anon-rpc network.' });
+    function record() { return Promise.resolve(Response.json({})); }
+  });
+
   test('routedFetch sends over anon-rpc while Tor is in force, and direct only when it is off', async () => {
     const realFetch = globalThis.fetch;
     const direct: string[] = [];

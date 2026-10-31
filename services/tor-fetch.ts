@@ -315,6 +315,8 @@ async function loadClient(
     // Loud, so a device failure names its cause instead of only the message.
     console.warn('[anon-rpc] client start failed', cause);
     if (cause instanceof TorUnavailableError) throw cause;
+    const skew = clockSkewError(cause);
+    if (skew) throw skew;
     throw new TorUnavailableError('Could not start the anon-rpc client.', { cause });
   } finally {
     unfollow?.();
@@ -503,7 +505,7 @@ function keyedFetch(module: HarnessModule, replacing: ReplacingWorkerLike, group
     try {
       return await send();
     } catch (error) {
-      if (!module.isTorExitFailure?.(error) || init?.signal?.aborted) throw error;
+      if (!module.isTorExitFailure?.(error) || init?.signal?.aborted) throw clockSkewError(error) ?? error;
       return send();
     }
   };
@@ -741,6 +743,16 @@ function torHeaders(headers: HeadersInit | undefined): Record<string, string> {
   const out = Object.fromEntries(new Headers(headers).entries());
   delete out['user-agent'];
   return TOR_ON_DEVICE ? out : { ...out, 'user-agent': '' };
+}
+
+/**
+ * A client start that Arti reports blocked by the device clock, as an error
+ * the user can act on; null for any other failure.
+ */
+function clockSkewError(error: unknown): TorUnavailableError | null {
+  const kind = (e: unknown) => (e as { torKind?: unknown } | null | undefined)?.torKind;
+  if (kind(error) !== 'ClockSkew' && kind((error as { cause?: unknown } | null | undefined)?.cause) !== 'ClockSkew') return null;
+  return new TorUnavailableError("Tor could not start because this device's date and time are wrong. Correct them and try again.", { cause: error });
 }
 
 /**
