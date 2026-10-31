@@ -1,18 +1,19 @@
 import { isHex, keccak256 } from 'viem';
 
 /**
- * Which anon-rpc worker carries a request: its isolation group.
+ * Which isolation group carries a request: a worker of its own, or an
+ * isolation key on a worker that keeps keys apart (services/tor-fetch.ts).
  *
- * Requests on one worker leave from one exit, so whoever sees two of them can
+ * Requests in one group leave from one exit, so whoever sees two of them can
  * link them. The rule (owner ruling, 2026-10-21, "Identity first"): traffic that
- * identifies the user never shares a worker with anything else.
+ * identifies the user never shares a group with anything else.
  *
  * - A request that names one of the user's accounts, or that one of them
  *   signs, goes to that account's group, whoever sends it: balances, token
  *   lists, keystore checks, a screening check, a Sui transaction whose
  *   sender it carries. A request naming two (a wallet paying into an imported key's account)
  *   already links them for whoever receives it, so it goes over the first
- *   one's group, the session's, rather than a third worker.
+ *   one's group, the session's, rather than a third group.
  * - A request about one transaction (broadcasting a signed EVM one, whose
  *   signer the request does not name, or a receipt or status lookup) goes to
  *   that transaction's group. Its sender is public on

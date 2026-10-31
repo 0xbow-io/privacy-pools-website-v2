@@ -367,8 +367,9 @@ export function torFetchIfActive(): TorFetch | null {
 /**
  * Start an operation (see services/tor-groups.ts) and return what ends it.
  * Ending fails the operation's requests still pending and any sent later
- * through a sender it handed out, and closes its worker, so the next
- * operation starts on a fresh route and the budget is free for others.
+ * through a sender it handed out, and closes its worker where it has one of
+ * its own. The next operation starts on a fresh route either way, under a
+ * new worker or a new isolation key, and the budget is free for others.
  */
 export function beginTorOperationScope(): () => void {
   const { key, end } = beginTorOperation();
@@ -392,12 +393,12 @@ const operationLifetimes = new Map<string, AbortController>();
 const operationEnded = () => new TorUnavailableError('The operation this request belonged to has ended.');
 
 /**
- * The page's isolation groups, started on first use: a WorkerPool on the web,
- * where each group is a worker of its own, and one Arti client on a device,
- * where each group is an isolation key (separate circuits, connections, and
- * TLS sessions). The promise is cached, not its result, so senders starting
- * at once share one import; a failed import is dropped so the next call
- * tries again.
+ * The page's isolation groups, started on first use. A worker that isolates
+ * by key (Arti on a device, tor-js on the web) carries every group, each
+ * under an isolation key of its own: separate circuits and TLS sessions.
+ * Otherwise a WorkerPool gives each group a worker of its own. The promise is
+ * cached, not its result, so senders starting at once share one import; a
+ * failed import is dropped so the next call tries again.
  */
 let groups: Promise<(key: string) => ReplacingWorkerLike> | null = null;
 
@@ -415,14 +416,20 @@ function workerBudget(provider: TorProviderId): { maxWorkers: number; spare: num
   return { maxWorkers, spare: maxWorkers >= 3 ? 1 : 0, idleCloseMs: provider === 'nym' ? 90_000 : 120_000 };
 }
 
+/** Whether one worker carries every group under its own isolation key. */
+function keyedGroups(): boolean {
+  return TOR_ON_DEVICE || torProvider(ACTIVE_TOR_SETTINGS.provider)?.isolatesByKey === true;
+}
+
 /**
- * Public groups merged to fit the budget: with six workers each public
- * service has its own, with four or five chain reads keep theirs and the
- * other services share one, and below that every public service shares one.
- * Identity groups always keep their own (a device has no budget).
+ * Public groups merged to fit the web pool's budget: with six workers each
+ * public service has its own, with four or five chain reads keep theirs and
+ * the other services share one, and below that every public service shares
+ * one. Identity groups always keep their own, and keyed groups have no
+ * budget.
  */
 function budgetedGroup(key: string): string {
-  if (TOR_ON_DEVICE || !key.startsWith('public:')) return key;
+  if (keyedGroups() || !key.startsWith('public:')) return key;
   const { maxWorkers } = workerBudget(ACTIVE_TOR_SETTINGS.provider);
   if (maxWorkers >= 6) return key;
   if (maxWorkers >= 4) return key === 'public:rpc' ? key : 'public';
@@ -433,12 +440,14 @@ async function startGroups(): Promise<(key: string) => ReplacingWorkerLike> {
   const target = clientTarget(ACTIVE_TOR_SETTINGS.provider, ACTIVE_TOR_SETTINGS.gatewayUrl);
   const module = await importHarness(new AbortController().signal);
   const timeouts = { callTimeoutMs: TOR_ROUTE_DEADLINE_MS, readyTimeoutMs: TOR_PROBE_TIMEOUT_MS };
-  if (TOR_ON_DEVICE) {
+  const start: WorkerStart = TOR_ON_DEVICE ? { tor: {} }
+    : async (retired) => ({ ...await loadClient(module, target, retired), ready: Promise.resolve() });
+  if (keyedGroups()) {
     const Replacing = module.ReplacingWorker as ReplacingWorkerFactory | undefined;
     if (typeof Replacing !== 'function') {
       throw new TorUnavailableError('The anon-rpc client does not expose the expected interface.');
     }
-    const replacing = new Replacing({ start: { tor: {} }, ...timeouts });
+    const replacing = new Replacing({ start, ...timeouts });
     return (key) => ({
       fetch: (url, init) => replacing.fetch(url, { ...init, anonOptions: { isolationKey: key } }),
       close: () => {},
@@ -449,7 +458,7 @@ async function startGroups(): Promise<(key: string) => ReplacingWorkerLike> {
     throw new TorUnavailableError('The anon-rpc client does not expose the expected interface.');
   }
   const pool = new Pool({
-    start: async (retired) => ({ ...await loadClient(module, target, retired), ready: Promise.resolve() }),
+    start,
     ...timeouts,
     ...workerBudget(target.provider.id),
   });

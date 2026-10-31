@@ -172,7 +172,7 @@ export function NewsletterModal({ visible, onClose }: { visible: boolean; onClos
     setError(null);
     try {
       // Same-origin by default, which stays direct: the app's own host already
-      // has the connection. Elsewhere, over anon-rpc on a worker of its own.
+      // has the connection. Elsewhere, over anon-rpc in a group of its own.
       const send = sameOrigin(NEWSLETTER_API_URL) ? fetch : routedFetch('web', () => true);
       const resp = await send(NEWSLETTER_API_URL, {
         signal: controller.signal,
