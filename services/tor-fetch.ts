@@ -449,7 +449,16 @@ async function startGroups(): Promise<(key: string) => ReplacingWorkerLike> {
     }
     const replacing = new Replacing({ start, ...timeouts });
     return (key) => ({
-      fetch: (url, init) => replacing.fetch(url, { ...init, anonOptions: { isolationKey: key } }),
+      fetch: async (url, init) => {
+        const send = () => replacing.fetch(url, { ...init, anonOptions: { isolationKey: isolationKeyFor(key) } });
+        try {
+          return await send();
+        } catch (error) {
+          if (!exitFailed(error) || init?.signal?.aborted) throw error;
+          moveToNewCircuit(key);
+          return send();
+        }
+      },
       close: () => {},
     });
   }
@@ -464,6 +473,45 @@ async function startGroups(): Promise<(key: string) => ReplacingWorkerLike> {
   });
   return (key) => pool.group(key);
 }
+
+/**
+ * The isolation key a group's requests carry. A group moves to a new key, and
+ * so to a new circuit, when its circuit's exit fails (exitFailed): Arti keeps
+ * handing out a circuit whose exit stopped opening streams until it expires
+ * as dirty, ten minutes on, so retrying on the same key fails the same way
+ * (https://gitlab.torproject.org/tpo/core/arti/-/issues/1001). tor-js leaves
+ * this to the application, and gives it `torKind` to decide by.
+ */
+function isolationKeyFor(group: string): string {
+  const moves = circuitMoves.get(group);
+  return moves ? `${group}~${moves}` : group;
+}
+
+function moveToNewCircuit(group: string): void {
+  circuitMoves.set(group, (circuitMoves.get(group) ?? 0) + 1);
+}
+
+/** How many times each group has moved to a new circuit. */
+const circuitMoves = new Map<string, number>();
+
+/**
+ * Whether a request failed because its circuit's exit did not open the
+ * stream: Arti's kind, which tor-js and the native Tor client report as
+ * `torKind` on a connect failure. The stream never opened, so nothing reached
+ * the destination and the request can go again, even a relay. A destination
+ * that refused the connection (RemoteConnectionRefused) is not the circuit's
+ * fault, and a new one would not help.
+ */
+function exitFailed(error: unknown): boolean {
+  const kind = (error as { torKind?: unknown } | null)?.torKind;
+  return typeof kind === 'string' && EXIT_FAILURES.has(kind);
+}
+
+const EXIT_FAILURES = new Set([
+  'RemoteNetworkTimeout', 'RemoteNetworkFailed', 'RemoteStreamError', 'RemoteStreamClosed', 'RemoteStreamReset',
+  'ExitTimeout', 'ExitPolicyRejected', 'RemoteHostNotFound', 'RemoteHostResolutionFailed',
+  'CircuitCollapse', 'CircuitRefused', 'TorNetworkTimeout',
+]);
 
 function groupSender(key: string): TorFetch {
   // An operation's sender lives as long as the operation; one that ended

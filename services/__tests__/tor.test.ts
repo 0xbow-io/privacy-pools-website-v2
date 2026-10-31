@@ -1141,6 +1141,34 @@ describe('isolation groups over the worker pool', () => {
     expect(workers[0].closed).toBe(false);
   });
 
+  test('an exit that fails to open the stream moves the group to a new key, and the request goes once more', async () => {
+    const keys: (string | undefined)[] = [];
+    let failures = 0;
+    const module = { AnonRpcWorker: class {
+      ready = Promise.resolve();
+      close() {}
+      fetch = async (url: string, init?: RequestInit & { anonOptions?: { isolationKey?: string } }) => {
+        keys.push(init?.anonOptions?.isolationKey);
+        if (url.endsWith('/stuck') && failures++ === 0) {
+          throw Object.assign(new Error('Failed to connect: remote stream error'), { code: 'CONNECTION', torKind: 'RemoteStreamError' });
+        }
+        if (url.endsWith('/refused')) {
+          throw Object.assign(new Error('Failed to connect: refused'), { code: 'CONNECTION', torKind: 'RemoteConnectionRefused' });
+        }
+        return Response.json({ result: '0x1' });
+      };
+    } };
+    const loaded = transport(true, () => module, { cores: 12 });
+    const send = loaded.tor.torFetchFor('rpc', '')!;
+    expect(await (await send('https://rpc.example/stuck', { method: 'POST', body: '{}' })).json()).toEqual({ result: '0x1' });
+    await send('https://rpc.example/after', {});
+    // The failed request went again on a new key, and the group stays on it.
+    expect(keys).toEqual(['public:rpc', 'public:rpc~1', 'public:rpc~1']);
+    // A refusal is the destination's answer: the key stays, and nothing is resent.
+    expect(String(await send('https://rpc.example/refused', {}).catch((e: unknown) => e))).toContain('refused');
+    expect(keys.slice(3)).toEqual(['public:rpc~1']);
+  });
+
   test('routedFetch sends over anon-rpc while Tor is in force, and direct only when it is off', async () => {
     const realFetch = globalThis.fetch;
     const direct: string[] = [];
