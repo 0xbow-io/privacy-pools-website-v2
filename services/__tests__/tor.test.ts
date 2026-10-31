@@ -1172,6 +1172,52 @@ describe('isolation groups over the worker pool', () => {
     expect(keys.slice(3)).toEqual(['public:rpc~1']);
   });
 
+  type AnonInit = RequestInit & { anonOptions?: { isolationKey?: string } };
+  const EXIT_FAILURE = () => Object.assign(new Error('Failed to connect: remote stream error'), { code: 'CONNECTION', torKind: 'RemoteStreamError' });
+  const answer = (url: string) => Response.json(url.includes('torproject') ? { IsTor: true } : { result: '0x1' });
+
+  test('each draft and each Test goes out under a key of its own, which an exit failure moves to a new circuit', async () => {
+    const keys: (string | undefined)[] = [];
+    let failures = 0;
+    const loaded = transport(false, () => ({ AnonRpcWorker: class {
+      ready = Promise.resolve();
+      close() {}
+      fetch = async (url: string, init?: AnonInit) => {
+        keys.push(init?.anonOptions?.isolationKey);
+        if (failures-- > 0) throw EXIT_FAILURE();
+        return answer(url);
+      };
+    } }));
+    const draft = loaded.tor.createTorFetch(GATEWAY);
+    await draft('https://rpc.example/a');
+    await draft('https://rpc.example/b');
+    draft.close();
+    failures = 2;
+    expect(await loaded.tor.probeTorGateway(GATEWAY, 5_000, 'tor-js')).toEqual({ ok: true });
+    expect(keys).toEqual(['draft:1', 'draft:1', 'draft:2', 'draft:2~1', 'draft:2~2']);
+  });
+
+  test('a Test or draft of the target in force rides the page\'s client, and closing it leaves that client to the page', async () => {
+    const keys: (string | undefined)[] = [];
+    let starts = 0;
+    let closed = 0;
+    const loaded = transport(true, () => ({ AnonRpcWorker: class {
+      ready = Promise.resolve();
+      constructor() { starts++; }
+      close() { closed++; }
+      fetch = async (url: string, init?: AnonInit) => { keys.push(init?.anonOptions?.isolationKey); return answer(url); };
+    } }), { cores: 12 });
+    await loaded.tor.torFetchFor('rpc', '')!('https://rpc.example/page', {});
+    expect(await loaded.tor.probeTorGateway(GATEWAY, 5_000, 'tor-js')).toEqual({ ok: true });
+    const draft = loaded.tor.createTorFetch(GATEWAY, 'tor-js');
+    await draft('https://rpc.example/draft');
+    draft.close();
+    await loaded.tor.torFetchFor('rpc', '')!('https://rpc.example/after', {});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect([starts, closed]).toEqual([1, 0]);
+    expect(keys).toEqual(['public:rpc', 'draft:1', 'draft:2', 'public:rpc']);
+  });
+
   test('routedFetch sends over anon-rpc while Tor is in force, and direct only when it is off', async () => {
     const realFetch = globalThis.fetch;
     const direct: string[] = [];

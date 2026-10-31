@@ -401,7 +401,10 @@ const operationEnded = () => new TorUnavailableError('The operation this request
  * cached, not its result, so senders starting at once share one import; a
  * failed import is dropped so the next call tries again.
  */
-let groups: Promise<(key: string) => ReplacingWorkerLike> | null = null;
+let groups: Promise<Groups> | null = null;
+
+/** Each group's client, and whether one worker carries every group by key. */
+type Groups = ((key: string) => ReplacingWorkerLike) & { keyed: boolean };
 
 /**
  * How many workers the web pool keeps alive, over every group and the spare.
@@ -441,7 +444,7 @@ function budgetedGroup(key: string): string {
   return 'public';
 }
 
-async function startGroups(): Promise<(key: string) => ReplacingWorkerLike> {
+async function startGroups(): Promise<Groups> {
   const target = clientTarget(ACTIVE_TOR_SETTINGS.provider, ACTIVE_TOR_SETTINGS.gatewayUrl);
   const module = await importHarness(new AbortController().signal);
   const timeouts = { callTimeoutMs: TOR_ROUTE_DEADLINE_MS, readyTimeoutMs: TOR_PROBE_TIMEOUT_MS };
@@ -453,19 +456,7 @@ async function startGroups(): Promise<(key: string) => ReplacingWorkerLike> {
       throw new TorUnavailableError('The anon-rpc client does not expose the expected interface.');
     }
     const replacing = new Replacing({ start, ...timeouts });
-    return (key) => ({
-      fetch: async (url, init) => {
-        const send = () => replacing.fetch(url, { ...init, anonOptions: { isolationKey: isolationKeyFor(key) } });
-        try {
-          return await send();
-        } catch (error) {
-          if (!module.isTorExitFailure?.(error) || init?.signal?.aborted) throw error;
-          moveToNewCircuit(key);
-          return send();
-        }
-      },
-      close: () => {},
-    });
+    return Object.assign((key: string) => ({ fetch: keyedFetch(module, replacing, key), close: () => {} }), { keyed: true });
   }
   const Pool = module.WorkerPool as WorkerPoolFactory | undefined;
   if (typeof Pool !== 'function') {
@@ -476,7 +467,7 @@ async function startGroups(): Promise<(key: string) => ReplacingWorkerLike> {
     ...timeouts,
     ...workerBudget(target.provider.id),
   });
-  return (key) => pool.group(budgetedGroup(key));
+  return Object.assign((key: string) => pool.group(budgetedGroup(key)), { keyed: false });
 }
 
 /**
@@ -495,6 +486,27 @@ function isolationKeyFor(group: string): string {
 
 function moveToNewCircuit(group: string): void {
   circuitMoves.set(group, (circuitMoves.get(group) ?? 0) + 1);
+}
+
+/**
+ * `replacing`'s fetch for `group`, under the group's isolation key. An exit
+ * failure moves the group to a new key; a call whose exit failed goes once
+ * more.
+ */
+function keyedFetch(module: HarnessModule, replacing: ReplacingWorkerLike, group: string): ReplacingWorkerLike['fetch'] {
+  return async (url, init) => {
+    const send = () => replacing.fetch(url, { ...init, anonOptions: { isolationKey: isolationKeyFor(group) } })
+      .catch((error: unknown) => {
+        if (module.isTorExitFailure?.(error)) moveToNewCircuit(group);
+        throw error;
+      });
+    try {
+      return await send();
+    } catch (error) {
+      if (!module.isTorExitFailure?.(error) || init?.signal?.aborted) throw error;
+      return send();
+    }
+  };
 }
 
 /** How many times each group has moved to a new circuit. */
@@ -662,16 +674,17 @@ async function replacingClient(
     // ready, not the steps between.
     onStep?.('starting');
     const replacing = new Replacing({ start: { tor: {} }, callTimeoutMs: TOR_ROUTE_DEADLINE_MS, readyTimeoutMs: TOR_PROBE_TIMEOUT_MS });
+    const send = keyedFetch(module, replacing, draftKey());
     return {
       fetch: async (url, init) => {
-        const response = await replacing.fetch(url, init);
+        const response = await send(url, init);
         onStep?.('checking');
         return response;
       },
       close: () => replacing.close(),
     };
   }
-  return new Replacing({
+  const replacing = new Replacing({
     start: async (retired) => {
       const { signal: boot, release } = composeSignals([timeoutSignal(TOR_PROBE_TIMEOUT_MS), signal, retired]);
       try {
@@ -685,7 +698,38 @@ async function replacingClient(
     },
     callTimeoutMs: TOR_ROUTE_DEADLINE_MS,
   });
+  return { fetch: keyedFetch(module, replacing, draftKey()), close: () => replacing.close() };
 }
+
+/**
+ * A draft's or Test's client. When it names the provider and gateway in force
+ * and the page has started its client, or is starting it, it rides that one,
+ * since another would bootstrap a second Tor client on the same stored state;
+ * closing it then closes nothing. Otherwise it is a client of its own, which
+ * closing ends. Either way it sends under a key of its own, which an exit
+ * failure moves to a new circuit, as a group's does.
+ */
+async function draftClient(
+  gatewayUrl: string,
+  providerId: TorProviderId,
+  signal: AbortSignal,
+  onStep?: (step: TorProbeStep) => void,
+): Promise<ReplacingWorkerLike> {
+  const draft = validateTorGatewayFor(providerId, gatewayUrl);
+  const active = validateTorGatewayFor(ACTIVE_TOR_SETTINGS.provider, ACTIVE_TOR_SETTINGS.gatewayUrl);
+  const page = TOR_IN_FORCE && providerId === ACTIVE_TOR_SETTINGS.provider && draft.ok && active.ok
+    && draft.url === active.url ? groups : null;
+  if (page) {
+    const group = await withAbort(page, signal);
+    onStep?.('checking');
+    // A pool gives each group a worker of its own: public reads share one.
+    return { fetch: group(group.keyed ? draftKey() : 'public:rpc').fetch, close: () => {} };
+  }
+  return replacingClient(gatewayUrl, providerId, signal, onStep);
+}
+
+let draftKeys = 0;
+const draftKey = () => `draft:${++draftKeys}`;
 
 /**
  * Draft probes must use the selected gateway before settings take effect on reload.
@@ -697,7 +741,7 @@ export function createTorFetch(gatewayUrl: string, providerId: TorProviderId = D
   let clients: Promise<ReplacingWorkerLike> | null = null;
   const lifetime = new AbortController();
   const send: TorFetch = (input, init) => sendOver(() => {
-    const pending = clients ??= replacingClient(gatewayUrl, providerId, lifetime.signal);
+    const pending = clients ??= draftClient(gatewayUrl, providerId, lifetime.signal);
     return {
       pending: pending.then((client) => () => client),
       drop: () => { if (clients === pending) clients = null; },
@@ -724,7 +768,7 @@ export async function probeTorGateway(
   ]);
   let clients: ReplacingWorkerLike | undefined;
   try {
-    clients = await replacingClient(gatewayUrl, providerId, signal, onStep);
+    clients = await draftClient(gatewayUrl, providerId, signal, onStep);
     if (providerId !== 'tor-js') return await probeMixnet(clients, signal);
     // check.torproject.org is the canonical "am I on Tor" endpoint and is the
     // library's own example, so it exercises a real circuit rather than just
