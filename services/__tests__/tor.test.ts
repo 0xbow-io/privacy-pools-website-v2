@@ -1141,11 +1141,13 @@ describe('isolation groups over the worker pool', () => {
     expect(workers[0].closed).toBe(false);
   });
 
-  test('an exit that fails to open the stream moves the group to a new key, and the request goes once more', async () => {
+  test('an exit that fails to open the stream moves the group to a new key, and the same worker sends the request once more', async () => {
     const keys: (string | undefined)[] = [];
     let failures = 0;
+    let starts = 0;
     const module = { AnonRpcWorker: class {
       ready = Promise.resolve();
+      constructor() { starts++; }
       close() {}
       fetch = async (url: string, init?: RequestInit & { anonOptions?: { isolationKey?: string } }) => {
         keys.push(init?.anonOptions?.isolationKey);
@@ -1164,6 +1166,7 @@ describe('isolation groups over the worker pool', () => {
     await send('https://rpc.example/after', {});
     // The failed request went again on a new key, and the group stays on it.
     expect(keys).toEqual(['public:rpc', 'public:rpc~1', 'public:rpc~1']);
+    expect(starts).toBe(1);
     // A refusal is the destination's answer: the key stays, and nothing is resent.
     expect(String(await send('https://rpc.example/refused', {}).catch((e: unknown) => e))).toContain('refused');
     expect(keys.slice(3)).toEqual(['public:rpc~1']);
