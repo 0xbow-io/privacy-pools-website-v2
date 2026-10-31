@@ -605,7 +605,7 @@ async function sendOver(
     // still ends a probe that has its headers but not its answer.
     return await withAbort(client.fetch(request.url, {
       method: request.method,
-      headers: Object.fromEntries(request.headers.entries()),
+      headers: torHeaders(request.headers),
       body,
       redirect: init?.redirect ?? request.redirect,
       signal,
@@ -732,6 +732,18 @@ let draftKeys = 0;
 const draftKey = () => `draft:${++draftKeys}`;
 
 /**
+ * A Tor request's headers without the caller's User-Agent. A device sends
+ * none; the web sends an empty one, which keeps the pinned tor-js worker from
+ * adding the browser's, since that would tell this user's isolation keys apart
+ * by browser, version and platform.
+ */
+function torHeaders(headers: HeadersInit | undefined): Record<string, string> {
+  const out = Object.fromEntries(new Headers(headers).entries());
+  delete out['user-agent'];
+  return TOR_ON_DEVICE ? out : { ...out, 'user-agent': '' };
+}
+
+/**
  * Draft probes must use the selected gateway before settings take effect on reload.
  *
  * Its clients come and go as replacingClient describes. Closing this sender
@@ -826,7 +838,7 @@ async function probeMixnet(clients: ReplacingWorkerLike, signal: AbortSignal): P
 async function probeFetch(clients: ReplacingWorkerLike, url: string, init: RequestInit, signal: AbortSignal): Promise<Response> {
   for (let attempt = 1; ; attempt++) {
     try {
-      return await withAbort(clients.fetch(url, { ...init, signal }), signal);
+      return await withAbort(clients.fetch(url, { ...init, headers: torHeaders(init.headers), signal }), signal);
     } catch (error) {
       // A client that could not start is not retried: a gateway that is down
       // or a pin the chain does not match fails the same way again.

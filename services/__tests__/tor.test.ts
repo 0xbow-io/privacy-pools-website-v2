@@ -1218,6 +1218,19 @@ describe('isolation groups over the worker pool', () => {
     expect(keys).toEqual(['public:rpc', 'draft:1', 'draft:2', 'public:rpc']);
   });
 
+  test('a Tor request carries no User-Agent of the caller\'s: an empty one on the web, none on a device, a Test\'s included', async () => {
+    const agents: (string | null)[] = [];
+    const record = async (url: string, init?: AnonInit) => { agents.push(new Headers(init?.headers).get('user-agent')); return answer(url); };
+    const web = transport(true, () => ({ AnonRpcWorker: class { ready = Promise.resolve(); close() {} fetch = record; } }), { cores: 12 });
+    await web.tor.torFetchFor('rpc', '')!('https://rpc.example/', { headers: { 'user-agent': 'app/1' } });
+    const webTest = transport(false, () => ({ AnonRpcWorker: class { ready = Promise.resolve(); close() {} fetch = record; } }));
+    expect(await webTest.tor.probeTorGateway(GATEWAY, 5_000, 'tor-js')).toEqual({ ok: true });
+    const device = () => ({ ReplacingWorker: class { close() {} fetch = record; } });
+    await transport(true, device, { device: true }).tor.torFetchFor('rpc', '')!('https://rpc.example/', { headers: { 'user-agent': 'app/1' } });
+    expect(await transport(false, device, { device: true }).tor.probeTorGateway(GATEWAY, 5_000, 'tor-js')).toEqual({ ok: true });
+    expect(agents).toEqual(['', '', null, null]);
+  });
+
   test('routedFetch sends over anon-rpc while Tor is in force, and direct only when it is off', async () => {
     const realFetch = globalThis.fetch;
     const direct: string[] = [];
