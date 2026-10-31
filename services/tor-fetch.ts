@@ -67,7 +67,7 @@ type AnonRpcWorkerLike = {
 type RpcProviderLike = { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> };
 
 /** The harness's knownWorker() entry: where a provider's specifier lives. */
-type KnownWorkerLike = { specifier: string; specifierChainId: number };
+type KnownWorkerLike = { specifier: string; specifierChainId: number; isolatesByKey: boolean };
 
 /** The harness's ReplacingWorker, or a WorkerPool group: a fetch over one route at a time. */
 type ReplacingWorkerLike = TorClientLike;
@@ -95,6 +95,7 @@ type HarnessModule = {
   ReplacingWorker?: unknown;
   WorkerPool?: unknown;
   knownWorker?: (id: TorProviderId) => KnownWorkerLike;
+  isTorExitFailure?: (error: unknown) => boolean;
   knownWorkerInit?: (id: TorProviderId, options: { rpcProvider: RpcProviderLike; config?: ReturnType<TorProvider['workerConfig']> }) => object;
 };
 
@@ -331,7 +332,7 @@ async function loadClient(
  */
 export function torFetchFor(party: TorParty, text: string, subject?: TorSubject): TorFetch | null {
   if (!TOR_IN_FORCE) return null;
-  const key = budgetedGroup(torGroupFor(party, text, subject));
+  const key = torGroupFor(party, text, subject);
   // A group of its own for one request: it closes once that request is done.
   if (key.startsWith('subject:')) return oneShotSender(key);
   let sender = senders.get(key);
@@ -416,9 +417,13 @@ function workerBudget(provider: TorProviderId): { maxWorkers: number; spare: num
   return { maxWorkers, spare: maxWorkers >= 3 ? 1 : 0, idleCloseMs: provider === 'nym' ? 90_000 : 120_000 };
 }
 
-/** Whether one worker carries every group under its own isolation key. */
-function keyedGroups(): boolean {
-  return TOR_ON_DEVICE || torProvider(ACTIVE_TOR_SETTINGS.provider)?.isolatesByKey === true;
+/**
+ * Whether one worker carries every group under its own isolation key: a
+ * device's Arti client does, and on the web a worker the harness knows to
+ * act on `anonOptions.isolationKey` (anon-rpc §9.3).
+ */
+function keyedGroups(module: HarnessModule): boolean {
+  return TOR_ON_DEVICE || module.knownWorker?.(ACTIVE_TOR_SETTINGS.provider).isolatesByKey === true;
 }
 
 /**
@@ -429,7 +434,7 @@ function keyedGroups(): boolean {
  * budget.
  */
 function budgetedGroup(key: string): string {
-  if (keyedGroups() || !key.startsWith('public:')) return key;
+  if (!key.startsWith('public:')) return key;
   const { maxWorkers } = workerBudget(ACTIVE_TOR_SETTINGS.provider);
   if (maxWorkers >= 6) return key;
   if (maxWorkers >= 4) return key === 'public:rpc' ? key : 'public';
@@ -442,7 +447,7 @@ async function startGroups(): Promise<(key: string) => ReplacingWorkerLike> {
   const timeouts = { callTimeoutMs: TOR_ROUTE_DEADLINE_MS, readyTimeoutMs: TOR_PROBE_TIMEOUT_MS };
   const start: WorkerStart = TOR_ON_DEVICE ? { tor: {} }
     : async (retired) => ({ ...await loadClient(module, target, retired), ready: Promise.resolve() });
-  if (keyedGroups()) {
+  if (keyedGroups(module)) {
     const Replacing = module.ReplacingWorker as ReplacingWorkerFactory | undefined;
     if (typeof Replacing !== 'function') {
       throw new TorUnavailableError('The anon-rpc client does not expose the expected interface.');
@@ -454,7 +459,7 @@ async function startGroups(): Promise<(key: string) => ReplacingWorkerLike> {
         try {
           return await send();
         } catch (error) {
-          if (!exitFailed(error) || init?.signal?.aborted) throw error;
+          if (!module.isTorExitFailure?.(error) || init?.signal?.aborted) throw error;
           moveToNewCircuit(key);
           return send();
         }
@@ -471,13 +476,14 @@ async function startGroups(): Promise<(key: string) => ReplacingWorkerLike> {
     ...timeouts,
     ...workerBudget(target.provider.id),
   });
-  return (key) => pool.group(key);
+  return (key) => pool.group(budgetedGroup(key));
 }
 
 /**
  * The isolation key a group's requests carry. A group moves to a new key, and
- * so to a new circuit, when its circuit's exit fails (exitFailed): Arti keeps
- * handing out a circuit whose exit stopped opening streams until it expires
+ * so to a new circuit, when its circuit's exit fails, by the harness's
+ * isTorExitFailure on the `torKind` tor-js and the native Tor client report:
+ * Arti keeps handing out a circuit whose exit stopped opening streams until it expires
  * as dirty, ten minutes on, so retrying on the same key fails the same way
  * (https://gitlab.torproject.org/tpo/core/arti/-/issues/1001). tor-js leaves
  * this to the application, and gives it `torKind` to decide by.
@@ -493,25 +499,6 @@ function moveToNewCircuit(group: string): void {
 
 /** How many times each group has moved to a new circuit. */
 const circuitMoves = new Map<string, number>();
-
-/**
- * Whether a request failed because its circuit's exit did not open the
- * stream: Arti's kind, which tor-js and the native Tor client report as
- * `torKind` on a connect failure. The stream never opened, so nothing reached
- * the destination and the request can go again, even a relay. A destination
- * that refused the connection (RemoteConnectionRefused) is not the circuit's
- * fault, and a new one would not help.
- */
-function exitFailed(error: unknown): boolean {
-  const kind = (error as { torKind?: unknown } | null)?.torKind;
-  return typeof kind === 'string' && EXIT_FAILURES.has(kind);
-}
-
-const EXIT_FAILURES = new Set([
-  'RemoteNetworkTimeout', 'RemoteNetworkFailed', 'RemoteStreamError', 'RemoteStreamClosed', 'RemoteStreamReset',
-  'ExitTimeout', 'ExitPolicyRejected', 'RemoteHostNotFound', 'RemoteHostResolutionFailed',
-  'CircuitCollapse', 'CircuitRefused', 'TorNetworkTimeout',
-]);
 
 function groupSender(key: string): TorFetch {
   // An operation's sender lives as long as the operation; one that ended

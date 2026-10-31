@@ -94,14 +94,6 @@ export type TorProvider = {
    */
   needsGateway: boolean;
   /**
-   * Whether the pinned worker keeps calls under different
-   * `anonOptions.isolationKey` values apart (anon-rpc §9.3), on separate
-   * circuits and TLS sessions. One such worker carries every isolation group;
-   * a worker that ignores the key needs a worker per group. A device's Arti
-   * client always does.
-   */
-  isolatesByKey: boolean;
-  /**
    * Web only. A device runs Arti, not anon-rpc, so a provider without a native
    * client is hidden there and a saved choice naming it reads as off.
    */
@@ -131,7 +123,6 @@ export const TOR_PROVIDERS: readonly TorProvider[] = ([
     // the bundle keccak matches on the jsDelivr, unpkg and GitHub resolvers).
     workerHash: '0x5b62f358ce7a2b94ee9bc3a0e6a08757db68fa08fc348276f31eda788aec818b',
     needsGateway: true,
-    isolatesByKey: true,
     webOnly: false,
     hint: 'Tor, run in your browser. It connects through a gateway, which sees that you connected but not what you asked for.',
     workerConfig: (gatewayUrl) => ({ gateways: [gatewayUrl] }),
@@ -142,7 +133,6 @@ export const TOR_PROVIDERS: readonly TorProvider[] = ([
     // As the specifier named it on 2026-10-15.
     workerHash: '0xf13a448a8721b9d0b20da3d5b80ffe00bf4c5bb3aae812a38d3d1e3bc81fceb8',
     needsGateway: false,
-    isolatesByKey: false,
     webOnly: true,
     hint: 'The Nym mixnet. Calls leave from a Nym exit, so the endpoint never sees your address. About 18 MB to download.',
     workerConfig: () => undefined,
@@ -153,7 +143,6 @@ export const TOR_PROVIDERS: readonly TorProvider[] = ([
     // @hisoka-io/anon-rpc-worker 0.4.1, as the specifier named it on 2026-10-26.
     workerHash: '0xd9fa04b080a33062680a27cad828196bfb04615a0ebc76bcbffedb6dcbe838d4',
     needsGateway: false,
-    isolatesByKey: false,
     webOnly: true,
     hint: 'A Sphinx mixnet. This is a demo network: it may be slow or go away.',
     workerConfig: () => undefined,
