@@ -110,17 +110,18 @@ const BSC_PROD_RPCS = buildRpcOrder(
 );
 const BSC_PROD_ON_ALCHEMY = /\.g\.alchemy\.com\//.test(BSC_PROD_RPCS[0]);
 
-// The 2026-10-14 chains. Public fallbacks are the chains' own endpoints. Their
-// eth_getLogs windows were probed the same day: mainnet.optimism.io rejects
-// 50k ("Block range is too large", staging measured 3000 passing), the public
-// Base endpoint rate-limits (staging uses 2000), while Alchemy on all four and
-// the public Arbitrum and Robinhood endpoints answer a 50k window.
+// The 2026-10-14 chains. Public fallbacks are the chains' own endpoints, except
+// Optimism's: mainnet.optimism.io answers 403 to Tor exits, so its fallback is
+// publicnode, which answered every exit tried and a 10k eth_getLogs window but
+// not 50k (2026-10-31). The public Base endpoint rate-limits (staging uses
+// 2000), while Alchemy on all four and the public Arbitrum and Robinhood
+// endpoints answer a 50k window.
 const OPTIMISM_PROD_RPCS = buildRpcOrder(
   ALCHEMY_KEY,
   alchemyHostFor(10),
   process.env.EXPO_PUBLIC_PROD_OPTIMISM_RPC_URL,
   undefined,
-  'https://mainnet.optimism.io',
+  'https://optimism-rpc.publicnode.com',
 );
 const BASE_PROD_RPCS = buildRpcOrder(
   ALCHEMY_KEY,
