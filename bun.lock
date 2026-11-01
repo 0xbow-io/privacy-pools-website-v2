@@ -124,11 +124,11 @@
 
     "@0no-co/graphqlsp": ["@0no-co/graphqlsp@1.17.3", "", { "dependencies": { "@gql.tada/internal": "^1.2.0", "graphql": "^15.5.0 || ^16.0.0 || ^17.0.0" }, "peerDependencies": { "typescript": "^5.0.0 || ^6.0.0" } }, "sha512-4PPvxDPmbntddpgMyA3VId5/E9YGdRuuS/mW+THOvtTx/C79Pf+lN28LkNNACJrF9L7YACiAJelyOkC6LqUzvw=="],
 
-    "@0xbow/anon-rpc-rs-browser-harness": ["@0xbow/anon-rpc-rs-browser-harness@./vendor/0xbow-anon-rpc-rs-browser-harness-0.4.0-beta.1.tgz", { "dependencies": { "@0xbow/anon-rpc-rs-harness-core": "0.4.0-beta.1", "@kpstreams/core": "^0.2.1", "@noble/hashes": "^1.8.0 || ^2.0.0" } }, "sha512-uXPqIkjWMWJB/rgOX4fYMcOPZSBbsSimczFjSnNollKfysNfM3K1dz2LKfQoau8zO08iWZ9jS4hyFAc8ayxO+w=="],
+    "@0xbow/anon-rpc-rs-browser-harness": ["@0xbow/anon-rpc-rs-browser-harness@./vendor/0xbow-anon-rpc-rs-browser-harness-0.4.0-beta.1.tgz", { "dependencies": { "@0xbow/anon-rpc-rs-harness-core": "0.4.0-beta.1", "@kpstreams/core": "^0.2.1", "@noble/hashes": "^1.8.0 || ^2.0.0" } }, "sha512-m0nDviR/y3KAwV2TcQJg7rSK2Yxv2XD6vyCl3a2feFSVrXKG/nEBY3BNyZWNDqci4c5lo6eXn2em2e87zxUyBw=="],
 
-    "@0xbow/anon-rpc-rs-harness-core": ["@0xbow/anon-rpc-rs-harness-core@./vendor/0xbow-anon-rpc-rs-harness-core-0.4.0-beta.1.tgz", { "dependencies": { "@noble/hashes": "^1.8.0 || ^2.0.0" } }, "sha512-k13NZNM8k7jBvPTfPoWnaHo30P+yGxtsrEWnr+DBn87l6NY4eBF4xKRXofXeAlScH/V8Lyavq+jacp/H3eS1IA=="],
+    "@0xbow/anon-rpc-rs-harness-core": ["@0xbow/anon-rpc-rs-harness-core@./vendor/0xbow-anon-rpc-rs-harness-core-0.4.0-beta.1.tgz", { "dependencies": { "@noble/hashes": "^1.8.0 || ^2.0.0" } }, "sha512-sINbLL/EWYPRsiRI+BZMLa5LzWD8Q4AKIPxk5PNsjCurOD1MwS2w1DFoI9uXw9GFDsNZkzn6nVTHUeeST6Njpw=="],
 
-    "@0xbow/anon-rpc-rs-react-native": ["@0xbow/anon-rpc-rs-react-native@./vendor/0xbow-anon-rpc-rs-react-native-0.4.0-beta.1.tgz", { "dependencies": { "@0xbow/anon-rpc-rs-browser-harness": "0.4.0-beta.1" }, "peerDependencies": { "expo": ">=54", "react-native": ">=0.81 <1" }, "optionalPeers": ["expo"] }, "sha512-oGkRmaG7KYJ0oCBlUy8CRggF1UexFV6ANCuk4HYy5o44c35sQKIgh+THxltFO9EwjVYu2yfQTnFZ1MZ2kgTrWg=="],
+    "@0xbow/anon-rpc-rs-react-native": ["@0xbow/anon-rpc-rs-react-native@./vendor/0xbow-anon-rpc-rs-react-native-0.4.0-beta.1.tgz", { "dependencies": { "@0xbow/anon-rpc-rs-browser-harness": "0.4.0-beta.1" }, "peerDependencies": { "expo": ">=54", "react-native": ">=0.81 <1" }, "optionalPeers": ["expo"] }, "sha512-GaIXOrFxOSG3eKT+T+mahf6UXUDzP5sUagB4WSdMOrRxwnQ6lP6sCn/L1HuRYnHnFu+lkX9JwkcfY/NEgi5ZyA=="],
 
     "@adobe/css-tools": ["@adobe/css-tools@4.5.0", "", {}, "sha512-6OzddxPio9UiWTCemp4N8cYLV2ZN1ncRnV1cVGtve7dhPOtRkleRyx32GQCYSwDYgaHU3USMm84tNsvKzRCa1Q=="],
 
