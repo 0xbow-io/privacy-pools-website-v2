@@ -120,7 +120,16 @@ export async function fetchRelayerAssetAddressesOrThrow(chainId: number, timeout
     if (recent) return recent;
     throw new RelayerReadError(res.status, relayerRetryAfterMs(res.headers));
   }
-  const assets = parseRelayerAssetAddresses(await res.json(), chainId);
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    // A 200 whose body is not JSON (a proxy page, a cut-off answer) is a failed read too.
+    const recent = recentRelayerAssets(chainId);
+    if (recent) return recent;
+    throw new RelayerReadError(res.status, null);
+  }
+  const assets = parseRelayerAssetAddresses(body, chainId);
   rememberRelayerAssets(chainId, assets);
   return assets;
 }

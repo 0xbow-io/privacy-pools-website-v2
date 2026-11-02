@@ -23,6 +23,11 @@ export function useRelayerAssetSupport(chainId: number | undefined, tokenAddress
     gcTime: 30 * 60_000,
     retry: RELAYER_READ_RETRIES,
     retryDelay: relayerRetryDelayMs,
+    // The deposit modal is mounted once for the page, so an errored read would
+    // otherwise never run again and the refusal ("Try again in a minute") would
+    // stand until a reload. While it is in error it reads again every minute;
+    // a good read stops that.
+    refetchInterval: (query) => (query.state.status === 'error' ? 60_000 : false),
     refetchOnWindowFocus: false,
     queryFn: () => fetchRelayerAssetAddressesOrThrow(chainId!),
   });
