@@ -10,6 +10,8 @@ production dependency tree. Run the same check locally before every commit that 
 bun audit --prod --audit-level=high $(sed -E 's/#.*//; s/[[:space:]]+//g; /^$/d; s/^/--ignore=/' .bun-audit-ignore | tr '\n' ' ')
 ```
 
+Do not rerun the audit if the last commit on this branch is less than 2 hours old (`git log -1 --format=%cr`), unless `package.json` or the lockfile changed since then. A changed dependency tree always needs a fresh run.
+
 If it fails:
 
 1. Run `bun audit fix --dry-run`, then `bun audit fix`. It moves a vulnerable package to the lowest safe
