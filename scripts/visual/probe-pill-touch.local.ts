@@ -1,9 +1,9 @@
 // @ts-nocheck — local one-off probe
 // Mobile-touch pill check: (1) tap the Send tab — pill must glide; (2) touch
 // swipe the pager — pill must ride the finger; page must settle + adopt.
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 
-const browser = await chromium.launch({ args: ['--no-sandbox'] });
+const browser = await launchChrome();
 const context = await browser.newContext({
   viewport: { width: 390, height: 844 },
   hasTouch: true,

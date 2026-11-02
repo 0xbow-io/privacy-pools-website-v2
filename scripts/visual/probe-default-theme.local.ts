@@ -1,6 +1,6 @@
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 const BASE = process.env.PROBE_URL ?? 'http://localhost:8080';
-const browser = await chromium.launch({ headless: true });
+const browser = await launchChrome({ headless: true });
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
 const page = await ctx.newPage();
 // NO ?theme param, NO stored variant — fresh visitor.

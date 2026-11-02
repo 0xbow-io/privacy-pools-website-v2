@@ -1,16 +1,16 @@
-// Deterministic capture harness: pinned browser, fixed viewport/DPR/locale/TZ,
+// Deterministic capture harness: Google Chrome stable (scripts/lib/chrome.mjs), fixed viewport/DPR/locale/TZ,
 // fresh context per set, seeded storage, frozen motion, fixture-driven data,
 // app-ready + fonts.ready waits, and stable-screenshot capture.
 
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
-import { BASE_URL, CHROMIUM_PATH, VIEWPORTS, type ColorName, type ViewportName } from './config';
+import { type Browser, type BrowserContext, type Page } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
+import { BASE_URL, VIEWPORTS, type ColorName, type ViewportName } from './config';
 import { FixtureStore, installFixtureRouting, type FixtureMode } from './fixtures';
 
 export async function launchBrowser(): Promise<Browser> {
-  return chromium.launch({
+  return launchChrome({
     headless: true,
-    executablePath: CHROMIUM_PATH,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--force-color-profile=srgb', '--disable-lcd-text'],
+    args: ['--force-color-profile=srgb', '--disable-lcd-text'],
   });
 }
 

@@ -8,7 +8,8 @@
 // auto-connects it, and every signature and broadcast happens node-side with
 // viem. That makes a run frictionless: no wallet popups to drive, nothing to
 // click except the app's own UI.
-import { chromium, type Browser, type Page } from 'playwright';
+import { type Browser, type Page } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 import type { CapturedRequest } from './network-privacy';
 import { startNetworkCapture } from './network-capture';
 import { existsSync, readFileSync } from 'node:fs';
@@ -92,15 +93,8 @@ export async function openApp(
   startCapture: () => Promise<void>;
   stopCapture: () => Promise<void>;
 }> {
-  // Locally the browser is pinned under .pw-browsers; in CI `playwright install`
-  // puts it in its own cache, so fall back to playwright's resolution instead of
-  // failing on a path that only exists on one machine.
-  const pinned = `${ROOT}/.pw-browsers/chromium-1228/chrome-linux64/chrome`;
-  const browser = await chromium.launch({
-    headless: true,
-    ...(existsSync(pinned) ? { executablePath: pinned } : {}),
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  });
+  // Google Chrome stable, sandbox on, version-checked: see scripts/lib/chrome.mjs.
+  const browser = await launchChrome({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1200 }, reducedMotion: 'reduce', serviceWorkers: 'block' });
   const capture = startNetworkCapture(context, { enabled: false, file: process.env.E2E_RPC_CAPTURE, devServerOrigin: BASE });
   // Allow UI actions to finish while Metro and proof workers share the runner.

@@ -2,7 +2,7 @@
 // Uses the configured default yield pool's real reads, holding its last RPC response.
 // Run against a production preview: PROBE_URL=http://localhost:8083 node scripts/visual/home-startup.mjs
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 import { toFunctionSelector } from 'viem';
 
 const base = process.env.PROBE_URL ?? 'http://localhost:8083';
@@ -16,7 +16,7 @@ function readsYield(request) {
   } catch { return false; }
 }
 
-const browser = await chromium.launch({ headless: true });
+const browser = await launchChrome({ headless: true });
 try {
   for (const { width, unavailable = false, reducedMotion = 'no-preference' } of [
     { width: 1440 }, { width: 412 }, { width: 360 },

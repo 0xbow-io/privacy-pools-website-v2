@@ -1,10 +1,10 @@
 // Local navigation regression: panels, route return, and late funding.
 // PROBE_URL=http://localhost:8081 node scripts/e2e/panel-navigation.mjs
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 import { installLandingWallet } from './fixtures/landing-wallet.mjs';
 
-const browser = await chromium.launch({ headless: true });
+const browser = await launchChrome({ headless: true });
 try {
   const page = await browser.newPage({ hasTouch: true, viewport: { width: 1440, height: 1000 } });
   page.setDefaultNavigationTimeout(30_000);

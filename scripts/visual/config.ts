@@ -6,17 +6,6 @@ import * as path from 'node:path';
 export const VISUAL_DIR = path.resolve(new URL('.', import.meta.url).pathname);
 export const REPO_ROOT = path.resolve(VISUAL_DIR, '..', '..');
 
-/**
- * Pinned browser — the same chromium revision every prior QA session used.
- * Must live INSIDE the repo (`.pw-browsers/`, untracked): the safewrap sandbox
- * only exposes the cwd, so an absolute path outside it is invisible. Copy it
- * from the main checkout if missing:
- *   cp -r /home/pe/newnewrepos/w/0xbow/ppv2/.pw-browsers <repo>/.pw-browsers
- */
-export const CHROMIUM_PATH =
-  process.env.PPV2_VISUAL_CHROMIUM ??
-  path.join(REPO_ROOT, '.pw-browsers', 'chromium-1228', 'chrome-linux64', 'chrome');
-
 // 127.0.0.1, not localhost: inside the safewrap netns, `localhost` resolves
 // to ::1 first and pasta only splices IPv4 loopback to the host. Run capture
 // commands with SAFEWRAP_WHITELIST_PORTS=8085 so 8081 stays in pasta's
