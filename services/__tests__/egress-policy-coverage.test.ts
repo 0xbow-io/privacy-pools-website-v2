@@ -9,6 +9,7 @@ import * as egressFetch from '@/services/egress-fetch';
 import * as aspBackoffModule from '@/services/asp-backoff';
 import { FetchHTTPClient } from '@/services/egress-http-client';
 import * as entrypointsNormalize from '@/services/entrypoints-normalize';
+import * as torFetch from '@/services/tor-fetch';
 
 const ROOT = join(new URL('.', import.meta.url).pathname, '..', '..');
 const ASP = 'https://asp.example';
@@ -33,6 +34,7 @@ function loadApi(legacy: boolean) {
     if (name === '@/services/egress-fetch') return egressFetch;
     if (name === '@/services/asp-backoff') return aspBackoffModule;
     if (name === '@/services/entrypoints-normalize') return entrypointsNormalize;
+    if (name === '@/services/tor-fetch') return torFetch;
     throw new Error(`Unexpected APIClient dependency: ${name}`);
   };
   new Function('require', 'exports', code)(require, exports);

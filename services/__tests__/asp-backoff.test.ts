@@ -7,6 +7,7 @@ import * as backoffModule from '@/services/asp-backoff';
 import * as egressFetch from '@/services/egress-fetch';
 import * as policy from '@/services/egress-policy';
 import * as entrypointsNormalize from '@/services/entrypoints-normalize';
+import * as torFetch from '@/services/tor-fetch';
 
 import {
   ASP_BACKOFF_BASE_MS,
@@ -39,7 +40,7 @@ function nativeSignal() {
 
 // The real APIClient, with only its native config module replaced (same
 // approach as egress-policy-coverage.test.ts; config/env cannot load in bun).
-function loadApi() {
+function loadApi(tor: Pick<typeof torFetch, 'rpcTimeoutMs'> = torFetch) {
   const exports: Record<string, unknown> = {};
   const source = readFileSync(join(new URL('.', import.meta.url).pathname, '..', 'api-client.ts'), 'utf8');
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -49,6 +50,7 @@ function loadApi() {
     '@/services/egress-fetch': egressFetch,
     '@/services/asp-backoff': backoffModule,
     '@/services/entrypoints-normalize': entrypointsNormalize,
+    '@/services/tor-fetch': tor,
   };
   const require = (name: string) => {
     if (!(name in modules)) throw new Error(`Unexpected APIClient dependency: ${name}`);
@@ -500,5 +502,37 @@ describe('production ASP pacing and fixed-grid recovery', () => {
     } finally {
       transport.stopAspRequests(); b.reset(); globalThis.fetch = original;
     }
+  });
+});
+
+describe('the ASP request deadline over Tor', () => {
+  // The deadline starts when the request is made, and the page's first
+  // requests wait for the Tor client to start: over Tor it is an RPC call's.
+  async function deadlines(tor: Pick<typeof torFetch, 'rpcTimeoutMs'>): Promise<number[]> {
+    const delays: number[] = [];
+    const realSetTimeout = globalThis.setTimeout;
+    const realFetch = globalThis.fetch;
+    // Only a request deadline is recorded and held back; the pacer's own
+    // short timers run as usual.
+    globalThis.setTimeout = ((handler: () => void, ms?: number) => {
+      if ((ms ?? 0) < 45_000) return realSetTimeout(handler, ms);
+      delays.push(ms ?? 0);
+      return realSetTimeout(() => {}, 0);
+    }) as typeof setTimeout;
+    globalThis.fetch = (async () => Response.json({})) as typeof fetch;
+    try {
+      await new (loadApi(tor).APIClient)().getGlobalStatistics().catch(() => undefined);
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+      globalThis.fetch = realFetch;
+    }
+    return delays;
+  }
+
+  test('is 45 s direct and the raised RPC deadline while Tor is in force', async () => {
+    expect(await deadlines(torFetch)).toContain(45_000);
+    const raised = await deadlines({ rpcTimeoutMs: (ms) => Math.max(ms ?? 0, torFetch.TOR_RPC_TIMEOUT_MS) });
+    expect(raised).toContain(torFetch.TOR_RPC_TIMEOUT_MS);
+    expect(raised).not.toContain(45_000);
   });
 });
