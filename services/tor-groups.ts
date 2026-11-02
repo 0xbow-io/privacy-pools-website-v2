@@ -130,6 +130,13 @@ function sentBy(text: string): string | null {
   return sent.get(text) ?? null;
 }
 
+/** Whether a request's text carries anything beyond its path: a body or a query. */
+function describesItself(text: string): boolean {
+  const newline = text.indexOf('\n');
+  const url = newline < 0 ? text : text.slice(0, newline);
+  return url.includes('?') || (newline >= 0 && newline < text.length - 1);
+}
+
 /**
  * The group that received each recent relayer quote, by the commitment the
  * relayer signed into it. A relay names its quote's commitment, and may be
@@ -178,12 +185,18 @@ export function torGroupFor(party: TorParty, text: string, subject: TorSubject =
     if (quoted) return live.has(quoted) ? quoted : `subject:${++subjects}`;
     // A client that retries sends the same request again, possibly after its
     // operation ended and the next began: it goes over a group of its own.
-    const earlier = sentBy(text);
+    // A request with neither a body nor a query, such as the relayer's
+    // details, says nothing about the operation that sent it, so a repeat of
+    // it goes wherever a first request would.
+    const tracked = subject.identifying === true || describesItself(text);
+    const earlier = tracked ? sentBy(text) : null;
     if (earlier && earlier !== operation) return `subject:${++subjects}`;
     if (operation) {
-      sent.delete(text);
-      sent.set(text, operation);
-      if (sent.size > SENT_KEPT) sent.delete(sent.keys().next().value!);
+      if (tracked) {
+        sent.delete(text);
+        sent.set(text, operation);
+        if (sent.size > SENT_KEPT) sent.delete(sent.keys().next().value!);
+      }
       return operation;
     }
   }

@@ -116,6 +116,25 @@ describe('anon-rpc isolation groups', () => {
     second.end();
   });
 
+  test('a repeat of a request with neither body nor query goes where a first one would', () => {
+    const details = 'https://relayer.example/v1/details/evm/1\n';
+    const first = beginTorOperation();
+    expect(torGroupFor('relayer', details)).toBe(first.key);
+    first.end();
+    expect(torGroupFor('relayer', details)).toBe('public:asp');
+    const second = beginTorOperation();
+    expect(torGroupFor('relayer', details)).toBe(second.key);
+    second.end();
+    // A targeted ASP call says who it is about in its path, so it stays tracked.
+    const label = 'https://asp.example/labels/9\n';
+    const third = beginTorOperation();
+    expect(torGroupFor('asp', label, { identifying: true })).toBe(third.key);
+    third.end();
+    const fourth = beginTorOperation();
+    expect(torGroupFor('asp', label, { identifying: true })).toMatch(/^subject:/);
+    fourth.end();
+  });
+
   test('an identifying request rides the operation, or outside one gets a group of its own', () => {
     const a = torGroupFor('asp', 'https://asp.example/labels/1', { identifying: true });
     const b = torGroupFor('asp', 'https://asp.example/labels/2', { identifying: true });
