@@ -314,29 +314,45 @@ export function torFetchIfActive(): TorFetch | null {
 
 /**
  * Start an operation (see services/tor-groups.ts) and return what ends it.
- * Ending fails the operation's requests still pending and any sent later
- * through a sender it handed out, and closes its worker where it has one of
- * its own. The next operation starts on a fresh route either way, under a
- * new worker or a new isolation key, and the budget is free for others.
+ * Ending fails any request sent later through a sender it handed out, and
+ * closes its worker, where it has one of its own, once the requests already
+ * on their way are answered and read: a relay the relayer may have taken
+ * still gets its answer when the flow closes first. Those get
+ * TOR_RPC_TIMEOUT_MS from the end, body included, since the harness stops
+ * timing a call once its headers arrive. The next operation starts on a fresh
+ * route either way, under a new worker or a new isolation key.
  */
 export function beginTorOperationScope(): () => void {
   const { key, end } = beginTorOperation();
-  const lifetime = new AbortController();
-  operationLifetimes.set(key, lifetime);
+  const operation: Operation = { ended: false, inFlight: 0, lifetime: new AbortController() };
+  operations.set(key, operation);
   return () => {
     end();
-    operationLifetimes.delete(key);
-    lifetime.abort(operationEnded());
+    operation.ended = true;
+    operations.delete(key);
     senders.delete(key);
-    void groups?.then((group) => group(key).close(), () => {});
+    if (operation.inFlight === 0) closeGroup(key);
+    else timeoutSignal(TOR_RPC_TIMEOUT_MS).addEventListener('abort', () => operation.lifetime.abort(operationEnded()), { once: true });
   };
 }
 
 /** One sender per group key, each over that group's worker. */
 const senders = new Map<string, TorFetch>();
 
+/**
+ * An operation's state: whether it has ended, how many of its requests are on
+ * their way, and the signal that ends those once the operation's grace runs out.
+ */
+type Operation = { ended: boolean; inFlight: number; lifetime: AbortController };
+
 /** Each operation in progress, by group key, until it ends. */
-const operationLifetimes = new Map<string, AbortController>();
+const operations = new Map<string, Operation>();
+
+const endedOperation = (): Operation => ({ ended: true, inFlight: 0, lifetime: new AbortController() });
+
+function closeGroup(key: string): void {
+  void groups?.then((group) => group(key).close(), () => {});
+}
 
 const operationEnded = () => new TorUnavailableError('The operation this request belonged to has ended.');
 
@@ -453,28 +469,29 @@ type AnonFetcher = { fetch: BrowserHarness.AnonFetch };
 const circuitMoves = new Map<string, number>();
 
 function groupSender(key: string): TorFetch {
-  // An operation's sender lives as long as the operation; one that ended
-  // before its sender was made has nothing left to send.
-  let lifetime: AbortSignal | undefined;
-  if (key.startsWith('operation:')) {
-    let operation = operationLifetimes.get(key);
-    if (!operation) {
-      operation = new AbortController();
-      operation.abort(operationEnded());
-    }
-    lifetime = operation.signal;
-  }
+  const operation = key.startsWith('operation:') ? operations.get(key) ?? endedOperation() : undefined;
   const send: TorFetch = (input, init) => {
     const refusal = pinRefusals.get(ACTIVE_TOR_SETTINGS.provider);
     if (refusal) return Promise.reject(refusal);
     return sendOver(() => {
       const pending = groups ??= startGroups();
       return { pending, drop: () => { if (groups === pending) groups = null; } };
-    }, key, input, init, lifetime);
+    }, key, input, init, operation?.lifetime.signal);
   };
-  // An operation reads each answer before handing it on, so a relayer quote
-  // binds the relay that later names its commitment to this operation.
-  return lifetime ? async (input, init) => read(key, await send(input, init)) : send;
+  if (!operation) return send;
+  // An operation's sender sends until the operation ends; one that ended
+  // before its sender was made has nothing left to send. It reads each answer
+  // before handing it on, so a relayer quote binds the relay that later names
+  // its commitment to this operation, and the worker stays open until then.
+  return async (input, init) => {
+    if (operation.ended) throw operationEnded();
+    operation.inFlight++;
+    try {
+      return await read(key, await send(input, init));
+    } finally {
+      if (--operation.inFlight === 0 && operation.ended) closeGroup(key);
+    }
+  };
 }
 
 /**

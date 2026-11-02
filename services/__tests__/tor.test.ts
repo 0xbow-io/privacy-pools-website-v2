@@ -991,23 +991,27 @@ describe('isolation groups over the worker pool', () => {
   // A worker that records which instance served each call.
   function pooled() {
     const workers: { id: number; closed: boolean; served: string[] }[] = [];
+    let release = () => {};
+    const released = new Promise<void>((resolve) => { release = resolve; });
     const module = { AnonRpcWorker: class {
       ready = Promise.resolve();
       record = { id: workers.length, closed: false, served: [] as string[] };
       constructor() { workers.push(this.record); }
       close() { this.record.closed = true; }
-      // A URL ending in /hang waits until its caller gives up.
+      // A URL ending in /hang waits until its caller gives up, and one ending
+      // in /slow until the test releases it.
       fetch = async (url: string, init?: RequestInit) => {
         this.record.served.push(url);
         if (url.endsWith('/hang')) {
           await new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true }));
         }
+        if (url.endsWith('/slow')) await released;
         // A URL ending in /quote answers like a relayer quote.
         if (url.endsWith('/quote')) return Response.json({ feeCommitment: { signedRelayerCommitment: COMMITMENT } });
         return Response.json({ result: '0x1' });
       };
     } };
-    return { workers, importer: () => module, servedBy: (url: string) => workers.filter(w => w.served.includes(url)).map(w => w.id) };
+    return { workers, release, importer: () => module, servedBy: (url: string) => workers.filter(w => w.served.includes(url)).map(w => w.id) };
   }
   const COMMITMENT = `0x${'5e'.repeat(65)}`;
 
@@ -1058,17 +1062,57 @@ describe('isolation groups over the worker pool', () => {
     endSecond();
   });
 
-  test('ending an operation fails its pending request and any later one through a sender it handed out', async () => {
-    const { importer, servedBy } = pooled();
+  test('ending an operation lets a request on its way finish, then closes the worker; a later one fails', async () => {
+    const { importer, workers, release, servedBy } = pooled();
     const loaded = transport(true, importer, { provider: 'nym', cores: 12 });
     const end = loaded.tor.beginTorOperationScope();
-    const send = loaded.tor.torFetchFor('relayer', 'https://relayer.example/v1/quote')!;
-    const pending = send('https://relayer.example/hang', {}).then(() => null, (error: unknown) => error);
+    const send = loaded.tor.torFetchFor('relayer', 'https://relayer.example/v1/relay')!;
+    // The flow closes while its relay is on its way.
+    const pending = send('https://relayer.example/slow', { method: 'POST', body: '{}' });
     await new Promise((resolve) => setTimeout(resolve, 10));
     end();
-    expect(String(await pending)).toContain('has ended');
+    const [worker] = servedBy('https://relayer.example/slow');
     expect(String(await send('https://relayer.example/later', {}).catch((error: unknown) => error))).toContain('has ended');
     expect(servedBy('https://relayer.example/later')).toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(workers[worker].closed).toBe(false);
+    release();
+    expect(await (await pending).json()).toEqual({ result: '0x1' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(workers[worker].closed).toBe(true);
+  });
+
+  test('an ended operation gives a body still arriving TOR_RPC_TIMEOUT_MS, then ends it and closes the worker', async () => {
+    const grace = new AbortController();
+    const workers: { closed: boolean }[] = [];
+    let headers = false;
+    const module = { AnonRpcWorker: class {
+      ready = Promise.resolve();
+      record = { closed: false };
+      constructor() { workers.push(this.record); }
+      close() { this.record.closed = true; }
+      // As the harness does, a streamed body ends when the call's signal aborts.
+      fetch = async (_url: string, init?: RequestInit) => {
+        headers = true;
+        return new Response(new ReadableStream({
+          start(controller) { init?.signal?.addEventListener('abort', () => controller.error(init.signal!.reason), { once: true }); },
+        }));
+      };
+    } };
+    const loaded = transport(true, () => module, {
+      provider: 'nym', cores: 12,
+      timeoutSignal: (ms) => ms === loaded.tor.TOR_RPC_TIMEOUT_MS ? grace.signal : AbortSignal.timeout(ms),
+    });
+    const end = loaded.tor.beginTorOperationScope();
+    const pending = loaded.tor.torFetchFor('relayer', 'https://relayer.example/v1/details')!('https://relayer.example/stall', {}).then(() => null, (error: unknown) => error);
+    while (!headers) await new Promise((resolve) => setTimeout(resolve, 0));
+    end();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(workers.some((w) => w.closed)).toBe(false);
+    grace.abort();
+    expect(String(await pending)).toContain('has ended');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(workers.filter((w) => w.closed)).toHaveLength(1);
   });
 
   test('a request that identifies the user outside an operation gets a worker of its own, closed once it is read', async () => {
