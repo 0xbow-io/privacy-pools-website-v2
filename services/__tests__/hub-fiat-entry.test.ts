@@ -97,7 +97,9 @@ describe('the dollar keystroke sanitizer and labels', () => {
     // cappedQuickAmounts floors 10% of a $100 cap at $2,630 to 0.0038 ETH.
     expect(usdChipLabel('0.0038', 2630)).toBe('$10');
     expect(usdChipLabel('0.038', 2630)).toBe('$100');
-    expect(usdChipLabel('1', 2630)).toBe('$2,630');
+    expect(usdChipLabel('1', 2630)).toBe('$2.6k');
+    expect(usdChipLabel('0.38', 2630)).toBe('$999');
+    expect(usdChipLabel('40', 2630)).toBe('$105.2k');
     expect(usdChipLabel('0.0001', 2630)).toBe('$0.26');
   });
 

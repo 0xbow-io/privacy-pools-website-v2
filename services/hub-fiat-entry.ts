@@ -13,7 +13,7 @@
 // Pure, so it is testable under the bun runner (see token-format.ts for why
 // anything that reaches react-native is not).
 
-import { isStablecoin } from '@/services/token-format';
+import { compactAmountLabel, isStablecoin } from '@/services/token-format';
 import { sanitizeAmountInput } from '@/services/token-amount';
 import { displayTokenSymbol } from '@/services/share-display';
 
@@ -74,6 +74,7 @@ export function formatUsdLabel(usdText: string): string {
 export function usdChipLabel(preset: string, priceUsd: number): string {
   const usd = (parseFloat(preset) || 0) * priceUsd;
   if (!(usd > 0)) return preset;
+  if (usd >= 1000) return `$${compactAmountLabel(String(Math.floor(usd)))}`;
   return `$${usd.toLocaleString('en-US', { maximumFractionDigits: usd < 1 ? 2 : 0 })}`;
 }
 

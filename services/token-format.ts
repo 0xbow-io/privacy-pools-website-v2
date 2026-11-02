@@ -138,6 +138,23 @@ export function groupThousands(text: string): string {
 }
 
 /**
+ * A short figure for a recommended-amount chip: "1000" to "1k", "12500" to
+ * "12.5k", "1000000" to "1M". Below 1,000 it is the grouped figure as is.
+ * Big presets ("100000 USDC") overflowed the chip row (Pat, 2026-11-02).
+ *
+ * Display only, like groupThousands: the chip still fills the exact preset.
+ * Rounds DOWN to one decimal so a chip never reads more than it fills.
+ */
+export function compactAmountLabel(text: string): string {
+  const n = Number(text);
+  if (!Number.isFinite(n) || n < 1000) return groupThousands(text);
+  const units: Array<[number, string]> = [[1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'k']];
+  const [size, suffix] = units.find(([s]) => n >= s)!;
+  const scaled = Math.floor((n / size) * 10) / 10;
+  return `${scaled % 1 === 0 ? scaled.toFixed(0) : scaled.toFixed(1)}${suffix}`;
+}
+
+/**
  * The amount input's text while the field is NOT being typed in: grouped when it
  * is a plain decimal ("4526.5" to "4,526.5", "4526." to "4,526."), as is
  * otherwise. While focused the field keeps the raw text, so the caret and the
