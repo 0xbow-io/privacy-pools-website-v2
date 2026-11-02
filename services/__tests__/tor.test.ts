@@ -45,7 +45,7 @@ function transport(active: boolean, importer: () => unknown, options: {
   const tor = load('services/tor-fetch.ts', { navigator: { hardwareConcurrency: options.cores ?? 4 }, require(name: string) {
     if (name === '@/services/tor-errors') return errors;
     if (name === '@/services/tor-groups') return groups;
-    if (name === '@0xbow/anon-rpc-rs-react-native') { imports++; return importer(); }
+    if (name === '@0xbow/anon-rpc-rs-react-native') { imports++; return { isTorExitFailure: harness.isTorExitFailure, ...importer() as object }; }
     if (name === '@/services/abort-signal') return options.timeoutSignal ? { ...abortSignal, timeoutSignal: options.timeoutSignal } : abortSignal;
     if (name === '@/config/tor') return { ...settings, TOR_IN_FORCE: active, TOR_ON_DEVICE: options.device ?? false, ACTIVE_TOR_SETTINGS: { enabled: active, gatewayUrl: GATEWAY, provider: options.provider ?? 'tor-js' } };
     if (name === '@/services/egress-policy') return policy;
@@ -924,6 +924,8 @@ test('the anon-rpc harness is reachable only through the transport dynamic impor
       const ast = ts.createSourceFile(path, source(path), ts.ScriptTarget.Latest, true, path.endsWith('tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
       function visit(node: ts.Node) {
         if (ts.isStringLiteral(node) && /^(?:@0xbow\/anon-rpc-rs-browser-harness|@0xbow\/anon-rpc-rs-react-native)(?:\/|$)/.test(node.text)) {
+          // A type-only import is erased from the build, so it loads nothing.
+          if (ts.isImportDeclaration(node.parent) && node.parent.importClause?.isTypeOnly) return;
           references.push(path);
           expect(ts.isCallExpression(node.parent) && node.parent.expression.kind === ts.SyntaxKind.ImportKeyword).toBe(true);
         }

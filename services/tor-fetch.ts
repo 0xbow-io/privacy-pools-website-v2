@@ -45,66 +45,23 @@ import { abortReason, anySignal, composeSignals, throwIfAborted, timeoutSignal }
 import { assertEgressAllowed } from '@/services/egress-policy';
 import { TorUnavailableError } from '@/services/tor-errors';
 import { beginTorOperation, noteTorQuotes, torGroupFor, type TorParty, type TorSubject } from '@/services/tor-groups';
+import type * as BrowserHarness from '@0xbow/anon-rpc-rs-browser-harness';
+import type * as NativeHarness from '@0xbow/anon-rpc-rs-react-native';
 
 export { TorUnavailableError };
 
-/** A fetch init with the harness's per-call options (anon-rpc §9.3). */
-type AnonRequestInit = RequestInit & { anonOptions?: { isolationKey?: string } };
+/** The harness: the browser package on the web, the native SDK's on a device. */
+type Harness = typeof BrowserHarness | typeof NativeHarness;
 
-/** The subset of the anon-rpc harness this app uses. */
-type TorClientLike = {
-  fetch: (url: string, init?: AnonRequestInit) => Promise<Response>;
-  close: () => void;
-};
-
-type AnonRpcWorkerLike = {
-  ready: Promise<void>;
-  fetch: (input: string, init?: RequestInit) => Promise<Response>;
-  close: () => void;
-  acceptLog?: (options: { signal: AbortSignal }) => Promise<{ args: unknown[] }>;
-};
-
-type RpcProviderLike = { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> };
-
-/** The harness's knownWorker() entry: where a provider's specifier lives. */
-type KnownWorkerLike = { specifier: string; specifierChainId: number; isolatesByKey: boolean };
-
-/** The harness's ReplacingWorker, or a WorkerPool group: a fetch over one route at a time. */
-type ReplacingWorkerLike = TorClientLike;
-
-/** How the harness starts each worker: a function on the web, Arti's options on a device. */
-type WorkerStart = ((signal: AbortSignal) => Promise<TorClientLike & { ready: Promise<void> }>) | { tor: Record<string, never> };
-
-type ReplacingWorkerFactory = new (options: {
-  start: WorkerStart;
-  callTimeoutMs?: number;
-  readyTimeoutMs?: number;
-}) => ReplacingWorkerLike;
-
-type WorkerPoolFactory = new (options: {
-  start: WorkerStart;
-  callTimeoutMs?: number;
-  readyTimeoutMs?: number;
-  maxWorkers: number;
-  spare?: number;
-  idleCloseMs?: number;
-}) => { group: (key: string) => ReplacingWorkerLike; close: () => void };
-
-type HarnessModule = {
-  AnonRpcWorker?: unknown;
-  ReplacingWorker?: unknown;
-  WorkerPool?: unknown;
-  knownWorker?: (id: TorProviderId) => KnownWorkerLike;
-  isTorExitFailure?: (error: unknown) => boolean;
-  knownWorkerInit?: (id: TorProviderId, options: { rpcProvider: RpcProviderLike; config?: ReturnType<TorProvider['workerConfig']> }) => object;
-};
+/** A ReplacingWorker, or a WorkerPool group: a fetch over one route at a time. */
+type TorClient = Pick<BrowserHarness.WorkerGroup, 'fetch' | 'close'>;
 
 /** A fetch over Tor. */
 export type TorFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 // Race a wait that takes no signal (an import, a worker's `ready`, a provider
-// read) against one, rejecting with the signal's own reason; harness calls get
-// it too, so every caller sees the reason it aborted with.
+// read) against one, rejecting with the signal's own reason, as a harness call
+// does, so every caller sees the reason it aborted with.
 function withAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
     const abort = () => reject(abortReason(signal));
@@ -133,7 +90,7 @@ function withAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
  * without reading anything direct. A read the harness no longer waits for
  * ends at TOR_PROBE_TIMEOUT_MS.
  */
-async function bootstrapProvider(known: KnownWorkerLike): Promise<RpcProviderLike> {
+async function bootstrapProvider(known: BrowserHarness.KnownWorker): Promise<BrowserHarness.RpcProvider> {
   const { getChainConfig } = await import('@/config/chains');
   let url = getChainConfig(known.specifierChainId)?.rpcUrl;
   if (!url && (known.specifierChainId === 1 || known.specifierChainId === 11155111)) {
@@ -149,9 +106,9 @@ async function bootstrapProvider(known: KnownWorkerLike): Promise<RpcProviderLik
   return provider;
 }
 
-const bootstrapProviders = new Map<string, RpcProviderLike>();
+const bootstrapProviders = new Map<string, BrowserHarness.RpcProvider>();
 
-function directProvider(endpoint: string): RpcProviderLike {
+function directProvider(endpoint: string): BrowserHarness.RpcProvider {
   let id = 0;
   return {
     async request({ method, params }: { method: string; params?: unknown[] }): Promise<unknown> {
@@ -205,15 +162,13 @@ export function workerLogStep(line: string): TorProbeStep | null {
  * the app's own bootstrap never advances on its lines. Steps only move
  * forward, so a late line cannot rewind it.
  */
-function followWorkerLog(worker: AnonRpcWorkerLike, report: (step: TorProbeStep) => void, signal: AbortSignal): () => void {
-  const { acceptLog } = worker;
-  if (typeof acceptLog !== 'function') return () => {};
+function followWorkerLog(worker: BrowserHarness.AnonRpcWorker, report: (step: TorProbeStep) => void, signal: AbortSignal): () => void {
   const stop = new AbortController();
   const both = anySignal([signal, stop.signal]);
   void (async () => {
     try {
       for (;;) {
-        const { args } = await acceptLog.call(worker, { signal: both });
+        const { args } = await worker.acceptLog({ signal: both });
         const step = workerLogStep(args.map((a) => (typeof a === 'string' ? a : '')).join(' '));
         if (step) report(step);
       }
@@ -222,14 +177,14 @@ function followWorkerLog(worker: AnonRpcWorkerLike, report: (step: TorProbeStep)
   return () => stop.abort();
 }
 
-async function importHarness(signal: AbortSignal): Promise<HarnessModule> {
+async function importHarness(signal: AbortSignal): Promise<Harness> {
   try {
-    // The only two references in the repo, both bare dynamic imports, so a
-    // user who never turns anon-rpc on never loads either. On a device the
+    // The only two runtime references in the repo, both bare dynamic imports,
+    // so a user who never turns anon-rpc on never loads either. On a device the
     // client is Arti compiled into the app (@0xbow/anon-rpc-rs-react-native,
     // AnonRpcWorker.tor()): same worker shape, no gateway, no specifier, no
     // bundle.
-    return await withAbort<HarnessModule>(
+    return await withAbort<Harness>(
       TOR_ON_DEVICE ? import('@0xbow/anon-rpc-rs-react-native') : import('@0xbow/anon-rpc-rs-browser-harness'),
       signal,
     );
@@ -256,47 +211,37 @@ function clientTarget(providerId: TorProviderId, gatewayUrl: string): { provider
  */
 const pinRefusals = new Map<TorProviderId, TorUnavailableError>();
 
-/** One client, started and ready; `onStep` hears its steps after 'loading'. */
+/**
+ * One web client, started and ready; `onStep` hears its steps after
+ * 'loading'. A device's ReplacingWorker starts Arti itself.
+ */
 async function loadClient(
-  module: HarnessModule,
+  module: typeof BrowserHarness,
   { provider, gatewayUrl }: ReturnType<typeof clientTarget>,
   signal: AbortSignal,
   onStep?: (step: TorProbeStep) => void,
-): Promise<TorClientLike> {
+): Promise<TorClient> {
   let reached = STEP_ORDER.indexOf('loading');
   const report = (step: TorProbeStep) => {
     const at = STEP_ORDER.indexOf(step);
     if (at > reached) { reached = at; onStep?.(step); }
   };
 
-  const factory = module.AnonRpcWorker as
-    | ((new (init: unknown) => AnonRpcWorkerLike) & { tor?: () => AnonRpcWorkerLike })
-    | undefined;
-  const { knownWorker, knownWorkerInit } = module;
-  if (typeof factory !== 'function' || (TOR_ON_DEVICE ? typeof factory.tor !== 'function'
-    : typeof knownWorker !== 'function' || typeof knownWorkerInit !== 'function')) {
-    throw new TorUnavailableError('The anon-rpc client does not expose the expected interface.');
-  }
-
   const refusal = pinRefusals.get(provider.id);
   if (refusal) throw refusal;
-  let worker: AnonRpcWorkerLike | undefined;
+  let worker: BrowserHarness.AnonRpcWorker | undefined;
   let unfollow: (() => void) | undefined;
   try {
     throwIfAborted(signal);
-    if (TOR_ON_DEVICE) {
-      worker = factory.tor!();
-    } else {
-      report('specifier');
-      const rpcProvider = await withAbort(bootstrapProvider(knownWorker!(provider.id)), signal);
-      throwIfAborted(signal);
-      // The harness runs a bundle only if the specifier pins this build's hash,
-      // and refuses before fetching it otherwise.
-      worker = new factory({
-        ...knownWorkerInit!(provider.id, { rpcProvider, config: provider.workerConfig(gatewayUrl) }),
-        expectedWorkerHash: provider.workerHash,
-      });
-    }
+    report('specifier');
+    const rpcProvider = await withAbort(bootstrapProvider(module.knownWorker(provider.id)), signal);
+    throwIfAborted(signal);
+    // The harness runs a bundle only if the specifier pins this build's hash,
+    // and refuses before fetching it otherwise.
+    worker = new module.AnonRpcWorker({
+      ...module.knownWorkerInit(provider.id, { rpcProvider, config: provider.workerConfig(gatewayUrl) }),
+      expectedWorkerHash: provider.workerHash,
+    });
     // Only a Test follows the log: the app's own client leaves it alone.
     if (onStep) unfollow = followWorkerLog(worker, report, signal);
     report('starting');
@@ -406,7 +351,7 @@ const operationEnded = () => new TorUnavailableError('The operation this request
 let groups: Promise<Groups> | null = null;
 
 /** Each group's client, and whether one worker carries every group by key. */
-type Groups = ((key: string) => ReplacingWorkerLike) & { keyed: boolean };
+type Groups = ((key: string) => TorClient) & { keyed: boolean };
 
 /**
  * How many workers the web pool keeps alive, over every group and the spare.
@@ -420,15 +365,6 @@ function workerBudget(provider: TorProviderId): { maxWorkers: number; spare: num
   const cores = typeof navigator !== 'undefined' && navigator.hardwareConcurrency > 0 ? navigator.hardwareConcurrency : 4;
   const maxWorkers = Math.min(6, Math.max(1, Math.floor(cores / 2)));
   return { maxWorkers, spare: maxWorkers >= 3 ? 1 : 0, idleCloseMs: provider === 'nym' ? 90_000 : 120_000 };
-}
-
-/**
- * Whether one worker carries every group under its own isolation key: a
- * device's Arti client does, and on the web a worker the harness knows to
- * act on `anonOptions.isolationKey` (anon-rpc §9.3).
- */
-function keyedGroups(module: HarnessModule): boolean {
-  return TOR_ON_DEVICE || module.knownWorker?.(ACTIVE_TOR_SETTINGS.provider).isolatesByKey === true;
 }
 
 /**
@@ -446,25 +382,22 @@ function budgetedGroup(key: string): string {
   return 'public';
 }
 
+/**
+ * One worker carries every group under its own isolation key where it can: a
+ * device's Arti client does, and on the web a worker the harness knows to act
+ * on `anonOptions.isolationKey` (anon-rpc §9.3).
+ */
 async function startGroups(): Promise<Groups> {
   const target = clientTarget(ACTIVE_TOR_SETTINGS.provider, ACTIVE_TOR_SETTINGS.gatewayUrl);
   const module = await importHarness(new AbortController().signal);
   const timeouts = { callTimeoutMs: TOR_ROUTE_DEADLINE_MS, readyTimeoutMs: TOR_PROBE_TIMEOUT_MS };
-  const start: WorkerStart = TOR_ON_DEVICE ? { tor: {} }
-    : async (retired) => ({ ...await loadClient(module, target, retired), ready: Promise.resolve() });
-  if (keyedGroups(module)) {
-    const Replacing = module.ReplacingWorker as ReplacingWorkerFactory | undefined;
-    if (typeof Replacing !== 'function') {
-      throw new TorUnavailableError('The anon-rpc client does not expose the expected interface.');
-    }
-    const replacing = new Replacing({ start, ...timeouts });
-    return Object.assign((key: string) => ({ fetch: keyedFetch(module, replacing, key), close: () => {} }), { keyed: true });
-  }
-  const Pool = module.WorkerPool as WorkerPoolFactory | undefined;
-  if (typeof Pool !== 'function') {
-    throw new TorUnavailableError('The anon-rpc client does not expose the expected interface.');
-  }
-  const pool = new Pool({
+  const keyed = (replacing: AnonFetcher) =>
+    Object.assign((key: string) => ({ fetch: keyedFetch(module, replacing, key), close: () => {} }), { keyed: true });
+  if (TOR_ON_DEVICE) return keyed(new (module as typeof NativeHarness).ReplacingWorker({ start: { tor: {} }, ...timeouts }));
+  const web = module as typeof BrowserHarness;
+  const start = async (retired: AbortSignal) => ({ ...await loadClient(web, target, retired), ready: Promise.resolve() });
+  if (web.knownWorker(target.provider.id).isolatesByKey) return keyed(new web.ReplacingWorker({ start, ...timeouts }));
+  const pool = new web.WorkerPool({
     start,
     ...timeouts,
     ...workerBudget(target.provider.id),
@@ -495,21 +428,26 @@ function moveToNewCircuit(group: string): void {
  * failure moves the group to a new key; a call whose exit failed goes once
  * more.
  */
-function keyedFetch(module: HarnessModule, replacing: ReplacingWorkerLike, group: string): ReplacingWorkerLike['fetch'] {
+function keyedFetch(module: Harness, replacing: AnonFetcher, group: string): TorClient['fetch'] {
   return async (url, init) => {
     const send = () => replacing.fetch(url, { ...init, anonOptions: { isolationKey: isolationKeyFor(group) } })
       .catch((error: unknown) => {
-        if (module.isTorExitFailure?.(error)) moveToNewCircuit(group);
+        if (module.isTorExitFailure(error)) moveToNewCircuit(group);
         throw error;
       });
     try {
       return await send();
     } catch (error) {
-      if (!module.isTorExitFailure?.(error) || init?.signal?.aborted) throw clockSkewError(error) ?? error;
+      // An aborted call rejects with its caller's reason, untouched.
+      if (init?.signal?.aborted) throw error;
+      if (!module.isTorExitFailure(error)) throw clockSkewError(error) ?? error;
       return send();
     }
   };
 }
+
+/** A ReplacingWorker, which takes the harness's per-call options (anon-rpc §9.3). */
+type AnonFetcher = { fetch: BrowserHarness.AnonFetch };
 
 /** How many times each group has moved to a new circuit. */
 const circuitMoves = new Map<string, number>();
@@ -576,7 +514,7 @@ function oneShotSender(key: string): TorFetch {
  * to load, so the next call tries again.
  */
 async function sendOver(
-  clients: () => { pending: Promise<(key: string) => ReplacingWorkerLike>; drop: () => void },
+  clients: () => { pending: Promise<(key: string) => TorClient>; drop: () => void },
   key: string,
   input: string | URL | Request,
   init: RequestInit | undefined,
@@ -588,7 +526,7 @@ async function sendOver(
   try {
     throwIfAborted(signal);
     const { pending, drop } = clients();
-    let client: ReplacingWorkerLike;
+    let client: TorClient;
     try {
       client = (await withAbort(pending, signal))(key);
     } catch (error) {
@@ -603,15 +541,16 @@ async function sendOver(
       ? null : new Uint8Array(await withAbort(request.arrayBuffer(), signal));
     const body = bytes && bytes.byteLength > 0 ? bytes : undefined;
     throwIfAborted(signal);
-    // The harness ends a streamed body when this signal aborts, so a timeout
-    // still ends a probe that has its headers but not its answer.
-    return await withAbort(client.fetch(request.url, {
+    // The harness fails the call with this signal's reason when it aborts, and
+    // ends a streamed body, so a timeout still ends a probe that has its
+    // headers but not its answer.
+    return await client.fetch(request.url, {
       method: request.method,
       headers: torHeaders(request.headers),
       body,
       redirect: init?.redirect ?? request.redirect,
       signal,
-    }), signal);
+    });
   } finally {
     // Where release does anything (React Native), the native client has
     // already buffered the whole response, so no body is left to abort.
@@ -663,19 +602,16 @@ async function replacingClient(
   providerId: TorProviderId,
   signal: AbortSignal,
   onStep?: (step: TorProbeStep) => void,
-): Promise<ReplacingWorkerLike> {
+): Promise<TorClient> {
   const target = clientTarget(providerId, gatewayUrl);
   onStep?.('loading');
   const module = await importHarness(signal);
-  const Replacing = module.ReplacingWorker as ReplacingWorkerFactory | undefined;
-  if (typeof Replacing !== 'function') {
-    throw new TorUnavailableError('The anon-rpc client does not expose the expected interface.');
-  }
+  const timeouts = { callTimeoutMs: TOR_ROUTE_DEADLINE_MS, readyTimeoutMs: TOR_PROBE_TIMEOUT_MS };
   if (TOR_ON_DEVICE) {
     // The native SDK starts Arti itself: the Test can name the start and the
     // ready, not the steps between.
     onStep?.('starting');
-    const replacing = new Replacing({ start: { tor: {} }, callTimeoutMs: TOR_ROUTE_DEADLINE_MS, readyTimeoutMs: TOR_PROBE_TIMEOUT_MS });
+    const replacing = new (module as typeof NativeHarness).ReplacingWorker({ start: { tor: {} }, ...timeouts });
     const send = keyedFetch(module, replacing, draftKey());
     return {
       fetch: async (url, init) => {
@@ -686,11 +622,12 @@ async function replacingClient(
       close: () => replacing.close(),
     };
   }
-  const replacing = new Replacing({
+  const web = module as typeof BrowserHarness;
+  const replacing = new web.ReplacingWorker({
     start: async (retired) => {
-      const { signal: boot, release } = composeSignals([timeoutSignal(TOR_PROBE_TIMEOUT_MS), signal, retired]);
+      const { signal: boot, release } = composeSignals([signal, retired]);
       try {
-        const client = await loadClient(module, target, boot, onStep);
+        const client = await loadClient(web, target, boot, onStep);
         onStep?.('checking');
         throwIfAborted(boot);
         return { ...client, ready: Promise.resolve() };
@@ -698,7 +635,7 @@ async function replacingClient(
         release();
       }
     },
-    callTimeoutMs: TOR_ROUTE_DEADLINE_MS,
+    ...timeouts,
   });
   return { fetch: keyedFetch(module, replacing, draftKey()), close: () => replacing.close() };
 }
@@ -716,7 +653,7 @@ async function draftClient(
   providerId: TorProviderId,
   signal: AbortSignal,
   onStep?: (step: TorProbeStep) => void,
-): Promise<ReplacingWorkerLike> {
+): Promise<TorClient> {
   const draft = validateTorGatewayFor(providerId, gatewayUrl);
   const active = validateTorGatewayFor(ACTIVE_TOR_SETTINGS.provider, ACTIVE_TOR_SETTINGS.gatewayUrl);
   const page = TOR_IN_FORCE && providerId === ACTIVE_TOR_SETTINGS.provider && draft.ok && active.ok
@@ -762,7 +699,7 @@ function clockSkewError(error: unknown): TorUnavailableError | null {
  * closes the one in use and counts for nothing.
  */
 export function createTorFetch(gatewayUrl: string, providerId: TorProviderId = DEFAULT_TOR_PROVIDER) {
-  let clients: Promise<ReplacingWorkerLike> | null = null;
+  let clients: Promise<TorClient> | null = null;
   const lifetime = new AbortController();
   const send: TorFetch = (input, init) => sendOver(() => {
     const pending = clients ??= draftClient(gatewayUrl, providerId, lifetime.signal);
@@ -790,7 +727,7 @@ export async function probeTorGateway(
   const { signal, release } = composeSignals([
     timeoutSignal(timeoutMs), ...(callerSignal ? [callerSignal] : []),
   ]);
-  let clients: ReplacingWorkerLike | undefined;
+  let clients: TorClient | undefined;
   try {
     clients = await draftClient(gatewayUrl, providerId, signal, onStep);
     if (providerId !== 'tor-js') return await probeMixnet(clients, signal);
@@ -823,7 +760,7 @@ export async function probeTorGateway(
  */
 export const MIXNET_PROBE_URL = 'https://ethereum-rpc.publicnode.com';
 
-async function probeMixnet(clients: ReplacingWorkerLike, signal: AbortSignal): Promise<{ ok: true } | { ok: false; message: string }> {
+async function probeMixnet(clients: TorClient, signal: AbortSignal): Promise<{ ok: true } | { ok: false; message: string }> {
   const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] });
   const headers = { 'content-type': 'application/json' };
   assertEgressAllowed('rpc', { method: 'POST', url: MIXNET_PROBE_URL, headers, body });
@@ -847,10 +784,10 @@ async function probeMixnet(clients: ReplacingWorkerLike, signal: AbortSignal): P
  * client is ready has failed too, as it would in the app. An answer, valid or
  * not, is never retried, and its body is read under the Test's own deadline.
  */
-async function probeFetch(clients: ReplacingWorkerLike, url: string, init: RequestInit, signal: AbortSignal): Promise<Response> {
+async function probeFetch(clients: TorClient, url: string, init: RequestInit, signal: AbortSignal): Promise<Response> {
   for (let attempt = 1; ; attempt++) {
     try {
-      return await withAbort(clients.fetch(url, { ...init, headers: torHeaders(init.headers), signal }), signal);
+      return await clients.fetch(url, { ...init, headers: torHeaders(init.headers), signal });
     } catch (error) {
       // A client that could not start is not retried: a gateway that is down
       // or a pin the chain does not match fails the same way again.
