@@ -14,6 +14,16 @@ export async function launchBrowser(): Promise<Browser> {
   });
 }
 
+/** The manifest label of the Chrome the captures run on (chrome-<version>), read from a short launch. */
+export async function captureBrowserLabel(): Promise<string> {
+  const browser = await launchBrowser();
+  try {
+    return `chrome-${browser.version()}`;
+  } finally {
+    await browser.close();
+  }
+}
+
 export interface ContextOptions {
   viewport: ViewportName;
   /**
