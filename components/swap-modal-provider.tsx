@@ -150,6 +150,7 @@ import { useNativeMockBlock } from '@/hooks/use-native-mock-block';
 import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { FeeWarning } from '@/components/fee-warning';
 import { buildFeeBreakdown, gasCostUsd, quoteGas, splitRelayerFee, swapLossUsd, tokenUsd, type FeeGasReading } from '@/services/fee-warning';
+import { useTorOperation } from '@/hooks/use-tor-operation';
 
 // Intent swap (withdraw-and-swap): a private note leaves the pool, swaps
 // through a LiFi route that is sealed inside the ZK proof, and the output
@@ -426,6 +427,7 @@ async function assertReshieldCap(noteValueWei: bigint, token: { symbol: string; 
 
 export function SwapModalProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
+  useTorOperation(isOpen);
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const { width } = useWindowDimensions();

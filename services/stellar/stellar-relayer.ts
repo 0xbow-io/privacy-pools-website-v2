@@ -18,6 +18,7 @@ import type {
 
 import { STELLAR_RELAYER_CHAIN_ID, STELLAR_TESTNET_CONTRACTS } from '@/config/stellar-deployment';
 import type { StellarSdk } from '@/services/stellar/stellar-runtime';
+import { routedFetch } from '@/services/tor-fetch';
 
 const TIMEOUT_MS = 90_000;
 
@@ -25,7 +26,7 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(url, {
+    const res = await routedFetch('relayer')(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),

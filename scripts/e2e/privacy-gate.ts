@@ -78,6 +78,9 @@ export function resolveHosts(config: {
     ],
     // Full hostnames, from config/relayer-eras.ts and config/chains.ts.
     relayer: [
+      'v2.fastrelay.xyz',
+      'v2-tor.fastrelay.xyz',
+      // The former default, still reachable through EXPO_PUBLIC_PROD_RELAYER_URL.
       'relayer-v2-prod-149184580131.us-east1.run.app',
       'relayer-staging.example',
       'relayer-testing.example',

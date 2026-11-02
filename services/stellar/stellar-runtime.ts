@@ -37,6 +37,9 @@ import {
   STELLAR_TESTNET_NETWORK,
   STELLAR_TESTNET_RPC_URL,
 } from '@/config/stellar-deployment';
+import { TOR_IN_FORCE } from '@/config/tor';
+import { routedFetch } from '@/services/tor-fetch';
+import type { TorSubject } from '@/services/tor-groups';
 
 export type StellarSdk = typeof import('@privacy-pools-v2/stellar-sdk');
 
@@ -55,7 +58,7 @@ async function fetchJson<T>(url: string, timeoutMs: number): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { cache: 'no-store', signal: controller.signal });
+    const res = await routedFetch('asp')(url, { cache: 'no-store', signal: controller.signal });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     return (await res.json()) as T;
   } finally {
@@ -182,7 +185,81 @@ export function createIndexedRpcInteractor(sdk: StellarSdk, aspUrl: string): Ind
       }
     }
   }
-  return new IndexedSorobanRPCInteractor({ rpcUrl: STELLAR_TESTNET_RPC_URL, networkPassphrase: STELLAR_TESTNET_NETWORK.networkPassphrase });
+  return routeSoroban(new IndexedSorobanRPCInteractor({ rpcUrl: STELLAR_TESTNET_RPC_URL, networkPassphrase: STELLAR_TESTNET_NETWORK.networkPassphrase }));
+}
+
+/**
+ * Under anon-rpc, a Soroban interactor's JSON-RPC goes over the request's
+ * group instead of the SDK's own HTTP client. Its account reads and
+ * transactions carry the account only as XDR, so the account is read from
+ * the XDR first: a ledger read of an account or trustline, and a transaction
+ * the account signs or simulates, go over that account's group, and a
+ * transaction lookup (the relayer's hash among them) over that transaction's.
+ */
+export function routeSoroban<T>(interactor: T): T {
+  if (!TOR_IN_FORCE) return interactor;
+  const server = (interactor as unknown as { server: { httpClient: unknown } }).server;
+  server.httpClient = {
+    async post(url: string, data: unknown) {
+      const subject = await sorobanSubject(data);
+      const res = await routedFetch('rpc', () => subject)(url, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error(`Soroban RPC HTTP ${res.status}`);
+      return { data: await res.json(), status: res.status, statusText: res.statusText, headers: Object.fromEntries(res.headers.entries()) };
+    },
+  };
+  return interactor;
+}
+
+/** What a Soroban JSON-RPC request is about (see routeSoroban). */
+export async function sorobanSubject(data: unknown): Promise<TorSubject> {
+  const { method, params } = (data ?? {}) as { method?: unknown; params?: Record<string, unknown> };
+  if (!params || typeof params !== 'object') return {};
+  const { FeeBumpTransaction, StrKey, TransactionBuilder, xdr } = await import('@stellar/stellar-sdk');
+  try {
+    switch (method) {
+      case 'sendTransaction':
+      case 'simulateTransaction': {
+        const tx = TransactionBuilder.fromXDR(String(params.transaction), STELLAR_TESTNET_NETWORK.networkPassphrase);
+        return { account: (tx instanceof FeeBumpTransaction ? tx.innerTransaction : tx).source };
+      }
+      case 'getTransaction':
+        return typeof params.hash === 'string' ? { transaction: params.hash } : {};
+      case 'getLedgerEntries':
+        for (const key of Array.isArray(params.keys) ? params.keys : []) {
+          const entry = xdr.LedgerKey.fromXDR(String(key), 'base64');
+          const kind = entry.switch().name;
+          const owner = kind === 'account' ? entry.account().accountId()
+            : kind === 'trustline' ? entry.trustLine().accountId()
+              : kind === 'contractData' ? accountIn(entry.contractData().key())
+                : null;
+          if (owner) return { account: StrKey.encodeEd25519PublicKey(owner.ed25519()) };
+        }
+        return {};
+      default:
+        return {};
+    }
+  } catch {
+    // XDR this cannot read may still name the user: give it a group of its own.
+    return { identifying: true };
+  }
+
+  // An account address in a contract data key, such as a token balance's.
+  function accountIn(value: InstanceType<typeof xdr.ScVal>): InstanceType<typeof xdr.PublicKey> | null {
+    const kind = value.switch().name;
+    if (kind === 'scvAddress') {
+      const address = value.address();
+      return address.switch().name === 'scAddressTypeAccount' ? address.accountId() : null;
+    }
+    if (kind === 'scvVec') {
+      for (const item of value.vec() ?? []) {
+        const found = accountIn(item);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
 }
 
 // ------------------------------------------------------------------ ASP
