@@ -19,7 +19,7 @@ import { policedFetch } from '@/services/egress-fetch';
 import { Platform } from 'react-native';
 import { envScopedStorageKey } from '@/config/app-environment';
 import { ASP_URL } from '@/config/env';
-import type { RegistryView } from '@/services/keystore-identity-status';
+import { REGISTRATION_INCOMPATIBLE_MESSAGE, REGISTRATION_UNCONFIRMED_MESSAGE, type RegistryView } from '@/services/keystore-identity-status';
 import { notifyRegistrySynced, onRegistrySynced } from '@/services/keystore-registry-events';
 import { getCachedViewingKey, isOtherKeystore, isViewingKeyRegistryFresh, registryEntrypointParam } from '@/services/viewing-key-cache';
 
@@ -221,6 +221,73 @@ export function resetNullifyingKeyHashCacheForTests(): void {
   lastSyncOk.clear();
   aspUnavailable.clear();
   ownRegistrations.clear();
+  onChainHashes.clear();
+}
+
+/**
+ * Nonzero nullifying-key hashes the chain has already returned for an account,
+ * taken from the SDK's OWN reads: its registration check
+ * (`isKeystoreRegistered` / `prepareRegisterKeystore`) reads this value for the
+ * session account before every register and deposit, and only reports whether
+ * it is nonzero. Nothing here sends a request or changes when one is sent; the
+ * observer only keeps the answer the SDK threw away. The hash is write-once, so
+ * a nonzero answer stays true, and like a served entry it outranks our own
+ * record of a registration.
+ */
+const onChainHashes = new Map<string, string>();
+
+export function noteOnChainNullifyingKeyHash(chainId: number, account: string, keystoreAddress: string | undefined, value: unknown): void {
+  const hash = normalizeHash(value);
+  // A zero answer is "not yet", which can change: never kept.
+  if (!hash) return;
+  onChainHashes.set(ownKey(chainId, account, keystoreAddress), hash);
+}
+
+/** Wrap the session interactor's own read so its answer is kept. Adds no request. */
+export function observeNullifyingKeyHashReads<A extends string, H>(
+  chainId: number,
+  keystoreAddress: string | undefined,
+  read: (account: A) => Promise<H>,
+): (account: A) => Promise<H> {
+  return async (account) => {
+    const hash = await read(account);
+    try {
+      noteOnChainNullifyingKeyHash(chainId, account, keystoreAddress, hash);
+    } catch {
+      // Bookkeeping never breaks the SDK's read.
+    }
+    return hash;
+  };
+}
+
+export type AuthPolicyOwner = 'ours' | 'other' | 'unseen';
+
+/** Whose nullifying key the chain holds for this account, from answers already received. */
+export function authPolicyOwner(chainId: number, account: string, keystoreAddress: string | undefined, ourNullifyingKeyHash: unknown): AuthPolicyOwner {
+  const onChain = onChainHashes.get(ownKey(chainId, account, keystoreAddress));
+  if (!onChain) return 'unseen';
+  return onChain === normalizeHash(ourNullifyingKeyHash) ? 'ours' : 'other';
+}
+
+/**
+ * SDK 1.0.2 `prepareRegisterKeystore()` answers `alreadyRegistered` (or plans
+ * only the viewing-key leg) when ANY auth policy is set on the address, without
+ * comparing it with this session's keys. Before such a result may mark the
+ * chain registered, or send a viewing key onto that policy, the hash the SDK's
+ * own check just read must be this session's. Returns the refusal text, or null
+ * when the result is ours (or an auth leg is still to be sent, which the chain
+ * itself guards).
+ */
+export function alreadySetRegistrationRefusal(
+  chainId: number,
+  account: string,
+  keystoreAddress: string | undefined,
+  registration: { alreadyRegistered: boolean; keystoreCalldata: unknown; nullifyingKeyHash: unknown },
+): string | null {
+  if (!registration.alreadyRegistered && registration.keystoreCalldata) return null;
+  const owner = authPolicyOwner(chainId, account, keystoreAddress, registration.nullifyingKeyHash);
+  if (owner === 'ours') return null;
+  return owner === 'other' ? REGISTRATION_INCOMPATIBLE_MESSAGE : REGISTRATION_UNCONFIRMED_MESSAGE;
 }
 
 /**
@@ -229,8 +296,9 @@ export function resetNullifyingKeyHashCacheForTests(): void {
  * feed lags by up to a grid window plus indexing; without this a reopened flow
  * would plan the registration again and revert. Built only from values this
  * client already holds (its own account and key hashes), never from a request.
- * It answers only a registry MISS: a served entry always wins, so it can never
- * hide a registration under a different unlock.
+ * It answers only a registry MISS (or fills the viewing key next to the same
+ * hash): a served entry or a hash the chain returned always wins, so it can
+ * never hide a registration under a different unlock.
  */
 const OWN_REGISTRATION_TTL_MS = 30 * 60_000;
 const ownRegistrations = new Map<string, { nullifyingKeyHash: string; viewingKey: string | null; at: number }>();
@@ -249,6 +317,10 @@ export function recordOwnRegistration(
   const hash = normalizeHash(nullifyingKeyHash);
   if (!hash) return;
   const key = ownKey(chainId, account, keystoreAddress);
+  // The chain already answered with another unlock's hash: whatever marked
+  // this chain registered, it was not a registration of these keys.
+  const onChain = onChainHashes.get(key);
+  if (onChain && onChain !== hash) return;
   const previous = ownRegistrations.get(key);
   // Same identity only: a different hash means a different unlock, which the chain would refuse anyway.
   if (previous && previous.nullifyingKeyHash !== hash) return;
@@ -267,8 +339,13 @@ export function readRegistryView(chainId: number, account: string, keystoreAddre
     viewingKey: getCachedViewingKey(chainId, account, keystoreAddress),
     viewingFresh: isViewingKeyRegistryFresh(chainId, keystoreAddress, now),
   };
-  const own = ownRegistrations.get(ownKey(chainId, account, keystoreAddress));
-  if (own && now - own.at <= OWN_REGISTRATION_TTL_MS && view.nullifyingKeyHash == null) {
+  const key = ownKey(chainId, account, keystoreAddress);
+  // A hash the chain returned is as good as a served entry (write-once).
+  if (view.nullifyingKeyHash == null) view.nullifyingKeyHash = onChainHashes.get(key) ?? null;
+  const own = ownRegistrations.get(key);
+  // Our record answers a miss, or fills the viewing key next to a hash that is
+  // already ours. It never stands in for a different hash.
+  if (own && now - own.at <= OWN_REGISTRATION_TTL_MS && (view.nullifyingKeyHash == null || view.nullifyingKeyHash === own.nullifyingKeyHash)) {
     view.nullifyingKeyHash = own.nullifyingKeyHash;
     if (own.viewingKey && !view.viewingKey) {
       view.viewingKey = own.viewingKey;

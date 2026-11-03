@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 mock.module('react-native', () => ({
   Platform: { OS: 'web', select: (o: Record<string, unknown>) => o.web ?? o.default },
@@ -13,7 +15,7 @@ const send = (async (_party: string, _base: string, url: string) => {
   return respond(url);
 }) as never;
 
-const { identityStatusFromRegistry, ownRegistrationRefusal, REGISTRATION_UNCONFIRMED_MESSAGE } = await import('@/services/keystore-identity-status');
+const { identityStatusFromRegistry, ownRegistrationRefusal, REGISTRATION_INCOMPATIBLE_MESSAGE, REGISTRATION_UNCONFIRMED_MESSAGE } = await import('@/services/keystore-identity-status');
 const cache = await import('@/services/nullifying-key-hash-cache');
 const policy = await import('@/services/egress-policy');
 const { ASP_URL } = await import('@/config/env');
@@ -182,5 +184,96 @@ describe('review fixes', () => {
   test('a write waits for the grid sync instead of fetching, bounded', async () => {
     expect(await cache.awaitKeystoreRegistries(1, undefined, 10)).toBe(false);
     expect(sent.length).toBe(0);
+  });
+});
+
+describe('an "already registered" answer is only ours when the chain says so (review of #34)', () => {
+  // SDK 1.0.2 prepareRegisterKeystore() says alreadyRegistered for ANY auth
+  // policy. The scenario: registered under P1 on the phone, signed in with P2
+  // on the laptop before its registry has P1, pressed Register.
+  const MINE = `0x${'11'.repeat(32)}`;
+  const THEIRS = `0x${'22'.repeat(32)}`;
+  const ZERO = `0x${'0'.repeat(64)}`;
+  const already = { alreadyRegistered: true, keystoreCalldata: null, viewingKeyCalldata: null, nullifyingKeyHash: MINE };
+  const viewingKeyOnly = { alreadyRegistered: false, keystoreCalldata: null, viewingKeyCalldata: { to: '0x1', data: '0x', value: 0 }, nullifyingKeyHash: MINE };
+
+  beforeEach(async () => {
+    sent.length = 0;
+    cache.resetNullifyingKeyHashCacheForTests();
+    try { localStorage.clear(); } catch { /* no DOM storage under bun */ }
+    // A current registry that has not caught up with ALICE yet.
+    respond = () => json({ entries: [], lastSyncedId: '1', hasMore: false });
+    await sync(1);
+    sent.length = 0;
+  });
+
+  // The SDK's own check, as pool-session-service wires it.
+  const sdkReadsOnChain = async (hash: string) => {
+    let calls = 0;
+    const read = cache.observeNullifyingKeyHashReads(1, undefined, async (_account: string) => { calls += 1; return hash; });
+    expect(await read(ALICE)).toBe(hash);
+    expect(calls).toBe(1);
+    // Kept from the read the SDK made anyway: nothing else was sent.
+    expect(sent.length).toBe(0);
+  };
+
+  test('another unlock: the result is refused and readRegistryView is left alone', async () => {
+    await sdkReadsOnChain(THEIRS);
+    expect(cache.alreadySetRegistrationRefusal(1, ALICE, undefined, already)).toBe(REGISTRATION_INCOMPATIBLE_MESSAGE);
+    expect(cache.alreadySetRegistrationRefusal(1, ALICE, undefined, viewingKeyOnly)).toBe(REGISTRATION_INCOMPATIBLE_MESSAGE);
+    // Even if a flow still marked the chain complete, the receive-setup
+    // listener's mirror cannot turn the miss into 'compatible'.
+    cache.recordOwnRegistration(1, ALICE, undefined, MINE, VK);
+    const view = cache.readRegistryView(1, ALICE);
+    expect(view.nullifyingKeyHash).toBe(THEIRS);
+    expect(view.viewingKey).toBeNull();
+    // The deposit gate now names the wrong unlock instead of going ahead.
+    const status = identityStatusFromRegistry(view, BigInt(MINE).toString(), VK);
+    expect(status).toBe('incompatible');
+    expect(ownRegistrationRefusal(status, true)).toBe(REGISTRATION_INCOMPATIBLE_MESSAGE);
+  });
+
+  test('before the fix the same mirror read compatible (the hole)', () => {
+    // No on-chain answer kept: the old path. Shown so the test above means something.
+    cache.recordOwnRegistration(1, ALICE, undefined, MINE, VK);
+    expect(identityStatusFromRegistry(cache.readRegistryView(1, ALICE), BigInt(MINE).toString(), VK)).toBe('compatible');
+  });
+
+  test('our own unlock: confirmed, and the mirror still answers the viewing key', async () => {
+    await sdkReadsOnChain(MINE);
+    expect(cache.alreadySetRegistrationRefusal(1, ALICE, undefined, already)).toBeNull();
+    expect(cache.alreadySetRegistrationRefusal(1, ALICE, undefined, viewingKeyOnly)).toBeNull();
+    cache.recordOwnRegistration(1, ALICE, undefined, MINE, VK);
+    expect(identityStatusFromRegistry(cache.readRegistryView(1, ALICE), BigInt(MINE).toString(), VK)).toBe('compatible');
+  });
+
+  test('no on-chain answer seen: unconfirmed, never complete', () => {
+    expect(cache.alreadySetRegistrationRefusal(1, ALICE, undefined, already)).toBe(REGISTRATION_UNCONFIRMED_MESSAGE);
+    expect(cache.authPolicyOwner(1, BOB, undefined, MINE)).toBe('unseen');
+  });
+
+  test('a zero answer is not kept, and a plan that still sends the auth leg needs no check', async () => {
+    await sdkReadsOnChain(ZERO);
+    expect(cache.authPolicyOwner(1, ALICE, undefined, MINE)).toBe('unseen');
+    const fresh = { alreadyRegistered: false, keystoreCalldata: { to: '0x1', data: '0x', value: 0 }, nullifyingKeyHash: MINE };
+    expect(cache.alreadySetRegistrationRefusal(1, ALICE, undefined, fresh)).toBeNull();
+  });
+
+  test('every already-registered path checks before marking complete', () => {
+    const src = (rel: string) => readFileSync(join(__dirname, '../..', rel), 'utf8');
+    const modal = src('components/keystore-registration-modal-provider.tsx');
+    // The check runs before finishAlreadyRegistered can be reached.
+    expect(modal.indexOf('refuseIfNotOurs(registration);')).toBeGreaterThan(-1);
+    expect(modal.indexOf('refuseIfNotOurs(registration);')).toBeLessThan(modal.indexOf('const finishAlreadyRegistered = async'));
+    expect(modal).toContain('refuseIfNotOurs({ ...fresh, keystoreCalldata: null });');
+    const importer = src('hooks/use-note-import.ts');
+    expect(importer.match(/ownRegistrationResultRefusal\(chainId, sessionAddress, registration\)/g)?.length).toBe(3);
+    expect(importer).not.toContain("if (registration.alreadyRegistered) setReceiveSetup(");
+    const pay = src('components/payment-request-modal-provider.tsx');
+    expect(pay).toContain('const notOurs = ownRegistrationResultRefusal(request.chainId, address, registration);');
+    expect(pay).toContain("if (!notOurs) setReceiveSetup(address, request.chainId, 'complete', 'onchain');");
+    expect(src('hooks/use-publish-viewing-key.ts')).toContain('ownRegistrationResultRefusal(chainId, sessionAddress ?? address, registration)');
+    // The observer wraps the session's own interactor: no new call site.
+    expect(src('services/pool-session-service.ts')).toMatch(/keystoreInteractor\.getNullifyingKeyHash = observeNullifyingKeyHashReads\(/);
   });
 });

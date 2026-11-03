@@ -61,6 +61,8 @@ import {
   VIEWING_KEY_GAS_LIMIT,
 } from '@/services/receive-setup';
 import { priceWalletTx, registrationOwnerUnchanged, walletTxFields, type FeeReadClient } from '@/services/wallet-tx-fees';
+import { ownRegistrationResultRefusal } from '@/services/keystore-scope';
+import { REGISTRATION_INCOMPATIBLE_MESSAGE } from '@/services/keystore-identity-status';
 
 export const REGISTRATION_CLOSED_BEFORE_PROMPT = 'Registration was closed before the wallet prompt. Nothing was sent.';
 export const REGISTRATION_OWNER_CHANGED =
@@ -864,8 +866,22 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
         await new Promise((resolve) => setTimeout(resolve, AUTH_LAG_RETRY_MS));
         registration = await session.prepareRegisterKeystore();
       }
+      // SDK 1.0.2 answers "already registered" (or plans only the viewing key)
+      // for ANY auth policy on the address, never comparing it with these
+      // keys. Marking that 'complete' mirrored another unlock's registration
+      // as ours and let a deposit through under the wrong keys. Only go on
+      // when the hash the SDK's own check just read is this session's.
+      const refuseIfNotOurs = (result: typeof registration) => {
+        const refusal = ownRegistrationResultRefusal(chainId, sessionAddress ?? address, result);
+        if (!refusal) return;
+        if (refusal === REGISTRATION_INCOMPATIBLE_MESSAGE) {
+          setReceiveSetup(sessionAddress ?? address, chainId, 'incompatible', 'onchain');
+        }
+        throw new Error(refusal);
+      };
+      refuseIfNotOurs(registration);
       const finishAlreadyRegistered = async () => {
-        // Race / external registration: mark and exit cleanly.
+        // Race / external registration, confirmed ours above: mark and exit.
         setReceiveSetup(sessionAddress ?? address, chainId, 'complete', 'onchain');
         setStatus('registered');
         const home = await returnHome();
@@ -961,6 +977,9 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
           registrationLegSent = false;
           const fresh = await session.prepareRegisterKeystore();
           viewingKeyCalldata = fresh.alreadyRegistered ? null : fresh.viewingKeyCalldata;
+          // The wallet says a policy is set, so check it as one even if this
+          // read still plans the auth leg.
+          refuseIfNotOurs({ ...fresh, keystoreCalldata: null });
           if (!viewingKeyCalldata) {
             await finishAlreadyRegistered();
             return;

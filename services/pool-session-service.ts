@@ -34,6 +34,7 @@ import {
 } from '@/services/sdk-setup';
 import { getChainConfig } from '@/config/chains';
 import { recordingNoteEventReads } from '@/services/note-ciphertexts';
+import { observeNullifyingKeyHashReads } from '@/services/nullifying-key-hash-cache';
 import { createSdkConsoleLogger } from '@/services/sdk-logger';
 import { buildReshieldDestinationKeys } from '@/services/reshield-destination';
 import { createPublicClient, fallback } from 'viem';
@@ -192,6 +193,15 @@ export async function createPoolSession(params: CreatePoolSessionParams) {
     poolVaultInteractor.getNoteEvents.bind(poolVaultInteractor),
   );
   const keystoreInteractor = createKeystoreInteractor(rpc, keystoreAddress, keystoreSyncFromBlock);
+  // The SDK's registration check reads the session account's nullifying-key
+  // hash and keeps only "is it nonzero". Keep the value too, so an "already
+  // registered" answer can be checked against this unlock's keys without
+  // another request (services/nullifying-key-hash-cache.ts, authPolicyOwner).
+  keystoreInteractor.getNullifyingKeyHash = observeNullifyingKeyHashReads(
+    chainId,
+    keystoreAddress,
+    keystoreInteractor.getNullifyingKeyHash.bind(keystoreInteractor),
+  );
 
   // Persistent payment-request store. Default PoolSessionFactory wiring
   // uses InMemoryStorageService → records vanish on refresh, taking the

@@ -8,6 +8,7 @@ import { useDebug } from '@/components/debug-provider';
 import { isSupportedEvmChainId } from '@/config/chains';
 import { isSessionInitTimeout, withSessionInitTimeout } from '@/services/session-init-timeout';
 import { setReceiveSetup, viewingKeyTxPlan } from '@/services/receive-setup';
+import { ownRegistrationResultRefusal } from '@/services/keystore-scope';
 import { minPriorityFeeFor, readFeeMarket, type FeeReadClient } from '@/services/wallet-tx-fees';
 
 export const PUBLISH_PROMPT_TIMEOUT_MS = 120_000;
@@ -119,6 +120,10 @@ export function usePublishViewingKey(chainId: number) {
       await new Promise((resolve) => setTimeout(resolve, AUTH_LAG_RETRY_MS));
       registration = await session.prepareRegisterKeystore();
     }
+    // SDK 1.0.2: "already registered" / a viewing-key-only plan means SOME auth
+    // policy, not this unlock's. Never mark it complete or publish onto it.
+    const refusal = ownRegistrationResultRefusal(chainId, sessionAddress ?? address, registration);
+    if (refusal) throw new Error(refusal);
     if (registration.alreadyRegistered) {
       setReceiveSetup(sessionAddress ?? address, chainId, 'complete', 'onchain');
       return { kind: 'already' };
