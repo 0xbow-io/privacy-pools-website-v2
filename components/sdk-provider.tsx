@@ -61,6 +61,7 @@ import { getPasskeyPrf, createPasskey, PasskeyCancelledError } from '@/services/
 import {
   resolvePasskeyUnlockPlan, passkeyNotUsedMessage, type PasskeyPick,
   discoverablePickVerdict, passkeyOwnerHandle, passkeyDisplayName, PASSKEY_WRONG_WALLET_MESSAGE, PASSKEY_UNPROVEN_MESSAGE,
+  keepCreatedPasskey, PASSKEY_CREATED_FOR_REGISTERED_MESSAGE,
 } from '@/services/passkey-unlock-plan';
 import { bumpPaymentRequestRevision } from '@/services/payment-request-revision';
 import { useDebug, isDebugModeActive } from '@/components/debug-provider';
@@ -1373,6 +1374,8 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
           // this owner before the pick is remembered (see below).
           let pickedHandle: Uint8Array | null | undefined;
           let pickedRpId: string | undefined;
+          // Set when THIS tap created a new passkey (not another tab's).
+          let createdRpId: string | undefined;
           if (plan.kind === 'targeted') {
             // Known passkey for this owner → targeted sign-in (no QR fallback).
             const res = await getPasskeyPrf({ rpId: getRpId(), challenge: randomChallenge(), credentialId: plan.credentialId }).catch(notUsed);
@@ -1423,9 +1426,10 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
                 log('error', 'SDK', 'Passkey credential id could not be stored durably; refusing the passkey unlock', { address: derivationAddress });
                 throw new Error(PASSKEY_STORAGE_MESSAGE);
               }
-              return { credentialId: created.credentialId, prfFirst: created.prf?.first };
+              return { credentialId: created.credentialId, prfFirst: created.prf?.first, created: true };
             });
             credentialId = outcome.credentialId;
+            if ('created' in outcome) createdRpId = rpId;
             if (outcome.prfFirst) {
               prfFirst = outcome.prfFirst;
             } else {
@@ -1443,6 +1447,17 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
           // (deposit) on a mismatch, and the recovery flow can import the other
           // identity's notes to exit them.
           const pkStatus = await resolveKeystoreIdentityStatus(sdkSetup, pkKm, derivationAddress as `0x${string}`, chainId);
+
+          if (createdRpId !== undefined && !keepCreatedPasskey(pkStatus)) {
+            // The wallet is already registered with another passkey, and the
+            // nullifying-key hash is write-once, so this new one could never
+            // deposit (review on PR #63). Forget it as this owner's passkey so
+            // the next Sign in lists the passkeys again instead of insisting on
+            // this one. The credential itself stays in the passkey manager.
+            persistPasskeyMarker({ ownerAddress: String(derivationAddress), rpId: createdRpId });
+            log('warn', 'SDK', 'New passkey does not match this wallet\'s registration; not keeping it', { address: derivationAddress, identity: pkStatus });
+            throw new Error(PASSKEY_CREATED_FOR_REGISTERED_MESSAGE);
+          }
 
           if (pickedRpId !== undefined) {
             // A discoverable pick is kept only when it provably belongs to this

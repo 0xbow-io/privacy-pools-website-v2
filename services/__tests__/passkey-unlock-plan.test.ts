@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { discoverablePickVerdict, ownerFromPasskeyHandle, passkeyDisplayName, passkeyOwnerHandle } from '@/services/passkey-unlock-plan';
+import { discoverablePickVerdict, keepCreatedPasskey, passkeyDisplayName, passkeyHandleIsOwner, passkeyHandleNamesOwner, passkeyOwnerHandle } from '@/services/passkey-unlock-plan';
 import {
   normalizePasskeyPick,
   passkeyNotUsedMessage,
@@ -71,9 +71,13 @@ const B = '0x2222222222222222222222222222222222222222';
 
 describe('a discoverable pick must belong to this wallet (review on PR #63)', () => {
   test('a new passkey names its owner in the handle', () => {
-    expect(ownerFromPasskeyHandle(passkeyOwnerHandle(A.toUpperCase().replace('0X', '0x')))).toBe(A);
-    expect(ownerFromPasskeyHandle(new Uint8Array(16).fill(7))).toBeNull();
-    expect(ownerFromPasskeyHandle(null)).toBeNull();
+    const h = passkeyOwnerHandle(A.toUpperCase().replace('0X', '0x'));
+    expect(passkeyHandleIsOwner(h, A)).toBe(true);
+    expect(passkeyHandleIsOwner(h, B)).toBe(false);
+    // a hash, never the address itself (review on PR #63)
+    expect(new TextDecoder().decode(h).toLowerCase()).not.toContain(A.slice(2));
+    expect(passkeyHandleNamesOwner(new Uint8Array(16).fill(7))).toBe(false);
+    expect(passkeyHandleNamesOwner(null)).toBe(false);
     expect(passkeyDisplayName(A)).toBe('Privacy Pools 0x1111…1111');
   });
   test('another wallet\'s passkey is refused whatever the chain says', () => {
@@ -88,5 +92,12 @@ describe('a discoverable pick must belong to this wallet (review on PR #63)', ()
     for (const s of ['unregistered', 'incompatible', 'unknown']) {
       expect(discoverablePickVerdict({ ownerAddress: A, userHandle: legacy, identityStatus: s })).toBe('unproven');
     }
+  });
+});
+
+describe('a new passkey for an already registered wallet is not kept (review on PR #63)', () => {
+  test('only an incompatible registration drops it', () => {
+    expect(keepCreatedPasskey('incompatible')).toBe(false);
+    for (const s of ['unregistered', 'compatible', 'partial', 'unknown']) expect(keepCreatedPasskey(s)).toBe(true);
   });
 });

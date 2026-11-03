@@ -20,6 +20,8 @@
 // Key derivation is untouched: whichever passkey answers, its PRF goes through
 // the same salts and the same derivation as before.
 
+import { keccak256, toBytes } from 'viem';
+
 export type PasskeyPick = 'any' | 'create';
 
 export type PasskeyUnlockPlan =
@@ -57,21 +59,39 @@ export function resolvePasskeyUnlockPlan(input: {
 // - older passkeys have a random handle, so they are kept only when this
 //   wallet is already registered on this network with exactly these keys.
 
-const OWNER_HANDLE_PREFIX = 'pp1:';
+// The handle holds a HASH of the owner, not the address (the WebAuthn spec says
+// user.id must not carry identifying information, and it syncs with the
+// passkey into the user's passkey manager and its exports; review on PR #63).
+// The check recomputes the hash and compares.
+const OWNER_HANDLE_PREFIX = 'pp2:';
 
-/** user.id for a new passkey: binds it to the wallet that created it (local to the authenticator). */
-export function passkeyOwnerHandle(ownerAddress: string): Uint8Array {
-  return new TextEncoder().encode(`${OWNER_HANDLE_PREFIX}${ownerAddress.toLowerCase()}`);
+function ownerDigest(ownerAddress: string): string {
+  return keccak256(toBytes(`privacy-pools passkey owner:${ownerAddress.toLowerCase()}`)).slice(2);
 }
 
-/** The owner a handle names, or null for an older passkey with a random handle. */
-export function ownerFromPasskeyHandle(handle: Uint8Array | null | undefined): string | null {
+/** user.id for a new passkey: binds it to the wallet that created it. */
+export function passkeyOwnerHandle(ownerAddress: string): Uint8Array {
+  return new TextEncoder().encode(`${OWNER_HANDLE_PREFIX}${ownerDigest(ownerAddress)}`);
+}
+
+/** The owner digest a handle carries, or null for an older passkey with a random handle. */
+function digestFromPasskeyHandle(handle: Uint8Array | null | undefined): string | null {
   if (!handle || handle.length === 0) return null;
   let text: string;
   try { text = new TextDecoder('utf-8', { fatal: true }).decode(handle); } catch { return null; }
   if (!text.startsWith(OWNER_HANDLE_PREFIX)) return null;
-  const owner = text.slice(OWNER_HANDLE_PREFIX.length);
-  return /^0x[0-9a-f]{40}$/.test(owner) ? owner : null;
+  const digest = text.slice(OWNER_HANDLE_PREFIX.length);
+  return /^[0-9a-f]{64}$/.test(digest) ? digest : null;
+}
+
+/** Whether a handle names an owner at all (a passkey created by this version). */
+export function passkeyHandleNamesOwner(handle: Uint8Array | null | undefined): boolean {
+  return digestFromPasskeyHandle(handle) !== null;
+}
+
+/** Whether a handle names exactly this owner. */
+export function passkeyHandleIsOwner(handle: Uint8Array | null | undefined, ownerAddress: string): boolean {
+  return digestFromPasskeyHandle(handle) === ownerDigest(ownerAddress);
 }
 
 /** The name the OS sheet shows for a new passkey, so two wallets' passkeys can be told apart. */
@@ -87,8 +107,9 @@ export function discoverablePickVerdict(input: {
   userHandle: Uint8Array | null | undefined;
   identityStatus: string;
 }): DiscoverablePickVerdict {
-  const named = ownerFromPasskeyHandle(input.userHandle);
-  if (named) return named === input.ownerAddress.toLowerCase() ? 'accept' : 'wrong-wallet';
+  if (passkeyHandleNamesOwner(input.userHandle)) {
+    return passkeyHandleIsOwner(input.userHandle, input.ownerAddress) ? 'accept' : 'wrong-wallet';
+  }
   return input.identityStatus === 'compatible' || input.identityStatus === 'partial' ? 'accept' : 'unproven';
 }
 
@@ -96,6 +117,14 @@ export const PASSKEY_WRONG_WALLET_MESSAGE =
   'That passkey belongs to another wallet. Tap Use another passkey and pick the one for this wallet.';
 export const PASSKEY_UNPROVEN_MESSAGE =
   'That passkey is not registered for this wallet on this network. Pick another passkey, or switch to a network where this wallet is registered.';
+
+export const PASSKEY_CREATED_FOR_REGISTERED_MESSAGE =
+  'This wallet is already set up with another passkey, so the new one cannot use it. Tap Sign in and pick the passkey you set it up with.';
+
+/** A passkey just created is kept as this wallet's passkey only when the wallet is not already set up with another one. */
+export function keepCreatedPasskey(identityStatus: string): boolean {
+  return identityStatus !== 'incompatible';
+}
 
 export const PASSKEY_USE_ANOTHER_LABEL = 'Use another passkey';
 export const PASSKEY_CREATE_LABEL = 'Create a passkey';
