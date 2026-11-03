@@ -50,3 +50,28 @@ export function identityStatusFromRegistry(
   return view.viewingKey!.toLowerCase() === activeViewingKey.toLowerCase() ? 'compatible' : 'partial';
 }
 
+/** A deposit refused because the registry and the chain disagree about this account. */
+export const REGISTRATION_UNCONFIRMED_MESSAGE =
+  'Could not confirm this unlock matches the account\'s registration yet. Nothing was sent. Try again in a few minutes.';
+export const REGISTRATION_INCOMPATIBLE_MESSAGE =
+  'This account is registered with a different unlock. Switch unlock, or import its notes to exit.';
+export const REGISTRATION_SYNCING_REFUSAL =
+  'Still syncing account registrations. Nothing was sent. Try again in a moment.';
+
+/**
+ * The last check before a write mints a note under this session's keys, once
+ * the live "is anything registered?" read is in. That read is a nonzero check:
+ * it says SOMEONE registered this address, not which keys. So a registry miss
+ * ('unregistered') next to a registered chain is a contradiction, either the
+ * registry lags or the address is registered under another unlock, and the
+ * second strands the funds for good. Refuse rather than guess. Returns the
+ * refusal text, or null to go ahead (an unregistered chain goes to the
+ * caller's own registration step).
+ */
+export function ownRegistrationRefusal(status: KeystoreIdentityStatus, registeredOnChain: boolean): string | null {
+  if (status === 'incompatible') return REGISTRATION_INCOMPATIBLE_MESSAGE;
+  if (!registeredOnChain) return null;
+  if (status === 'unregistered') return REGISTRATION_UNCONFIRMED_MESSAGE;
+  if (status === 'unknown') return REGISTRATION_SYNCING_REFUSAL;
+  return null;
+}

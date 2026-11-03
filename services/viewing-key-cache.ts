@@ -165,6 +165,13 @@ const aspUnavailable = new Map<string, boolean>();
  * one minute it was three requests a minute across the chains for that.
  */
 export const FULL_RESYNC_INTERVAL_MS = 5 * 60_000;
+// A full pull this recent lets the local map stand in for the chain
+// (isViewingKeyRegistryFresh). Also the feed's maxAgeMs on the grid, so a tab
+// back from idle refreshes it at once instead of refusing writes until the
+// next instant.
+export const VIEWING_KEY_REGISTRY_MAX_AGE_MS = 2 * FULL_RESYNC_INTERVAL_MS + 60_000;
+// Grid retry after a failed full pull (divides FULL_RESYNC_INTERVAL_MS).
+export const VIEWING_KEY_REGISTRY_RETRY_MS = 30_000;
 // Stamped only on a SUCCESSFUL full pull — a failed attempt must not go quiet
 // for a whole window while the cache stays possibly-incomplete; the next grid
 // tick retries it instead.
@@ -448,5 +455,5 @@ export function isViewingKeyRegistryFresh(chainId: number, keystoreAddress?: str
   // The persisted stamp lets a reload inside the window answer at once; this
   // process's own failed full pull still wins.
   const at = Math.max(lastFullResyncOk.get(scope) ?? 0, readRegistry(chainId, keystoreAddress).lastFullSyncedAt ?? 0);
-  return at > 0 && !fullResyncFailed.get(scope) && now - at <= 2 * FULL_RESYNC_INTERVAL_MS + 60_000;
+  return at > 0 && !fullResyncFailed.get(scope) && now - at <= VIEWING_KEY_REGISTRY_MAX_AGE_MS;
 }

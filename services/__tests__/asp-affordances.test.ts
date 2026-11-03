@@ -199,7 +199,7 @@ test('public price and gas price feeds register every build-supported EVM chain 
   const feeds = source('services/public-feeds.ts');
   const code = feeds.statements.filter((n) => !ts.isImportDeclaration(n))
     .map((n) => n.getText(feeds).replace(/^export /, '')).join('\n');
-  const registrations: { key: string; fetch: () => unknown }[] = [];
+  const registrations: { key: string; fetch: () => unknown; maxAgeMs?: number; retryMs?: number; retryOnError?: boolean; enabled?: unknown }[] = [];
   const env = (pointsEnabled: boolean, target: typeof registrations): Record<string, unknown> => ({
     supportedEvmChainIds: [1, 10, 11155111], apiClient: {},
     fetchGasPrice: async (chain: number) => BigInt(chain),
@@ -229,10 +229,13 @@ test('public price and gas price feeds register every build-supported EVM chain 
     feedPpUsdcVaultMetrics: (chain: number | string) => `ppusdc-vault-metrics:${chain}`,
     fetchPpUsdcRateHistoryFeed: (chain: number) => `rate-history-fetch:${chain}`,
     fetchPpUsdcVaultMetricsFeed: (chain: number) => `vault-metrics-fetch:${chain}`,
-    FULL_RESYNC_INTERVAL_MS: 60_000,
-    refreshViewingKeyRegistry: (chain: number) => `viewing-key-refresh:${chain}`,
+    FULL_RESYNC_INTERVAL_MS: 300_000,
+    VIEWING_KEY_REGISTRY_MAX_AGE_MS: 660_000,
+    VIEWING_KEY_REGISTRY_RETRY_MS: 30_000,
+    refreshViewingKeyRegistry: async (chain: number) => ({ ok: true, appliedDeltas: 0, lastSyncedId: `viewing-key-refresh:${chain}` }),
     NULLIFYING_KEY_HASH_INTERVAL_MS: 300_000,
     NULLIFYING_KEY_HASH_RETRY_MS: 30_000,
+    NULLIFYING_KEY_HASH_MAX_AGE_MS: 660_000,
     syncNullifyingKeyHashes: async (chain: number) => ({ ok: true, appliedEntries: 0, lastSyncedId: `nullifying-key-hash-sync:${chain}` }),
     getChainConfig: () => undefined,
     LEGACY_CONFIG: undefined,
@@ -304,10 +307,21 @@ test('public price and gas price feeds register every build-supported EVM chain 
     expect(registrations.filter((f) => f.key === `ppusdc-vault-metrics:${chain}`).map((f) => f.fetch())).toEqual([`vault-metrics-fetch:${chain}`]);
     // The viewing-key registry's full re-pull rides the grid too, not a
     // per-lookup trigger — see services/viewing-key-cache.ts (review of #130).
-    expect(registrations.filter((f) => f.key === `viewing-key-registry:${chain}`).map((f) => f.fetch())).toEqual([`viewing-key-refresh:${chain}`]);
+    expect(await Promise.all(registrations.filter((f) => f.key === `viewing-key-registry:${chain}`).map((f) => f.fetch())))
+      .toEqual([{ ok: true, appliedDeltas: 0, lastSyncedId: `viewing-key-refresh:${chain}` }]);
     // So does the nullifying-key-hash registry the identity check reads.
     expect(await Promise.all(registrations.filter((f) => f.key === `nullifying-key-hash-registry:${chain}`).map((f) => f.fetch())))
       .toEqual([{ ok: true, appliedEntries: 0, lastSyncedId: `nullifying-key-hash-sync:${chain}` }]);
+    // Writes refuse once either registry ages out, so both declare a maxAgeMs
+    // (refreshed when a hidden tab comes back) and retry a failed pull on the
+    // 30s grid. Still the grid: no enabled flag, nothing a component triggers.
+    for (const key of [`viewing-key-registry:${chain}`, `nullifying-key-hash-registry:${chain}`]) {
+      const [feed] = registrations.filter((f) => f.key === key);
+      expect(feed.maxAgeMs).toBeGreaterThan(0);
+      expect(feed.retryMs).toBe(30_000);
+      expect(feed.retryOnError).toBe(true);
+      expect(feed.enabled).toBeUndefined();
+    }
     // Points epochs: every chain, whatever the wallet holds.
     expect(registrations.filter((f) => f.key === `points-epochs:${chain}`).map((f) => f.fetch())).toEqual([`points-fetch:${chain}`]);
   }

@@ -79,9 +79,16 @@ import {
   refreshPoolEventSnapshot,
   refreshPoolLeaves,
 } from '@/services/snapshot-source';
-import { FULL_RESYNC_INTERVAL_MS, refreshViewingKeyRegistry, type SyncOutcome } from '@/services/viewing-key-cache';
+import {
+  FULL_RESYNC_INTERVAL_MS,
+  refreshViewingKeyRegistry,
+  VIEWING_KEY_REGISTRY_MAX_AGE_MS,
+  VIEWING_KEY_REGISTRY_RETRY_MS,
+  type SyncOutcome,
+} from '@/services/viewing-key-cache';
 import {
   NULLIFYING_KEY_HASH_INTERVAL_MS,
+  NULLIFYING_KEY_HASH_MAX_AGE_MS,
   NULLIFYING_KEY_HASH_RETRY_MS,
   syncNullifyingKeyHashes,
   type NullifyingKeyHashSyncOutcome,
@@ -311,7 +318,23 @@ export function startPublicFeeds(): void {
       publicFeeds.register<SyncOutcome>({
         key: feedViewingKeyRegistry(chainId),
         intervalMs: FULL_RESYNC_INTERVAL_MS,
-        fetch: () => refreshViewingKeyRegistry(chainId, chainKeystoreAddress),
+        // A write refuses ("still syncing") once the full pull is older than
+        // VIEWING_KEY_REGISTRY_MAX_AGE_MS or the last one failed. So a failed
+        // pull retries on the 30s grid, and a tab back from idle refreshes at
+        // once. The window less one interval: a tick inside the throttle is a
+        // no-op success, so the grid's own stamp can run up to one interval
+        // ahead of the real pull.
+        retryMs: VIEWING_KEY_REGISTRY_RETRY_MS,
+        retryOnError: true,
+        maxAgeMs: VIEWING_KEY_REGISTRY_MAX_AGE_MS - FULL_RESYNC_INTERVAL_MS,
+        fetch: async () => {
+          const outcome = await refreshViewingKeyRegistry(chainId, chainKeystoreAddress);
+          // A 404 (feed not deployed) or a disabled build is not retried.
+          if (!outcome.ok && outcome.reason !== 'not-deployed' && outcome.reason !== 'disabled') {
+            throw new Error(`viewing-keys sync failed: ${outcome.reason}`);
+          }
+          return outcome;
+        },
       });
       // The nullifying-key-hash registry (services/nullifying-key-hash-cache.ts).
       // The keystore identity check at sign-in and before a deposit reads this
@@ -325,6 +348,9 @@ export function startPublicFeeds(): void {
         // deployed on this ASP) is not retried.
         retryMs: NULLIFYING_KEY_HASH_RETRY_MS,
         retryOnError: true,
+        // Past this a registry miss stops answering and writes refuse, so a
+        // tab back from idle (or out of an ASP backoff) refreshes at once.
+        maxAgeMs: NULLIFYING_KEY_HASH_MAX_AGE_MS,
         fetch: async () => {
           const outcome = await syncNullifyingKeyHashes(chainId, chainKeystoreAddress);
           if (!outcome.ok && outcome.reason !== 'not-deployed') throw new Error(`nullifying-key-hashes sync failed: ${outcome.reason}`);

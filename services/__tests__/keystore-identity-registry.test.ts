@@ -13,7 +13,7 @@ const send = (async (_party: string, _base: string, url: string) => {
   return respond(url);
 }) as never;
 
-const { identityStatusFromRegistry } = await import('@/services/keystore-identity-status');
+const { identityStatusFromRegistry, ownRegistrationRefusal, REGISTRATION_UNCONFIRMED_MESSAGE } = await import('@/services/keystore-identity-status');
 const cache = await import('@/services/nullifying-key-hash-cache');
 const policy = await import('@/services/egress-policy');
 const { ASP_URL } = await import('@/config/env');
@@ -48,6 +48,34 @@ describe('identityStatusFromRegistry', () => {
     expect(identityStatusFromRegistry({ ...view, viewingKey: null }, active, VK)).toBe('partial');
     expect(identityStatusFromRegistry({ ...view, viewingKey: `0x${'0'.repeat(64)}` }, active, VK)).toBe('partial');
     expect(identityStatusFromRegistry(view, active, `0x${'ef'.repeat(32)}`)).toBe('partial');
+  });
+});
+
+describe('ownRegistrationRefusal (the last check before a deposit)', () => {
+  const view = { nullifyingKeyHash: null, nullifyingFresh: true, viewingKey: null, viewingFresh: true };
+  const active = BigInt(HASH).toString();
+
+  test('a fresh-looking registry miss next to a registered chain refuses the deposit', () => {
+    // Registered under P1 on another device minutes ago, the local copy has not
+    // caught up, and this session holds P2. The registry says 'unregistered',
+    // the live nonzero read says registered: depositing would mint a note P2
+    // can never spend.
+    const status = identityStatusFromRegistry(view, active, VK);
+    expect(status).toBe('unregistered');
+    expect(ownRegistrationRefusal(status, true)).toBe(REGISTRATION_UNCONFIRMED_MESSAGE);
+    expect(REGISTRATION_UNCONFIRMED_MESSAGE).toContain('Nothing was sent');
+  });
+
+  test('an unregistered chain goes to registration, a matching one goes ahead', () => {
+    expect(ownRegistrationRefusal('unregistered', false)).toBeNull();
+    expect(ownRegistrationRefusal('compatible', true)).toBeNull();
+    expect(ownRegistrationRefusal('partial', true)).toBeNull();
+  });
+
+  test('another unlock or an unanswered registry never goes ahead on a registered chain', () => {
+    expect(ownRegistrationRefusal('incompatible', true)).not.toBeNull();
+    expect(ownRegistrationRefusal('incompatible', false)).not.toBeNull();
+    expect(ownRegistrationRefusal('unknown', true)).not.toBeNull();
   });
 });
 

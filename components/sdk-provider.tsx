@@ -1408,7 +1408,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
           // any wallet; the deposit guard only blocks the irreversible action
           // (deposit) on a mismatch, and the recovery flow can import the other
           // identity's notes to exit them.
-          const pkStatus = await resolveKeystoreIdentityStatus(sdkSetup, pkKm, derivationAddress as `0x${string}`, chainId);
+          const pkStatus = await resolveKeystoreIdentityStatus(sdkSetup, pkKm, derivationAddress as `0x${string}`, chainId, REGISTRY_WAIT_MS);
 
           // Commit only if still the current target AND epoch AND the UI is still
           // in passkey mode: a wallet change, a source switch or a mode flip
@@ -1839,7 +1839,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
           + `(nullifying/spend: ${nullifyingScheme}, viewing/receive: ${viewingScheme})`,
         );
 
-        const sigStatus = await resolveKeystoreIdentityStatus(sdkSetup, km, derivationAddress as `0x${string}`, chainId);
+        const sigStatus = await resolveKeystoreIdentityStatus(sdkSetup, km, derivationAddress as `0x${string}`, chainId, REGISTRY_WAIT_MS);
         // Determinism proof. The account is derived from the signature's r, so
         // the wallet must return the SAME r every time. A key the chain already
         // vouches for (registered and matching) needs no proof; MetaMask and
@@ -2877,19 +2877,24 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     // not whether that someone was this unlock. The nullifying-key hash is
     // write-once per address, so depositing under a different unlock than the
     // one registered there mints a note that can NEVER be spent and cannot be
-    // re-registered. 'unknown' stays fail-open (a flaky RPC must not block the
-    // flow) and 'unregistered' falls through to the caller's own handling.
+    // re-registered. Every caller here writes (cross-chain shield, reshield,
+    // far-chain registration), so like the other writes it waits for the grid
+    // to bring the registries current and never proceeds on 'unknown'.
+    // 'unregistered' falls through to the caller's own handling, which checks
+    // it against the live registration (ownRegistrationRefusal).
     const targetIdentity = opts?.discoveryOnly ? 'unknown' : await resolveKeystoreIdentityStatus(
       sdkSetup,
       managers.keystoreManager as IKeystoreManager,
       owner,
       targetChainId,
+      REGISTRY_WAIT_MS,
     );
     if (targetIdentity === 'incompatible') {
       throw new Error(
         'This account is registered with a different unlock on that network. Switch unlock, or import its notes to exit.',
       );
     }
+    if (!opts?.discoveryOnly && targetIdentity === 'unknown') throw new RegistrySyncingError();
 
     const { createPoolSession } = await getPoolSessionService();
     // Seeded from that chain's own stored export so work appends to its notes
@@ -4108,12 +4113,17 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
   // from keys this session already holds, so a reopened flow does not plan the
   // registration again. No request: these are our own values.
   useEffect(() => subscribeReceiveSetup(() => {
-    // Only the committed session's own chain: its manager is the one that
-    // registered there, and another chain may use other keys (Sepolia legacy).
+    // The committed session's chain, plus the far chains a cross-chain flow
+    // registers on: those sessions are built from this same manager
+    // (buildSessionForChain), so it is the one that registered there. Without
+    // them a register-then-resume shield would read a registry miss next to a
+    // registered chain and be refused until the next sync. Sepolia is never a
+    // far chain here: its sign-in may pick legacy keys.
     const committed = committedSessionRef.current;
     if (!committed?.keystoreManager || !committed.address) return;
     const identity = { keystoreManager: committed.keystoreManager, address: committed.address };
-    const chains = [committed.chainId].filter((id) => {
+    const candidates = [committed.chainId, ...queryableEvmChainIds().filter((id) => id !== committed.chainId && id !== SEPOLIA_CHAIN_ID)];
+    const chains = candidates.filter((id) => {
       const state = getReceiveSetup(identity.address, id);
       return state === 'partial' || state === 'complete';
     });
