@@ -64,19 +64,24 @@ export function relayerRetryAfterMs(headers: Pick<Headers, 'forEach'> | null | u
 }
 
 /** Retries after a failed read before the deposit says it cannot check. */
-export const RELAYER_READ_RETRIES = 4;
+export const RELAYER_READ_RETRIES = 3;
 const RETRY_CAP_MS = 60_000;
 
 /**
  * Pure: how long to wait before retry `attempt` (0-based). The relayer's own
- * Retry-After when it sent one, else 2 s, 4 s, 8 s, 16 s. Capped at a minute.
+ * Retry-After when it sent one, else 10 s, 20 s, 30 s. Capped at a minute.
+ * The prod relayer does not expose its retry headers to the browser (no
+ * Access-Control-Expose-Headers), so the fallback is what runs: three retries
+ * spanning a full minute, enough to outlast its ~55 s throttle, and fewer
+ * reads, since each one spends the per-IP relay budget a withdrawal also
+ * needs (Zeeshan on #59).
  * A throttled read used to fail at once and the deposit refused for five
  * minutes (Pat on a VPN exit, 2026-11-02, whose per-IP budget other users had
  * spent).
  */
 export function relayerRetryDelayMs(attempt: number, error: unknown): number {
   const asked = error instanceof RelayerReadError ? error.retryAfterMs : null;
-  return Math.min(asked ?? 2_000 * 2 ** attempt, RETRY_CAP_MS);
+  return Math.min(asked ?? 10_000 * (attempt + 1), RETRY_CAP_MS);
 }
 
 // The last list each chain's relayer returned. Which assets a relayer supports

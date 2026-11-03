@@ -54,8 +54,8 @@ describe('relayer asset support', () => {
     expect(relayerRetryAfterMs(null)).toBeNull();
     expect(relayerRetryDelayMs(0, new RelayerReadError(429, 54_000))).toBe(54_000);
     expect(relayerRetryDelayMs(0, new RelayerReadError(429, 600_000))).toBe(60_000);
-    expect([0, 1, 2, 3].map((n) => relayerRetryDelayMs(n, new RelayerReadError(429, null)))).toEqual([2_000, 4_000, 8_000, 16_000]);
-    expect(relayerRetryDelayMs(1, new Error('other'))).toBe(4_000);
+    expect([0, 1, 2].map((n) => relayerRetryDelayMs(n, new RelayerReadError(429, null)))).toEqual([10_000, 20_000, 30_000]);
+    expect(relayerRetryDelayMs(1, new Error('other'))).toBe(20_000);
   });
   test('a recent good read stands in for a failed one, an old one does not', () => {
     const one = parseRelayerAssetAddresses(DETAILS, 1);
