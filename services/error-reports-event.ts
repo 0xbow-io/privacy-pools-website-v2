@@ -38,6 +38,21 @@ export type IncomingEvent = {
   [key: string]: unknown;
 };
 
+/**
+ * Sentry's ingest always derives a location (`user.geo`) from the connection's IP
+ * (getsentry/relay#4586), whatever the event or the "Prevent Storing of IP Addresses"
+ * switch says: an explicit null IP does not stop it (2026-10-30, a team member's own
+ * crash report showed their city, switch on). The one thing that skips the lookup is
+ * a `user.geo` already on the event (relay#4888), so the event carries a fixed
+ * placeholder, never a real place. It must be non-empty: an empty object can be
+ * dropped before ingest. The null IP stays, and the project switch stays on.
+ * Verify with a fresh prod event after deploy: its user.geo must read this placeholder.
+ */
+export const NO_USER_LOCATION = Object.freeze({
+  ip_address: null,
+  geo: Object.freeze({ country_code: 'ZZ' }),
+}) as { readonly ip_address: null; readonly geo: { readonly country_code: 'ZZ' } };
+
 export type OutgoingEvent = {
   /** Carried over so the envelope header can address the event. Never ours. */
   event_id?: string;
@@ -47,6 +62,8 @@ export type OutgoingEvent = {
   release?: string;
   level: 'error' | 'warning';
   message: string;
+  /** Always `{ ip_address: null }`: no user, and no IP for Sentry to infer a location from. */
+  user: typeof NO_USER_LOCATION;
   contexts?: {
     flags?: Record<string, boolean>;
     egress?: Record<string, string>;
@@ -371,6 +388,7 @@ export function privateErrorReportEvent(
         ...(release ? { release } : {}),
         level: 'error',
         message,
+        user: NO_USER_LOCATION,
         tags: { stage: tags.stage, reason: tags.reason },
         ...(exception ? { exception } : {}),
         ...(debugMeta ? { debug_meta: debugMeta } : {}),
@@ -386,6 +404,7 @@ export function privateErrorReportEvent(
     ...(release ? { release } : {}),
     level: key === 'egress-refused' ? 'warning' : 'error',
     message,
+    user: NO_USER_LOCATION,
     contexts: {
       ...(Object.keys(flags).length > 0 ? { flags } : {}),
       ...(egress ? { egress } : {}),

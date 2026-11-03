@@ -235,7 +235,7 @@ describe('frames', () => {
 });
 
 describe('the whole event', () => {
-  const ALLOWED_TOP_LEVEL = ['event_id', 'timestamp', 'platform', 'environment', 'release', 'level', 'message', 'contexts', 'tags', 'exception'];
+  const ALLOWED_TOP_LEVEL = ['event_id', 'timestamp', 'platform', 'environment', 'release', 'level', 'message', 'contexts', 'tags', 'exception', 'user'];
 
   function build() {
     const err = leakyError();
@@ -366,7 +366,7 @@ describe('relayed spends say less', () => {
       expect(out).not.toBeNull();
       expect(out.tags).toEqual({ stage: 'confirm', reason: 'unknown' });
       expect(out.contexts).toBeUndefined();
-      expect(Object.keys(out).sort()).toEqual(['environment', 'event_id', 'exception', 'level', 'message', 'platform', 'release', 'tags']);
+      expect(Object.keys(out).sort()).toEqual(['environment', 'event_id', 'exception', 'level', 'message', 'platform', 'release', 'tags', 'user']);
       expect(Object.keys(out.exception!.values[0]!).sort()).toEqual(['stacktrace', 'type']);
       for (const dropped of ['chainId', 'asset', 'isYield', 'walletKind', 'connector', 'io.metamask', ADDRESS, AMOUNT]) {
         expect({ dropped, present: json(out).includes(dropped) }).toEqual({ dropped, present: false });
