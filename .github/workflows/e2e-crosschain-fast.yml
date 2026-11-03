@@ -9,14 +9,15 @@ name: e2e-crosschain-fast
 
 # It spends REAL mainnet funds from E2E_ACCOUNT_A_PK (a 0.001 ETH swap on OP,
 # and sometimes a shield and a bridge, about 0.0048 ETH a run). It runs on every
-# push to dev or main, never on a pull request: the job sits in the
+# push to main (one per release, Zeeshan on #36: dev would drain the account in
+# about three runs), never on a pull request: the job sits in the
 # `e2e-mainnet` GitHub Environment, which only dev and main may deploy to, so a
 # PR branch never receives the key. Run by hand with
 # `gh workflow run e2e-crosschain-fast.yml --ref dev`. Input dry_run=true quotes
 # and stops before any transaction.
 on:
   push:
-    branches: [dev, main]
+    branches: [main]
     paths:
       - "services/**"
       - "components/**"

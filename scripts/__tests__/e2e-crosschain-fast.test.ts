@@ -17,8 +17,8 @@ const timeoutMinutes = (yaml: string) => Number(/timeout-minutes:\s*(\d+)/.exec(
 describe('e2e-crosschain-fast workflow', () => {
   const wf = uncommented(WORKFLOW);
 
-  test('runs on pushes to dev and main and by hand, never on a pull request', () => {
-    expect(wf).toMatch(/^on:\s*\n\s+push:\s*\n\s+branches:\s*\[dev, main\]/m);
+  test('runs on pushes to main and by hand, never on dev pushes or a pull request', () => {
+    expect(wf).toMatch(/^on:\s*\n\s+push:\s*\n\s+branches:\s*\[main\]/m);
     expect(wf).toMatch(/^\s+workflow_dispatch:/m);
     for (const trigger of ['pull_request', 'pull_request_target', 'schedule', 'workflow_run', 'workflow_call']) {
       expect(wf).not.toMatch(new RegExp(`^\\s*${trigger}\\s*:`, 'm'));
