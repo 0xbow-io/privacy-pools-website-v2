@@ -47,7 +47,8 @@ const CARD_OVERFLOW = { overflow: 'visible' } as const;
  */
 function MiniStat({ label, value, stacked }: { label: string; value: string | null; stacked: boolean }) {
   return (
-    <View className={stacked ? 'w-1/3 gap-[2px] pr-[8px]' : 'flex-1 gap-[2px]'}>
+    // min-w: a long USD figure on a 320px phone wraps the column instead of truncating (review of #35).
+    <View className={stacked ? 'w-1/3 min-w-[84px] gap-[2px] pr-[8px]' : 'flex-1 gap-[2px]'}>
       <Text
         numberOfLines={1}
         className="font-pp-semi-bold text-[10px] uppercase leading-[12px] tracking-[0.4px] text-text-muted"

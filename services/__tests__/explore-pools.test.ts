@@ -262,3 +262,17 @@ describe('formatCompactTokenAmount', () => {
     expect(formatCompactTokenAmount(999_990, 'USDC')).toBe('999.99K USDC');
   });
 });
+
+describe('pool size reads the same on the pool page (review of #35)', () => {
+  const read = (path: string) => require('node:fs').readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8') as string;
+
+  test('the share pool page TVL uses the Explore rounding', () => {
+    const page = read('components/pools/pool-page-content.tsx');
+    expect(page).toContain('formatCompactTokenAmount(shareNumberAsUnderlying(tvlShares, tvlRate), displayTokenSymbol(tvlRate.underlyingSymbol))');
+    expect(page).not.toContain('formatShareAsUnderlying(shareNumberAsUnderlying(tvlShares');
+  });
+
+  test('stacked stat columns keep a min width so a USD figure wraps, never truncates, at 320px', () => {
+    expect(read('components/stats/stats-asset-cards.tsx')).toContain("'w-1/3 min-w-[84px] gap-[2px] pr-[8px]'");
+  });
+});
