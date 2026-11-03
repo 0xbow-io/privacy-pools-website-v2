@@ -159,6 +159,10 @@ export function createBulkLabelCache(deps: BulkLabelCacheDeps) {
   const entries = new Map<string, Entry>();
   const rootProbes = new Map<number, RootProbe>();
   const owners = new Map<number, Owner>();
+  // The last on-chain root read per chain, and the chains with a re-sync
+  // waiting (a count: two spends can re-sync at once). See chainRoot().
+  const chainRoots = new Map<number, unknown>();
+  const pinnedRoots = new Map<number, number>();
   const ownerOf = (chainId: number): Owner => {
     let owner = owners.get(chainId);
     if (!owner) {
@@ -355,20 +359,48 @@ export function createBulkLabelCache(deps: BulkLabelCacheDeps) {
     // On a chain the feed grid owns, a mismatch re-syncs once before it is
     // shown (Pat, 2026-11-02): the invalidation makes the grid's NEXT
     // wall-clock tick (60s) fetch the set afresh, and the retry's read waits
-    // for that tick. No request leaves because of the user's action, the set
-    // is simply read again once the grid has replaced it. A chain the grid does
-    // not own would have to fetch on the spot, so it still fails at once.
+    // for that tick. The retry also compares against the on-chain root the
+    // first attempt already read (chainRoot below), so no request at all
+    // leaves because of the user's action. A chain the grid does not own would
+    // have to fetch on the spot, so it still fails at once.
     async verify<T>(chainId: number, poolKey: string, verify: () => Promise<T>): Promise<T> {
+      const seen = entries.get(poolKey)?.list;
       try { return await verify(); } catch (error) {
         if (!isRootMismatch(error)) throw error;
-        invalidate(chainId, poolKey);
+        // Another caller's re-sync may already have replaced the stale list
+        // this attempt read: keep that fresh set, do not wipe it again.
+        const now = entries.get(poolKey);
+        const replaced = seen !== undefined && now !== undefined && now.list !== seen && now.list.length > 0;
+        if (!replaced) invalidate(chainId, poolKey);
         if (!deps.owns?.(chainId)) throw error;
         deps.onDecision?.(`leaf-cache RESYNC pool=${poolKey}: root mismatch, waiting for the grid's next refresh`);
+        pinnedRoots.set(chainId, (pinnedRoots.get(chainId) ?? 0) + 1);
         try { return await verify(); } catch (again) {
-          if (isRootMismatch(again)) invalidate(chainId, poolKey);
-          throw again;
+          if (isRootMismatch(again)) {
+            invalidate(chainId, poolKey);
+            throw again;
+          }
+          // The wait ended without a fresh set (the tick failed or never
+          // came): the mismatch is still the honest answer.
+          throw error;
+        } finally {
+          const left = (pinnedRoots.get(chainId) ?? 1) - 1;
+          if (left > 0) pinnedRoots.set(chainId, left); else pinnedRoots.delete(chainId);
         }
       }
+    },
+
+    /**
+     * Every on-chain root read of the association set goes through here. While
+     * a re-sync is waiting on a chain, it answers with the root that chain's
+     * last read returned instead of asking the RPC again: that read would be
+     * timed by the spend (only a client with a spend in progress sends it).
+     */
+    async chainRoot<R>(chainId: number, read: () => Promise<R>): Promise<R> {
+      if (pinnedRoots.has(chainId) && chainRoots.has(chainId)) return chainRoots.get(chainId) as R;
+      const value = await read();
+      chainRoots.set(chainId, value);
+      return value;
     },
 
     invalidate,

@@ -443,3 +443,58 @@ describe('root mismatch re-sync on a grid-owned chain', () => {
     expect(attempts).toBe(2);
   });
 });
+
+describe('the re-sync sends no on-chain root read of its own', () => {
+  test('the retry compares against the root the first attempt read', async () => {
+    const h = harness({ owns: true });
+    const stale = source(['0xAA']);
+    await h.cache.refresh(stale, CHAIN, POOL);
+    let rpcReads = 0;
+    let attempts = 0;
+    const verify = async () => {
+      attempts++;
+      const leaves = await h.cache.leaves(stale, CHAIN, POOL);
+      const chainRoot = await h.cache.chainRoot(CHAIN, async () => { rpcReads++; return '0xbb'; });
+      if (leaves[0] !== chainRoot) throw new Error('ASP leaves root mismatch: stale');
+      return leaves;
+    };
+    const pending = h.cache.verify(CHAIN, POOL, verify);
+    while (attempts < 2) await new Promise((r) => setTimeout(r, 1));
+    await h.cache.refresh(source(['0xBB']), CHAIN, POOL);
+    expect(await pending).toEqual(['0xbb']);
+    expect(rpcReads).toBe(1);
+    // Outside a re-sync the root is read live again.
+    await h.cache.chainRoot(CHAIN, async () => { rpcReads++; return '0xbb'; });
+    expect(rpcReads).toBe(2);
+  });
+
+  test('a wait that ends without a fresh set shows the mismatch, not a load error', async () => {
+    const h = harness({ owns: true });
+    const stale = source(['0xAA']);
+    await h.cache.refresh(stale, CHAIN, POOL);
+    let attempts = 0;
+    const pending = h.cache.verify(CHAIN, POOL, async () => {
+      attempts++;
+      if (attempts === 2) throw new Error('association set not loaded yet');
+      await h.cache.leaves(stale, CHAIN, POOL);
+      throw new Error('ASP leaves root mismatch: stale');
+    });
+    await expect(pending).rejects.toThrow('ASP leaves root mismatch: stale');
+  });
+
+  test('a late mismatch does not wipe a set another re-sync already replaced', async () => {
+    const h = harness({ owns: true });
+    await h.cache.refresh(source(['0xAA']), CHAIN, POOL);
+    let first = true;
+    const pending = h.cache.verify(CHAIN, POOL, async () => {
+      if (first) {
+        first = false;
+        h.setRoot('root-b');
+        await h.cache.refresh(source(['0xBB']), CHAIN, POOL); // grid replaced it meanwhile
+        throw new Error('ASP leaves root mismatch: read the old list');
+      }
+      return await h.cache.leaves(source(['0xCC']), CHAIN, POOL);
+    });
+    expect(await pending).toEqual(['0xbb']);
+  });
+});
