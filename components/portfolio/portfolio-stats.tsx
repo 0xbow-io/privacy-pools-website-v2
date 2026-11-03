@@ -21,6 +21,8 @@ type PortfolioStatsProps = {
   yieldEarnedUsd?: string | null;
   /** The rows' figures are still being computed: a shimmer, not a dash. */
   yieldEarnedLoading?: boolean;
+  /** A held yield row has no figure in the sum: marked, since it may be low. */
+  yieldEarnedPartial?: boolean;
 };
 
 /**
@@ -33,6 +35,7 @@ export function PortfolioStats({
   pending = '0%',
   yieldEarnedUsd = null,
   yieldEarnedLoading = false,
+  yieldEarnedPartial = false,
 }: PortfolioStatsProps) {
   const { width } = useWindowDimensions();
   const isMobile = width <= 450;
@@ -74,11 +77,22 @@ export function PortfolioStats({
         <Skeleton width={isMobile ? 72 : 96} height={responsiveFontSize} />
       </View>
     ) : (
-      figure(
-        yieldEarnedUsd ?? '—',
-        yieldEarnedUsd ? 'text-success' : 'text-text-muted',
-        'portfolio-stats-yield-earned',
-      )
+      <>
+        {figure(
+          yieldEarnedUsd ?? '—',
+          yieldEarnedUsd ? 'text-success' : 'text-text-muted',
+          'portfolio-stats-yield-earned',
+        )}
+        {/* A held row is not in the sum (another chain, a failed feed): say so. */}
+        {yieldEarnedUsd && yieldEarnedPartial ? (
+          <Text
+            testID="portfolio-stats-yield-earned-partial"
+            className="font-pp-regular text-[11px] leading-[11px] text-text-muted"
+          >
+            Partial
+          </Text>
+        ) : null}
+      </>
     ),
   );
 

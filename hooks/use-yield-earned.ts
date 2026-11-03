@@ -74,6 +74,8 @@ export function useYieldEarned(params: {
   chainId: number | null;
   /** PoolsProvider's merged snapshot, chain-tagged; undefined until loaded. */
   snapshot: (ChainTaggedSnapshot & { loadedChainIds?: readonly number[] }) | undefined;
+  /** The snapshot query is in error: no snapshot is on its way. */
+  snapshotFailed?: boolean;
 }): YieldEarnedByShare {
   const { session, chainId } = params;
   // Pinned to the session it was computed for, so a new session reads empty
@@ -83,8 +85,10 @@ export function useYieldEarned(params: {
   );
 
   const snapshotRef = useRef(params.snapshot);
+  const snapshotFailedRef = useRef(!!params.snapshotFailed);
   useEffect(() => {
     snapshotRef.current = params.snapshot;
+    snapshotFailedRef.current = !!params.snapshotFailed;
   });
   // The live tick of the current session effect, so a snapshot landing can run it.
   const tickRef = useRef<(() => void) | null>(null);
@@ -94,7 +98,7 @@ export function useYieldEarned(params: {
   // the grid publishes), so a compute timed by it is grid-timed, not UI-timed.
   useEffect(() => {
     tickRef.current?.();
-  }, [params.snapshot]);
+  }, [params.snapshot, params.snapshotFailed]);
 
   useEffect(() => {
     if (!session || chainId == null) return undefined;
@@ -126,9 +130,16 @@ export function useYieldEarned(params: {
       try {
         const snapshot = snapshotRef.current;
         // Not loaded, or this chain's part of it failed: without its spends a
-        // note that left would be valued as still held.
-        if (!snapshot || (snapshot.loadedChainIds && !snapshot.loadedChainIds.includes(chainId))) {
-          allUnavailable('snapshot-not-ready');
+        // note that left would be valued as still held. A snapshot that failed
+        // (the query in error, or this chain missing from a loaded one) is not
+        // on its way: "not ready" there held the total on a shimmer for as long
+        // as the snapshot stayed down (review of PR #31).
+        if (!snapshot) {
+          allUnavailable(snapshotFailedRef.current ? 'snapshot-failed' : 'snapshot-not-ready');
+          return;
+        }
+        if (snapshot.loadedChainIds && !snapshot.loadedChainIds.includes(chainId)) {
+          allUnavailable('snapshot-failed');
           return;
         }
         const depositsState = publicFeeds.read<YieldFeedResult<YieldDepositsResponse>>(feedYieldDeposits(chainId));

@@ -270,6 +270,8 @@ describe('display threshold', () => {
       ]);
       expect(total.status).toBe('ok');
       if (total.status === 'ok') expect(total.usd).toBeCloseTo(0.0000016 * 2500 + 0.11, 9);
+      // A pending-only row without a figure does not make the sum partial.
+      if (total.status === 'ok') expect(total.partial).toBe(false);
     });
 
     test('a row whose feed is not served counts as 0', () => {
@@ -277,7 +279,8 @@ describe('display threshold', () => {
         row(usdc, 'USDC', 1),
         row({ status: 'unavailable', reason: 'no-rate-series' }, 'USDT', 1),
       ]);
-      expect(total).toEqual({ status: 'ok', usd: 0.11 });
+      // ...and the tile marks the sum partial, since USDT is left out.
+      expect(total).toEqual({ status: 'ok', usd: 0.11, partial: true });
     });
 
     test('a held row still computing makes it loading, a pending-only one does not', () => {
@@ -285,21 +288,34 @@ describe('display threshold', () => {
       for (const reason of ['snapshot-not-ready', 'deposits-feed-loading', 'rate-history-loading']) {
         expect(totalYieldEarnedUsd([row({ status: 'unavailable', reason }, 'USDC', 1)])).toEqual({ status: 'loading' });
       }
-      expect(totalYieldEarnedUsd([row(usdc, 'USDC', 1), row(computing, 'USDC', 1, true)])).toEqual({ status: 'ok', usd: 0.11 });
+      expect(totalYieldEarnedUsd([row(usdc, 'USDC', 1), row(computing, 'USDC', 1, true)])).toEqual({ status: 'ok', usd: 0.11, partial: false });
     });
 
     test('a feed that failed is not loading: the tile settles instead of shimmering forever', () => {
-      for (const reason of ['deposits-feed-failed', 'rate-history-failed', 'compute-failed', 'exchange-rate-read-failed']) {
+      for (const reason of ['snapshot-failed', 'deposits-feed-failed', 'rate-history-failed', 'compute-failed', 'exchange-rate-read-failed']) {
         expect(totalYieldEarnedUsd([row({ status: 'unavailable', reason }, 'USDC', 1)])).toEqual({ status: 'none' });
-        expect(totalYieldEarnedUsd([row(usdc, 'USDC', 1), row({ status: 'unavailable', reason }, 'USDT', 1)])).toEqual({ status: 'ok', usd: 0.11 });
+        expect(totalYieldEarnedUsd([row(usdc, 'USDC', 1), row({ status: 'unavailable', reason }, 'USDT', 1)])).toEqual({ status: 'ok', usd: 0.11, partial: true });
       }
     });
 
+    test('a HELD row on another chain (no entry) is left out and marks the sum partial (review of PR #31)', () => {
+      expect(totalYieldEarnedUsd([row(usdc, 'USDC', 1), row(undefined, 'USDC', 1)])).toEqual({ status: 'ok', usd: 0.11, partial: true });
+      expect(totalYieldEarnedUsd([row(usdc, 'USDC', 1), row(eth, 'ETH', 2500)])).toMatchObject({ status: 'ok', partial: false });
+    });
+
+    test('a snapshot that failed reports "snapshot-failed", not "not ready" (review of PR #31)', () => {
+      const { readFileSync } = require('node:fs') as typeof import('node:fs');
+      const hook = readFileSync(new URL('../../hooks/use-yield-earned.ts', import.meta.url), 'utf8');
+      expect(hook).toContain("allUnavailable(snapshotFailedRef.current ? 'snapshot-failed' : 'snapshot-not-ready')");
+      const provider = readFileSync(new URL('../../components/pools-provider.tsx', import.meta.url), 'utf8');
+      expect(provider).toContain('snapshotFailed: eventSnapshotFailed,');
+    });
+
     test('a missing price leaves that row out, the others still sum', () => {
-      expect(totalYieldEarnedUsd([row(eth, 'ETH', 0), row(usdc, 'USDC', 1)])).toEqual({ status: 'ok', usd: 0.11 });
+      expect(totalYieldEarnedUsd([row(eth, 'ETH', 0), row(usdc, 'USDC', 1)])).toEqual({ status: 'ok', usd: 0.11, partial: true });
       expect(totalYieldEarnedUsd([row(eth, 'ETH', 0)])).toEqual({ status: 'none' });
       // A zero figure needs no price.
-      expect(totalYieldEarnedUsd([row(ok(0n, 0n, 18), 'ETH', 0)])).toEqual({ status: 'ok', usd: 0 });
+      expect(totalYieldEarnedUsd([row(ok(0n, 0n, 18), 'ETH', 0)])).toEqual({ status: 'ok', usd: 0, partial: false });
     });
 
     test('"none" only when no row has a figure', () => {

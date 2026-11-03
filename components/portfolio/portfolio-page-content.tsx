@@ -67,7 +67,7 @@ function PortfolioBody() {
   const tabClearance = useTabBarClearance();
   const { isConnected } = useAccount();
   const { sessionAddress } = useSdkContext();
-  const { positions, totalValueFormatted, pendingValueFormatted, hasPositions, chainDisplayName, chainId, isLoading: portfolioLoading, yieldEarnedUsdFormatted, yieldEarnedLoading } = usePortfolio();
+  const { positions, totalValueFormatted, pendingValueFormatted, hasPositions, chainDisplayName, chainId, isLoading: portfolioLoading, yieldEarnedUsdFormatted, yieldEarnedLoading, yieldEarnedPartial } = usePortfolio();
   // Live APY for real yield rows (feed first, env placeholder second).
   const liveApy = useResolvedYieldApy({ chainId });
   const { data: poolsData } = usePools();
@@ -196,6 +196,7 @@ function PortfolioBody() {
             pending={portfolioLoading ? '—' : pendingValueFormatted}
             yieldEarnedUsd={portfolioLoading ? null : yieldEarnedTile}
             yieldEarnedLoading={yieldEarnedTileLoading}
+            yieldEarnedPartial={hasRealYield && !portfolioLoading && yieldEarnedPartial}
           />
           {(isConnected || !!sessionAddress) && <PointsCard />}
           {/* The yield POSITION is a row in All positions, so the page is one

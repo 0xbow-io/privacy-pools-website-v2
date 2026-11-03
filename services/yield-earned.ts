@@ -335,7 +335,12 @@ export type YieldEarnedTotalRow = {
 export type YieldEarnedTotal =
   | { status: 'loading' }
   | { status: 'none' }
-  | { status: 'ok'; usd: number };
+  /**
+   * `partial`: a held row adds nothing for want of a figure or a price
+   * (another chain's position, a failed feed, a bound that shows), so the sum
+   * can be low.
+   */
+  | { status: 'ok'; usd: number; partial: boolean };
 
 /**
  * The page's total: the USD sum of the figures the rows show.
@@ -347,21 +352,26 @@ export type YieldEarnedTotal =
  *   A pending-only row never does.
  * - A non-zero figure without a price cannot be valued and is left out.
  * - "none" only when no row has a figure that could be valued.
+ * - `partial` when a held row is left out of the sum, so the tile can say the
+ *   sum may be low instead of understating silently (review of PR #31).
  */
 export function totalYieldEarnedUsd(rows: readonly YieldEarnedTotalRow[]): YieldEarnedTotal {
   let total = 0;
   let valued = false;
   let loading = false;
+  let partial = false;
   for (const row of rows) {
     if (row.earned) {
       if (row.earned.amount === 0) { valued = true; continue; }
-      if (!(row.underlyingPriceUsd > 0)) continue;
+      if (!(row.underlyingPriceUsd > 0)) { partial = true; continue; }
       total += row.earned.amount * row.underlyingPriceUsd;
       valued = true;
       continue;
     }
-    if (!row.pendingOnly && yieldEarnedEntryLoading(row.entry)) loading = true;
+    if (row.pendingOnly) continue;
+    if (yieldEarnedEntryLoading(row.entry)) loading = true;
+    else partial = true;
   }
   if (loading) return { status: 'loading' };
-  return valued ? { status: 'ok', usd: total } : { status: 'none' };
+  return valued ? { status: 'ok', usd: total, partial } : { status: 'none' };
 }

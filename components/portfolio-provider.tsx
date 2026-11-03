@@ -87,6 +87,8 @@ type PortfolioContextType = {
   yieldEarnedUsdFormatted: string | null;
   /** A held yield row's figure is still being computed. */
   yieldEarnedLoading: boolean;
+  /** A held yield row has no figure in the sum, so it may be low. */
+  yieldEarnedPartial: boolean;
 };
 
 // --- Context ---
@@ -255,6 +257,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     chainId,
     yieldEarnedUsdFormatted: yieldEarnedTotal.status === 'ok' ? formatUsd(yieldEarnedTotal.usd) : null,
     yieldEarnedLoading: yieldEarnedTotal.status === 'loading',
+    yieldEarnedPartial: yieldEarnedTotal.status === 'ok' && yieldEarnedTotal.partial,
   };
 
   return (
