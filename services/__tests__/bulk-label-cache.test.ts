@@ -26,7 +26,7 @@ function fakeStore(): FakeStore {
   return st;
 }
 
-function harness(opts: { root?: string | null; ttlMs?: number; now?: () => number; store?: FakeStore } = {}) {
+function harness(opts: { root?: string | null; ttlMs?: number; now?: () => number; store?: FakeStore; owns?: boolean } = {}) {
   // NOT `opts.root ?? 'root-a'`: passing null deliberately means "no root
   // probe available", and ?? would turn it back into a root.
   let root: string | null = opts.root === undefined ? 'root-a' : opts.root;
@@ -37,6 +37,7 @@ function harness(opts: { root?: string | null; ttlMs?: number; now?: () => numbe
     ttlMs: opts.ttlMs ?? 5_000,
     now: opts.now,
     store: opts.store,
+    owns: opts.owns ? () => true : undefined,
   });
   return {
     cache,
@@ -399,5 +400,46 @@ describe('createRejectedLabelCache', () => {
     const results = await Promise.all(lookups);
     expect(calls).toBe(1);
     for (const set of results) expect(set?.has('0xrevoked')).toBe(true);
+  });
+});
+
+// Pat, 2026-11-02: a root mismatch re-syncs before it is shown, without a
+// request caused by the user's action.
+describe('root mismatch re-sync on a grid-owned chain', () => {
+  test('the retry waits for the grid refresh and sends nothing itself', async () => {
+    const h = harness({ owns: true });
+    const stale = source(['0xAA']);
+    await h.cache.refresh(stale, CHAIN, POOL); // the grid's earlier tick
+    const fresh = source(['0xBB']);
+    let attempts = 0;
+    const verify = async () => {
+      attempts++;
+      const leaves = await h.cache.leaves(stale, CHAIN, POOL);
+      if (leaves[0] !== '0xbb') throw new Error('ASP leaves root mismatch: stale');
+      return leaves;
+    };
+    const pending = h.cache.verify(CHAIN, POOL, verify);
+    while (attempts < 2) await new Promise((r) => setTimeout(r, 1));
+    expect(stale.calls).toBe(1); // the retry did not fetch
+    await h.cache.refresh(fresh, CHAIN, POOL); // the grid's next tick
+    expect(await pending).toEqual(['0xbb']);
+    expect(fresh.calls).toBe(1);
+    expect(stale.calls).toBe(1);
+  });
+
+  test('a second mismatch is shown, after one re-sync only', async () => {
+    const h = harness({ owns: true });
+    const stale = source(['0xAA']);
+    await h.cache.refresh(stale, CHAIN, POOL);
+    let attempts = 0;
+    const pending = h.cache.verify(CHAIN, POOL, async () => {
+      attempts++;
+      await h.cache.leaves(stale, CHAIN, POOL);
+      throw new Error('ASP leaves root mismatch: still stale');
+    });
+    while (attempts < 2) await new Promise((r) => setTimeout(r, 1));
+    await h.cache.refresh(stale, CHAIN, POOL);
+    await expect(pending).rejects.toThrow('still stale');
+    expect(attempts).toBe(2);
   });
 });

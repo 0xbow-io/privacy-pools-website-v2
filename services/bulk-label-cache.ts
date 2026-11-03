@@ -144,6 +144,11 @@ type Owner = {
  * nothing is held. One association-set grid period (60s) plus slack. */
 export const OWNED_READ_WAIT_MS = 75_000;
 
+/** The SDK's "served leaves do not hash to the on-chain root" failure. */
+function isRootMismatch(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('ASP leaves root mismatch:');
+}
+
 export function createBulkLabelCache(deps: BulkLabelCacheDeps) {
   const now = deps.now ?? (() => Date.now());
   // Keyed by POOL, not by provider identity. The set is a property of the pool,
@@ -345,11 +350,24 @@ export function createBulkLabelCache(deps: BulkLabelCacheDeps) {
     },
 
     // A rejected snapshot must not survive a fresh tab or explicit user retry.
-    // Invalidation itself performs no ASP/RPC request or automatic retry.
+    // Invalidation itself performs no ASP/RPC request.
+    //
+    // On a chain the feed grid owns, a mismatch re-syncs once before it is
+    // shown (Pat, 2026-11-02): the invalidation makes the grid's NEXT
+    // wall-clock tick (60s) fetch the set afresh, and the retry's read waits
+    // for that tick. No request leaves because of the user's action, the set
+    // is simply read again once the grid has replaced it. A chain the grid does
+    // not own would have to fetch on the spot, so it still fails at once.
     async verify<T>(chainId: number, poolKey: string, verify: () => Promise<T>): Promise<T> {
       try { return await verify(); } catch (error) {
-        if (error instanceof Error && error.message.includes('ASP leaves root mismatch:')) invalidate(chainId, poolKey);
-        throw error;
+        if (!isRootMismatch(error)) throw error;
+        invalidate(chainId, poolKey);
+        if (!deps.owns?.(chainId)) throw error;
+        deps.onDecision?.(`leaf-cache RESYNC pool=${poolKey}: root mismatch, waiting for the grid's next refresh`);
+        try { return await verify(); } catch (again) {
+          if (isRootMismatch(again)) invalidate(chainId, poolKey);
+          throw again;
+        }
       }
     },
 
