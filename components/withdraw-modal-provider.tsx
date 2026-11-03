@@ -4094,10 +4094,12 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           const noteComputation = await createNoteComputationService();
           const redeem = await directYieldNs.withdraw.prepareYieldWithdraw({
             inputCommitments: directInputs.map((n) => n.commitment),
-            amount: directAmountHex,
-            amountOut: directAmountHex,
+            // bigints, not hex: the SDK pads params.amount with bigintToHex and
+            // a hex string comes out as 0x000…0x3b9aca00 (Zeeshan on #52).
+            amount: directAmountWei,
+            amountOut: directAmountWei,
             recipient: sender,
-            feeAmount: '0x0',
+            feeAmount: 0n,
           });
           const redeemValue = redeem.withdrawTx.value ? BigInt(redeem.withdrawTx.value) : 0n;
           directPrepared = {
