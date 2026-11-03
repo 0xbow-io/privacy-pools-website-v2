@@ -119,6 +119,15 @@ describe('what the Swap tab renders never names a share', () => {
       }
     });
 
+    test(`${share.symbol}: nothing held and no rate reads as a plain zero, the coin named once`, () => {
+      const coin = displayTokenSymbol(share.symbol);
+      const view = underlyingOnlyView(shareBalanceDisplay({ sharesExact: '0', shareSymbol: share.symbol, rate: undefined, priceMap: {}, fallbackPrice: 0 }), share.symbol);
+      expect(view.text).toMatch(new RegExp(`^0(?:\\.0+)? ${escape(coin)}$`));
+      expect(view.text).not.toContain('shares');
+      expect(view.symbol).toBe(coin);
+      expect(view.hint).toBeNull();
+    });
+
     test(`${share.symbol}: a count without a rate`, () => {
       expect(shareCountLabel('1.5', share.symbol)).toBe(`1.5 ${displayTokenSymbol(share.symbol)} shares`);
     });
