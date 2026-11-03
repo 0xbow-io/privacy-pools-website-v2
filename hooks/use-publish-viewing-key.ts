@@ -8,7 +8,7 @@ import { useDebug } from '@/components/debug-provider';
 import { isSupportedEvmChainId } from '@/config/chains';
 import { isSessionInitTimeout, withSessionInitTimeout } from '@/services/session-init-timeout';
 import { setReceiveSetup, viewingKeyTxPlan } from '@/services/receive-setup';
-import { minPriorityFeeFor, readFeeMarket, walletTxAffordable, type FeeReadClient } from '@/services/wallet-tx-fees';
+import { minPriorityFeeFor, readFeeMarket, walletPricedFeeFloorFor, walletTxAffordable, type FeeReadClient } from '@/services/wallet-tx-fees';
 
 export const PUBLISH_PROMPT_TIMEOUT_MS = 120_000;
 
@@ -80,7 +80,10 @@ export function usePublishViewingKey(chainId: number) {
           // Fails for an account short of gas; the static budget is used instead.
         }
       }
-      const plan = viewingKeyTxPlan({ ...market, gasEstimate, minPriorityFeeWei: minPriorityFeeFor(chainId) });
+      const plan = viewingKeyTxPlan({
+        ...market, gasEstimate,
+        minPriorityFeeWei: minPriorityFeeFor(chainId), minMaxFeeWei: walletPricedFeeFloorFor(chainId),
+      });
       return {
         costWei: plan.costWei,
         balanceWei,

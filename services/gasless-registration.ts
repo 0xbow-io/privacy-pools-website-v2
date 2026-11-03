@@ -456,8 +456,12 @@ export type RegistrationErrorKind =
   | 'raw'
   | 'plain';
 
-/** The node refused the fee the wallet signed with (DEV-589). */
-const FEE_REFUSED = /underpriced|gas price (is )?(too low|below)|fee too low|max ?fee per gas less than block base fee|minimum gas price|intrinsic gas too low/i;
+/**
+ * The node refused the fee the wallet signed with (DEV-589). Not "intrinsic
+ * gas too low": that is the gas LIMIT, a retry at the same limit fails the
+ * same way, so the fee line would loop (review of DEV-589).
+ */
+const FEE_REFUSED = /underpriced|gas price (is )?(too low|below)|fee too low|max ?fee per gas less than block base fee|minimum gas price/i;
 /** The wallet could not reach its node, or the node failed the request. */
 const NETWORK_FAILURE = /HTTP request failed|Failed to fetch|fetch failed|network ?error|network request failed|could not connect|ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up|request timed out|rate limit|too many requests|\b(429|502|503|504)\b/i;
 const INSUFFICIENT_GAS = /insufficient funds|enough .{0,12} in your account|exceeds the balance|insufficient balance/i;

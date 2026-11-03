@@ -65,7 +65,22 @@ export function minPriorityFeeFor(chainId: number | null | undefined): bigint {
  * pre-checks, top-up sizing and the native gas reserve.
  */
 export function walletMaxFeePerGas(gasPriceWei: bigint, chainId?: number | null): bigint {
-  return 2n * gasPriceWei + minPriorityFeeFor(chainId);
+  const bound = 2n * gasPriceWei + minPriorityFeeFor(chainId);
+  const floor = walletPricedFeeFloorFor(chainId);
+  return bound > floor ? bound : floor;
+}
+
+/**
+ * Per-gas floor for the cost bound on a WALLET_PRICED_CHAINS chain (BNB). The
+ * wallet picks its own fee there, and a wallet node pricing above 2 x the app
+ * RPC's eth_gasPrice (~0.05 gwei) would refuse `setViewingKey` right after the
+ * user paid for a gas top-up sized from that bound (review of DEV-589). 1 gwei
+ * is still a fraction of a cent for any tx the app sends on BNB.
+ */
+export const WALLET_PRICED_FEE_FLOOR_WEI = 1_000_000_000n;
+
+export function walletPricedFeeFloorFor(chainId: number | null | undefined): bigint {
+  return chainId != null && WALLET_PRICED_CHAINS.has(chainId) ? WALLET_PRICED_FEE_FLOOR_WEI : 0n;
 }
 
 /** Upper bound of what the wallet reserves for `gasUnits` (before headroom) at `gasPriceWei`. */
@@ -149,6 +164,8 @@ export function planWalletTx(input: {
   priorityFeeWei?: bigint | null;
   baseFeeWei?: bigint | null;
   minPriorityFeeWei?: bigint | null;
+  /** Floor on the per-gas bound of a no-fee-fields plan (`walletPricedFeeFloorFor`). */
+  minMaxFeeWei?: bigint | null;
   gasPriceWei: bigint;
 }): WalletTxPlan {
   const units = input.gasEstimate && input.gasEstimate > 0n
@@ -156,7 +173,11 @@ export function planWalletTx(input: {
     : input.fallbackGas && input.fallbackGas > 0n ? input.fallbackGas : null;
   const gas = units === null ? undefined : walletGasLimit(units);
   const costAt = (perGas: bigint) => (gas === undefined ? null : gas * perGas);
-  if (input.eip1559 === null) return { gas, fees: null, costWei: costAt(2n * input.gasPriceWei + (input.minPriorityFeeWei ?? 0n)) };
+  if (input.eip1559 === null) {
+    const bound = 2n * input.gasPriceWei + (input.minPriorityFeeWei ?? 0n);
+    const floor = input.minMaxFeeWei ?? 0n;
+    return { gas, fees: null, costWei: costAt(bound > floor ? bound : floor) };
+  }
   if (!input.eip1559) return { gas, fees: { gasPrice: input.gasPriceWei }, costWei: costAt(input.gasPriceWei) };
   const suggested = input.priorityFeeWei != null && input.priorityFeeWei >= 0n ? input.priorityFeeWei : 0n;
   const floor = input.minPriorityFeeWei ?? 0n;
@@ -199,8 +220,9 @@ export interface FeeMarket {
  * was the one BNB-only field DEV-542 added, and registering from a mobile
  * wallet failed on BNB only after it shipped. The fee there is a fraction of a
  * cent, so the wallet's own tier costs nothing that matters. The gas limit is
- * still set, as on every other chain, and `costWei` is bounded at 2 x gasPrice
- * so the pre-checks and the top-up sizing keep their headroom.
+ * still set, as on every other chain, and `costWei` is bounded at
+ * max(2 x gasPrice, 1 gwei) so the pre-checks and the top-up sizing keep
+ * their headroom (WALLET_PRICED_FEE_FLOOR_WEI).
  */
 export const WALLET_PRICED_CHAINS: ReadonlySet<number> = new Set([56, 97]);
 
@@ -209,7 +231,7 @@ export const WALLET_PRICED_CHAINS: ReadonlySet<number> = new Set([56, 97]);
  * gas check. A plan with no fee fields means one of two things:
  *  - the block could not be read: nothing reliable to check, the wallet decides;
  *  - a WALLET_PRICED_CHAINS chain (BNB): the wallet sets the fee, but `costWei`
- *    is still a real bound (gas x 2 x gasPrice), so the check stays ON there.
+ *    is still a real bound (gas x max(2 x gasPrice, 1 gwei)), so the check stays ON there.
  *    Treating BNB like "unread" switched off the "not enough BNB for gas"
  *    check (review of DEV-589).
  */
@@ -264,7 +286,10 @@ export async function priceWalletTx(
   try {
     const market = await readFeeMarket(client, chainId);
     const gasEstimate = await client.estimateGas(tx).catch(() => null);
-    return planWalletTx({ ...market, gasEstimate, fallbackGas, minPriorityFeeWei: minPriorityFeeFor(chainId) });
+    return planWalletTx({
+      ...market, gasEstimate, fallbackGas,
+      minPriorityFeeWei: minPriorityFeeFor(chainId), minMaxFeeWei: walletPricedFeeFloorFor(chainId),
+    });
   } catch {
     return null;
   }

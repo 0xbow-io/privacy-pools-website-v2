@@ -423,6 +423,9 @@ describe('describeRegistrationError', () => {
     // The reason sits in the cause, the message is a generic dump.
     const generic = dump('An internal error was received.');
     expect(bnb(generic, `${generic}\ntransaction underpriced`)).toBe('BNB Chain refused the network fee your wallet set. Try again.');
+    // "intrinsic gas too low" is the gas LIMIT, not the fee: never the fee line, which would loop.
+    expect(classifyRegistrationError(generic, false, `${generic}\nintrinsic gas too low`)).not.toBe('fee-refused');
+    expect(bnb(generic, `${generic}\nintrinsic gas too low`)).toBe(WALLET_SEND_FAILED_MESSAGE);
     expect(bnb(generic, `${generic}\ninsufficient funds for gas * price + value`)).toBe('You need BNB on BNB Chain to pay the network fee. Add some, then register again.');
     expect(bnb(generic, `${generic}\nHTTP request failed.\nStatus: 503`)).toBe('Could not reach BNB Chain. Check your connection and try again.');
     expect(bnb(generic, `${generic}\nUser rejected the request.`)).toBe('Transaction cancelled in your wallet.');

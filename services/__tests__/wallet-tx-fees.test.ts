@@ -11,6 +11,9 @@ import {
   planWalletTx,
   priceWalletTx,
   readFeeMarket,
+  WALLET_PRICED_FEE_FLOOR_WEI,
+  walletGasLimit,
+  walletPricedFeeFloorFor,
   walletTxAffordable,
   walletTxCostWei,
   walletTxFields,
@@ -232,8 +235,8 @@ describe('wallet tx fee policy (DEV-542)', () => {
       const plan = await priceWalletTx(c, TX, null, chainId);
       expect(plan?.fees).toBeNull();
       expect(walletTxFields(plan)).toEqual({ gas: (51_084n * 12n) / 10n });
-      // Bounded at 2 x gasPrice: pre-checks and top-ups keep headroom over the wallet's tier.
-      expect(plan?.costWei).toBe(((51_084n * 12n) / 10n) * 2n * GAS_PRICE);
+      // Bounded at max(2 x gasPrice, 1 gwei): pre-checks and top-ups keep headroom over the wallet's tier.
+      expect(plan?.costWei).toBe(((51_084n * 12n) / 10n) * GWEI);
       expect(c.calls).not.toContain('tip');
       expect(c.calls).not.toContain('block');
     }
@@ -302,7 +305,7 @@ describe('wallet tx fee policy (DEV-542)', () => {
     for (const chainId of [56, 97]) {
       // The plan the publish hook builds: same fee read, same viewing-key plan.
       const market = await readFeeMarket(client({ block: { baseFeePerGas: 0n } }), chainId);
-      const plan = viewingKeyTxPlan({ ...market, gasEstimate: 51_084n });
+      const plan = viewingKeyTxPlan({ ...market, gasEstimate: 51_084n, minMaxFeeWei: walletPricedFeeFloorFor(chainId) });
       expect(plan.fees).toBeNull();
       expect(plan.costWei > 0n).toBe(true);
       expect(walletTxAffordable({ plan, balanceWei: 0n, chainId })).toBe(false);
@@ -322,5 +325,36 @@ describe('wallet tx fee policy (DEV-542)', () => {
     const hook = readFileSync(new URL('../../hooks/use-publish-viewing-key.ts', import.meta.url), 'utf8');
     expect(hook).toContain('affordable: walletTxAffordable({ plan, balanceWei, chainId })');
     expect(hook).not.toMatch(/fees\s*===?\s*null\s*\?\s*true/);
+  });
+
+  test('BNB Chain: every cost bound has a 1 gwei floor, so a wallet pricing above 2x eth_gasPrice is covered (DEV-589 review)', async () => {
+    const APP_GAS_PRICE = 50_000_000n; // 0.05 gwei, the app RPC on BSC
+    const WALLET_PRICE = 500_000_000n; // a wallet node at 10x that
+    const gasLimit = (51_084n * 12n) / 10n;
+    for (const chainId of [56, 97]) {
+      expect(walletPricedFeeFloorFor(chainId)).toBe(WALLET_PRICED_FEE_FLOOR_WEI);
+      // The top-up is sized for the floor, not 2 x 0.05 gwei...
+      const shortfall = viewingKeyShortfallWei({ gasPriceWei: APP_GAS_PRICE, balanceWei: 0n, gasEstimate: 51_084n, chainId });
+      expect(shortfall).toBe(gasLimit * GWEI);
+      expect(shortfall >= gasLimit * WALLET_PRICE).toBe(true);
+      // ...and the publish pre-check, after that top-up lands, agrees with it.
+      const market = await readFeeMarket({ ...client(), getGasPrice: async () => APP_GAS_PRICE }, chainId);
+      const plan = viewingKeyTxPlan({ ...market, gasEstimate: 51_084n, minMaxFeeWei: walletPricedFeeFloorFor(chainId) });
+      expect(plan.costWei).toBe(shortfall);
+      expect(walletTxAffordable({ plan, balanceWei: shortfall, chainId })).toBe(true);
+      // The Max-shield reserve uses the same floor.
+      const bound = walletTxCostWei({ gasUnits: DEPOSIT_GAS_BUDGET, gasPriceWei: APP_GAS_PRICE, chainId });
+      expect(bound).toBe(walletGasLimit(DEPOSIT_GAS_BUDGET) * GWEI);
+      expect(nativeDepositGasReserveWei({ gasPriceWei: APP_GAS_PRICE, chainId })).toBe((bound * 160n) / 100n);
+      // A gas price already above the floor keeps the 2x bound.
+      expect(walletTxCostWei({ gasUnits: 51_084n, gasPriceWei: GWEI, chainId })).toBe(gasLimit * 2n * GWEI);
+    }
+    // Other chains: no floor.
+    for (const chainId of [1, 10, 8453]) expect(walletPricedFeeFloorFor(chainId)).toBe(0n);
+    expect(walletTxCostWei({ gasUnits: 51_000n, gasPriceWei: 10_000_000n, chainId: 10 })).toBe(61_200n * 20_000_000n);
+    // The hook passes the floor into the plan it checks.
+    const { readFileSync } = require('node:fs') as typeof import('node:fs');
+    const hook = readFileSync(new URL('../../hooks/use-publish-viewing-key.ts', import.meta.url), 'utf8');
+    expect(hook).toContain('minMaxFeeWei: walletPricedFeeFloorFor(chainId)');
   });
 });
