@@ -137,6 +137,18 @@ describe('what the Send flow renders never names a share', () => {
         expect(display(0.10098, share.symbol, 1).text).not.toMatch(SHARE_NAME);
       });
 
+      if (!rate) {
+        test(`${label}: nothing held reads as a plain zero, the coin named once`, () => {
+          for (const zero of ['0', 0]) {
+            const view = display(zero, share.symbol, 1);
+            expect(view.text).toMatch(new RegExp(`^0(?:\\.0+)? ${escape(coin)}$`));
+            expect(view.text).not.toContain('shares');
+            expect(view.symbol).toBe(coin);
+            expect(view.hint).toBeNull();
+          }
+        });
+      }
+
       test(`${label}: amount errors, the way the validation memo builds them`, () => {
         // The memo stays in shares (tokenAmountLabel / the share's own name);
         // displayAmountError and reportTransferError rewrite at the boundary.

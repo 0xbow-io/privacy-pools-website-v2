@@ -188,6 +188,9 @@ export function underlyingOnlyView<V extends BalanceViewLike>(view: V, assetSymb
   if (view.converted) {
     return { ...view, hint: view.hint ? view.hint.replace(named, '') : view.hint };
   }
+  // Nothing held and no rate: shareBalanceDisplay already reads under the coin
+  // ("0.00 ETH"), so there is no share count to relabel ("0.00 ETH ETH shares").
+  if (!isShareSymbol(view.symbol)) return { ...view, hint: null };
   const coin = displayTokenSymbol(assetSymbol);
   const count = view.text.replace(named, '').trim();
   return {

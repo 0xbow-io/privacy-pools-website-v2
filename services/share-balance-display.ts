@@ -16,10 +16,12 @@
 // and symbol always come from the same token identity: shares use the share's
 // decimals, the converted figure the underlying's (shareExactAsUnderlying).
 //
-// Rate unknown (loading, read gap): the share count under the SHARE's own
+// Rate unknown (loading, read gap): a held share count under the SHARE's own
 // symbol ("0.09989 ppETH"), never under the coin's name, so it cannot read as a
-// fee ("0.09989 ETH" for a 0.1 ETH shield). Display only: nothing here feeds a
-// MAX or withdraw amount, those keep reading the exact share strings.
+// fee ("0.09989 ETH" for a 0.1 ETH shield). Nothing held is the one exception:
+// zero is zero in any unit, so it reads under the coin ("0.00 ETH") and
+// `symbol` is the coin, not the share. Display only: nothing here feeds a MAX
+// or withdraw amount, those keep reading the exact share strings.
 import { formatUnits } from 'viem';
 import { parseTokenAmount } from '@/services/token-amount';
 import { formatTokenBalance } from '@/services/token-format';
@@ -29,9 +31,9 @@ import { formatShareAsUnderlying, shareExactAsUnderlying, underlyingPriceFor, ty
 export type ShareBalanceDisplay = {
   /** The figure in `symbol`, as a number. */
   amount: number;
-  /** The coin the figure is in: the underlying when converted, else the share. */
+  /** The coin the figure is in: the underlying when converted or nothing is held, else the share. */
   symbol: string;
-  /** "0.1 ETH" or "0.09989 ppETH". */
+  /** "0.1 ETH", "0.09989 ppETH", or "0.00 ETH" when nothing is held. */
   text: string;
   /** USD for the figure; approximate when not converted. */
   usd: number;
