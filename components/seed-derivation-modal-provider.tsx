@@ -298,7 +298,9 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
   // may be the wrong one or deleted), set one up when none is. The Sign in
   // button itself never creates: with nothing remembered it lists the
   // passkeys this device already has.
-  const passkeySecondary = passkeyActive && !pending && !showBaseNotice
+  // Hidden while ANY unlock is in flight (another flow's ensureInitialized
+  // too): a tap then would join that promise and drop the pick.
+  const passkeySecondary = passkeyActive && !pending && !isInitializing && !showBaseNotice
     ? passkeySecondaryChoice(hasRememberedPasskey())
     : null;
   const offerPasskeyInstead = passkeyPreviewEnabled && signerRefusedDerivation && !passkeyActive && !pending && !baseAppCannotSign;

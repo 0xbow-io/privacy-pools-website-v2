@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { discoverablePickVerdict, ownerFromPasskeyHandle, passkeyDisplayName, passkeyOwnerHandle } from '@/services/passkey-unlock-plan';
 import {
   normalizePasskeyPick,
   passkeyNotUsedMessage,
@@ -61,5 +62,31 @@ describe('passkeySecondaryChoice', () => {
   test('every secondary choice resolves to the ceremony its label names', () => {
     expect(resolvePasskeyUnlockPlan({ rememberedCredentialId: 'abc', pick: passkeySecondaryChoice(true).pick }).kind).toBe('discoverable');
     expect(resolvePasskeyUnlockPlan({ pick: passkeySecondaryChoice(false).pick }).kind).toBe('create');
+  });
+});
+
+
+const A = '0x1111111111111111111111111111111111111111';
+const B = '0x2222222222222222222222222222222222222222';
+
+describe('a discoverable pick must belong to this wallet (review on PR #63)', () => {
+  test('a new passkey names its owner in the handle', () => {
+    expect(ownerFromPasskeyHandle(passkeyOwnerHandle(A.toUpperCase().replace('0X', '0x')))).toBe(A);
+    expect(ownerFromPasskeyHandle(new Uint8Array(16).fill(7))).toBeNull();
+    expect(ownerFromPasskeyHandle(null)).toBeNull();
+    expect(passkeyDisplayName(A)).toBe('Privacy Pools 0x1111…1111');
+  });
+  test('another wallet\'s passkey is refused whatever the chain says', () => {
+    expect(discoverablePickVerdict({ ownerAddress: B, userHandle: passkeyOwnerHandle(A), identityStatus: 'unregistered' })).toBe('wrong-wallet');
+    expect(discoverablePickVerdict({ ownerAddress: B, userHandle: passkeyOwnerHandle(A), identityStatus: 'compatible' })).toBe('wrong-wallet');
+    expect(discoverablePickVerdict({ ownerAddress: A, userHandle: passkeyOwnerHandle(A), identityStatus: 'unregistered' })).toBe('accept');
+  });
+  test('an older passkey is kept only when this wallet is registered with exactly its keys', () => {
+    const legacy = new Uint8Array(16).fill(3);
+    expect(discoverablePickVerdict({ ownerAddress: A, userHandle: legacy, identityStatus: 'compatible' })).toBe('accept');
+    expect(discoverablePickVerdict({ ownerAddress: A, userHandle: legacy, identityStatus: 'partial' })).toBe('accept');
+    for (const s of ['unregistered', 'incompatible', 'unknown']) {
+      expect(discoverablePickVerdict({ ownerAddress: A, userHandle: legacy, identityStatus: s })).toBe('unproven');
+    }
   });
 });

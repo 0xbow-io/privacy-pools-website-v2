@@ -44,6 +44,59 @@ export function resolvePasskeyUnlockPlan(input: {
   return { kind: 'discoverable' };
 }
 
+// --- Owner binding for a discoverable pick ----------------------------------
+//
+// The keys come from the passkey's PRF alone, not the wallet. A discoverable
+// prompt lists every privacypools.com passkey, so a user with wallets A and B
+// could pick A's passkey while unlocking B: B would then hold A's keys, and
+// registering B would put A's key hash on chain for both, linking them
+// (review on PR #63). So a discoverable pick is only kept when it provably
+// belongs to this wallet:
+// - passkeys created from now on carry the owner in their user handle
+//   (`pp1:<owner>`), checked on assertion;
+// - older passkeys have a random handle, so they are kept only when this
+//   wallet is already registered on this network with exactly these keys.
+
+const OWNER_HANDLE_PREFIX = 'pp1:';
+
+/** user.id for a new passkey: binds it to the wallet that created it (local to the authenticator). */
+export function passkeyOwnerHandle(ownerAddress: string): Uint8Array {
+  return new TextEncoder().encode(`${OWNER_HANDLE_PREFIX}${ownerAddress.toLowerCase()}`);
+}
+
+/** The owner a handle names, or null for an older passkey with a random handle. */
+export function ownerFromPasskeyHandle(handle: Uint8Array | null | undefined): string | null {
+  if (!handle || handle.length === 0) return null;
+  let text: string;
+  try { text = new TextDecoder('utf-8', { fatal: true }).decode(handle); } catch { return null; }
+  if (!text.startsWith(OWNER_HANDLE_PREFIX)) return null;
+  const owner = text.slice(OWNER_HANDLE_PREFIX.length);
+  return /^0x[0-9a-f]{40}$/.test(owner) ? owner : null;
+}
+
+/** The name the OS sheet shows for a new passkey, so two wallets' passkeys can be told apart. */
+export function passkeyDisplayName(ownerAddress: string): string {
+  const a = ownerAddress.toLowerCase();
+  return `Privacy Pools ${a.slice(0, 6)}…${a.slice(-4)}`;
+}
+
+export type DiscoverablePickVerdict = 'accept' | 'wrong-wallet' | 'unproven';
+
+export function discoverablePickVerdict(input: {
+  ownerAddress: string;
+  userHandle: Uint8Array | null | undefined;
+  identityStatus: string;
+}): DiscoverablePickVerdict {
+  const named = ownerFromPasskeyHandle(input.userHandle);
+  if (named) return named === input.ownerAddress.toLowerCase() ? 'accept' : 'wrong-wallet';
+  return input.identityStatus === 'compatible' || input.identityStatus === 'partial' ? 'accept' : 'unproven';
+}
+
+export const PASSKEY_WRONG_WALLET_MESSAGE =
+  'That passkey belongs to another wallet. Tap Use another passkey and pick the one for this wallet.';
+export const PASSKEY_UNPROVEN_MESSAGE =
+  'That passkey is not registered for this wallet on this network. Pick another passkey, or switch to a network where this wallet is registered.';
+
 export const PASSKEY_USE_ANOTHER_LABEL = 'Use another passkey';
 export const PASSKEY_CREATE_LABEL = 'Create a passkey';
 
