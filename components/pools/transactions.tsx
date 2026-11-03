@@ -87,6 +87,7 @@ import { formatFeeUnits } from '@/services/relay-fee-split';
 import { detailAmountDigits, isStablecoin } from '@/services/token-format';
 import { encodePaymentReceiptPayloadForUrl, type PaymentReceiptPayload } from '@/services/payment-request-codec';
 import { PAY_URL_BASE } from '@/config/env';
+import { SUPPORT_TELEGRAM_URL } from '@/config/support';
 
 // Same base the payment-request modal uses for its share links: the brand
 // domain when configured, else this session's own origin.
@@ -1111,7 +1112,7 @@ export function TransactionDetailModal({ tx, onClose, onCloseForAction, actions 
         <View className="flex-row items-center justify-center gap-[10px] px-[16px] pb-[16px] pt-[2px]">
             <Pressable
               className="flex-row items-center gap-[6px] rounded-pill border border-border px-[16px] py-[8px] active:bg-background-secondary"
-              onPress={() => Linking.openURL('https://docs.google.com/forms/d/e/1FAIpQLSe0UKiTrZ4kD0apx75bEW0PWqJxpd6bCYh_IUKBrCkJOBzkpQ/viewform')}
+              onPress={() => Linking.openURL(SUPPORT_TELEGRAM_URL)}
             >
               {/* nw-keep(data-color): icon color is a theme token into the @expo/vector-icons sink (no className path) */}
               <Ionicons name="mail-outline" size={14} color={colors.text} />
