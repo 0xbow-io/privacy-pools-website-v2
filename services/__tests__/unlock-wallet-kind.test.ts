@@ -9,6 +9,8 @@ import {
   isEoaOnlyWallet,
   readWalletCode,
   unlockCodeReaders,
+  walletCodeReaderAllowed,
+  walletProviderCodeReader,
   WALLET_TYPE_UNVERIFIED_MESSAGE,
 } from '@/services/unlock-wallet-kind';
 
@@ -30,12 +32,13 @@ function flakyClient(failures: number, code: string | undefined = undefined) {
 
 const alwaysFails = () => flakyClient(Number.POSITIVE_INFINITY);
 
-function wallet(opts: { chainId: number; code?: string | null; fail?: boolean }) {
+function wallet(opts: { chainId: number; code?: string | null; fail?: boolean; hangOn?: string }) {
   const seen: string[] = [];
   const provider = {
     request: async ({ method, params }: { method: string; params?: unknown[] }) => {
       seen.push(method);
       if (opts.fail) throw new Error('wallet rpc down');
+      if (opts.hangOn === method) return new Promise(() => {});
       if (method === 'eth_chainId') return `0x${opts.chainId.toString(16)}`;
       if (method === 'eth_getCode') {
         expect(params).toEqual([ADDR, 'latest']);
@@ -50,12 +53,21 @@ function wallet(opts: { chainId: number; code?: string | null; fail?: boolean })
 async function unlockKind(input: {
   client: ReturnType<typeof flakyClient> | null;
   walletProvider?: (() => Promise<unknown>) | null;
-  connector?: { id?: string; name?: string } | null;
+  connector?: { id?: string; name?: string; type?: string } | null;
   ahead?: { key: string; smart: boolean } | null;
   passkey?: boolean;
+  tor?: boolean;
+  walletTimeoutMs?: number;
 }) {
+  const getProvider = input.walletProvider;
   const read = await readWalletCode(
-    unlockCodeReaders(input.client, input.walletProvider ?? null, ADDR, 1),
+    unlockCodeReaders(
+      input.client,
+      getProvider ? { connector: input.connector ?? null, getProvider } : null,
+      ADDR,
+      1,
+      { torInForce: input.tor ?? false, walletTimeoutMs: input.walletTimeoutMs },
+    ),
   );
   return decideUnlockWalletKind({
     read,
@@ -66,7 +78,9 @@ async function unlockKind(input: {
   });
 }
 
-const METAMASK = { id: 'io.metamask', name: 'MetaMask' };
+const METAMASK = { id: 'io.metamask', name: 'MetaMask', type: 'injected' };
+const RABBY = { id: 'io.rabby', name: 'Rabby Wallet', type: 'injected' };
+const WALLETCONNECT = { id: 'walletConnect', name: 'WalletConnect', type: 'walletConnect' };
 
 describe('unlock wallet kind: a failed getCode does not lock an EOA out', () => {
   test('getCode throws once then succeeds: EOA, no refusal', async () => {
@@ -112,7 +126,7 @@ describe('unlock wallet kind: smart wallets still reach the passkey', () => {
 
   test('a contract found by the wallet RPC after the app RPC fails is smart', async () => {
     const w = wallet({ chainId: 1, code: SAFE_CODE });
-    expect(await unlockKind({ client: alwaysFails(), walletProvider: w.getProvider, connector: { id: 'walletConnect' } }))
+    expect(await unlockKind({ client: alwaysFails(), walletProvider: w.getProvider, connector: RABBY }))
       .toMatchObject({ kind: 'read', smart: true });
   });
 
@@ -122,7 +136,7 @@ describe('unlock wallet kind: smart wallets still reach the passkey', () => {
 
   test('a wallet on another chain is not asked for this chain\'s code', async () => {
     const w = wallet({ chainId: 10, code: '0x' });
-    const kind = await unlockKind({ client: alwaysFails(), walletProvider: w.getProvider, connector: { id: 'walletConnect' } });
+    const kind = await unlockKind({ client: alwaysFails(), walletProvider: w.getProvider, connector: RABBY });
     expect(w.seen).toEqual(['eth_chainId']);
     expect(kind).toEqual({ kind: 'refuse', message: WALLET_TYPE_UNVERIFIED_MESSAGE });
   });
@@ -134,6 +148,73 @@ describe('unlock wallet kind: smart wallets still reach the passkey', () => {
 
   test('an unknown wallet with no verdict anywhere asks for a retry', async () => {
     expect((await unlockKind({ client: alwaysFails(), connector: { id: 'io.rabby', name: 'Rabby Wallet' } })).kind).toBe('refuse');
+  });
+});
+
+describe('unlock wallet kind: the wallet provider is asked only when that names nothing new', () => {
+  // A WalletConnect provider answers eth_getCode itself over HTTP to its rpcMap
+  // URL, from the user's own IP and outside Tor, naming the address. The ahead
+  // probe runs on connect with no click, so that would be an untimed leak.
+  test('WalletConnect: the wallet provider is never asked, even with the app RPC down', async () => {
+    const w = wallet({ chainId: 1, code: '0x' });
+    const kind = await unlockKind({ client: alwaysFails(), walletProvider: w.getProvider, connector: WALLETCONNECT });
+    expect(w.seen).toEqual([]);
+    expect(kind.kind).toBe('refuse');
+  });
+
+  test('under Tor: an injected wallet is never asked either', async () => {
+    const w = wallet({ chainId: 1, code: '0x' });
+    const kind = await unlockKind({ client: alwaysFails(), walletProvider: w.getProvider, connector: METAMASK, tor: true });
+    expect(w.seen).toEqual([]);
+    expect(kind).toEqual({ kind: 'assume-eoa', reason: 'eoa-only-wallet' });
+  });
+
+  test('under Tor the reader list holds the app RPC only', () => {
+    const w = wallet({ chainId: 1 });
+    const readers = unlockCodeReaders(flakyClient(0), { connector: METAMASK, getProvider: w.getProvider }, ADDR, 1, { torInForce: true });
+    expect(readers.map((r) => r.source)).toEqual(['app-rpc']);
+  });
+
+  test('walletCodeReaderAllowed: injected only, never under Tor', () => {
+    expect(walletCodeReaderAllowed({ type: 'injected' }, false)).toBe(true);
+    expect(walletCodeReaderAllowed({ type: 'injected' }, true)).toBe(false);
+    expect(walletCodeReaderAllowed({ type: 'walletConnect' }, false)).toBe(false);
+    expect(walletCodeReaderAllowed({ type: 'coinbaseWallet' }, false)).toBe(false);
+    expect(walletCodeReaderAllowed({ type: 'metaMask' }, false)).toBe(false);
+    expect(walletCodeReaderAllowed({}, false)).toBe(false);
+    expect(walletCodeReaderAllowed(null, false)).toBe(false);
+  });
+});
+
+describe('unlock wallet kind: a wallet that never answers does not hang the unlock', () => {
+  test('eth_chainId never answers: times out and falls through to the ahead verdict', async () => {
+    const w = wallet({ chainId: 1, hangOn: 'eth_chainId' });
+    const kind = await unlockKind({ client: alwaysFails(), walletProvider: w.getProvider, connector: RABBY, ahead: { key: KEY, smart: false }, walletTimeoutMs: 20 });
+    expect(w.seen).toEqual(['eth_chainId']);
+    expect(kind).toEqual({ kind: 'ahead', smart: false });
+  });
+
+  test('eth_getCode never answers, MetaMask: times out and goes on to the signature', async () => {
+    const w = wallet({ chainId: 1, hangOn: 'eth_getCode' });
+    const kind = await unlockKind({ client: alwaysFails(), walletProvider: w.getProvider, connector: METAMASK, walletTimeoutMs: 20 });
+    expect(w.seen).toEqual(['eth_chainId', 'eth_getCode']);
+    expect(kind).toEqual({ kind: 'assume-eoa', reason: 'eoa-only-wallet' });
+  });
+
+  test('getProvider never resolves: the read throws within the bound', async () => {
+    const reader = walletProviderCodeReader(() => new Promise(() => {}), ADDR, 1, 20);
+    await expect(reader.read()).rejects.toThrow(/did not answer getProvider/);
+  });
+
+  test('the timeout failure is reported like any failed read', async () => {
+    const w = wallet({ chainId: 1, hangOn: 'eth_getCode' });
+    const failures: string[] = [];
+    const read = await readWalletCode(
+      unlockCodeReaders(alwaysFails(), { connector: RABBY, getProvider: w.getProvider }, ADDR, 1, { torInForce: false, walletTimeoutMs: 20 }),
+      { onFailure: ({ source }) => failures.push(source) },
+    );
+    expect(read).toBeNull();
+    expect(failures).toEqual(['app-rpc', 'app-rpc', 'wallet-rpc']);
   });
 });
 

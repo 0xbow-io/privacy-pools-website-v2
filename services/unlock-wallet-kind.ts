@@ -11,9 +11,12 @@
 // Order:
 //   1. the app's public client for the chain (its transport already falls back
 //      across our endpoints), tried twice;
-//   2. the connected wallet's own provider, only when it is on the same chain.
-//      Same question, about the user's own connected address, over the RPC the
-//      wallet already uses, so it names nothing new;
+//   2. the connected wallet's own provider, only when it is on the same chain,
+//      only for an injected wallet and never under Tor. An injected wallet
+//      answers over the RPC it already uses for this address, so it names
+//      nothing new. A WalletConnect provider answers eth_getCode itself, over
+//      HTTP to its rpcMap URL from the user's own IP, outside Tor, so it is
+//      never asked. Each wallet request is bounded by WALLET_READ_TIMEOUT_MS;
 //   3. the verdict the ahead-of-click probe settled for this address:chain;
 //   4. nothing answered: a wallet that has no contract accounts goes on to the
 //      signature, anything else gets a retry message.
@@ -63,25 +66,38 @@ function isEip1193(p: unknown): p is Eip1193Like {
   return !!p && typeof p === 'object' && typeof (p as { request?: unknown }).request === 'function';
 }
 
+/** A wallet request that never answers must not hang the unlock. */
+export const WALLET_READ_TIMEOUT_MS = 5_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`wallet did not answer ${what} within ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 /**
  * eth_getCode through the connected wallet's provider. Refuses (throws) when the
- * wallet is on another chain, so its answer is never taken for the wrong chain.
+ * wallet is on another chain, so its answer is never taken for the wrong chain,
+ * and when any wallet request takes longer than `timeoutMs`.
  */
 export function walletProviderCodeReader(
   getProvider: () => Promise<unknown>,
   address: string,
   chainId: number,
+  timeoutMs: number = WALLET_READ_TIMEOUT_MS,
 ): CodeReader {
   return {
     source: 'wallet-rpc',
     read: async () => {
-      const provider = await getProvider();
+      const provider = await withTimeout(getProvider(), timeoutMs, 'getProvider');
       if (!isEip1193(provider)) throw new Error('wallet provider unavailable');
-      const walletChain = await provider.request({ method: 'eth_chainId' });
+      const walletChain = await withTimeout(provider.request({ method: 'eth_chainId' }), timeoutMs, 'eth_chainId');
       const walletChainId = typeof walletChain === 'string' ? Number.parseInt(walletChain, 16)
         : typeof walletChain === 'number' ? walletChain : NaN;
       if (walletChainId !== chainId) throw new Error('wallet is on another chain');
-      const code = await provider.request({ method: 'eth_getCode', params: [address, 'latest'] });
+      const code = await withTimeout(provider.request({ method: 'eth_getCode', params: [address, 'latest'] }), timeoutMs, 'eth_getCode');
       if (code !== null && code !== undefined && typeof code !== 'string') throw new Error('wallet returned a non-string code');
       return code as string | null | undefined;
     },
@@ -90,18 +106,36 @@ export function walletProviderCodeReader(
 
 type CodeClient = { getCode: (args: { address: `0x${string}` }) => Promise<string | undefined> };
 
-/** The app's public client first, then the wallet's own provider. */
+/**
+ * May the connected wallet's provider be asked for eth_getCode? Never under
+ * Tor (any wallet request leaves outside Tor), and otherwise only for an
+ * injected wallet (EIP-6963 or window.ethereum), whose reads go through the
+ * RPC it already uses for this address. WalletConnect, Coinbase SDK and other
+ * SDK connectors answer reads themselves over their own HTTP RPC.
+ */
+export function walletCodeReaderAllowed(
+  connector: { type?: string | null } | null | undefined,
+  torInForce: boolean,
+): boolean {
+  if (torInForce || !connector) return false;
+  return connector.type === 'injected';
+}
+
+/** The app's public client first, then (when allowed) the wallet's own provider. */
 export function unlockCodeReaders(
   publicClient: CodeClient | null | undefined,
-  getWalletProvider: (() => Promise<unknown>) | null,
+  wallet: { connector: { type?: string | null } | null | undefined; getProvider: () => Promise<unknown> } | null,
   address: string,
   chainId: number,
+  opts: { torInForce: boolean; walletTimeoutMs?: number },
 ): CodeReader[] {
   const readers: CodeReader[] = [];
   if (publicClient) {
     readers.push({ source: 'app-rpc', attempts: 2, read: () => publicClient.getCode({ address: address as `0x${string}` }) });
   }
-  if (getWalletProvider) readers.push(walletProviderCodeReader(getWalletProvider, address, chainId));
+  if (wallet && walletCodeReaderAllowed(wallet.connector, opts.torInForce)) {
+    readers.push(walletProviderCodeReader(wallet.getProvider, address, chainId, opts.walletTimeoutMs));
+  }
   return readers;
 }
 

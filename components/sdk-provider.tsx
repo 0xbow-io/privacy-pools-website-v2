@@ -38,6 +38,7 @@ import { EMBEDDED_CONNECTOR_ID } from '@/services/embedded-wallet/connector';
 import { useAccount, useConfig, usePublicClient, useReconnect, useSignTypedData } from 'wagmi';
 import { COINBASE_SMART_WALLET_SIGNIN_MESSAGE, connectorIsKnownDeterministicSigner, isPlainEcdsaSignature, NON_DETERMINISTIC_SIGNER_MESSAGE, SMART_WALLET_SIGNIN_MESSAGE } from '@/services/signer-determinism';
 import { decideUnlockWalletKind, isEoaOnlyWallet, readWalletCode, unlockCodeReaders } from '@/services/unlock-wallet-kind';
+import { TOR_IN_FORCE } from '@/config/tor';
 import { passkeyUnlockDefault } from '@/services/passkey-policy';
 import { smartWalletPasskeyEnabled } from '@/config/smart-wallet-passkey-flag';
 import { passkeyRpIdFor } from '@/services/passkey-rp-id';
@@ -1034,7 +1035,13 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     // the wallet's own provider, so one failed read does not leave this unset.
     const connector = activeConnector;
     readWalletCode(
-      unlockCodeReaders(chainPublicClient, connector ? () => walletProvider(connector) : null, address, chainId),
+      unlockCodeReaders(
+        chainPublicClient,
+        connector ? { connector, getProvider: () => walletProvider(connector) } : null,
+        address,
+        chainId,
+        { torInForce: TOR_IN_FORCE },
+      ),
     )
       .then((read) => {
         if (cancelled) return;
@@ -1568,7 +1575,13 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
           // and only then decides (2026-10-24, MetaMask on mainnet refused).
           const unlockConnector = liveConnection() ?? activeConnectorRef.current;
           const codeRead = await readWalletCode(
-            unlockCodeReaders(chainPublicClient, unlockConnector ? () => walletProvider(unlockConnector) : null, String(derivationAddress), chainId),
+            unlockCodeReaders(
+              chainPublicClient,
+              unlockConnector ? { connector: unlockConnector, getProvider: () => walletProvider(unlockConnector) } : null,
+              String(derivationAddress),
+              chainId,
+              { torInForce: TOR_IN_FORCE },
+            ),
             {
               onFailure: ({ source, error }) => log('warn', 'SDK', 'Contract-wallet probe read failed', { source, detail: describeRpcError(error) }),
             },
