@@ -63,6 +63,7 @@ import {
   transferRelayFee,
 } from '@/services/relayed-transfer';
 import { expectTransferRelay } from '@/services/transfer-relay-outputs';
+import { ownRegistrationResultRefusal } from '@/services/keystore-scope';
 
 export type NoteImportStatus =
   | 'idle'
@@ -644,6 +645,10 @@ export function useNoteImport() {
     if (!publicClient) {
       throw new Error('Cannot confirm the on-chain setup on this network. Try again in a moment.');
     }
+    // A viewing-key-only plan means SOME auth policy is set: never publish this
+    // unlock's viewing key onto another unlock's registration.
+    const refusal = ownRegistrationResultRefusal(chainId, sessionAddress, registration);
+    if (refusal) throw new Error(refusal);
     if (registration.keystoreCalldata) {
       const keystoreHash = await sendTransactionAsync({
         chainId,
@@ -700,6 +705,9 @@ export function useNoteImport() {
         }
         await sendRegistrationLegs(registration);
       } else {
+        // "Already registered" means ANY keys (SDK 1.0.2): only ours count.
+        const refusal = ownRegistrationResultRefusal(chainId, sessionAddress, registration);
+        if (refusal) throw new Error(refusal);
         setReceiveSetup(sessionAddress, chainId, 'complete', 'onchain');
       }
       if (live()) {
@@ -1270,7 +1278,13 @@ export function useNoteImport() {
         }
       } else {
         const registration = await session.prepareRegisterKeystore();
-        if (registration.alreadyRegistered) setReceiveSetup(sessionAddress, chainId, 'complete', 'onchain');
+        if (registration.alreadyRegistered) {
+          // ANY keys count as registered to the SDK: anchoring under this
+          // unlock onto another unlock's registration strands the funds.
+          const refusal = ownRegistrationResultRefusal(chainId, sessionAddress, registration);
+          if (refusal) throw new Error(refusal);
+          setReceiveSetup(sessionAddress, chainId, 'complete', 'onchain');
+        }
         if (!registration.alreadyRegistered && !registration.keystoreCalldata && !registration.viewingKeyCalldata) {
           throw new Error('On-chain setup is unavailable for this session. The funds stay saved on this device.');
         }

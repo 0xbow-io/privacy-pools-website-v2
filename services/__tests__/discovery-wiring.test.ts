@@ -697,14 +697,18 @@ test('the discovery session builder never requests address-keyed keystore status
   const owner = '0x1111111111111111111111111111111111111111';
   const managers = { address: owner, keystoreManager: {} };
   let statusReads = 0;
+  let answer = 'incompatible';
+  const waits: unknown[] = [];
+  class RegistrySyncingError extends Error {}
   const build = compile(`${providerDecl('buildSessionForChain')}; return buildSessionForChain;`, {
     useCallback: (fn: unknown) => fn, effectiveAddress: owner, log() {},
+    REGISTRY_WAIT_MS: 15_000, RegistrySyncingError,
     siblingWorld: () => ({ managers }), siblingWorldUnchanged: () => true,
     getChainConfig: () => ({ contracts: { fromBlock: 1n, poolAddress: 'pool', keystoreAddress: 'keys' } }),
     apiClient: { getEntrypoints: async () => ({}) },
     resolveEntrypointChainConfig: () => ({ entrypoint: 'entrypoint' }), isAddress: () => true,
     getSdkSetup: async () => ({ createNoteManager: () => ({}), createCircuitArtifacts: () => ({}) }),
-    resolveKeystoreIdentityStatus: async () => { statusReads++; return 'incompatible'; },
+    resolveKeystoreIdentityStatus: async (...args: unknown[]) => { statusReads++; waits.push(args[4]); return answer; },
     getPoolSessionService: async () => ({ createPoolSession: async () => ({}) }),
     loadStoredAccountExport: () => null, CIRCUIT_ARTIFACTS_BASE_URL: '',
   });
@@ -713,6 +717,11 @@ test('the discovery session builder never requests address-keyed keystore status
   // Deposit sessions still refuse an incompatible registration.
   await expect(build(10)).rejects.toThrow('different unlock');
   expect(statusReads).toBe(1);
+  // A write session (cross-chain shield / reshield destination) waits for the
+  // grid and never proceeds on an unanswered identity.
+  answer = 'unknown';
+  await expect(build(10)).rejects.toBeInstanceOf(RegistrySyncingError);
+  expect(waits).toEqual([15_000, 15_000]);
 });
 
 test('unchanged pool rows retry on the grid while discovery holds its cursor, then stop', async () => {

@@ -74,6 +74,7 @@ import { useNotes } from '@/hooks/use-notes';
 
 import { useTheme } from '@/components/theme-provider';
 import { PAY_URL_BASE } from '@/config/env';
+import { ownRegistrationResultRefusal } from '@/services/keystore-scope';
 import { IsDefaultPoolActive } from '@/config/pool-profile';
 import { resolveEnsName } from '@/services/ens';
 
@@ -2076,6 +2077,15 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         if (!registration.alreadyRegistered && !registration.keystoreCalldata && !registration.viewingKeyCalldata) {
           throw new Error('Keystore registration is unavailable for this session.');
         }
+        // "Already registered" (or a viewing-key-only plan) means SOME auth
+        // policy is set, not that it is this unlock's (SDK 1.0.2). The payment
+        // itself is a depositFor to the requester and needs neither leg, so
+        // when the policy is not confirmed ours: send nothing onto it and do
+        // not mark this chain set up.
+        const notOurs = ownRegistrationResultRefusal(request.chainId, address, registration);
+        if (notOurs) {
+          log('warn', 'PaymentRequest', 'Payer registration skipped: the on-chain policy is not this unlock', { chainId: request.chainId });
+        }
         // Each leg submits independently (viewing-only resume is a real SDK
         // state), and the SDK receipt's mined status is READ (codex round 2:
         // both statuses were ignored, so a reverted registration proceeded
@@ -2102,7 +2112,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           walletSpend = 'registration';
           requireOk(await rpcInteractor.waitForTransactionReceipt(regHash), 'Keystore registration');
         }
-        if (!registration.alreadyRegistered && registration.viewingKeyCalldata) {
+        if (!notOurs && !registration.alreadyRegistered && registration.viewingKeyCalldata) {
           if (!live()) { abortStale('before the viewing-key broadcast'); return; }
           const vkHash = await sendTransactionAsync({
             chainId: request.chainId,
@@ -2113,7 +2123,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           walletSpend = 'registration';
           requireOk(await rpcInteractor.waitForTransactionReceipt(vkHash), 'Viewing-key registration');
         }
-        setReceiveSetup(address, request.chainId, 'complete', 'onchain');
+        if (!notOurs) setReceiveSetup(address, request.chainId, 'complete', 'onchain');
       }
 
       // prepareDepositFor's schema is XOR — either a bare `noteAddressHash`
