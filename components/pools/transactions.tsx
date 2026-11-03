@@ -1115,7 +1115,7 @@ export function TransactionDetailModal({ tx, onClose, onCloseForAction, actions 
               onPress={() => Linking.openURL(SUPPORT_TELEGRAM_URL)}
             >
               {/* nw-keep(data-color): icon color is a theme token into the @expo/vector-icons sink (no className path) */}
-              <Ionicons name="mail-outline" size={14} color={colors.text} />
+              <Ionicons name="chatbubble-ellipses-outline" size={14} color={colors.text} />
               <Text className="font-pp-sans-medium text-[12.5px] text-text">
                 Contact
               </Text>
