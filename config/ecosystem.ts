@@ -148,6 +148,30 @@ export const ECOSYSTEM_PARTNERS: EcosystemPartner[] = [
     chains: ['Ethereum'],
     status: 'live',
   },
+  {
+    name: 'Nymis',
+    slug: 'nymis',
+    url: 'https://nymis.io',
+    description:
+      'Address privacy checker. Shows what a crypto address reveals: identity exposure, exchange connections and linked addresses.',
+    logoText: 'N',
+    logoColor: '#3B4BA8',
+    categories: ['tools', 'privacy'],
+    chains: ['Ethereum'],
+    status: 'live',
+  },
+  {
+    name: 'Casberi',
+    slug: 'casberi',
+    url: 'https://casberi.app',
+    description:
+      'An inbox and a wallet for all your accounts, with private transfers through Privacy Pools.',
+    logoText: 'C',
+    logoColor: '#C2410C',
+    categories: ['wallet'],
+    chains: ['Ethereum'],
+    status: 'live',
+  },
 ];
 
 /**
