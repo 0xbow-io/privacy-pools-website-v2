@@ -28,7 +28,7 @@ import { PROD_ASP_URL_DEFAULT, PROD_CHAINS, PROD_YIELD_DEPLOYMENTS } from './pro
 import { STAGING_CHAINS, STAGING_ENABLED, STAGING_MAINNET_ONLY_CHAIN_IDS } from './staging-deployments';
 import { STAGING_MAINNET_OPT_IN } from './staging-mainnet';
 import { parseDepositCapUsd } from '@/services/deposit-cap';
-import { YIELD_DEPOSITS_PAUSED } from './yield-deposits-paused';
+import { YIELD_DEPOSITS_PAUSED, yieldDepositsPausedOnChain } from './yield-deposits-paused';
 import type { YieldDeployment } from '@/services/sdk-types';
 
 // Lowercased so notes deposited via this app share casing with notes
@@ -216,9 +216,15 @@ function comingSoon(token: TokenMetadata): TokenMetadata {
 export function pauseVaultDeposits(
   tokens: TokenRegistry,
   deployments: Record<number, YieldDeployment[]> | undefined,
+  chainPaused: (chainId: number) => boolean = () => true,
 ): TokenRegistry {
   const out: TokenRegistry = {};
   for (const [key, chainTokens] of Object.entries(tokens)) {
+    // A chain the switch does not name keeps its registry as is.
+    if (!chainPaused(Number(key))) {
+      out[Number(key)] = chainTokens;
+      continue;
+    }
     const list = deployments?.[Number(key)] ?? [];
     const underlyings = new Set(list.map((d) => d.underlying.toLowerCase()));
     const nativeRoute = list.some((d) => d.nativeMode === true);
@@ -232,9 +238,9 @@ export function pauseVaultDeposits(
   return out;
 }
 
-/** The registry a build serves: vault entries paused when the kill switch is on. */
+/** The registry a build serves: vault entries paused on every chain the kill switch names. */
 function servedTokens(tokens: TokenRegistry, deployments?: Record<number, YieldDeployment[]>): TokenRegistry {
-  return YIELD_DEPOSITS_PAUSED ? pauseVaultDeposits(tokens, deployments) : tokens;
+  return YIELD_DEPOSITS_PAUSED ? pauseVaultDeposits(tokens, deployments, yieldDepositsPausedOnChain) : tokens;
 }
 
 /** Mainnet (chain 1) native ETH, deposit-gated by the flag and the ppETH route. */

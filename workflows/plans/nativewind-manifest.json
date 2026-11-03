@@ -6,8 +6,8 @@
   "description": "Ownership manifest for the NativeWind port: every file the audit tool flags as carrying a styling signal (StyleSheet usage, style sinks, visual color props, or raw color literals in static styles) is assigned to exactly one migration phase. scripts/nativewind-manifest.test.ts asserts this list stays complete against the live audit output.",
   "groundTruth": {
     "filesWithStyleSheetCreate": 0,
-    "filesWithAnyStylingSignal": 137,
-    "portedFiles": 147,
+    "filesWithAnyStylingSignal": 138,
+    "portedFiles": 148,
     "note": "LIVE COUNTERS — updated by every porting commit (scripts/nativewind-manifest.test.ts pins the audit to this snapshot). Pre-port baseline: 90 files call StyleSheet.create (the plan's ground truth; liquid-light + vault-backdrop reference StyleSheet.absoluteFill only) and 110 files carry any styling signal, including SVG/icon color-prop-only files and spread-only forwarded-style contracts (haptic-tab, external-link — flagged via the audit's jsx-spread sink). Files gain \"ported\": true as their phase lands; a ported file may drop out of the styled set entirely."
   },
   "outOfScope": [
@@ -25,7 +25,7 @@
   "counts": {
     "F-C/theme-infra": 2,
     "P1/shared-primitives": 55,
-    "P2/app-routes": 29,
+    "P2/app-routes": 30,
     "P2/classic-pools": 14,
     "P2/ecosystem-payroll": 9,
     "P2/portfolio": 7,
@@ -119,6 +119,12 @@
     },
     {
       "path": "components/error-reports-modal.tsx",
+      "phase": "P2",
+      "slice": "app-routes",
+      "ported": true
+    },
+    {
+      "path": "components/yield-pause-banner.tsx",
       "phase": "P2",
       "slice": "app-routes",
       "ported": true
