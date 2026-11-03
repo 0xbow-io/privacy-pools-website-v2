@@ -26,12 +26,7 @@ minimumReleaseAge = 604800
 # empty unless a specific dependency requires same-day patches. If
 # you find yourself wanting to add something here, prefer pinning the
 # older known-good version in `package.json` instead.
-#
-# react-native-jelly-tabs: brand-new library (first release 2026-08),
-# every version is younger than the window so no older pin exists.
-# Pinned EXACTLY in package.json; the exclusion only lets that pinned
-# version through — bump deliberately, source reviewed on GitHub.
-minimumReleaseAgeExcludes = ["react-native-jelly-tabs"]
+minimumReleaseAgeExcludes = []
 
 [test]
 # Pins the build default to the staging world for the unit suite; see the

@@ -13,6 +13,7 @@ import { phonePanelTarget } from '@/services/home-navigation';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { useMultiChainWallet } from '@/hooks/use-multi-chain-wallet';
 import { usePoolSession } from '@/hooks/use-pool-session';
+import { useAccount } from 'wagmi';
 
 /**
  * Full-page stack presentation of a data surface — `/explore/balances`,
@@ -46,6 +47,11 @@ export default function ExploreSectionRoute() {
   const { isConnected } = useMultiChainWallet();
   const { identityMode, sessionAddress } = usePoolSession();
   const hasAccount = isConnected || (identityMode === 'key' && !!sessionAddress);
+  // wagmi's own lifecycle: a boot restore goes connecting/reconnecting ->
+  // connected, never through a settled "disconnected" (see
+  // connect-balance-landing.tsx). Key sessions load synchronously.
+  const { status: walletStatus } = useAccount();
+  const walletSettling = walletStatus === 'connecting' || walletStatus === 'reconnecting';
 
   const goBack = useMemo(
     () => () => {
@@ -67,6 +73,12 @@ export default function ExploreSectionRoute() {
   // phonePanelTarget keeps this page: Sui/Stellar, signed-out activity).
   const phoneTarget = appHeader && raw ? phonePanelTarget(raw as 'balances' | 'activity', { nonEvm, signedIn: hasAccount }) : null;
   if (phoneTarget) return <Redirect href={phoneTarget} />;
+  // Cold load of /explore/activity on a phone while the wallet is still
+  // restoring: the redirect target is not known yet, so render the empty
+  // shell rather than the public feed and then jump to Portfolio (review of #32).
+  if (appHeader && raw === 'activity' && !nonEvm && !hasAccount && walletSettling) {
+    return <View className="flex-1 bg-background" />;
+  }
 
   if (appHeader) {
     return (
