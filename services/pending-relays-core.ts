@@ -246,7 +246,7 @@ export class PendingRelayBlockedError extends Error {
   constructor(record: PendingRelay, now = Date.now()) {
     const minutes = Math.max(1, Math.round((now - record.at) / 60_000));
     super(
-      `A transaction spending these funds was sent through the relayer ${minutes} min ago and has not confirmed yet. `
+      `A transaction spending these funds was sent ${record.method === 'selfWithdraw' ? 'from your wallet' : 'through the relayer'} ${minutes} min ago and has not confirmed yet. `
       + 'It can still land, so sending again now would only fail. Your balance updates on its own once it settles.'
       + (canOverride(record, now) ? ' If you believe it was dropped, choose "Send anyway" in the pending notice.' : ''),
     );

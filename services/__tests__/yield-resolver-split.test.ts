@@ -64,8 +64,8 @@ const VERIFIED_CALLS: Record<string, Record<string, { calls: number; why: string
   },
   'getYieldDeploymentForAsset': {
     'components/withdraw-modal-provider.tsx': {
-      calls: 2,
-      why: 'the review figures read off the vault, and the redemption route the withdrawal is built on. Both are the money path.',
+      calls: 3,
+      why: 'the review figures read off the vault, the relayed redemption route, and the own-wallet redemption the wallet sends. All three are the money path.',
     },
     // Read-only accrued values now use configured per-vault public rates.
   },

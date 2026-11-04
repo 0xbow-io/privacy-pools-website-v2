@@ -143,7 +143,19 @@ export interface PoolSessionYield {
     prepareYieldDeposit: (params: { value: bigint; maxUnderlyingIn?: bigint }) => Promise<PreparedYieldDeposit>;
   };
   withdraw: {
-    prepareYieldWithdraw: (...args: any[]) => Promise<any>;
+    // Typed like the relay variant so a hex string for a bigint no longer
+    // compiles (the own-wallet share path passed hex and failed at runtime).
+    prepareYieldWithdraw: (params: {
+      inputCommitments: Hash[];
+      amount: bigint;
+      amountOut: bigint;
+      recipient: string;
+      feeAmount: bigint;
+    }) => Promise<{
+      withdrawTx: { to: `0x${string}`; data: `0x${string}`; value?: bigint | string };
+      changePendingNotes: unknown[];
+      spentNotes?: unknown[];
+    }>;
     prepareYieldWithdrawRelay: (params: {
       inputCommitments: Hash[];
       amount: bigint;
