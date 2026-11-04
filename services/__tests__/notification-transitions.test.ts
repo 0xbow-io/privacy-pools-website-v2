@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { shareBalanceDisplay } from '@/services/share-balance-display';
+import { underlyingOnlyView } from '@/services/share-display';
 import type { ShareRate } from '@/services/share-rates';
 
 import {
@@ -163,8 +164,9 @@ const RATE: ShareRate = {
   assetsPerShare: 1_001_100_000_000_000_000n,
 };
 const amountDisplay = (rate: ShareRate | undefined) => (t: TransitionTx) => {
-  const view = shareBalanceDisplay({ sharesExact: String(t.tokenAmount), shareSymbol: t.asset,
-    rate, priceMap: {}, fallbackPrice: 0 });
+  // The same share-free view the deposit toast (status-notifier) renders.
+  const view = underlyingOnlyView(shareBalanceDisplay({ sharesExact: String(t.tokenAmount), shareSymbol: t.asset,
+    rate, priceMap: {}, fallbackPrice: 0 }), t.asset);
   return `${view.converted ? '≈ ' : ''}${view.text}`;
 };
 
@@ -182,11 +184,11 @@ test('share deposit approval and decline use approximate coin quantities with a 
   }
 });
 
-test('share deposit notifications without a rate keep their share units', () => {
+test('share deposit notifications without a rate read as a share count, never the share name', () => {
   for (const status of ['approved', 'declined']) {
     const t = tx({ status, asset: 'ppETH', tokenAmount: 0.1 });
-    expect(buildTransitionEvent(t).description).toBe('0.10 ppETH');
-    expect(buildTransitionEvent(t, amountDisplay(undefined)).description).toBe('0.10 ppETH');
+    expect(buildTransitionEvent(t).description).toBe('0.10 ETH shares');
+    expect(buildTransitionEvent(t, amountDisplay(undefined)).description).toBe('0.10 ETH shares');
   }
 });
 

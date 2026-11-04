@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Text, View } from 'react-native';
 import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
+import { shareFreeText } from '@/services/share-display';
 
 // The four phases a deposit moves through. The provider's loading message is
 // matched to one of these so the indicator advances step by step with the
@@ -127,7 +128,7 @@ export function FlowProgress({ message, showMessage = true }: { message?: string
       </View>
 
       {message && showMessage ? (
-        <Text className="pt-[2px] text-center text-[13px] text-text-secondary font-pp-regular">{message}</Text>
+        <Text className="pt-[2px] text-center text-[13px] text-text-secondary font-pp-regular">{shareFreeText(message)}</Text>
       ) : null}
     </View>
   );

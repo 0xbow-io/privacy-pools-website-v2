@@ -12,7 +12,7 @@ import { useCallback } from 'react';
 import { getTokenMetadataBySymbol } from '@/config/tokens';
 import { useAllChainsPriceMap } from '@/hooks/use-all-chains-price-map';
 import { useShareRates } from '@/hooks/use-share-rates';
-import { isShareSymbol } from '@/services/share-display';
+import { isShareSymbol, underlyingOnlyView } from '@/services/share-display';
 import { shareBalanceDisplay } from '@/services/share-balance-display';
 
 /** Display only. Reads the fixed feed grid; never use its result as a spend amount. */
@@ -29,4 +29,16 @@ export function useBalanceDisplay(activeChainId?: number) {
       fallbackPrice: prices[symbol] ?? 0,
     });
   }, [rateFor, prices]);
+}
+
+/**
+ * useBalanceDisplay for a surface that never names the share (the Send flow,
+ * its receipts and activity rows, payment requests, claim links): the converted
+ * underlying, or "0.1 ETH shares" while the rate is still loading, never the
+ * share's own name. Same signature and fields, display only.
+ */
+export function useShareFreeBalanceDisplay(activeChainId?: number) {
+  const display = useBalanceDisplay(activeChainId);
+  return useCallback((exact: string | number, symbol: string, chainId: number | undefined, address?: string) =>
+    underlyingOnlyView(display(exact, symbol, chainId, address), symbol), [display]);
 }

@@ -9,7 +9,7 @@ import { formatUnits } from 'viem';
 // Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
 // MAX retains the original exact shares. USD edits use an exact decimal price
 // in that same boundary. No other operation converts display back.
-import { useBalanceDisplay } from '@/hooks/use-balance-display';
+import { useShareFreeBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import React, { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react';
 import { DROPDOWN_SHADOW, WEB_FIXED_POSITION } from '@/components/ui/web-style-shims';
@@ -678,7 +678,7 @@ export function TransactionDetailModal({ tx, onClose, onCloseForAction, actions 
   const { data: poolsData } = usePools();
   // The detail header speaks the same units as the row that opened it.
   const { rateFor: rateForDetail } = useShareRates();
-  const balanceDisplay = useBalanceDisplay(tx.chainId);
+  const balanceDisplay = useShareFreeBalanceDisplay(tx.chainId);
   const exactUnitsLabel = (wei: bigint, decimals: number, symbol: string) => isShareSymbol(symbol)
     ? balanceDisplay(formatUnits(wei, decimals), symbol, tx.chainId, tx.tokenAddress).text
     : tokenAmountLabel(detailAmountDigits(formatFeeUnits(wei, decimals), displayTokenSymbol(symbol)), symbol);
@@ -1226,7 +1226,7 @@ export function Transactions({
   const { data } = usePools();
   // Live USDC-per-ppUSDC: a share row prints the USDC it is worth, share named in a hint.
   const { rateFor } = useShareRates();
-  const balanceDisplay = useBalanceDisplay();
+  const balanceDisplay = useShareFreeBalanceDisplay();
   // The feed is a LIST of self-describing rows, not a column grid, so there are
   // no per-column visibility breakpoints left: each row carries its own asset
   // mark, direction glyph and stacked amount, and the meta line ellipsizes.

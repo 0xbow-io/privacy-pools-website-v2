@@ -9,7 +9,7 @@ import { ShareCountHint } from '@/components/pools/share-count-hint';
 // Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
 // MAX retains the original exact shares. USD edits use an exact decimal price
 // in that same boundary. No other operation converts display back.
-import { useBalanceDisplay } from '@/hooks/use-balance-display';
+import { useShareFreeBalanceDisplay } from '@/hooks/use-balance-display';
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Platform, Pressable, Share, Text, View, type LayoutChangeEvent } from 'react-native';
 
@@ -135,7 +135,7 @@ export function PaymentRequestsCard({
   const { data: poolsData } = usePools();
   const priceMap = poolsData?.priceMap;
   const { rateFor } = useShareRates();
-  const balanceDisplay = useBalanceDisplay();
+  const balanceDisplay = useShareFreeBalanceDisplay();
   // The dollar line under each amount, priced like Activity rows: the row's
   // own chain's price, and a share at its underlying through the live rate.
   const usdLabel = useCallback((r: PaymentRequestListRow): string => {

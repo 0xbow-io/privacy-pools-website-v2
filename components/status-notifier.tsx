@@ -9,6 +9,7 @@ import { usePoolSession } from '@/hooks/use-pool-session';
 import { useMultiChainWallet } from '@/hooks/use-multi-chain-wallet';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
+import { underlyingOnlyView } from '@/services/share-display';
 import { depositTransitionTxs, detectStatusTransitions } from '@/services/notification-transitions';
 
 /**
@@ -102,7 +103,7 @@ export function StatusNotifier(): null {
     const { events, next } = detectStatusTransitions(prevStatuses.current, input, (tx) => {
       // Toast copy only: the grid-backed rate converts the displayed quantity,
       // never the activity row or any operational amount.
-      const view = balanceDisplay(tx.tokenAmount, tx.asset, tx.chainId, tx.tokenAddress);
+      const view = underlyingOnlyView(balanceDisplay(tx.tokenAmount, tx.asset, tx.chainId, tx.tokenAddress), tx.asset);
       return `${view.converted ? '≈ ' : ''}${view.text}`;
     });
     prevStatuses.current = next;

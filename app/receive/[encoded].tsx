@@ -5,7 +5,7 @@
 // Display headlines use underlying through shareBalanceDisplay; shares appear
 // only in the (i) hint, in fields labelled with the share symbol, or while the
 // rate is unknown. Never print a share count under the underlying symbol.
-import { useBalanceDisplay } from '@/hooks/use-balance-display';
+import { useShareFreeBalanceDisplay } from '@/hooks/use-balance-display';
 
 import React, { useMemo } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
@@ -48,7 +48,7 @@ export default function ReceivePaymentScreen() {
     }
   }, [encoded]);
 
-  const balanceDisplay = useBalanceDisplay();
+  const balanceDisplay = useShareFreeBalanceDisplay();
   const token = receipt ? getTokenMetadata(receipt.tokenId, receipt.chainId) : null;
   const chainName = receipt ? getChainConfig(receipt.chainId)?.displayName ?? `Chain ${receipt.chainId}` : 'Sepolia';
   const amountLabel = receipt && token
