@@ -1,0 +1,19 @@
+# Accepted audit exceptions, one GHSA id per line, each explained in docs/dependency-audit.md.
+# Add one only if it cannot be fixed without a breaking bump and the reason is written down there.
+
+# image-size 1.2.1 under metro, the Expo bundler (build time)
+GHSA-5p2g-fcmc-qvqq
+GHSA-w3rx-r6r6-pgpr
+
+# toml 3.0.0 under @stellar/stellar-sdk (parses TOML only for a stellar.toml lookup)
+GHSA-82x6-q7mm-w9cf
+GHSA-v5mp-jgw5-2x6j
+GHSA-4qx8-w7c3-pj3p
+GHSA-9j65-hcg3-gc64
+GHSA-9qmh-m7c6-f92p
+
+# decode-uri-component 0.2.2 under query-string 7 (expo-router, WalletConnect); no 0.2.x patch exists, 0.5.1 is ESM-only
+GHSA-qr28-fpjm-wq7f
+
+# zod 3.x under @reown/appkit-wallet, @coinbase/cdp-sdk and @expo/cli (our own zod is 4.6.6)
+GHSA-mrhx-c7xc-m3w5
