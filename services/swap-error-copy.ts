@@ -67,6 +67,22 @@ export function friendlySwapError(message: string, units: AmountUnits): string |
 }
 
 /**
+ * The relayer caps the native value a swap route may carry (`maxSwapValueWei`
+ * on `/v1/details`, the bridge messaging fee RelaySwaps pays on the way). The
+ * SDK checks it before proving and throws `SwapValueExceedsRelayerCap`, whose
+ * message is base units and an internal field name. The relayer itself refuses
+ * the same thing by naming `max_swap_value_wei`. Both read as this one line.
+ * Nothing was proved or sent at that point.
+ */
+export const SWAP_VALUE_CAP_TEXT =
+  'This route needs a bridge fee above the relayer limit. Nothing was sent. Pick another destination or try again later.';
+
+export function isSwapValueOverRelayerCap(err: unknown): boolean {
+  if (!(err instanceof Error)) return typeof err === 'string' && /max_swap_value_wei/.test(err);
+  return err.name === 'SwapValueExceedsRelayerCap' || /max_swap_value_wei/.test(err.message);
+}
+
+/**
  * The relayer answered the relay-swap with an HTTP refusal: a 4xx from its own
  * simulation or gas cap, e.g. Mike's, verbatim on screen (DEV-459):
  *
