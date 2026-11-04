@@ -22,7 +22,7 @@
  * which already resolves a share to its underlying), so a test drives the real
  * rule.
  */
-import { approxUnderlyingText } from '@/services/share-display';
+import { shareCountLabel } from '@/services/share-display';
 import { isRelayerOutOfGas, isRelayerRateLimited, relayerOutOfGasMessage, relayerRateLimitedMessage } from '@/services/transfer-outcome';
 import { formatUnits } from 'viem';
 
@@ -41,7 +41,8 @@ const LIFI_INPUT_SHORTFALL = /LiFi needs\s+(\d+)\s+input but only\s+(\d+)\s+avai
 
 /** Trim a formatted amount to something readable without losing the difference. */
 function amountText(raw: string, units: AmountUnits): string {
-  return approxUnderlyingText(`${formatUnits(BigInt(raw), units.decimals)} ${units.symbol}`, units.symbol);
+  // No rate here: a share count reads "0.5 ETH shares", never ppETH (DEV-591).
+  return shareCountLabel(formatUnits(BigInt(raw), units.decimals), units.symbol);
 }
 
 /**
