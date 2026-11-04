@@ -47,6 +47,7 @@ export function usePoolSession() {
     passkeyActive: ctx.passkeyActive,
     signerRefusedDerivation: ctx.signerRefusedDerivation,
     choosePasskeyForRefusedSigner: ctx.choosePasskeyForRefusedSigner,
+    hasRememberedPasskey: ctx.hasRememberedPasskey,
     baseAppCannotSign: ctx.baseAppCannotSign,
     isSmartWallet: ctx.isSmartWallet,
     smartWalletProbeSettled: ctx.smartWalletProbeSettled,
