@@ -41,7 +41,8 @@ describe('portfolio signed-out gate', () => {
 describe('yield earned recomputes when the snapshot lands', () => {
   const hook = readFileSync(join(process.cwd(), 'hooks/use-yield-earned.ts'), 'utf8');
   test('a snapshot change runs the current tick, not only the 60s interval', () => {
-    expect(hook).toMatch(/useEffect\(\(\) => \{\s*tickRef\.current\?\.\(\);\s*\}, \[params\.snapshot\]\);/);
+    // The snapshot failing (no data, query in error) runs it too, so the tile settles (review of PR #31).
+    expect(hook).toMatch(/useEffect\(\(\) => \{\s*tickRef\.current\?\.\(\);\s*\}, \[params\.snapshot, params\.snapshotFailed\]\);/);
     expect(hook).toContain('tickRef.current = null;');
   });
 });

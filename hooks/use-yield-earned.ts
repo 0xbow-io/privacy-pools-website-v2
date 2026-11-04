@@ -19,7 +19,7 @@
  * public-feed grid (PoolsProvider re-reads it when the grid publishes). Both
  * are timed by the grid, not by the user.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { feedData, publicFeeds } from '@/services/public-feed-scheduler';
 import type { PpUsdcRateHistoryResponse, YieldDepositsResponse } from '@/services/api-types';
@@ -74,6 +74,8 @@ export function useYieldEarned(params: {
   chainId: number | null;
   /** PoolsProvider's merged snapshot, chain-tagged; undefined until loaded. */
   snapshot: (ChainTaggedSnapshot & { loadedChainIds?: readonly number[] }) | undefined;
+  /** The snapshot query is in error: no snapshot is on its way. */
+  snapshotFailed?: boolean;
 }): YieldEarnedByShare {
   const { session, chainId } = params;
   // Pinned to the session it was computed for, so a new session reads empty
@@ -83,8 +85,10 @@ export function useYieldEarned(params: {
   );
 
   const snapshotRef = useRef(params.snapshot);
+  const snapshotFailedRef = useRef(!!params.snapshotFailed);
   useEffect(() => {
     snapshotRef.current = params.snapshot;
+    snapshotFailedRef.current = !!params.snapshotFailed;
   });
   // The live tick of the current session effect, so a snapshot landing can run it.
   const tickRef = useRef<(() => void) | null>(null);
@@ -94,7 +98,7 @@ export function useYieldEarned(params: {
   // the grid publishes), so a compute timed by it is grid-timed, not UI-timed.
   useEffect(() => {
     tickRef.current?.();
-  }, [params.snapshot]);
+  }, [params.snapshot, params.snapshotFailed]);
 
   useEffect(() => {
     if (!session || chainId == null) return undefined;
@@ -126,16 +130,24 @@ export function useYieldEarned(params: {
       try {
         const snapshot = snapshotRef.current;
         // Not loaded, or this chain's part of it failed: without its spends a
-        // note that left would be valued as still held.
-        if (!snapshot || (snapshot.loadedChainIds && !snapshot.loadedChainIds.includes(chainId))) {
-          allUnavailable('snapshot-not-ready');
+        // note that left would be valued as still held. A snapshot that failed
+        // (the query in error, or this chain missing from a loaded one) is not
+        // on its way: "not ready" there held the total on a shimmer for as long
+        // as the snapshot stayed down (review of PR #31).
+        if (!snapshot) {
+          allUnavailable(snapshotFailedRef.current ? 'snapshot-failed' : 'snapshot-not-ready');
           return;
         }
-        const depositsFeed = feedValue(feedData(
-          publicFeeds.read<YieldFeedResult<YieldDepositsResponse>>(feedYieldDeposits(chainId)),
-        ));
+        if (snapshot.loadedChainIds && !snapshot.loadedChainIds.includes(chainId)) {
+          allUnavailable('snapshot-failed');
+          return;
+        }
+        const depositsState = publicFeeds.read<YieldFeedResult<YieldDepositsResponse>>(feedYieldDeposits(chainId));
+        const depositsFeed = feedValue(feedData(depositsState));
         if (depositsFeed === undefined) {
-          allUnavailable('deposits-feed-loading');
+          // A feed that failed with nothing cached is not on its way: "loading"
+          // here held the Portfolio total on a shimmer forever.
+          allUnavailable(depositsState.status === 'error' ? 'deposits-feed-failed' : 'deposits-feed-loading');
           return;
         }
 
@@ -149,9 +161,8 @@ export function useYieldEarned(params: {
         const next = new Map<string, YieldEarnedEntry>();
         for (const ns of namespaces) {
           const share = ns.deployment.ppUSDC;
-          const rateFeed = feedValue(feedData(
-            publicFeeds.read<YieldFeedResult<PpUsdcRateHistoryResponse>>(feedYieldRateHistory(chainId, share)),
-          ));
+          const rateState = publicFeeds.read<YieldFeedResult<PpUsdcRateHistoryResponse>>(feedYieldRateHistory(chainId, share));
+          const rateFeed = feedValue(feedData(rateState));
           // Computed for every share, held or not, so which shares this client
           // reads the rate of says nothing about which it holds.
           const rateSeries = rateFeed === undefined ? null : toYieldRateSeries(rateFeed, share);
@@ -160,7 +171,7 @@ export function useYieldEarned(params: {
           try {
             const result = await ns.earned.compute({ depositFacts, rateSeries, events });
             entry = rateFeed === undefined
-              ? { status: 'unavailable', reason: 'rate-history-loading' }
+              ? { status: 'unavailable', reason: rateState.status === 'error' ? 'rate-history-failed' : 'rate-history-loading' }
               : toYieldEarnedEntry(result, rateSeries?.assetDecimals ?? 0);
           } catch {
             entry = { status: 'unavailable', reason: 'exchange-rate-read-failed' };
@@ -204,5 +215,19 @@ export function useYieldEarned(params: {
     };
   }, [session, chainId]);
 
-  return state.session === session && state.chainId === chainId ? state.results : EMPTY_YIELD_EARNED;
+  // Until the first compute for this session answers, every share it will
+  // compute reads "computing", so the portfolio can tell "not yet" from "no
+  // figure". That first compute awaits the SDK import and one exchangeRate()
+  // per share, which can take a while. Derived, no request.
+  const computing = useMemo<YieldEarnedByShare>(() => {
+    if (!session || chainId == null) return EMPTY_YIELD_EARNED;
+    const namespaces = earnedNamespaces(session);
+    if (namespaces.length === 0) return EMPTY_YIELD_EARNED;
+    return new Map(namespaces.map((ns): [string, YieldEarnedEntry] => [
+      yieldEarnedKey(chainId, ns.deployment.ppUSDC),
+      { status: 'unavailable', reason: 'computing' },
+    ]));
+  }, [session, chainId]);
+
+  return state.session === session && state.chainId === chainId ? state.results : computing;
 }
