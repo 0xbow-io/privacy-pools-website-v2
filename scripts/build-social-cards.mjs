@@ -1,7 +1,7 @@
 // Render committed social-card PNGs from the approved HTML/SVG composition.
-// Run: bun scripts/build-social-cards.mjs (requires Playwright Chromium).
+// Run: bun scripts/build-social-cards.mjs (requires Google Chrome; see scripts/lib/chrome.mjs).
 // Deployments serve the committed PNGs and do not need a browser.
-import { chromium } from 'playwright';
+import { launchChrome } from './lib/chrome.mjs';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,9 +36,7 @@ function card({ width, height }) {
     </style>`);
 }
 
-const browser = await chromium.launch(process.env.PW_EXECUTABLE
-  ? { executablePath: process.env.PW_EXECUTABLE }
-  : {});
+const browser = await launchChrome();
 mkdirSync(OUT, { recursive: true });
 try {
   for (const img of META.images) {

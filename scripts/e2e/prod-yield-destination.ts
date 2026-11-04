@@ -33,10 +33,8 @@
 //
 // PROBE_URL points at a dev server; ?env=prod switches the world at load
 // (config/app-environment.ts) and is persisted, so the whole run stays on prod.
-import { chromium } from 'playwright';
-import { existsSync } from 'node:fs';
+import { launchChrome } from '../lib/chrome.mjs';
 
-const ROOT = new URL('../..', import.meta.url).pathname;
 const BASE = process.env.PROBE_URL || 'http://localhost:8081';
 
 const failures: string[] = [];
@@ -54,19 +52,8 @@ const CONVERSION_REFUSAL = /Converting\s+\w+\s+isn't available/i;
 const SHARE_NAME = /\bpp(usdc|usdt)\b/i;
 const NOT_FOUND_LINE = /There is no .* pool on .*/i;
 
-// Same resolution order as scripts/e2e/lib.ts, plus the shared playwright
-// cache: locally the browser is pinned under .pw-browsers or that cache, and in
-// CI `playwright install` puts it wherever playwright expects.
-const CANDIDATES = [
-  `${ROOT}/.pw-browsers/chromium-1228/chrome-linux64/chrome`,
-  `${process.env.HOME}/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome`,
-];
-const pinned = CANDIDATES.find((p) => existsSync(p));
-const browser = await chromium.launch({
-  headless: true,
-  ...(pinned ? { executablePath: pinned } : {}),
-  args: ['--no-sandbox', '--disable-setuid-sandbox'],
-});
+// Google Chrome stable, sandbox on, version-checked: see scripts/lib/chrome.mjs.
+const browser = await launchChrome({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1200 }, reducedMotion: 'reduce', serviceWorkers: 'block' });
 const page = await context.newPage();
 // Metro compiles the web bundle on the FIRST request, which on a cold CI runner

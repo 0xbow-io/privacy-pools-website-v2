@@ -96,7 +96,7 @@ jobs:
           EOF
 
       - name: Install the browser
-        run: bunx playwright install --with-deps chromium
+        run: bunx playwright install --with-deps chrome
 
       # The privacy gate, against a throwaway local server: no app, no wallet,
       # no chain, no funds. Placed here because this is the only job with a

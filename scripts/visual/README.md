@@ -12,9 +12,9 @@ so phases F-B…P5 have something rigorous to diff against. Protocol per
   check-pinned-deps) and run `git checkout package.json bun.lock` before their
   final commits. It is deliberately NOT a permanent dependency; the pin matches
   every prior QA session in `.pwcheck/`.
-- **Pinned browser:** chromium-1228 at `<repo>/.pw-browsers/…` (copy from
-  `/home/pe/newnewrepos/w/0xbow/ppv2/.pw-browsers` — it must live inside the
-  repo because the safewrap sandbox only exposes the cwd).
+- **Browser:** Google Chrome stable with the sandbox on, launched through
+  `scripts/lib/chrome.mjs` (refuses Chrome older than 156.0.8078.73). Baselines
+  captured on the old pinned chromium-1228 need re-capturing on Chrome.
 - **Dev server** on 8081: `safewrap bun run web` (background). The `.env`
   whitelist (`SAFEWRAP_WHITELIST_PORTS=8081,8082`) is what lets that sandbox
   hold the host port — which is also why capture commands must run with
