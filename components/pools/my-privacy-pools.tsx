@@ -650,7 +650,7 @@ export function MyPrivacyPools({
                   </View>
                   <View className="items-end gap-[3px]">
                     <View className="flex-row items-center gap-[4px]">
-                      <Text numberOfLines={1} className="font-pp-medium text-[14px] leading-[16px] text-text">
+                      <Text numberOfLines={1} className="shrink font-pp-medium text-[14px] leading-[16px] text-text">
                         {balanceText}
                       </Text>
                       <ShareCountHint hint={balanceView?.hint ?? null} />
@@ -710,7 +710,7 @@ export function MyPrivacyPools({
                   <ShareApyChip chainId={pool.chainId} tokenAddress={pool.tokenAddress} testID={`my-pool-row-apy-${pool.id}`} />
                   <View className="flex-1 gap-[2px]">
                     <View className="flex-row items-center gap-[4px]">
-                      <Text numberOfLines={1} className="font-pp-regular text-[13px] leading-[15px] text-text-secondary">
+                      <Text numberOfLines={1} className="shrink font-pp-regular text-[13px] leading-[15px] text-text-secondary">
                         {balanceText}
                       </Text>
                       <ShareCountHint hint={balanceView?.hint ?? null} />
