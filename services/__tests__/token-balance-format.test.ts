@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { amountInputDisplay, formatTokenBalance, formatTokenBalanceDown, groupThousands, stripAmountSeparators } from '@/services/token-format';
+import { amountInputDisplay, compactAmountLabel, formatTokenBalance, formatTokenBalanceDown, groupThousands, stripAmountSeparators } from '@/services/token-format';
 
 // This helper carries the whole app's "does the user think they have zero"
 // question: balances, activity rows and pool tables all print through it.
@@ -139,4 +139,23 @@ describe('amount field wiring', () => {
       expect(source).toMatch(/onBlur=\{\(\) => \{?[^}]*set(Amount|AmountInput)Focused\(false\)/);
     });
   }
+});
+
+// Pat, 2026-11-02: "1000 USDC ... 100000 USDC" chips overflowed the row.
+describe('recommended-amount chips read short', () => {
+  test('1k, 10k, 100k, 1M; small figures untouched', () => {
+    expect(compactAmountLabel('0.01')).toBe('0.01');
+    expect(compactAmountLabel('999')).toBe('999');
+    expect(compactAmountLabel('1000')).toBe('1k');
+    expect(compactAmountLabel('5000')).toBe('5k');
+    expect(compactAmountLabel('12500')).toBe('12.5k');
+    expect(compactAmountLabel('10000')).toBe('10k');
+    expect(compactAmountLabel('100000')).toBe('100k');
+    expect(compactAmountLabel('1000000')).toBe('1M');
+    expect(compactAmountLabel('2500000000')).toBe('2.5B');
+  });
+  test('rounds down so a chip never reads more than it fills', () => {
+    expect(compactAmountLabel('1999')).toBe('1.9k');
+    expect(compactAmountLabel('999999')).toBe('999.9k');
+  });
 });

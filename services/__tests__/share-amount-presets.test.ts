@@ -37,7 +37,7 @@ test('both quick-preset surfaces label literals and convert presses; percentages
   expect(withdraw).not.toContain('balanceDisplay(preset, selectedToken');
   const hub = read('components/home/action-hub.tsx');
   expect(hub).toContain("const next = a === 'withdraw' ? amountField.toShares(preset) : preset;");
-  expect(hub).toContain('`${preset} ${amountField.symbol}`');
+  expect(hub).toContain('`${compactAmountLabel(preset)} ${amountField.symbol}`');
   expect(hub).toContain('const next = sanitizeAmountInput(maxText, payMeta.decimals);');
   const panel = read('components/pools/pool-action-panel.tsx');
   expect(panel).toContain('setTypedAmount(sanitizeAmountInput(formatUnits(part, decimals), decimals));');
