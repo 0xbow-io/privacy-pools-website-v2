@@ -76,6 +76,12 @@ export async function launch(tag: string, opts: {
   /** Answer eth_getCode for the wallet with bytecode, as a smart-contract wallet. */
   smartWallet?: boolean;
   viewport?: { width: number; height: number };
+  /**
+   * Limit the share-name guard to the surface this smoke owns (a CSS selector),
+   * when another surface's share names are another PR's to fix. The whole page
+   * when omitted.
+   */
+  guardScope?: string;
 } = {}): Promise<Smoke> {
   // Locally a system Chromium (E2E_CHROMIUM=/usr/bin/chromium) or the pinned
   // build; in CI `playwright install` puts it where playwright looks.
@@ -189,7 +195,7 @@ export async function launch(tag: string, opts: {
     });
   }
   page.on('pageerror', (e) => console.log('  [pageerror]', e.message.slice(0, 200)));
-  const guard = await installShareNameGuard(page, { label: tag });
+  const guard = await installShareNameGuard(page, { label: tag, scope: opts.guardScope });
   let n = 0;
   const smoke: Smoke = {
     browser, context, page, guard, address, refusedSends,
@@ -197,7 +203,8 @@ export async function launch(tag: string, opts: {
       try {
         // The (i) hints only paint their text on hover, so the guard would
         // never see it: hover each one (it scans on the DOM change).
-        const hints = page.locator('text="ⓘ"').filter({ visible: true });
+        const hints = (opts.guardScope ? page.locator(opts.guardScope).locator('text="ⓘ"') : page.locator('text="ⓘ"'))
+          .filter({ visible: true });
         const count = Math.min(await hints.count().catch(() => 0), 12);
         for (let i = 0; i < count; i++) {
           await hints.nth(i).hover({ timeout: 3000 }).catch(() => {});
