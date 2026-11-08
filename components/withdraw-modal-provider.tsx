@@ -1820,9 +1820,11 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     && !isQuoteLoading
     && enteredAmount > 0
     && (grossLeavingWei <= availableWei || fullBalanceRequested)
-    && !!targetAddress
-    && !targetError
-    && !targetEnsResolving;
+    // Own-wallet withdrawal pays the connected wallet and the recipient field
+    // is replaced by it, so a typed address neither unlocks nor blocks Review.
+    && (directMode
+      ? !!walletAddress
+      : (!!targetAddress && !targetError && !targetEnsResolving));
   // Batch review figures: gross = full balance leaving the pool, net = gross
   // minus the aggregate batch fee. These override the single-quote display
   // values only while a batch plan is active.
@@ -1984,6 +1986,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   const reviewRecipientFull = (() => {
     if (swapSnapshot) return swapSnapshot.recipient;
     if (reviewContext?.recipient) return reviewContext.recipient;
+    if (directMode) return walletAddress ?? null;
     if (targetAddress && (isSui || isAddress(targetAddress))) return targetAddress;
     return reviewRecipientFallback ?? null;
   })();
@@ -5733,7 +5736,32 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                   );
                 })()}
 
-                {/* Target Address Input */}
+                {/* Target Address Input. Own-wallet withdrawal pays the connected
+                    wallet, so the field is swapped for that address (read only)
+                    while the box is ticked. The typed value stays in state and
+                    comes back when the box is cleared (QA on PR #52: a typed
+                    address used to be silently ignored). */}
+                {directMode ? (
+                  <View className="w-full gap-[4px]" testID="withdraw-recipient-own-wallet">
+                    <View className="w-full h-[40px] flex-row items-center rounded-control border px-[16px] py-[12px] gap-[12px] bg-card-background border-border opacity-70">
+                      <TextInput
+                        className="text-[14px] flex-1 p-0 m-0 font-pp-regular text-text"
+                        // nw-keep(platform-css): web-only outline reset has no className path (empty on native)
+                        style={WEB_NO_OUTLINE}
+                        value={walletAddress ?? ''}
+                        placeholder="Connect a wallet"
+                        placeholderTextColor="#999999"
+                        editable={false}
+                        selectTextOnFocus={false}
+                        accessibilityLabel="Recipient: your connected wallet"
+                        testID="withdraw-recipient-own-wallet-input"
+                      />
+                    </View>
+                    <Text className="text-[12px] text-[#737373] font-pp-regular">
+                      To your connected wallet
+                    </Text>
+                  </View>
+                ) : (
                 <View className="w-full gap-[4px]">
                   <View className={`w-full h-[40px] flex-row items-center rounded-control border px-[16px] py-[12px] gap-[12px] bg-card-background ${targetError ? 'border-[#E53935]' : 'border-border'}`}>
                     <TextInput
@@ -5759,6 +5787,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     </Text>
                   ) : null}
                 </View>
+                )}
 
                 {/* Gas Token Checkbox — not offered on the swap-exit route
                     (relayWithdrawAndSwap has no extra-gas option).
