@@ -103,6 +103,36 @@ describe('no raw share symbol can reach a render', () => {
     expect(RAW_TERNARY.test('  input: { decimals: t.decimals, symbol: t.symbol },')).toBe(false);
   });
 
+  /**
+   * QA on #26: the exemption above holds only where the field enters the
+   * underlying. With no rate lookup, `amountField.symbol` IS the share symbol,
+   * so the hub's pool chip printed it on Swap. The faces come from the code:
+   * the chip's own condition and the hook's `underlyingEntry`. A chip face the
+   * hook does not enter underlying on must name the coin before it reaches
+   * `amountField.symbol`.
+   */
+  test('the hub pool chip never shows amountField.symbol on a face that enters shares', () => {
+    const hub = readFileSync(join(ROOT, 'components/home/action-hub.tsx'), 'utf8');
+    const faces = (expr: string, v: string) => [...expr.matchAll(new RegExp(`\\b${v} === '(\\w+)'`, 'g'))].map((m) => m[1]);
+    const entry = hub.match(/useShareAmountField\(\{[\s\S]*?underlyingEntry: ([^}]+)\}\)/);
+    expect(entry).not.toBeNull();
+    const underlyingFaces = new Set(faces(entry![1], 'action'));
+    expect(underlyingFaces.size).toBeGreaterThan(0);
+    const chipAt = hub.indexOf('testID="hub-withdraw-pool"');
+    expect(chipAt).toBeGreaterThan(0);
+    // The `{(a === 'withdraw' || ...) && !isSui ? (` line that opens the chip.
+    const cond = hub.slice(0, chipAt).split('\n').reverse().find((l) => /\{\(a === '\w+'/.test(l));
+    expect(cond).toBeDefined();
+    const chipFaces = faces(cond!, 'a');
+    expect(chipFaces).toContain('swap');
+    const chip = hub.slice(chipAt, hub.indexOf('</Pressable>', chipAt));
+    const label = chip.split('\n').find((l) => l.includes('amountField.symbol'))?.trim();
+    if (!label) return;
+    for (const face of chipFaces.filter((f) => !underlyingFaces.has(f))) {
+      expect(`${face}: ${label}`).toContain(`${face}: {a === '${face}' ? displayTokenSymbol(`);
+    }
+  });
+
   test('the guard itself catches the shapes it is for', () => {
     const hits = (line: string) => (EXEMPT_LINE.test(line) ? [] : (renderable(line).match(RAW) ?? []).filter((m) => !EXEMPT_EXPR.test(m)));
     expect(hits('return `covers ${amount} ${units.symbol}`;')).toHaveLength(1);

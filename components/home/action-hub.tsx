@@ -2517,6 +2517,11 @@ export function ActionHub({
       if (withdrawInline) pushWithdrawAmount(shares);
       else if (transferInline) pushTransferAmount(shares);
     }, underlyingEntry: action === 'withdraw' || action === 'send' });
+  // Swap keeps share entry on purpose: the field holds the exact share count
+  // the swap spends, and an underlying edit would clamp to the cap and hide the
+  // flow's own over-balance message. So `amountField.symbol` is the raw share
+  // name there, and the Swap chip names the coin instead (DEV-591, QA on #26).
+  // Display only: the amount and what the swap submits are unchanged.
   const fillMax = () => {
     // Withdraw's max is the shielded balance, and while the association set is
     // still loading that figure is not yet provable — filling it would seed the
@@ -3542,7 +3547,7 @@ export function ActionHub({
               <TokenNetworkIcon symbol={tokenMeta.symbol} size={28} badgeSize={16} badgeTestnetLabel={false} chainId={chainId} />
               {/* nw-keep(data-color): per-asset runtime hue */}
               <Text className="font-pp-sans-semi-bold text-[15px]" style={{ color: hue.fg }}>
-                {amountField.symbol}
+                {a === 'swap' ? displayTokenSymbol(tokenMeta.symbol) : amountField.symbol}
               </Text>
               {/* nw-keep(data-color): caret color is a runtime theme token (vector-icon sink) */}
               <Ionicons name="chevron-down" size={14} color={colors.text} />
