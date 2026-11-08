@@ -54,8 +54,8 @@ export function resolvePasskeyUnlockPlan(input: {
 // registering B would put A's key hash on chain for both, linking them
 // (review on PR #63). So a discoverable pick is only kept when it provably
 // belongs to this wallet:
-// - passkeys created from now on carry the owner in their user handle
-//   (`pp1:<owner>`), checked on assertion;
+// - passkeys created from now on carry an owner tag in their user handle,
+//   checked on assertion;
 // - older passkeys have a random handle, so they are kept only when this
 //   wallet is already registered on this network with exactly these keys.
 
@@ -63,35 +63,68 @@ export function resolvePasskeyUnlockPlan(input: {
 // user.id must not carry identifying information, and it syncs with the
 // passkey into the user's passkey manager and its exports; review on PR #63).
 // The check recomputes the hash and compares.
-const OWNER_HANDLE_PREFIX = 'pp2:';
+//
+// Layout, 36 bytes: "pp2:" | 16-byte owner tag | 16 random bytes.
+// - WebAuthn caps user.id at 64 bytes. The first version put 64 hex chars
+//   after the prefix (68 bytes) and every create threw "User handle exceeds
+//   64 bytes" before the prompt (QA on PR #63).
+// - The random half is deliberate: an authenticator OVERWRITES a discoverable
+//   credential with the same RP ID and user.id, so a fully deterministic id
+//   would let a second create for the same wallet destroy the first passkey
+//   and the PRF its account comes from.
+// - Older handles are 16 random bytes, so the length and prefix tell them apart.
+const OWNER_HANDLE_PREFIX = new TextEncoder().encode('pp2:');
+export const OWNER_TAG_BYTES = 16;
+export const OWNER_HANDLE_RANDOM_BYTES = 16;
+export const OWNER_HANDLE_BYTES = OWNER_HANDLE_PREFIX.length + OWNER_TAG_BYTES + OWNER_HANDLE_RANDOM_BYTES;
+/** WebAuthn's limit on user.id. */
+export const WEBAUTHN_USER_ID_MAX_BYTES = 64;
 
-function ownerDigest(ownerAddress: string): string {
-  return keccak256(toBytes(`privacy-pools passkey owner:${ownerAddress.toLowerCase()}`)).slice(2);
+function ownerTag(ownerAddress: string): Uint8Array {
+  return keccak256(toBytes(`privacy-pools passkey owner:${ownerAddress.toLowerCase()}`), 'bytes').slice(0, OWNER_TAG_BYTES);
+}
+
+function defaultRandom(n: number): Uint8Array {
+  const out = new Uint8Array(n);
+  crypto.getRandomValues(out);
+  return out;
 }
 
 /** user.id for a new passkey: binds it to the wallet that created it. */
-export function passkeyOwnerHandle(ownerAddress: string): Uint8Array {
-  return new TextEncoder().encode(`${OWNER_HANDLE_PREFIX}${ownerDigest(ownerAddress)}`);
+export function passkeyOwnerHandle(
+  ownerAddress: string,
+  random: Uint8Array = defaultRandom(OWNER_HANDLE_RANDOM_BYTES),
+): Uint8Array {
+  if (random.length !== OWNER_HANDLE_RANDOM_BYTES) {
+    throw new Error(`passkeyOwnerHandle expects ${OWNER_HANDLE_RANDOM_BYTES} random bytes`);
+  }
+  const out = new Uint8Array(OWNER_HANDLE_BYTES);
+  out.set(OWNER_HANDLE_PREFIX, 0);
+  out.set(ownerTag(ownerAddress), OWNER_HANDLE_PREFIX.length);
+  out.set(random, OWNER_HANDLE_PREFIX.length + OWNER_TAG_BYTES);
+  return out;
 }
 
-/** The owner digest a handle carries, or null for an older passkey with a random handle. */
-function digestFromPasskeyHandle(handle: Uint8Array | null | undefined): string | null {
-  if (!handle || handle.length === 0) return null;
-  let text: string;
-  try { text = new TextDecoder('utf-8', { fatal: true }).decode(handle); } catch { return null; }
-  if (!text.startsWith(OWNER_HANDLE_PREFIX)) return null;
-  const digest = text.slice(OWNER_HANDLE_PREFIX.length);
-  return /^[0-9a-f]{64}$/.test(digest) ? digest : null;
+/** The owner tag a handle carries, or null for an older passkey with a random handle. */
+function tagFromPasskeyHandle(handle: Uint8Array | null | undefined): Uint8Array | null {
+  if (!handle || handle.length !== OWNER_HANDLE_BYTES) return null;
+  for (let i = 0; i < OWNER_HANDLE_PREFIX.length; i++) {
+    if (handle[i] !== OWNER_HANDLE_PREFIX[i]) return null;
+  }
+  return handle.slice(OWNER_HANDLE_PREFIX.length, OWNER_HANDLE_PREFIX.length + OWNER_TAG_BYTES);
 }
 
 /** Whether a handle names an owner at all (a passkey created by this version). */
 export function passkeyHandleNamesOwner(handle: Uint8Array | null | undefined): boolean {
-  return digestFromPasskeyHandle(handle) !== null;
+  return tagFromPasskeyHandle(handle) !== null;
 }
 
 /** Whether a handle names exactly this owner. */
 export function passkeyHandleIsOwner(handle: Uint8Array | null | undefined, ownerAddress: string): boolean {
-  return digestFromPasskeyHandle(handle) === ownerDigest(ownerAddress);
+  const tag = tagFromPasskeyHandle(handle);
+  if (!tag) return false;
+  const want = ownerTag(ownerAddress);
+  return tag.every((b, i) => b === want[i]);
 }
 
 /** The name the OS sheet shows for a new passkey, so two wallets' passkeys can be told apart. */

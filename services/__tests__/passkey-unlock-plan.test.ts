@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { discoverablePickVerdict, keepCreatedPasskey, passkeyDisplayName, passkeyHandleIsOwner, passkeyHandleNamesOwner, passkeyOwnerHandle } from '@/services/passkey-unlock-plan';
+import { discoverablePickVerdict, keepCreatedPasskey, passkeyDisplayName, passkeyHandleIsOwner, passkeyHandleNamesOwner, passkeyOwnerHandle, OWNER_HANDLE_BYTES, WEBAUTHN_USER_ID_MAX_BYTES } from '@/services/passkey-unlock-plan';
 import {
   normalizePasskeyPick,
   passkeyNotUsedMessage,
@@ -79,6 +79,31 @@ describe('a discoverable pick must belong to this wallet (review on PR #63)', ()
     expect(passkeyHandleNamesOwner(new Uint8Array(16).fill(7))).toBe(false);
     expect(passkeyHandleNamesOwner(null)).toBe(false);
     expect(passkeyDisplayName(A)).toBe('Privacy Pools 0x1111…1111');
+  });
+  test('the handle fits WebAuthn\'s 64-byte user.id limit for every owner (QA on PR #63)', () => {
+    const owners = [A, B, A.toUpperCase().replace('0X', '0x'), '0x' + 'f'.repeat(40), '0x' + '0'.repeat(40), '', 'not-an-address', 'x'.repeat(500)];
+    for (const owner of owners) {
+      const h = passkeyOwnerHandle(owner);
+      expect(h.length).toBeLessThanOrEqual(WEBAUTHN_USER_ID_MAX_BYTES);
+      expect(h.length).toBe(OWNER_HANDLE_BYTES);
+    }
+    expect(OWNER_HANDLE_BYTES).toBeLessThanOrEqual(WEBAUTHN_USER_ID_MAX_BYTES);
+  });
+  test('two passkeys for one wallet get different handles, both recognised', () => {
+    // an authenticator overwrites a credential with the same RP ID and user.id
+    const h1 = passkeyOwnerHandle(A);
+    const h2 = passkeyOwnerHandle(A);
+    expect(Buffer.from(h1).equals(Buffer.from(h2))).toBe(false);
+    expect(passkeyHandleIsOwner(h1, A)).toBe(true);
+    expect(passkeyHandleIsOwner(h2, A)).toBe(true);
+    expect(() => passkeyOwnerHandle(A, new Uint8Array(8))).toThrow();
+  });
+  test('a handle with a short or long body is not an owner handle', () => {
+    const h = passkeyOwnerHandle(A);
+    expect(passkeyHandleNamesOwner(h.slice(0, h.length - 1))).toBe(false);
+    const longer = new Uint8Array(h.length + 1);
+    longer.set(h);
+    expect(passkeyHandleNamesOwner(longer)).toBe(false);
   });
   test('another wallet\'s passkey is refused whatever the chain says', () => {
     expect(discoverablePickVerdict({ ownerAddress: B, userHandle: passkeyOwnerHandle(A), identityStatus: 'unregistered' })).toBe('wrong-wallet');
