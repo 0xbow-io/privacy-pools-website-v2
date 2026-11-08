@@ -25,7 +25,9 @@ const pageScan = `(() => {
     // A scoped guard reads only the surface a smoke owns (a selector); the
     // default is the whole page.
     const scope = window.__shareNameScope;
-    const roots = scope ? Array.from(body.querySelectorAll(scope)) : [body];
+    // A hovered (i) hint paints its bubble in a portal (role=tooltip), outside
+    // any scope: a scoped smoke only hovers hints inside its own surface.
+    const roots = scope ? Array.from(body.querySelectorAll(scope + ', [role="tooltip"]')) : [body];
     // The debug log panel (ppv2_debug) prints raw app logs, which name tokens
     // by their on-chain symbol. It is a developer surface, not copy.
     let debug = document.querySelector('[aria-label="Close debug logs"]');

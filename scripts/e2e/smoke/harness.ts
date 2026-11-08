@@ -203,7 +203,8 @@ export async function launch(tag: string, opts: {
       try {
         // The (i) hints only paint their text on hover, so the guard would
         // never see it: hover each one (it scans on the DOM change).
-        const hints = page.locator('text="ⓘ"').filter({ visible: true });
+        const hints = (opts.guardScope ? page.locator(opts.guardScope).locator('text="ⓘ"') : page.locator('text="ⓘ"'))
+          .filter({ visible: true });
         const count = Math.min(await hints.count().catch(() => 0), 12);
         for (let i = 0; i < count; i++) {
           await hints.nth(i).hover({ timeout: 3000 }).catch(() => {});
