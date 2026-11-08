@@ -2,7 +2,7 @@ import { getVerifiedPoolAssociationSetLeaves } from '@/services/public-associati
 import { setPendingRelayOwner } from '@/services/pending-relays-store';
 import { canonicalizeExportTokenIds } from '@/services/canonical-token-id';
 import { createChainLimiter, feedHasData, snapshotActivityFingerprint, snapshotScanComplete, sweepChains, waitForFeed, earliestScanOptions, type ChainStepResult } from '@/services/chain-sweep';
-import { browserSupportsPrf, createPasskey, getPasskeyPrf, PasskeyCancelledError, PrfUnavailableError } from '@/services/passkey';
+import { browserSupportsPrf, createPasskey, getPasskeyPrf, PasskeyCancelledError, PrfUnavailableError, WEBAUTHN_TIMEOUT_MS } from '@/services/passkey';
 import {
   decodeMarkerMeta,
   encodeMarkerMeta,
@@ -10,8 +10,11 @@ import {
   classifyUserHandle,
   SECURITY_KEY_OTHER_WALLET_MESSAGE,
   SECURITY_KEY_UNTAGGED_MESSAGE,
+  SecurityKeyConfirmCreateError,
   SecurityKeyNotFoundError,
+  SecurityKeyPromptClosedError,
   SecurityKeyPrfUnsupportedError,
+  securityKeyLookupOutcome,
   securityKeyUserId,
   securityKeyUserName,
   type PasskeyAuthenticatorKind,
@@ -387,32 +390,43 @@ function warmPrfSupport(): void {
 /**
  * Security-key unlock for an owner with no credential recorded on this browser.
  *
- * find: a discoverable sign-in steered to security keys. The credential's
- *   userHandle must carry this owner's tag (services/passkey-choice.ts), so a
- *   key set up for another wallet is refused instead of silently unlocking a
- *   different account. Nothing found (or the prompt dismissed: WebAuthn cannot
- *   tell the two apart) → SecurityKeyNotFoundError, and the dialog offers setup.
- * setup: a new discoverable credential on a roaming authenticator, only after
- *   the user asked for it. Refused up front when the browser says it has no
- *   PRF, and not recorded when the key did not enable PRF (no hmac-secret).
+ * WebAuthn answers NotAllowedError both for a closed prompt and for a key with
+ * no credential for this site, so a failed look-up never means "empty key"
+ * (services/passkey-choice.ts securityKeyLookupOutcome). A key that already
+ * holds this wallet's credential must never get a second one: that would be a
+ * different PRF, so a different, empty account.
  *
- * Both record the credential for the owner, so every later unlock is a
- * targeted allowCredentials sign-in. The PRF is requested in the same
- * assertion, so find costs one touch and setup two at most.
+ * find (Sign in): a discoverable sign-in steered to security keys. The
+ *   credential's userHandle must carry this owner's tag, so a key set up for
+ *   another wallet is refused instead of unlocking a different account. A
+ *   closed or timed-out prompt is reported as such and leads nowhere else.
+ * check ("Set up a new key", chosen on purpose): the same look-up first. This
+ *   wallet's credential found → used, nothing created. Another entry picked →
+ *   stop. Prompt closed (not timed out) → ask for an explicit second tap.
+ * create (that second tap only): a new discoverable credential on a roaming
+ *   authenticator. Refused up front when the browser says it has no PRF, and
+ *   not recorded when the key did not enable PRF (no hmac-secret).
+ *
+ * Every success records the credential for the owner, so later unlocks are a
+ * targeted allowCredentials sign-in.
  */
 async function unlockWithSecurityKey(p: {
   ownerAddress: string;
   rpId: string;
-  mode: 'find' | 'setup';
+  mode: 'find' | 'check' | 'create';
 }): Promise<{ prfFirst: `0x${string}`; credentialId: string }> {
   const ownerLc = p.ownerAddress.toLowerCase();
   const rpId = p.rpId;
-  if (p.mode === 'find') {
+  if (p.mode === 'find' || p.mode === 'check') {
     let res: Awaited<ReturnType<typeof getPasskeyPrf>>;
+    const startedAt = Date.now();
     try {
       res = await getPasskeyPrf({ rpId, challenge: randomChallenge(), authenticator: 'security-key' });
     } catch (e) {
-      if (e instanceof PasskeyCancelledError) throw new SecurityKeyNotFoundError();
+      if (e instanceof PasskeyCancelledError) {
+        const outcome = securityKeyLookupOutcome({ stage: p.mode, elapsedMs: Date.now() - startedAt, timeoutMs: WEBAUTHN_TIMEOUT_MS });
+        throw outcome === 'confirm-create' ? new SecurityKeyConfirmCreateError() : new SecurityKeyPromptClosedError();
+      }
       if (e instanceof PrfUnavailableError) throw new SecurityKeyPrfUnsupportedError();
       throw e;
     }
@@ -983,10 +997,12 @@ interface SdkContextValue {
   /** Unlock the connected wallet with this kind of authenticator. No-op unless allowed. Returns whether the choice was taken. */
   choosePasskeyKind: (kind: PasskeyAuthenticatorKind) => boolean;
   /**
-   * The next security-key unlock creates a credential on the key instead of
-   * looking for one. Set synchronously so the same tap can carry the prompt.
+   * The next security-key unlock is a setup step: 'check' looks for this
+   * wallet's credential first (and uses it), 'create' makes one and is only
+   * sent after the check asked for an explicit confirmation. Set
+   * synchronously so the same tap can carry the prompt.
    */
-  requestSecurityKeySetup: () => void;
+  requestSecurityKeySetup: (step: 'check' | 'create') => void;
   /**
    * The Base / Coinbase app signer failed sign-in for the connected address this
    * session: the dialog asks the user to use another wallet.
@@ -1142,9 +1158,9 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
   // Read inside the unlock (a callback), so the latest pick is seen without a re-render.
   const passkeyChoiceRef = useRef<{ owner: string; kind: PasskeyAuthenticatorKind } | null>(null);
   useEffect(() => { passkeyChoiceRef.current = passkeyChoice; }, [passkeyChoice]);
-  // Owner whose next security-key unlock should CREATE a credential (the user
-  // pressed "Set up this key" after the key had none). One shot.
-  const securityKeySetupRef = useRef<string | null>(null);
+  // The next security-key unlock's step for an owner, set by the dialog: the
+  // look-up inside "Set up a new key" (check), or the confirmed create. One shot.
+  const securityKeySetupRef = useRef<{ owner: string; step: 'check' | 'create' } | null>(null);
   const signerRefusedDerivation = !!address && refusedSigners.has(address.toLowerCase());
   // Base / Coinbase app signers that failed sign-in this session (in memory: a
   // fixed Base app gets the signature path back on the next load).
@@ -1527,12 +1543,12 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
             prfFirst = res.prf.first;
             credentialId = res.credentialId;
           } else if (chosenKind === 'security-key') {
-            const setup = securityKeySetupRef.current === ownerLc;
+            const setup = securityKeySetupRef.current?.owner === ownerLc ? securityKeySetupRef.current.step : null;
             securityKeySetupRef.current = null;
             const outcome = await unlockWithSecurityKey({
               ownerAddress: String(derivationAddress),
               rpId: getRpId(),
-              mode: setup ? 'setup' : 'find',
+              mode: setup ?? 'find',
             });
             prfFirst = outcome.prfFirst;
             credentialId = outcome.credentialId;
@@ -4220,11 +4236,11 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
       hasRecordedPasskey,
       isSmartWallet,
     });
-  const requestSecurityKeySetup = useCallback(() => {
+  const requestSecurityKeySetup = useCallback((step: 'check' | 'create') => {
     const current = address?.toLowerCase();
     if (!current) return;
     if (passkeyChoiceRef.current?.owner !== current || passkeyChoiceRef.current.kind !== 'security-key') return;
-    securityKeySetupRef.current = current;
+    securityKeySetupRef.current = { owner: current, step };
   }, [address]);
   useEffect(() => {
     if (canChooseSecurityKey) warmPrfSupport();

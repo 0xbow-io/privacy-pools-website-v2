@@ -142,11 +142,53 @@ export function decodeMarkerMeta(raw: string | null | undefined): PasskeyMarkerM
 }
 
 export const SECURITY_KEY_NOT_FOUND_MESSAGE = 'No Privacy Pools sign-in found on that key for this wallet. Try again, or set up this key.';
+export const SECURITY_KEY_PROMPT_CLOSED_MESSAGE = 'The security key prompt was closed or timed out. Tap Sign in to try again.';
+export const SECURITY_KEY_CONFIRM_CREATE_MESSAGE = 'No sign-in for this wallet was found on that key. Create one only if this key was never used with this wallet.';
 export const SECURITY_KEY_OTHER_WALLET_MESSAGE = 'That security key is set up for another wallet. Connect that wallet, or set up this key.';
 export const SECURITY_KEY_UNTAGGED_MESSAGE = 'That key was set up in another browser. Unlock it there, or set up this key.';
 export const SECURITY_KEY_NO_PRF_MESSAGE = 'This browser or key cannot unlock Privacy Pools. Use a key with hmac-secret, like a YubiKey 5, in a current Chrome, Edge or Firefox.';
 
-/** The discoverable sign-in found nothing usable for this wallet; the dialog offers setup. */
+/**
+ * WebAuthn answers NotAllowedError both when the user closes the prompt and
+ * when the key holds no credential for this site: the spec hides which, on
+ * purpose. So a failed look-up can never be read as "this key is empty".
+ *
+ * - find (Sign in): any closed, cancelled or timed-out prompt is just that.
+ *   Never a reason to create: on a key that already holds this wallet's
+ *   credential, a second one would be a different, empty account.
+ * - check (inside "Set up a new key", which the user chose on purpose): a
+ *   closed prompt asks for an explicit second confirmation before anything is
+ *   created, and a timeout (nobody touched the key) stops.
+ */
+export type SecurityKeyLookupOutcome = 'closed' | 'confirm-create';
+export function securityKeyLookupOutcome(input: {
+  stage: 'find' | 'check';
+  elapsedMs: number;
+  timeoutMs: number;
+}): SecurityKeyLookupOutcome {
+  if (input.stage === 'find') return 'closed';
+  // Within 5 s of the ceremony timeout counts as a timeout.
+  if (input.elapsedMs >= input.timeoutMs - 5_000) return 'closed';
+  return 'confirm-create';
+}
+
+/** The look-up prompt was closed or timed out. Nothing is created. */
+export class SecurityKeyPromptClosedError extends Error {
+  constructor(message = SECURITY_KEY_PROMPT_CLOSED_MESSAGE) {
+    super(message);
+    this.name = 'SecurityKeyPromptClosedError';
+  }
+}
+
+/** The user asked to set up a key and the check found nothing: create only on a second, explicit tap. */
+export class SecurityKeyConfirmCreateError extends Error {
+  constructor(message = SECURITY_KEY_CONFIRM_CREATE_MESSAGE) {
+    super(message);
+    this.name = 'SecurityKeyConfirmCreateError';
+  }
+}
+
+/** A completed sign-in returned a credential that is not this wallet's. Nothing is created. */
 export class SecurityKeyNotFoundError extends Error {
   constructor(message = SECURITY_KEY_NOT_FOUND_MESSAGE) {
     super(message);

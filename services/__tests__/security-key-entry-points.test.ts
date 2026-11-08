@@ -116,7 +116,7 @@ describe('embedded wallet: security key next to the passkey', () => {
     expect(getCalls[0].hints).toEqual(['security-key']);
     expect(r.meta.passkey?.kind).toBe('security-key');
     getThrows = Object.assign(new Error('no'), { name: 'NotAllowedError' });
-    await expect(recoverWallet({ authenticator: 'security-key' })).rejects.toThrow('SECURITY_KEY_NOT_FOUND');
+    await expect(recoverWallet({ authenticator: 'security-key' })).rejects.toThrow('SECURITY_KEY_PROMPT_CLOSED');
     expect(PasskeyCancelledError).toBeDefined();
   });
 });

@@ -73,6 +73,9 @@ export type CreateResult = {
 /** A credential to name in allowCredentials / excludeCredentials. */
 export type KnownCredential = { id: string; transports?: AuthenticatorTransport[] };
 
+/** Every ceremony here waits this long for the user. */
+export const WEBAUTHN_TIMEOUT_MS = 120_000;
+
 export class PasskeyUnsupportedError extends Error {}
 export class PasskeyCancelledError extends Error {}
 export class PasskeyUserVerificationError extends Error {}
@@ -195,7 +198,7 @@ export async function createPasskey(opts: {
       ...(opts.authenticator === 'security-key' ? { authenticatorAttachment: 'cross-platform' as const } : {}),
     },
     ...(opts.excludeCredentials?.length ? { excludeCredentials: descriptors(opts.excludeCredentials) } : {}),
-    timeout: 120_000,
+    timeout: WEBAUTHN_TIMEOUT_MS,
     extensions: {
       prf: {
         eval: {
@@ -211,7 +214,7 @@ export async function createPasskey(opts: {
   try {
     cred = (await navigator.credentials.create({ publicKey })) as PublicKeyCredential | null;
   } catch (e) {
-    throw toPasskeyError(e);
+    throw toPasskeyError(e, { excludedCredentials: !!opts.excludeCredentials?.length });
   }
   if (!cred) throw new PasskeyCancelledError('Passkey creation returned no credential.');
 
@@ -261,7 +264,7 @@ export async function getPasskeyPrf(opts: {
     rpId: opts.rpId,
     challenge: opts.challenge as BufferSource,
     userVerification: 'required',
-    timeout: 120_000,
+    timeout: WEBAUTHN_TIMEOUT_MS,
     allowCredentials,
     extensions: {
       prf: {
@@ -392,12 +395,15 @@ function fromBase64Url(value: string): Uint8Array {
   return out;
 }
 
-function toPasskeyError(e: unknown): Error {
+function toPasskeyError(e: unknown, ctx?: { excludedCredentials?: boolean }): Error {
   const name = (e as { name?: string })?.name;
   if (name === 'NotAllowedError' || name === 'AbortError') {
     return new PasskeyCancelledError('Passkey prompt was dismissed or timed out.');
   }
-  if (name === 'InvalidStateError') {
+  // Only a create() that named excludeCredentials can mean "already holds one
+  // of these". Any other InvalidStateError (a pending request, an
+  // authenticator state error) keeps its own message.
+  if (name === 'InvalidStateError' && ctx?.excludedCredentials) {
     return new PasskeyAlreadyRegisteredError('This authenticator is already set up for this wallet.');
   }
   return e instanceof Error ? e : new Error(String(e));

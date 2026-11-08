@@ -236,7 +236,7 @@ export async function recoverWallet(opts?: { authenticator?: PasskeyAuthenticato
   try {
     res = await getPasskeyPrf({ rpId: rpId(), challenge: randomBytes(32), ...(securityKey ? { authenticator: 'security-key' as const } : {}) });
   } catch (e) {
-    if (securityKey && e instanceof PasskeyCancelledError) throw new Error('SECURITY_KEY_NOT_FOUND');
+    if (securityKey && e instanceof PasskeyCancelledError) throw new Error('SECURITY_KEY_PROMPT_CLOSED');
     throw e;
   }
   const testPk = getTestPk();

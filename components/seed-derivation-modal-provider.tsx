@@ -16,7 +16,7 @@ import {
 import { isCoinbaseWalletIdentity, resolveWalletIdentity } from '@/services/wallet-signature-timeout';
 import { BASE_APP_NOTICE_BODY, BASE_APP_NOTICE_TITLE, BASE_APP_USE_ANOTHER_WALLET, isBaseAppCannotSign } from '@/services/base-app-passkey-choice';
 import { waitForReconnectSettled, walletErrorLine } from '@/services/wallet-reconnect';
-import { SecurityKeyNotFoundError } from '@/services/passkey-choice';
+import { SecurityKeyConfirmCreateError } from '@/services/passkey-choice';
 import { useWalletConnectModal } from '@/components/wallet-connect-modal-provider';
 
 /** After this long without a wallet answer, say so and let the user close. */
@@ -93,8 +93,10 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
   const walletReconnecting = status === 'reconnecting' && !passkeyActive;
   const [pending, setPending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  // The security key had no sign-in for this wallet: offer to set it up.
-  const [securityKeyMissing, setSecurityKeyMissing] = useState(false);
+  // "Set up a new key" looked on the key and found nothing for this wallet:
+  // creating one now takes a second, explicit tap. Never set by a closed or
+  // timed-out Sign in prompt (services/passkey-choice.ts securityKeyLookupOutcome).
+  const [securityKeyConfirm, setSecurityKeyConfirm] = useState(false);
   // Continuation for the action that triggered the prompt (e.g. reopening
   // the deposit modal once the signature lands).
   const onSignedRef = useRef<(() => void) | null>(null);
@@ -166,7 +168,7 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
     const attempt = ++signAttemptRef.current;
     const isCurrent = () => signAttemptRef.current === attempt;
     setErrorMessage(null);
-    setSecurityKeyMissing(false);
+    setSecurityKeyConfirm(false);
     setPending(true);
     setSlowSign(false);
     // Capture before the await: the keysReady state flush inside
@@ -222,8 +224,8 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
         setErrorMessage(null);
         return;
       }
-      if (err instanceof SecurityKeyNotFoundError || (err as { name?: unknown } | null)?.name === 'SecurityKeyNotFoundError') {
-        setSecurityKeyMissing(true);
+      if (err instanceof SecurityKeyConfirmCreateError || (err as { name?: unknown } | null)?.name === 'SecurityKeyConfirmCreateError') {
+        setSecurityKeyConfirm(true);
         setErrorMessage(message);
         return;
       }
@@ -310,7 +312,7 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
   const recordedSecurityKey = hasRecordedPasskey && passkeyKind === 'security-key';
   const takePasskeyBack = useCallback(() => {
     if (!choosePasskeyKind('platform')) return;
-    setSecurityKeyMissing(false);
+    setSecurityKeyConfirm(false);
     // Still in passkey mode, only the authenticator changed (a ref): this tap
     // can carry the prompt.
     void handleSign();
@@ -330,7 +332,7 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
   const offerSecurityKey = canChooseSecurityKey && !securityKeyMode && !pending && !baseAppCannotSign;
   const takeSecurityKeyOffer = useCallback(() => {
     if (!choosePasskeyKind('security-key')) return;
-    setSecurityKeyMissing(false);
+    setSecurityKeyConfirm(false);
     if (passkeyActive) {
       // Already in passkey mode (smart wallet): only the authenticator
       // changed, which the provider reads from a ref, so this tap can carry
@@ -340,9 +342,17 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
     }
     setErrorMessage('Security key unlock is on for this wallet. Tap Sign in to continue.');
   }, [choosePasskeyKind, passkeyActive, handleSign]);
+  // "Set up a new key": look on the key first and use this wallet's sign-in if
+  // it is there. Only a look-up the user closed (not a timeout) leads to the
+  // explicit "Create on this key" tap.
   const setUpSecurityKey = useCallback(() => {
-    requestSecurityKeySetup();
-    setSecurityKeyMissing(false);
+    requestSecurityKeySetup('check');
+    setSecurityKeyConfirm(false);
+    void handleSign();
+  }, [requestSecurityKeySetup, handleSign]);
+  const confirmCreateSecurityKey = useCallback(() => {
+    requestSecurityKeySetup('create');
+    setSecurityKeyConfirm(false);
     void handleSign();
   }, [requestSecurityKeySetup, handleSign]);
 
@@ -444,13 +454,23 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
               </Pressable>
             )}
 
-            {securityKeyMode && securityKeyMissing && !pending && (
+            {securityKeyMode && !hasRecordedPasskey && securityKeyConfirm && !pending && (
+              <Pressable
+                className="items-center justify-center rounded-[10px] border border-border py-[12px]"
+                onPress={confirmCreateSecurityKey}
+                testID="seed-derivation-security-key-create"
+              >
+                <Text className="font-pp-semi-bold text-[14px] text-text">Create on this key</Text>
+              </Pressable>
+            )}
+
+            {securityKeyMode && !hasRecordedPasskey && !securityKeyConfirm && !pending && (
               <Pressable
                 className="items-center justify-center rounded-[10px] border border-border py-[12px]"
                 onPress={setUpSecurityKey}
                 testID="seed-derivation-security-key-setup"
               >
-                <Text className="font-pp-semi-bold text-[14px] text-text">Set up this key</Text>
+                <Text className="font-pp-semi-bold text-[14px] text-text">Set up a new key</Text>
               </Pressable>
             )}
 

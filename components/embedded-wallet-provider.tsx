@@ -45,8 +45,8 @@ function humanizeError(e: unknown): string {
   switch (msg) {
     case 'SECURITY_KEY_PRF_UNSUPPORTED':
       return SECURITY_KEY_NO_PRF_MESSAGE;
-    case 'SECURITY_KEY_NOT_FOUND':
-      return 'No Privacy Pools wallet found on that key. Try again, or create one.';
+    case 'SECURITY_KEY_PROMPT_CLOSED':
+      return 'The security key prompt was closed or timed out. Try again.';
     case 'PASSKEY_PRF_UNSUPPORTED':
       return "This device's passkey can't secure the wallet key. Try a device with a built-in authenticator.";
     case 'NO_EMBEDDED_WALLET':

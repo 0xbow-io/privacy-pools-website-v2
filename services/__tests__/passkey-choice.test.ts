@@ -4,6 +4,7 @@ import {
   decodeMarkerMeta,
   encodeMarkerMeta,
   mayChoosePasskeyUnlock,
+  securityKeyLookupOutcome,
   sanitizeTransports,
   securityKeyOwnerTag,
   securityKeyUserId,
@@ -84,5 +85,22 @@ describe('marker metadata', () => {
   test('transports are limited to the ones WebAuthn defines', () => {
     expect(sanitizeTransports(['usb', 'usb', 'x', 3, 'nfc', 'hybrid'])).toEqual(['usb', 'nfc', 'hybrid']);
     expect(sanitizeTransports('usb')).toEqual([]);
+  });
+});
+
+describe('securityKeyLookupOutcome: a closed prompt never means "empty key"', () => {
+  const T = 120_000;
+  test('Sign in: a cancelled prompt is just closed, never a reason to create', () => {
+    expect(securityKeyLookupOutcome({ stage: 'find', elapsedMs: 800, timeoutMs: T })).toBe('closed');
+  });
+  test('Sign in: a timed-out prompt is just closed', () => {
+    expect(securityKeyLookupOutcome({ stage: 'find', elapsedMs: T, timeoutMs: T })).toBe('closed');
+  });
+  test('Set up a new key: a timeout (nobody touched the key) stops, nothing is created', () => {
+    expect(securityKeyLookupOutcome({ stage: 'check', elapsedMs: T, timeoutMs: T })).toBe('closed');
+    expect(securityKeyLookupOutcome({ stage: 'check', elapsedMs: T - 1_000, timeoutMs: T })).toBe('closed');
+  });
+  test('Set up a new key: a closed look-up only asks for an explicit second tap', () => {
+    expect(securityKeyLookupOutcome({ stage: 'check', elapsedMs: 3_000, timeoutMs: T })).toBe('confirm-create');
   });
 });

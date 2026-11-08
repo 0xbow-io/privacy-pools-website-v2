@@ -93,9 +93,19 @@ describe('createPasskey', () => {
     // PRF is still requested at create: same salts as the device passkey.
     expect((lastCreate!.extensions as AnyRecord).prf).toBeDefined();
   });
-  test('an authenticator that already holds an excluded credential is reported as such', async () => {
+  test('InvalidStateError means "already registered" only when excludeCredentials was sent', async () => {
     createImpl = async () => { throw Object.assign(new Error('exists'), { name: 'InvalidStateError' }); };
-    await expect(createPasskey({ ...baseCreate, authenticator: 'security-key' })).rejects.toBeInstanceOf(PasskeyAlreadyRegisteredError);
+    await expect(createPasskey({ ...baseCreate, authenticator: 'security-key', excludeCredentials: [{ id: 'AQIDBA' }] }))
+      .rejects.toBeInstanceOf(PasskeyAlreadyRegisteredError);
+    // Without excludeCredentials it is some other state error: keep it as is.
+    const err = await createPasskey({ ...baseCreate, authenticator: 'security-key' }).catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(PasskeyAlreadyRegisteredError);
+    expect((err as Error).name).toBe('InvalidStateError');
+  });
+  test('an InvalidStateError on sign-in is never "already registered"', async () => {
+    getImpl = async () => { throw Object.assign(new Error('pending'), { name: 'InvalidStateError' }); };
+    const err = await getPasskeyPrf({ rpId: 'privacypools.com', challenge: new Uint8Array(32) }).catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(PasskeyAlreadyRegisteredError);
   });
 });
 
