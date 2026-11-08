@@ -184,7 +184,7 @@ describe('wallet tx fee policy (DEV-542)', () => {
     expect(captured).toBeGreaterThan(0);
     expect(captured).toBeLessThan(check);
     const partial = modal.indexOf("if (registrationLegSent) setReceiveSetup(runSetupKey, chainId, 'partial', 'local');", check);
-    const send = modal.indexOf('sendTransactionAsync({ ...tx, account: runOwner as ViemAddress, ...walletTxFields(plan) })', check);
+    const send = modal.indexOf('sendWalletTransaction(wagmiConfig, { ...tx, account: runOwner as ViemAddress, ...walletTxFields(plan) })', check);
     expect(check).toBeGreaterThan(0);
     expect(partial).toBeGreaterThan(check);
     expect(send).toBeGreaterThan(partial);
@@ -255,7 +255,7 @@ describe('wallet tx fee policy (DEV-542)', () => {
     // Only the FIRST leg may be cancelled; once one went out the second proceeds.
     const guard = modal.indexOf('if (!registrationLegSent && !deliversToCaller()) throw new Error(REGISTRATION_CLOSED_BEFORE_PROMPT);', price);
     const mark = modal.indexOf('registrationLegSent = true;', guard);
-    const send = modal.indexOf('sendTransactionAsync({ ...tx, account: runOwner as ViemAddress, ...walletTxFields(plan) })', price);
+    const send = modal.indexOf('sendWalletTransaction(wagmiConfig, { ...tx, account: runOwner as ViemAddress, ...walletTxFields(plan) })', price);
     expect(price).toBeGreaterThan(0);
     expect(guard).toBeGreaterThan(price);
     expect(mark).toBeGreaterThan(guard);

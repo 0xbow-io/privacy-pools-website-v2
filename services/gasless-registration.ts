@@ -385,6 +385,21 @@ export function describeUnpayableWallet(
 }
 
 /**
+ * Whether Register is off because of that warning (QA on DEV-589). With no
+ * gas and nobody to carry the wallet, the press could only open a wallet
+ * prompt that fails, on every chain alike. Not for `probe-failed`: that is
+ * "could not tell", and the funded path stays the fallback there.
+ */
+export function registrationBlockedByGas(
+  eligibility: GaslessRegistrationEligibility | null,
+  options: { gaslessAllowed: boolean },
+): boolean {
+  if (!eligibility) return false;
+  if (eligibility.kind === 'ineligible' && eligibility.blocker === 'probe-failed') return false;
+  return describeUnpayableWallet(eligibility, 'gas', options) !== null;
+}
+
+/**
  * The one line a wallet's "insufficient funds" rejection should turn into.
  *
  * Wallets phrase it differently ("insufficient funds for gas * price + value"

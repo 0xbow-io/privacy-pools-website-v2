@@ -81,7 +81,7 @@ const UNSUPPORTED_NAMES = new Set<unknown>([
  * viem wraps provider errors (e.g. in TransactionExecutionError), so the whole
  * cause chain is checked, not just the outer error.
  */
-function isUnsupportedMethod(err: unknown): boolean {
+export function isUnsupportedMethod(err: unknown): boolean {
   let current: unknown = err;
   for (let depth = 0; current && depth < 8; depth++) {
     const { code, name, cause } = current as { code?: unknown; name?: unknown; cause?: unknown };

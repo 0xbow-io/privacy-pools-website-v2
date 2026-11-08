@@ -375,7 +375,7 @@ describe('isRawWalletError', () => {
     expect(src).toContain('classifyRegistrationError(message, sentUnconfirmed, detail)');
     expect(src).toContain('if (sentUnconfirmed && sentHash) watchSentRegistration(sentHash);');
     expect(src).toContain('const txUnconfirmed = !!getPendingRegistration(');
-    expect(src).toContain('disabled={pending || txUnconfirmed}');
+    expect(src).toContain('disabled={pending || txUnconfirmed || gasBlocked}');
     expect(REGISTRATION_TX_PENDING_MESSAGE).not.toMatch(/—/);
   });
 });

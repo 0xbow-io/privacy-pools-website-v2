@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
   describeInsufficientGas,
   describeUnpayableWallet,
+  registrationBlockedByGas,
   type GaslessRegistrationEligibility,
 } from '../gasless-registration';
 import { isSessionInitTimeout, withSessionInitTimeout } from '../session-init-timeout';
@@ -40,9 +41,9 @@ describe('the registration modal can always be closed', () => {
     const source = read(MODAL);
     // Both exits used to carry `disabled={pending}`. The primary button still
     // does, and should: pressing Register twice is not an escape.
-    const disabledOnPending = source.match(/disabled=\{pending( \|\| txUnconfirmed)?\}/g) ?? [];
+    const disabledOnPending = source.match(/disabled=\{pending( \|\| txUnconfirmed)?( \|\| gasBlocked)?\}/g) ?? [];
     expect(disabledOnPending.length).toBe(1);
-    expect(source).toMatch(/onPress=\{handleRegister\}\s*\n\s*disabled=\{pending \|\| txUnconfirmed\}/);
+    expect(source).toMatch(/onPress=\{handleRegister\}\s*\n\s*disabled=\{pending \|\| txUnconfirmed \|\| gasBlocked\}/);
   });
 
   test('a run the user closed cannot resume the flow that opened it', () => {
@@ -61,7 +62,7 @@ describe('the wait on a wallet prompt is bounded', () => {
     expect(source).toContain('withSessionInitTimeout');
     expect(source).toContain('WALLET_PROMPT_TIMEOUT_MS');
     // No bare send left behind: every leg goes through the bounded helper.
-    expect(source).not.toMatch(/await sendTransactionAsync\(/);
+    expect(source).not.toMatch(/await (?:sendTransactionAsync|sendWalletTransaction)\(/);
   });
 
   test('a wallet that never answers releases the pending flag instead of pinning it', async () => {
@@ -130,6 +131,22 @@ describe('a wallet that cannot pay is told so before it is asked to sign', () =>
     // A funded wallet is not stranded on either setting.
     expect(describeUnpayableWallet(ineligible('wallet-funded', true), 'ETH', { gaslessAllowed: false })).toBeNull();
     expect(describeUnpayableWallet(null, 'ETH', { gaslessAllowed: false })).toBeNull();
+  });
+
+  test('Register is off while the warning applies, not while the probe could not tell (QA on DEV-589)', () => {
+    // 0 BNB, nothing shielded: the warning showed and Register still sent a tx
+    // the wallet could only fail.
+    expect(registrationBlockedByGas(ineligible('no-notes', false), { gaslessAllowed: true })).toBe(true);
+    expect(registrationBlockedByGas(eligible, { gaslessAllowed: false })).toBe(true);
+    // The gasless button, a funded wallet, no answer yet: Register works.
+    expect(registrationBlockedByGas(eligible, { gaslessAllowed: true })).toBe(false);
+    expect(registrationBlockedByGas(ineligible('wallet-funded', true), { gaslessAllowed: false })).toBe(false);
+    expect(registrationBlockedByGas(null, { gaslessAllowed: true })).toBe(false);
+    // "Could not tell" keeps the funded path as the fallback.
+    expect(registrationBlockedByGas({ kind: 'ineligible', blocker: 'probe-failed', walletCanPay: false }, { gaslessAllowed: true })).toBe(false);
+    const source = read(MODAL);
+    expect(source).toContain('registrationBlockedByGas(gasless, { gaslessAllowed })');
+    expect(source).toContain('disabled={pending || txUnconfirmed || gasBlocked}');
   });
 
   test('a dead end the probe already described keeps its own copy', () => {

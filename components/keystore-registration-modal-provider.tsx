@@ -5,7 +5,7 @@ import { useOpLock } from '@/hooks/use-op-lock';
 import { Pressable, Text, View, useWindowDimensions } from 'react-native';
 import { Modal } from '@/components/ui/modal';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useAccount, useConfig, usePublicClient, useSendTransaction, useSwitchChain } from 'wagmi';
+import { useAccount, useConfig, usePublicClient, useSwitchChain } from 'wagmi';
 import { getAccount } from 'wagmi/actions';
 import type { Address as ViemAddress, Hex } from 'viem';
 
@@ -27,6 +27,7 @@ import {
   describeRegistrationError,
   REGISTRATION_TX_PENDING_MESSAGE,
   describeUnpayableWallet,
+  registrationBlockedByGas,
   GASLESS_REGISTRATION_CONFIRM_BODY,
   GASLESS_REGISTRATION_CONFIRM_BODY_TOP_UP,
   GASLESS_REGISTRATION_CONFIRM_PRIMARY,
@@ -61,6 +62,7 @@ import {
   VIEWING_KEY_GAS_LIMIT,
 } from '@/services/receive-setup';
 import { priceWalletTx, registrationOwnerUnchanged, walletTxFields, type FeeReadClient } from '@/services/wallet-tx-fees';
+import { sendWalletTransaction } from '@/services/wallet-send-refusal';
 
 export const REGISTRATION_CLOSED_BEFORE_PROMPT = 'Registration was closed before the wallet prompt. Nothing was sent.';
 export const REGISTRATION_OWNER_CHANGED =
@@ -266,7 +268,6 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
   const crossChainTarget = targetChainId !== null && targetChainId !== activeChainId;
   const withOpLock = useOpLock();
   const publicClient = usePublicClient({ chainId });
-  const { sendTransactionAsync } = useSendTransaction();
   const { switchChainAsync } = useSwitchChain();
   const {
     poolSession,
@@ -606,6 +607,11 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
     ),
     [gasless, chainId, gaslessAllowed],
   );
+  // While that warning is up, Register is off: the press could only open a
+  // wallet prompt that fails for want of gas (QA on DEV-589). Reopening the
+  // modal probes again, so a wallet funded meanwhile gets the button back.
+  const gasBlocked = !gaslessEligible && !quotedPlan && !publishStep && !!stuckMessage
+    && registrationBlockedByGas(gasless, { gaslessAllowed });
 
   /**
    * Escape, and it is UNCONDITIONAL.
@@ -895,7 +901,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
       if (!publicClient) {
         throw new Error('Cannot confirm the registration transaction (no RPC client). Check the connection and try again.');
       }
-      // BOUNDED. `sendTransactionAsync` resolves when the wallet answers, and a
+      // BOUNDED. The send resolves when the wallet answers, and a
       // wallet that cannot pay (or whose background worker was suspended) may
       // simply never answer — which pinned `pending` true for the life of the
       // page. Reuses services/session-init-timeout.ts: same shape (cap this
@@ -937,7 +943,8 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
         if (ownsUi()) setAwaitingWallet(true);
         try {
           return await withSessionInitTimeout(
-            sendTransactionAsync({ ...tx, account: runOwner as ViemAddress, ...walletTxFields(plan) }),
+            // The wallet's refusal survives a 4200 answer to viem's retry (QA on DEV-589).
+            sendWalletTransaction(wagmiConfig, { ...tx, account: runOwner as ViemAddress, ...walletTxFields(plan) }),
             { timeoutMs: WALLET_PROMPT_TIMEOUT_MS },
           );
         } catch (err) {
@@ -1089,7 +1096,6 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
     publishViewingKey,
     quoteRegistration,
     resolveGasless,
-    sendTransactionAsync,
     sessionAddress,
     address,
     wagmiConfig,
@@ -1288,9 +1294,10 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
                 </Text>
               </Pressable>
               <Pressable
-                className={`flex-1 items-center justify-center rounded-control bg-button-primary py-[12px] ${pending || txUnconfirmed ? 'opacity-60' : 'opacity-100'}`}
+                className={`flex-1 items-center justify-center rounded-control bg-button-primary py-[12px] ${pending || txUnconfirmed || gasBlocked ? 'opacity-60' : 'opacity-100'}`}
                 onPress={handleRegister}
-                disabled={pending || txUnconfirmed}
+                disabled={pending || txUnconfirmed || gasBlocked}
+                testID="keystore-register-primary"
               >
                 <Text className="font-pp-semi-bold text-[14px] text-button-primary-text">
                   {pending ? (publishStep ? 'Publishing…' : finishMode ? 'Finishing…' : 'Registering…') : copy.primary}

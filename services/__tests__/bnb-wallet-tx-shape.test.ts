@@ -10,6 +10,7 @@ import { bsc, mainnet } from 'viem/chains';
 
 import { collectErrorText, describeRegistrationError } from '../gasless-registration';
 import { priceWalletTx, walletTxFields, type FeeReadClient } from '../wallet-tx-fees';
+import { sendTransactionKeepingRefusal } from '../wallet-send-refusal';
 
 const OWNER = '0x1111111111111111111111111111111111111111' as Address;
 const KEYSTORE = '0x6E463391c79b7e1A88eF26E0B023f9A6C9938a71' as Address;
@@ -68,6 +69,26 @@ async function send(chain: typeof bsc | typeof mainnet, provider: { request: (a:
   return wallet.sendTransaction({ account: OWNER, chain, to: KEYSTORE, data: DATA, value: 0n, ...fields });
 }
 
+/** The same send through the registration's refusal-keeping wrapper. */
+async function sendKeeping(chain: typeof bsc, provider: { request: (a: { method: string; params?: unknown[] }) => Promise<unknown> }, fields: object) {
+  const wallet = createWalletClient({ chain, transport: custom(provider) });
+  return sendTransactionKeepingRefusal(wallet, { account: OWNER, chain, to: KEYSTORE, data: DATA, value: 0n, ...fields } as Parameters<typeof sendTransactionKeepingRefusal>[1]);
+}
+
+/** Refuses eth_sendTransaction with `reason` (-32000), answers the retry with `retryCode`. */
+function refusingWallet(reason: string, retryCode: number) {
+  const rpcError = (code: number, message: string) => Object.assign(new Error(message), { code });
+  return {
+    request: async ({ method }: { method: string }) => {
+      if (method === 'eth_chainId') return '0x38';
+      if (method === 'eth_accounts' || method === 'eth_requestAccounts') return [OWNER];
+      if (method === 'eth_sendTransaction') throw rpcError(-32000, reason);
+      if (method === 'wallet_sendTransaction') throw rpcError(retryCode, retryCode === 4001 ? 'User rejected the request.' : `unsupported ${method}`);
+      throw rpcError(-32601, `unsupported ${method}`);
+    },
+  };
+}
+
 describe('BNB Chain wallet tx shape against a mobile legacy-only wallet (DEV-589)', () => {
   test('the registration leg reaches the wallet with a gas limit and no fee fields, and is sent', async () => {
     const { provider, sent } = mobileLegacyWallet('0x38');
@@ -91,19 +112,49 @@ describe('BNB Chain wallet tx shape against a mobile legacy-only wallet (DEV-589
       .toBe('BNB Chain refused the network fee your wallet set. Try again.');
   });
 
-  test('a wallet answering 4200 to wallet_sendTransaction: viem hides the node reason, the console still shows the trail', async () => {
+  test('a wallet answering 4200 to wallet_sendTransaction: its refusal of eth_sendTransaction still says why (QA on DEV-589)', async () => {
     // viem retries a -32000 eth_sendTransaction refusal as wallet_sendTransaction
     // and, on a 4200 answer, throws THAT error: the "underpriced" is gone from
-    // the whole chain. Recorded so nobody expects the reason to survive here.
+    // the whole chain when viem is called directly.
     const { provider } = mobileLegacyWallet('0x38', 4200);
     const err = await send(bsc, provider, { gasPrice: APP_RPC_GAS_PRICE }).catch((e: unknown) => e);
     const detail = collectErrorText(err);
     expect(detail).not.toMatch(/underpriced/i);
     expect(detail).toContain('wallet_sendTransaction');
+    // The registration send keeps the first refusal and classifies that, the
+    // same line a -32601 wallet already got.
+    for (const code of [4200, -32601]) {
+      const wallet = mobileLegacyWallet('0x38', code);
+      const kept = await sendKeeping(bsc, wallet.provider, { gasPrice: APP_RPC_GAS_PRICE }).catch((e: unknown) => e);
+      expect(describeRegistrationError((kept as Error).message, false, 'BNB Chain', { detail: collectErrorText(kept), nativeSymbol: 'BNB' }))
+        .toBe('BNB Chain refused the network fee your wallet set. Try again.');
+    }
     // And with the fix the wallet never sees a fee it could refuse.
     const fixed = mobileLegacyWallet('0x38', 4200);
     const plan = await priceWalletTx(appRpc(), { account: OWNER, to: KEYSTORE, data: DATA, value: 0n }, 80_000n, 56);
     expect(await send(bsc, fixed.provider, walletTxFields(plan))).toMatch(/^0x/);
+  });
+
+  test('every refusal reason survives a 4200 retry answer, and a retry the user cancels stays cancelled', async () => {
+    const cases: [string, string][] = [
+      ['insufficient funds for gas * price + value', 'You need BNB on BNB Chain to pay the network fee. Add some, then register again.'],
+      ['transaction underpriced', 'BNB Chain refused the network fee your wallet set. Try again.'],
+      ['Failed to fetch', 'Could not reach BNB Chain. Check your connection and try again.'],
+    ];
+    for (const [reason, line] of cases) {
+      for (const code of [4200, -32601]) {
+        const kept = await sendKeeping(bsc, refusingWallet(reason, code), {}).catch((e: unknown) => e);
+        expect(kept).toBeInstanceOf(Error);
+        expect(describeRegistrationError((kept as Error).message, false, 'BNB Chain', { detail: collectErrorText(kept), nativeSymbol: 'BNB' })).toBe(line);
+      }
+    }
+    // Only an "unsupported" retry answer is swapped for the first refusal.
+    const cancelled = await sendKeeping(bsc, refusingWallet('transaction underpriced', 4001), {}).catch((e: unknown) => e);
+    expect(describeRegistrationError((cancelled as Error).message, false, 'BNB Chain', { detail: collectErrorText(cancelled), nativeSymbol: 'BNB' }))
+      .toBe('Transaction cancelled in your wallet.');
+    // A plain success is untouched.
+    const { provider } = mobileLegacyWallet('0x38', 4200);
+    expect(await sendKeeping(bsc, provider, {})).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
   test('the setAuthPolicy leg with no estimate leaves gas to the wallet too', async () => {
