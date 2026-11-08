@@ -12,28 +12,28 @@ import {
 
 describe('resolvePasskeyUnlockPlan', () => {
   test('a remembered passkey is a targeted sign-in, as before', () => {
-    expect(resolvePasskeyUnlockPlan({ rememberedCredentialId: 'abc' })).toEqual({ kind: 'targeted', credentialId: 'abc' });
+    expect(resolvePasskeyUnlockPlan({ tap: true, rememberedCredentialId: 'abc' })).toEqual({ kind: 'targeted', credentialId: 'abc' });
   });
   test('"Use another passkey" lists every passkey even when one is remembered', () => {
-    expect(resolvePasskeyUnlockPlan({ rememberedCredentialId: 'abc', pick: 'any' })).toEqual({ kind: 'discoverable' });
-    expect(resolvePasskeyUnlockPlan({ pick: 'any' })).toEqual({ kind: 'discoverable' });
+    expect(resolvePasskeyUnlockPlan({ tap: true, rememberedCredentialId: 'abc', pick: 'any' })).toEqual({ kind: 'discoverable' });
+    expect(resolvePasskeyUnlockPlan({ tap: true, pick: 'any' })).toEqual({ kind: 'discoverable' });
   });
   test('nothing remembered never creates on its own: it offers the existing passkeys', () => {
-    expect(resolvePasskeyUnlockPlan({})).toEqual({ kind: 'discoverable' });
-    expect(resolvePasskeyUnlockPlan({ rememberedCredentialId: null })).toEqual({ kind: 'discoverable' });
-    expect(resolvePasskeyUnlockPlan({ rememberedCredentialId: '' })).toEqual({ kind: 'discoverable' });
+    expect(resolvePasskeyUnlockPlan({ tap: true })).toEqual({ kind: 'discoverable' });
+    expect(resolvePasskeyUnlockPlan({ tap: true, rememberedCredentialId: null })).toEqual({ kind: 'discoverable' });
+    expect(resolvePasskeyUnlockPlan({ tap: true, rememberedCredentialId: '' })).toEqual({ kind: 'discoverable' });
   });
   test('create runs only when the user asked for it and nothing is remembered', () => {
-    expect(resolvePasskeyUnlockPlan({ pick: 'create' })).toEqual({ kind: 'create' });
+    expect(resolvePasskeyUnlockPlan({ tap: true, pick: 'create' })).toEqual({ kind: 'create' });
   });
   test('create never mints a second credential while one is remembered', () => {
-    expect(resolvePasskeyUnlockPlan({ rememberedCredentialId: 'abc', pick: 'create' })).toEqual({ kind: 'targeted', credentialId: 'abc' });
+    expect(resolvePasskeyUnlockPlan({ tap: true, rememberedCredentialId: 'abc', pick: 'create' })).toEqual({ kind: 'targeted', credentialId: 'abc' });
   });
   test('a stray argument (a press event, a typo) is no pick', () => {
     expect(normalizePasskeyPick({ nativeEvent: {} })).toBeUndefined();
     expect(normalizePasskeyPick('Create')).toBeUndefined();
-    expect(resolvePasskeyUnlockPlan({ pick: { type: 'press' } })).toEqual({ kind: 'discoverable' });
-    expect(resolvePasskeyUnlockPlan({ rememberedCredentialId: 'abc', pick: 'other' })).toEqual({ kind: 'targeted', credentialId: 'abc' });
+    expect(resolvePasskeyUnlockPlan({ tap: true, pick: { type: 'press' } })).toEqual({ kind: 'discoverable' });
+    expect(resolvePasskeyUnlockPlan({ tap: true, rememberedCredentialId: 'abc', pick: 'other' })).toEqual({ kind: 'targeted', credentialId: 'abc' });
   });
 });
 
@@ -60,8 +60,8 @@ describe('passkeySecondaryChoice', () => {
     expect(passkeySecondaryChoice(false)).toEqual({ pick: 'create', label: 'Create a passkey' });
   });
   test('every secondary choice resolves to the ceremony its label names', () => {
-    expect(resolvePasskeyUnlockPlan({ rememberedCredentialId: 'abc', pick: passkeySecondaryChoice(true).pick }).kind).toBe('discoverable');
-    expect(resolvePasskeyUnlockPlan({ pick: passkeySecondaryChoice(false).pick }).kind).toBe('create');
+    expect(resolvePasskeyUnlockPlan({ tap: true, rememberedCredentialId: 'abc', pick: passkeySecondaryChoice(true).pick }).kind).toBe('discoverable');
+    expect(resolvePasskeyUnlockPlan({ tap: true, pick: passkeySecondaryChoice(false).pick }).kind).toBe('create');
   });
 });
 

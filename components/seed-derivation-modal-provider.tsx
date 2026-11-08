@@ -79,7 +79,7 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
   const {
     keysReady, ensureInitialized, error, passkeyActive, isInitializing, identityMode,
     isSmartWallet, smartWalletProbeSettled, passkeyPreviewEnabled, signerRefusedDerivation, sessionTarget,
-    choosePasskeyForRefusedSigner, baseAppCannotSign, hasRememberedPasskey,
+    choosePasskeyForRefusedSigner, baseAppCannotSign, hasRememberedPasskey, passkeyTapRequests,
   } = usePoolSession();
   const { disconnectAsync } = useDisconnect();
   const walletPicker = useWalletConnectModal();
@@ -132,6 +132,16 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
     setIsOpen(true);
   }, []);
 
+  // A flow that needs keys (opening Withdraw, a review, a send) reached the
+  // passkey unlock without a tap on a passkey button. Nothing was asked of the
+  // authenticator; show this dialog so the tap starts it (QA on PR #63).
+  const seenTapRequestsRef = useRef(passkeyTapRequests);
+  useEffect(() => {
+    if (passkeyTapRequests === seenTapRequestsRef.current) return;
+    seenTapRequestsRef.current = passkeyTapRequests;
+    if (!keysReady) openSeedDerivationModal();
+  }, [passkeyTapRequests, keysReady, openSeedDerivationModal]);
+
   // A wallet that never answers (DEV-427 style hang, a backgrounded wallet
   // app) must not trap the user behind a disabled close button forever.
   const [slowSign, setSlowSign] = useState(false);
@@ -161,7 +171,10 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
   // passkeyPick: the explicit passkey choice under the Sign in button
   // (services/passkey-unlock-plan.ts). Passed straight through, so the tap
   // still carries the WebAuthn prompt's user activation.
-  const handleSign = useCallback(async (passkeyPick?: PasskeyPick) => {
+  // tap: the call comes from a press on one of this dialog's buttons. Only then
+  // may a passkey unlock start WebAuthn; the automatic sign-in after connect
+  // never passes it (services/passkey-unlock-plan.ts 'needs-tap').
+  const handleSign = useCallback(async (passkeyPick?: PasskeyPick, opts?: { tap?: boolean }) => {
     const attempt = ++signAttemptRef.current;
     const isCurrent = () => signAttemptRef.current === attempt;
     setErrorMessage(null);
@@ -188,7 +201,7 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
         subscribe: (listener) => wagmiConfig.subscribe((state) => state.status, listener),
       });
       console.log('[SeedDerivationModal] handleSign: calling ensureInitialized');
-      await ensureInitialized(passkeyActive && passkeyPick ? { passkeyPick } : undefined);
+      await ensureInitialized(passkeyActive && opts?.tap === true ? { passkeyPick, passkeyTap: true } : undefined);
       console.log('[SeedDerivationModal] handleSign: ensureInitialized resolved, session built');
       if (!isCurrent()) {
         // Signed after the user closed a slow prompt. The keys are good; if a
@@ -372,7 +385,7 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
             <View className="mt-[6px] flex-row gap-[10px]">
               <Pressable
                 className={`flex-1 items-center justify-center rounded-control bg-button-primary py-[12px] ${pending ? 'opacity-60' : 'opacity-100'}`}
-                onPress={() => { void handleSign(); }}
+                onPress={() => { void handleSign(undefined, { tap: true }); }}
                 disabled={pending}
               >
                 <Text className="font-pp-semi-bold text-[14px] text-button-primary-text">
@@ -385,7 +398,7 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
             {passkeySecondary && (
               <Pressable
                 className="h-[36px] items-center justify-center"
-                onPress={() => { void handleSign(passkeySecondary.pick); }}
+                onPress={() => { void handleSign(passkeySecondary.pick, { tap: true }); }}
                 accessibilityRole="button"
                 testID={`seed-derivation-passkey-${passkeySecondary.pick}`}
               >

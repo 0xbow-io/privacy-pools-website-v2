@@ -17,6 +17,12 @@
 //   applies when another tab won the race: never a second credential while one
 //   is on record.
 //
+// - no explicit tap ('needs-tap'): no ceremony at all. A WebAuthn prompt only
+//   starts from a tap on a passkey action in the unlock dialog (Sign in, Use
+//   another passkey, Create a passkey). Opening a tab, a modal or a flow that
+//   needs keys gets 'needs-tap' and shows the unlock dialog instead (QA on
+//   PR #63: opening the Withdraw tab popped the OS passkey sheet by itself).
+//
 // Key derivation is untouched: whichever passkey answers, its PRF goes through
 // the same salts and the same derivation as before.
 
@@ -25,9 +31,23 @@ import { keccak256, toBytes } from 'viem';
 export type PasskeyPick = 'any' | 'create';
 
 export type PasskeyUnlockPlan =
+  | { kind: 'needs-tap' }
   | { kind: 'targeted'; credentialId: string }
   | { kind: 'discoverable' }
   | { kind: 'create' };
+
+export const PASSKEY_TAP_REQUIRED_MESSAGE = 'Tap Sign in to unlock with your passkey.';
+
+/**
+ * A key build reached the passkey unlock without a tap on a passkey action.
+ * Nothing was asked of the authenticator; the unlock dialog is the way on.
+ */
+export class PasskeyTapRequiredError extends Error {
+  constructor(message: string = PASSKEY_TAP_REQUIRED_MESSAGE) {
+    super(message);
+    this.name = 'PasskeyTapRequiredError';
+  }
+}
 
 /** Only the two literal picks count; anything else (an event object, a typo) is no pick. */
 export function normalizePasskeyPick(pick: unknown): PasskeyPick | undefined {
@@ -37,7 +57,10 @@ export function normalizePasskeyPick(pick: unknown): PasskeyPick | undefined {
 export function resolvePasskeyUnlockPlan(input: {
   rememberedCredentialId?: string | null;
   pick?: unknown;
+  /** Literal true only from the unlock dialog's passkey buttons. */
+  tap?: unknown;
 }): PasskeyUnlockPlan {
+  if (input.tap !== true) return { kind: 'needs-tap' };
   const pick = normalizePasskeyPick(input.pick);
   const remembered = input.rememberedCredentialId || undefined;
   if (pick === 'any') return { kind: 'discoverable' };

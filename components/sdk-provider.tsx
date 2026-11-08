@@ -62,6 +62,7 @@ import {
   resolvePasskeyUnlockPlan, passkeyNotUsedMessage, type PasskeyPick,
   discoverablePickVerdict, passkeyOwnerHandle, passkeyDisplayName, PASSKEY_WRONG_WALLET_MESSAGE, PASSKEY_UNPROVEN_MESSAGE,
   keepCreatedPasskey, PASSKEY_CREATED_FOR_REGISTERED_MESSAGE,
+  PasskeyTapRequiredError,
 } from '@/services/passkey-unlock-plan';
 import { bumpPaymentRequestRevision } from '@/services/payment-request-revision';
 import { useDebug, isDebugModeActive } from '@/components/debug-provider';
@@ -246,6 +247,9 @@ const PASSKEY_CRED_PREFIX = 'ppv2_passkey_cred_v2|';
 const LEGACY_PASSKEY_MARKER_KEY = 'ppv2_passkey_preview_v1';
 
 type PasskeyMarker = { credentialId?: string; ownerAddress: string; rpId?: string };
+
+/** What the unlock dialog hands a key build: its passkey choice, and that a passkey button was tapped. */
+export type PasskeyInitOptions = { passkeyPick?: PasskeyPick; passkeyTap?: boolean };
 
 function getRpId(): string {
   // Apex RP ID for every *.privacypools.com page (services/passkey-rp-id.ts).
@@ -737,8 +741,13 @@ interface SdkContextValue {
   exportAccount: (sessionOverride?: PoolSession | null, opts?: { chainId?: number }) => Promise<AccountExport | null>;
   importAccount: (data: AccountExport) => Promise<void>;
   initializeKeys: () => Promise<void>;
-  /** passkeyPick: the unlock dialog's explicit passkey choice (services/passkey-unlock-plan.ts). */
-  ensureInitialized: (opts?: { passkeyPick?: PasskeyPick }) => Promise<PoolSession>;
+  /**
+   * passkeyPick: the unlock dialog's explicit passkey choice, passkeyTap: the
+   * call comes from a tap on one of its passkey buttons. Without passkeyTap a
+   * passkey unlock never reaches WebAuthn: it rejects with
+   * PasskeyTapRequiredError and asks for the unlock dialog (services/passkey-unlock-plan.ts).
+   */
+  ensureInitialized: (opts?: PasskeyInitOptions) => Promise<PoolSession>;
   // Synchronously read the managers committed by the most recent
   // createSession. Safe right after `await ensureInitialized()` even on the
   // first run, when render-captured noteManager/keystoreManager are still stale.
@@ -849,6 +858,11 @@ interface SdkContextValue {
   choosePasskeyForRefusedSigner: () => void;
   /** A passkey credential is remembered on this device for the connected owner (local read, no network). */
   hasRememberedPasskey: () => boolean;
+  /**
+   * Bumped each time a key build needed a passkey tap and did not start one
+   * (services/passkey-unlock-plan.ts 'needs-tap'). The unlock dialog opens on it.
+   */
+  passkeyTapRequests: number;
   /**
    * The Base / Coinbase app signer failed sign-in for the connected address this
    * session: the dialog asks the user to use another wallet.
@@ -961,6 +975,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
   // instead of the wallet signature. The wallet still owns the account, so
   // identityMode/effectiveAddress are unchanged — only the key SOURCE differs.
   const [passkeyActive, setPasskeyActive] = useState<boolean>(false);
+  const [passkeyTapRequests, setPasskeyTapRequests] = useState(0);
   const passkeyModeRef = useRef<boolean>(false);
   // Which source produced the currently-committed keystore manager, so a
   // mode switch forces a re-derive even if `keysReady` is still true.
@@ -1308,8 +1323,9 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
   // passkeyPick: the dialog's explicit passkey choice ("Use another passkey"
   // or "Create a passkey"), services/passkey-unlock-plan.ts. Ignored outside
   // the passkey unlock.
-  const deriveKeystoreManager = useCallback(async (opts?: { passkeyPick?: PasskeyPick }): Promise<IKeystoreManager> => {
+  const deriveKeystoreManager = useCallback(async (opts?: PasskeyInitOptions): Promise<IKeystoreManager> => {
     const passkeyPick = opts?.passkeyPick;
+    const passkeyTap = opts?.passkeyTap;
     if (!effectiveAddress || !isSupportedEvmChainId(chainId)) {
       throw new Error('Connect a wallet or sign in with an account key on a supported chain first.');
     }
@@ -1360,7 +1376,14 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
           // A missing id used to CREATE, so every new browser or cleared
           // storage minted another passkey and another account (user report
           // 2026-11-02: three passkeys for one wallet).
-          const plan = resolvePasskeyUnlockPlan({ rememberedCredentialId: marker?.credentialId, pick: passkeyPick });
+          const plan = resolvePasskeyUnlockPlan({ rememberedCredentialId: marker?.credentialId, pick: passkeyPick, tap: passkeyTap });
+          // No tap on a passkey button, no ceremony: opening Withdraw (or any
+          // flow that builds the session) must not pop the OS passkey sheet
+          // (QA on PR #63). The unlock dialog asks for the tap instead.
+          if (plan.kind === 'needs-tap') {
+            setPasskeyTapRequests((n) => n + 1);
+            throw new PasskeyTapRequiredError();
+          }
           // A dismissed or empty prompt (NotAllowed covers both) says where
           // the way out is instead of a bare "dismissed". Same error class, so
           // reporting still files it as a user rejection.
@@ -2051,6 +2074,9 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
         // derivation): the next attempt runs fresh; not a failure to paint or to
         // log as one (codex on PR #36).
         const sourceChanged = err instanceof KeySourceChangedError;
+        // A passkey unlock waiting for its tap is not a failure: the dialog
+        // asks for the tap, and nothing was asked of the authenticator.
+        const awaitingTap = err instanceof PasskeyTapRequiredError;
         // A lazy import that cannot resolve (getSdkSetup and friends) means this
         // tab is older than the server, which has nothing to do with keys.
         const staleBundle = staleBundleMessage(raw);
@@ -2086,13 +2112,13 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
           if (pruned) wagmiConfig.setState(pruned);
           log('info', 'SDK', pruned ? 'Dropped the stale restored wallet connection' : 'Stale-connector error, but the current connection is live; left it alone');
         }
-        if (!sourceChanged && (!staleConnector || isDebugModeActive()) && stillCurrent()) {
+        if (!sourceChanged && !awaitingTap && (!staleConnector || isDebugModeActive()) && stillCurrent()) {
           setError(reconnecting ? message : `Key initialization failed: ${message}`);
         }
         // The stack and the connector's shape say WHERE this came from. Without
         // them a "not a function" error only says that some wagmi call ran against
         // a connection that was not live, not which call.
-        log(sourceChanged ? 'info' : 'error', 'SDK', `Key initialization failed: ${message}`, {
+        log(sourceChanged || awaitingTap ? 'info' : 'error', 'SDK', `Key initialization failed: ${message}`, {
           raw,
           staleConnector,
           stack: err instanceof Error ? err.stack?.split('\n').slice(0, 8).join(' | ') : undefined,
@@ -2632,7 +2658,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     }
   }, [chainPublicClient, log, poolSession]);
 
-  const ensureInitialized = useCallback(async (opts?: { passkeyPick?: PasskeyPick }): Promise<PoolSession> => {
+  const ensureInitialized = useCallback(async (opts?: PasskeyInitOptions): Promise<PoolSession> => {
     if (!effectiveAddress) {
       throw new Error('Connect a wallet or sign in with an account key first.');
     }
@@ -2675,7 +2701,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     const initPromise = (async () => {
       setIsInitializing(true);
       const startEpoch = deriveEpochRef.current;
-      const km = await deriveKeystoreManager({ passkeyPick: opts?.passkeyPick });
+      const km = await deriveKeystoreManager({ passkeyPick: opts?.passkeyPick, passkeyTap: opts?.passkeyTap });
       // If the key source (or wallet/chain) switched while we were deriving,
       // abort instead of committing a stale-source manager/session — a fresh
       // ensureInitialized will run for the new source.
@@ -3905,6 +3931,11 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     if (!walletActive || !address) {
       throw new Error('Connect a wallet (or sign in with an account key) first.');
     }
+    // A passkey account has no signature to export, so it is refused before
+    // the derivation: nothing to unlock, and no passkey prompt for it.
+    if (passkeyModeRef.current) {
+      throw new Error('The account changed or uses a passkey. Export from the current account’s recovery options.');
+    }
     // Derive (or reuse) the keys so the deterministic signature(s) are
     // captured — prompts the wallet only if the account isn't unlocked yet.
     const epoch = deriveEpochRef.current;
@@ -4253,6 +4284,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     signerRefusedDerivation,
     choosePasskeyForRefusedSigner,
     hasRememberedPasskey,
+    passkeyTapRequests,
     baseAppCannotSign,
     keystoreIdentityStatus,
     assertCanDeposit,
