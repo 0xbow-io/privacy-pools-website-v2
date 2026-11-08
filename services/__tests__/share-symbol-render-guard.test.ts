@@ -35,7 +35,6 @@ function renderable(line: string): string {
   return line
     .replace(/\b(?:testID|key|accessibilityLabel)=\{`[^`]*`\}/g, '')
     .replace(/\{(?:amountField|view)\.symbol\}/g, '')
-    .replace(/\{(?:isShareSymbol\(requestToken\.symbol\) \? requestToken\.symbol : displayTokenSymbol\(requestToken\.symbol\))\}/g, '')
     .replace(/\$\{requestTokenSymbol\}/g, '')
     .replace(/approxUnderlyingText\(`[^`]*`/g, 'approxUnderlyingText(')
     .replace(/(?:\blog|\bconsole\.\w+)\(.*$/, '');

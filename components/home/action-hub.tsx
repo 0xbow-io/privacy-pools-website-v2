@@ -3586,7 +3586,7 @@ export function ActionHub({
               <TokenNetworkIcon symbol={requestToken.symbol} size={28} badgeSize={16} badgeTestnetLabel={false} chainId={requestToken.chainId} />
               {/* nw-keep(data-color): pill text uses the runtime per-asset hue */}
               <Text className="font-pp-sans-semi-bold text-[15px]" style={{ color: (TokenHues[colorScheme][requestToken.symbol] ?? TokenHues[colorScheme].ETH).fg }}>
-                {isShareSymbol(requestToken.symbol) ? requestToken.symbol : displayTokenSymbol(requestToken.symbol)}
+                {displayTokenSymbol(requestToken.symbol)}
               </Text>
               {/* Sui requests are always native SUI (the create path emits
                   0x2::sui::SUI): no sheet, so no caret. */}
