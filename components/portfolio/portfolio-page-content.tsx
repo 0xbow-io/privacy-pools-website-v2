@@ -120,6 +120,7 @@ function PortfolioBody() {
         pendingLabel: string | null;
         earnedText?: string | null;
         earnedLoading?: boolean;
+        earnedUnit?: string;
         venueLabel?: string | null;
         aprText?: string | null;
         withdrawEnabled: boolean;
@@ -158,6 +159,7 @@ function PortfolioBody() {
                 yield: true,
                 earnedText: p.earnedText ?? null,
                 earnedLoading: p.earnedLoading === true,
+                earnedUnit: p.tokenSymbol,
                 venueLabel: 'Aave v3',
                 aprText: liveApy.percent != null ? `${liveApy.percent.toFixed(2)}%` : null,
                 actionSymbol: p.shareSymbol,

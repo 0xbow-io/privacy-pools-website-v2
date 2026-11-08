@@ -25,8 +25,7 @@ import { buildPortfolioPositions } from '@/services/portfolio-positions';
 import { formatUsdPrecise } from '@/services/format-fiat';
 import { usePoolSession } from '@/hooks/use-pool-session';
 import {
-  LOADING_FIGURE,
-  LOADING_USD,
+  FIGURE_LOADING,
   pendingValueDisplay,
   totalYieldEarnedUsd,
   yieldEarnedKey,
@@ -65,7 +64,7 @@ export type PortfolioPosition = {
    * for "—" (no figure, or one whose error bound shows at display precision).
    */
   earnedText?: string | null;
-  /** Yield row only: the earned figure is still computing. `earnedText` holds the placeholder. */
+  /** Yield row only: the earned figure is still computing. `earnedText` is null, the row draws a shimmer. */
   earnedLoading?: boolean;
 };
 
@@ -74,7 +73,7 @@ type PortfolioContextType = {
   totalValue: number;
   totalValueFormatted: string;
   pendingValue: number;
-  /** The Pending figure as shown: placeholder and spinner while it is not known yet. */
+  /** The Pending figure as shown: no text (a shimmer) while it is not known yet. */
   pendingDisplay: FigureDisplay;
   isLoading: boolean;
   hasPositions: boolean;
@@ -92,7 +91,7 @@ type PortfolioContextType = {
    * The Yield earned tile. The sum of the yield rows' figures, USD-formatted,
    * ending in "+" when a row without a figure was left out or a row's figure
    * is itself a lower bound, with `loading` while a row is still computing.
-   * The placeholder with a spinner while no row has a figure yet and one is
+   * No text (a shimmer) while no row has a figure yet and one is
    * coming. Null renders "—": no row has a figure and none is coming.
    */
   yieldEarnedDisplay: FigureDisplay | null;
@@ -241,7 +240,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         withdrawEnabled: p.withdrawEnabled,
         ...(p.isYield
           ? earned?.state === 'loading'
-            ? { earnedText: `${LOADING_FIGURE} ${p.tokenSymbol}`, earnedLoading: true }
+            ? { earnedText: null, earnedLoading: true }
             : { earnedText: earned?.state === 'ok' ? earned.display.text : null, earnedLoading: false }
           : {}),
       };
@@ -259,8 +258,8 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
 
   const isLoading = poolsLoading || pricesLoading;
   // Pools or prices not in yet: nothing in the header is known, so every
-  // figure there is a placeholder with a spinner, never "$0.00".
-  const yieldEarnedTile = isLoading ? { text: LOADING_USD, loading: true } : yieldEarnedTileDisplay(yieldEarnedUsd, formatUsd);
+  // figure there is a shimmer, never "$0.00".
+  const yieldEarnedTile = isLoading ? FIGURE_LOADING : yieldEarnedTileDisplay(yieldEarnedUsd, formatUsd);
   const pendingDisplay = pendingValueDisplay({
     pageLoading: isLoading,
     accountSyncing,

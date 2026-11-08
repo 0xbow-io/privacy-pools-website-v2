@@ -62,9 +62,9 @@ export type YieldEarnedEntry =
        */
       heldShares: bigint;
     }
-  /** An input has not arrived yet (snapshot, a grid feed, the keys). Spinner, then a figure. */
+  /** An input has not arrived yet (snapshot, a grid feed, the keys). Shimmer, then a figure. */
   | { status: 'loading'; reason: string }
-  /** No figure will come from these inputs. "—", no spinner. */
+  /** No figure will come from these inputs. "—", no animation. */
   | { status: 'unavailable'; reason: string };
 
 export type YieldEarnedByShare = ReadonlyMap<string, YieldEarnedEntry>;
@@ -373,8 +373,8 @@ export function yieldEarnedNotesForShare(
 
 /**
  * One yield row's earned state. Three different things, never folded together:
- *   - `loading`: no figure YET. Placeholder and a spinner, never "0";
- *   - `unavailable`: no figure from these inputs. "—", no spinner;
+ *   - `loading`: no figure YET. A shimmer, never "0";
+ *   - `unavailable`: no figure from these inputs. "—", no animation;
  *   - `ok`: a computed figure, which may honestly be 0 (a deposit minutes old).
  */
 export type YieldEarnedRow =
@@ -407,17 +407,13 @@ export function yieldEarnedRow(
   return display ? { state: 'ok', display } : { state: 'unavailable' };
 }
 
-/** What a figure still loading shows in place of a number, beside a spinner. Never "0". */
-export const LOADING_FIGURE = '-.--';
-export const LOADING_USD = `$${LOADING_FIGURE}`;
-
 /**
  * The page's total, in USD.
  *   - `loading`: no row has a figure yet and at least one is still computing;
  *   - `unavailable`: no row has a figure and none is coming ("—");
  *   - `ok`: the priced figures summed. `partial` when a row has no figure, no
  *     price, or only a lower bound (the tile adds "+"). `loading` when a row
- *     is still computing, so the tile keeps a small spinner beside the sum.
+ *     is still computing, so the tile keeps a "syncing" badge beside the sum.
  */
 export type YieldEarnedTotal =
   | { state: 'loading' }
@@ -452,15 +448,22 @@ export function totalYieldEarnedUsd(
   return { state: 'ok', usd: total, partial, loading };
 }
 
-/** A header figure: its text, and whether a spinner sits beside it. */
-export type FigureDisplay = { text: string; loading: boolean };
+/**
+ * A header figure. `text` null with `loading`: nothing known yet, the page
+ * draws a shimmer block in its place, never "0". `text` with `loading`: the
+ * known part, not final yet (a "syncing" badge beside it).
+ */
+export type FigureDisplay = { text: string | null; loading: boolean };
+
+/** Nothing known yet: a shimmer block, never a figure. */
+export const FIGURE_LOADING: FigureDisplay = { text: null, loading: true };
 
 /** The "Yield earned" tile. Null renders "—". */
 export function yieldEarnedTileDisplay(
   total: YieldEarnedTotal,
   formatUsd: (usd: number) => string,
 ): FigureDisplay | null {
-  if (total.state === 'loading') return { text: LOADING_USD, loading: true };
+  if (total.state === 'loading') return FIGURE_LOADING;
   if (total.state === 'unavailable') return null;
   return { text: `${formatUsd(total.usd)}${total.partial ? '+' : ''}`, loading: total.loading };
 }
@@ -469,8 +472,8 @@ export function yieldEarnedTileDisplay(
  * The "Pending" figure. It sums the account's pending notes, so while the
  * account is still syncing a 0 there only means "none found yet", and a yield
  * row's pending shares have no value until the share rate arrives. Neither is
- * a figure: placeholder and spinner. A figure above 0 found mid-sync shows,
- * with the spinner, since more may land. A rate that failed (not loading)
+ * a figure: a shimmer block. A figure above 0 found mid-sync shows, with the
+ * "syncing" badge, since more may land. A rate that failed (not loading)
  * stays "Value unavailable".
  */
 export function pendingValueDisplay(params: {
@@ -486,10 +489,10 @@ export function pendingValueDisplay(params: {
   formatUsd: (usd: number) => string;
 }): FigureDisplay {
   const { pageLoading, accountSyncing, ratesLoading, value, valueUnavailable, formatUsd } = params;
-  if (pageLoading) return { text: LOADING_USD, loading: true };
+  if (pageLoading) return FIGURE_LOADING;
   if (valueUnavailable) {
-    return ratesLoading ? { text: LOADING_USD, loading: true } : { text: 'Value unavailable', loading: false };
+    return ratesLoading ? FIGURE_LOADING : { text: 'Value unavailable', loading: false };
   }
-  if (accountSyncing) return value > 0 ? { text: formatUsd(value), loading: true } : { text: LOADING_USD, loading: true };
+  if (accountSyncing) return value > 0 ? { text: formatUsd(value), loading: true } : FIGURE_LOADING;
   return { text: formatUsd(value), loading: false };
 }

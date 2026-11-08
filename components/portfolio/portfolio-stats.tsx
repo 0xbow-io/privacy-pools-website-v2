@@ -1,23 +1,22 @@
-import { ActivityIndicator, View, Text, useWindowDimensions } from 'react-native';
+import { View, Text, useWindowDimensions } from 'react-native';
 import { Card } from '@/components/ui/card';
 import { HoverHint } from '@/components/ui/hover-hint';
-import { useTheme } from '@/components/theme-provider';
-import { Colors } from '@/constants/theme';
-import { LOADING_USD } from '@/services/yield-earned';
+import { Skeleton, SyncingBadge } from '@/components/ui/skeleton';
 
 /**
- * The spinner beside a header figure that is not known yet, or not final yet.
- * Without it a placeholder read as a figure: "$0.00" and "0 USDC" were taken
- * for real (Nathaniel, QA of #67).
+ * A header figure that is not known yet: a shimmer block the size of the
+ * figure, never "$0.00" or a placeholder that reads as one (Nathaniel, QA of
+ * #67). About the width of "$0,000.00" at the figure's size.
  */
-function FigureLoading({ label }: { label: string }) {
-  const { colorScheme } = useTheme();
+function FigureSkeleton({ size, label }: { size: number; label: string }) {
   return (
-    <View accessibilityLabel={label} testID="portfolio-figure-loading">
-      {/* nw-keep(data-color): spinner tint is a theme token into RN's
-          ActivityIndicator (no className path). */}
-      <ActivityIndicator size="small" color={Colors[colorScheme].textSecondary} />
-    </View>
+    <Skeleton
+      width={Math.round(size * 3.6)}
+      height={size}
+      radius={6}
+      accessibilityLabel={label}
+      testID="portfolio-figure-loading"
+    />
   );
 }
 
@@ -43,7 +42,8 @@ type Asset = {
 
 type PortfolioStatsProps = {
   netValue?: string;
-  pending?: string;
+  /** Null with `pendingLoading`: nothing known yet, a shimmer block. */
+  pending?: string | null;
   assetsCount?: number;
   assetsLabel?: string;
   /**
@@ -51,9 +51,12 @@ type PortfolioStatsProps = {
    * show: no yield position, or one of them has no figure (services/yield-earned.ts).
    */
   yieldEarnedUsd?: string | null;
-  /** A yield row is still computing: a spinner beside the figure (or the placeholder). */
+  /**
+   * A yield row is still computing: a shimmer block while there is no figure
+   * yet, the known figure with a "syncing" badge once there is one.
+   */
   yieldEarnedLoading?: boolean;
-  /** The pending figure is not final yet: a spinner beside it. */
+  /** The pending figure is not final yet: a shimmer, or the figure so far with a "syncing" badge. */
   pendingLoading?: boolean;
   hasData?: boolean;
   assets?: Asset[];
@@ -129,12 +132,16 @@ export function PortfolioStats({
               <Text className="font-pp-regular text-[12px] leading-[12px] text-text-secondary">
                 Pending Balance
               </Text>
-              <View className="flex-row items-center gap-[6px]">
-                <Text className="font-pp-bold text-[18px] leading-[18px] text-text-muted">
-                  {pending}
-                </Text>
-                {pendingLoading ? <FigureLoading label="Pending balance loading" /> : null}
-              </View>
+              {pendingLoading && pending == null ? (
+                <FigureSkeleton size={18} label="Pending balance loading" />
+              ) : (
+                <View className="flex-row items-center gap-[6px]">
+                  <Text className="font-pp-bold text-[18px] leading-[18px] text-text-muted">
+                    {pending ?? '—'}
+                  </Text>
+                  {pendingLoading ? <SyncingBadge /> : null}
+                </View>
+              )}
             </View>
           </View>
 
@@ -149,14 +156,18 @@ export function PortfolioStats({
                   Yield earned
                 </Text>
               </View>
-              <View className="flex-row items-center gap-[6px]">
-                <Text
-                  className={`font-pp-bold text-[18px] leading-[18px] ${yieldEarnedUsd && yieldEarnedUsd !== LOADING_USD ? 'text-success' : 'text-text-muted'}`}
-                >
-                  {yieldEarnedUsd ?? '—'}
-                </Text>
-                {yieldEarnedLoading ? <FigureLoading label="Yield earned loading" /> : null}
-              </View>
+              {yieldEarnedLoading && yieldEarnedUsd == null ? (
+                <FigureSkeleton size={18} label="Yield earned loading" />
+              ) : (
+                <View className="flex-row items-center gap-[6px]">
+                  <Text
+                    className={`font-pp-bold text-[18px] leading-[18px] ${yieldEarnedUsd ? 'text-success' : 'text-text-muted'}`}
+                  >
+                    {yieldEarnedUsd ?? '—'}
+                  </Text>
+                  {yieldEarnedLoading ? <SyncingBadge testID="portfolio-yield-earned-syncing" /> : null}
+                </View>
+              )}
             </View>
             <View className="my-[10px] w-[1px] self-stretch bg-border" />
             <View className="flex-1 gap-[6px] p-[16px]">
@@ -217,17 +228,23 @@ export function PortfolioStats({
               <Text className="font-pp-regular text-[12px] leading-[12px] text-right text-text-secondary">
                 Pending
               </Text>
-              <View className="flex-row items-center justify-end gap-[6px]">
-                {pendingLoading ? <FigureLoading label="Pending balance loading" /> : null}
-                <Text
-                  className="font-pp-bold text-right text-text-muted"
-                  testID="portfolio-stats-pending"
-                  // nw-keep(measured-or-inset): headline size follows the width-driven responsive scale
-                  style={{ fontSize: responsiveFontSize, lineHeight: responsiveFontSize }}
-                >
-                  {pending}
-                </Text>
-              </View>
+              {pendingLoading && pending == null ? (
+                <View className="items-end">
+                  <FigureSkeleton size={responsiveFontSize} label="Pending balance loading" />
+                </View>
+              ) : (
+                <View className="flex-row items-center justify-end gap-[6px]">
+                  {pendingLoading ? <SyncingBadge /> : null}
+                  <Text
+                    className="font-pp-bold text-right text-text-muted"
+                    testID="portfolio-stats-pending"
+                    // nw-keep(measured-or-inset): headline size follows the width-driven responsive scale
+                    style={{ fontSize: responsiveFontSize, lineHeight: responsiveFontSize }}
+                  >
+                    {pending ?? '—'}
+                  </Text>
+                </View>
+              )}
             </View>
           </View>
         </View>
@@ -244,17 +261,21 @@ export function PortfolioStats({
               Yield earned
             </Text>
           </View>
-          <View className="flex-row items-center gap-[6px]">
-            <Text
-              className={`font-pp-bold ${yieldEarnedUsd && yieldEarnedUsd !== LOADING_USD ? 'text-success' : 'text-text-muted'}`}
-              testID="portfolio-stats-yield-earned"
-              // nw-keep(measured-or-inset): headline size follows the width-driven responsive scale
-              style={{ fontSize: responsiveFontSize, lineHeight: responsiveFontSize }}
-            >
-              {yieldEarnedUsd ?? '—'}
-            </Text>
-            {yieldEarnedLoading ? <FigureLoading label="Yield earned loading" /> : null}
-          </View>
+          {yieldEarnedLoading && yieldEarnedUsd == null ? (
+            <FigureSkeleton size={responsiveFontSize} label="Yield earned loading" />
+          ) : (
+            <View className="flex-row items-center gap-[8px]">
+              <Text
+                className={`font-pp-bold ${yieldEarnedUsd ? 'text-success' : 'text-text-muted'}`}
+                testID="portfolio-stats-yield-earned"
+                // nw-keep(measured-or-inset): headline size follows the width-driven responsive scale
+                style={{ fontSize: responsiveFontSize, lineHeight: responsiveFontSize }}
+              >
+                {yieldEarnedUsd ?? '—'}
+              </Text>
+              {yieldEarnedLoading ? <SyncingBadge testID="portfolio-yield-earned-syncing" /> : null}
+            </View>
+          )}
         </View>
 
         {/* Divider */}

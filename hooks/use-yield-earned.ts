@@ -142,7 +142,7 @@ export function useYieldEarned(params: {
     const markUnavailable = (next: Map<string, YieldEarnedEntry>, shares: readonly string[], cid: number, reason: string) => {
       for (const share of shares) next.set(yieldEarnedKey(cid, share), { status: 'unavailable', reason });
     };
-    // An input not here YET: the row shows a spinner, never a "0" and never
+    // An input not here YET: the row shows a shimmer, never a "0" and never
     // the dash, which says no figure is coming (QA of #67: "0 USDC" while loading).
     const markLoading = (next: Map<string, YieldEarnedEntry>, shares: readonly string[], cid: number, reason: string) => {
       for (const share of shares) next.set(yieldEarnedKey(cid, share), { status: 'loading', reason });

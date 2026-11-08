@@ -3,7 +3,7 @@ import { computeYieldEarned, yieldEarnedEventsFromSnapshot } from '@privacy-pool
 
 import type { PpUsdcRateHistoryResponse, YieldDepositsResponse } from '@/services/api-types';
 import {
-  LOADING_USD,
+  FIGURE_LOADING,
   feedValue,
   missingSectionDrops,
   pendingValueDisplay,
@@ -374,16 +374,16 @@ describe('loading is not zero, and neither is unavailable', () => {
       .toEqual({ state: 'ok', display: { text: '+1.23 USDC', amount: 1.234567 } });
   });
 
-  test('unavailable stays unavailable, with no spinner', () => {
+  test('unavailable stays unavailable, with no animation', () => {
     expect(yieldEarnedRow({ status: 'unavailable', reason: 'deposit-fact-missing' }, 'USDC', true)).toEqual({ state: 'unavailable' });
     expect(yieldEarnedTileDisplay(totalYieldEarnedUsd([{ earned: { state: 'unavailable' }, underlyingPriceUsd: 1 }]), usd)).toBeNull();
   });
 
-  test('the tile: placeholder and spinner while nothing is known, never "$0.00"', () => {
+  test('the tile: a shimmer (no text) while nothing is known, never "$0.00"', () => {
     const loading = totalYieldEarnedUsd([{ earned: { state: 'loading' }, underlyingPriceUsd: 1 }]);
     expect(loading).toEqual({ state: 'loading' });
-    expect(yieldEarnedTileDisplay(loading, usd)).toEqual({ text: LOADING_USD, loading: true });
-    expect(LOADING_USD).not.toContain('0');
+    expect(yieldEarnedTileDisplay(loading, usd)).toEqual({ text: null, loading: true });
+    expect(FIGURE_LOADING).toEqual({ text: null, loading: true });
     // Loading beside unavailable: still loading, a figure may come.
     expect(totalYieldEarnedUsd([
       { earned: { state: 'loading' }, underlyingPriceUsd: 1 },
@@ -391,14 +391,14 @@ describe('loading is not zero, and neither is unavailable', () => {
     ])).toEqual({ state: 'loading' });
   });
 
-  test('the tile: the known part as a lower bound, with a spinner, while other rows load', () => {
+  test('the tile: the known part as a lower bound, syncing, while other rows load', () => {
     const total = totalYieldEarnedUsd([
       { earned: { state: 'ok', display: { text: '+2.50 USDC', amount: 2.5 } }, underlyingPriceUsd: 1 },
       { earned: { state: 'loading' }, underlyingPriceUsd: 1 },
     ]);
     expect(total).toEqual({ state: 'ok', usd: 2.5, partial: true, loading: true });
     expect(yieldEarnedTileDisplay(total, usd)).toEqual({ text: '$2.50+', loading: true });
-    // Every row computed, one of them a real 0: a plain figure, no spinner.
+    // Every row computed, one of them a real 0: a plain figure, not syncing.
     const done = totalYieldEarnedUsd([
       { earned: { state: 'ok', display: { text: '+2.50 USDC', amount: 2.5 } }, underlyingPriceUsd: 1 },
       { earned: { state: 'ok', display: { text: '0 USDC', amount: 0 } }, underlyingPriceUsd: 1 },
@@ -409,15 +409,15 @@ describe('loading is not zero, and neither is unavailable', () => {
     expect(yieldEarnedTileDisplay(zero, usd)).toEqual({ text: '$0.00', loading: false });
   });
 
-  test('pending: placeholder and spinner while loading or syncing, a real 0 once synced', () => {
+  test('pending: a shimmer while loading or syncing, a real 0 once synced', () => {
     const base = { pageLoading: false, accountSyncing: false, ratesLoading: false, value: 0, valueUnavailable: false, formatUsd: usd };
-    expect(pendingValueDisplay({ ...base, pageLoading: true })).toEqual({ text: LOADING_USD, loading: true });
+    expect(pendingValueDisplay({ ...base, pageLoading: true })).toEqual({ text: null, loading: true });
     // Mid-sync a 0 is "none found yet".
-    expect(pendingValueDisplay({ ...base, accountSyncing: true })).toEqual({ text: LOADING_USD, loading: true });
-    // Mid-sync a figure found so far shows, with the spinner.
+    expect(pendingValueDisplay({ ...base, accountSyncing: true })).toEqual({ text: null, loading: true });
+    // Mid-sync a figure found so far shows, syncing.
     expect(pendingValueDisplay({ ...base, accountSyncing: true, value: 12 })).toEqual({ text: '$12.00', loading: true });
-    // Pending shares waiting on the share rate: loading. A failed rate: unavailable, no spinner.
-    expect(pendingValueDisplay({ ...base, valueUnavailable: true, ratesLoading: true })).toEqual({ text: LOADING_USD, loading: true });
+    // Pending shares waiting on the share rate: loading. A failed rate: unavailable, no animation.
+    expect(pendingValueDisplay({ ...base, valueUnavailable: true, ratesLoading: true })).toEqual({ text: null, loading: true });
     expect(pendingValueDisplay({ ...base, valueUnavailable: true })).toEqual({ text: 'Value unavailable', loading: false });
     // Synced, nothing pending: a computed 0.
     expect(pendingValueDisplay(base)).toEqual({ text: '$0.00', loading: false });
