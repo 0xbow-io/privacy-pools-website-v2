@@ -207,7 +207,8 @@ import { useNativeMockBlock } from '@/hooks/use-native-mock-block';
 import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { FeeWarning } from '@/components/fee-warning';
 import { buildFeeBreakdown, gasCostUsd, quoteGas, splitRelayerFee, swapLossUsd, type FeeGasReading } from '@/services/fee-warning';
-import { useShareNameText } from '@/hooks/use-share-rates';
+import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
+import { shareNumberAsUnderlying } from '@/services/share-rates';
 
 const WITHDRAW_RELAY_METHOD = /^relay(Withdrawal|RegisterAndWithdrawal|WithAnnounce)$/;
 const SWAP_EXIT_PENDING_MESSAGE = 'The relayer accepted this withdrawal, but it has not been included in a block yet. It has not failed and can still land, so these funds are held for it. Your balance and history update on their own once it settles; if it is still pending after 10 minutes, report it from the pending notice.';
@@ -1862,6 +1863,16 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // The greyed receive figure on the form, before Review: the same redeemed
   // underlying, never the share count under the coin's name.
   const previewNet = previewReceiveFigure({ isShare: selectedIsShare, amount: reviewNet, underlying: reviewNetUnderlyingNum });
+  // Full-balance (gross) mode before the quote: the fee comes out of the
+  // amount and is unknown until Withdraw fetches the quote, so the redeem read
+  // above has no net to price and the figure was a bare dash at Max (QA on
+  // #72). Show the entered shares at the live feed rate, marked "≈" and
+  // before the fee, as the plain-asset path does. Reads the feed grid only.
+  const { rateFor: shareRateFor } = useShareRates();
+  const previewShareRate = selectedIsShare ? shareRateFor(chainId, selectedTokenAddress) : undefined;
+  const previewNetEstimate = previewNet == null && selectedIsShare && !relayerQuote && previewShareRate && enteredAmount > 0
+    ? shareNumberAsUnderlying(enteredAmount, previewShareRate)
+    : null;
   // The dollar total beside it: the redeemed underlying at the underlying's
   // price, never shares × that price (codex P2 on 0cea0b3). Null hides the
   // line while the conversion is unknown.
@@ -5254,7 +5265,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                               {enteredAmount > 0
                                 ? (isSwapExit
                                   ? (swapExitEstimateText ?? '—')
-                                  : (previewNet == null ? '—' : groupThousands(formatTokenBalanceDown(previewNet, recvSymbol))))
+                                  : (previewNet != null ? groupThousands(formatTokenBalanceDown(previewNet, recvSymbol)) : previewNetEstimate != null ? `≈ ${groupThousands(formatTokenBalanceDown(previewNetEstimate, recvSymbol))}` : '—'))
                                 : '0'}
                             </Text>
                             <Pressable

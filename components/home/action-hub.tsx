@@ -3101,6 +3101,11 @@ export function ActionHub({
   };
 
   const renderZone = (a: Action) => {
+    // This page's own entry. Every page renders at once (the pager shows the
+    // neighbours while swiping), and `amount` is the LIVE tab's: a Withdraw max
+    // (a share count, 18 decimals) printed on the off-screen Shield page as
+    // "Into the $USDC pool … 1752.504386443988721838 USDC" (QA on #72).
+    const pageAmount = a === action ? amount : (amounts[a] ?? '');
     const { symbol: pageTargetSymbol, chainId: pageChainId, shielded: pageShielded } = pageFigures[a];
     const pagePool = data.myPools.find((p) => p.name.toUpperCase() === pageTargetSymbol.toUpperCase() && p.chainId === pageChainId);
     const pageBalanceView = balanceDisplay(a === 'withdraw' ? withdrawSpendableExact : pageShielded.exact, pageTargetSymbol, pageChainId, pagePool?.tokenAddress);
@@ -3114,7 +3119,7 @@ export function ActionHub({
     const ctaDisabled = ((a === 'withdraw' || a === 'send') && !!amountField.error)
       || (a === 'swap' && (!swapOutToken || swapRecipientBlocks))
       || (a === 'shield' && (shieldRecipientInvalid || shieldCapBlocksDeposit || shieldPricing || shieldDepositsPaused));
-    const compactShield = landing && a === 'shield' && !amount && !shieldRecipientEnabled;
+    const compactShield = landing && a === 'shield' && !pageAmount && !shieldRecipientEnabled;
     const active = ACTIONS.find((x) => x.key === a)!;
     // A settling deposit keeps the FORM on screen (input visible, disabled)
     // and swaps only the bottom half (presets/fee/info/CTA) for the progress
@@ -3811,7 +3816,7 @@ export function ActionHub({
                     // The quote's units, not the pool's: see shieldFundingUnits.
                     ? `≈ ${parseFloat(formatUnits(shieldQuote.toAmount!, shieldFundingUnits?.decimals ?? shieldPool.decimals)).toLocaleString('en-US', { maximumFractionDigits: 6 })}`
                     : '—')
-                  : (amount || '0')}
+                  : (pageAmount || '0')}
               </Text>
               <Pressable
                 onPress={() => { if (!poolPickEnabled) return; setPoolSheetMode('shield'); setPoolSheetOpen(true); }}
@@ -4010,9 +4015,9 @@ export function ActionHub({
           overlap.) */}
       {a === 'shield' && !shieldBusy && !isSui && walletConnected && !walletBalanceLoading
         && !shieldCapBlocksDeposit
-        && (parseFloat(amount) || 0) > (parseFloat(shieldMaxText) || 0) && (
+        && (parseFloat(pageAmount) || 0) > (parseFloat(shieldMaxText) || 0) && (
         <Text className="font-pp-sans text-[12px] text-[#E53935]">
-          {(parseFloat(amount) || 0) > (parseFloat(walletBalanceText) || 0)
+          {(parseFloat(pageAmount) || 0) > (parseFloat(walletBalanceText) || 0)
             ? `Exceeds your wallet balance (${(parseFloat(walletBalanceText) || 0).toLocaleString('en-US', { maximumFractionDigits: 6 })} ${displayTokenSymbol(payMeta.symbol)}).`
             : `Leave room for ${shieldHeadroomRoomText({ vettingFeeBps, crossPayShield, payIsNative: !tokenAddress })}. You can shield up to ${(parseFloat(shieldMaxText) || 0).toLocaleString('en-US', { maximumFractionDigits: 6 })} ${displayTokenSymbol(payMeta.symbol)}.`}
         </Text>
@@ -4425,7 +4430,7 @@ export function ActionHub({
           amount 1:1 and the fee comes out of the CONVERTED amount, so the fee
           is the quote's ≈ figure. */}
       {a === 'shield' && !shieldBusy && !isSui && vettingFeeBps != null && (!compactShield || vettingFeeBps > 0) && (() => {
-        const amt = parseFloat(amount) || 0;
+        const amt = parseFloat(pageAmount) || 0;
         const totalText = crossPayShield
           ? `${amt.toLocaleString('en-US', { maximumFractionDigits: 6 })} ${displayTokenSymbol(payMeta.symbol)}`
           : `${(amt * (1 + vettingFeeBps / 10000)).toLocaleString('en-US', { maximumFractionDigits: 6 })} ${displayTokenSymbol(pageTargetSymbol)}`;
