@@ -35,11 +35,13 @@ async function sessionFor(owner: string, seed: string) {
     rpcInteractor: chainStub,
     networkPassphrase: STELLAR_TESTNET_NETWORK.networkPassphrase,
     poolContractId: STELLAR_TESTNET_CONTRACTS.poolContractId,
+    deploymentLedger: '1',
     keystoreContractId: STELLAR_TESTNET_CONTRACTS.keystoreContractId,
     aspRegistryContractId: STELLAR_TESTNET_CONTRACTS.aspRegistryContractId,
     ipfsGatewayUrl: 'http://unused.invalid',
     protocolKeys: { ...derived, revocableKeyIndex: '0x0' },
     persistentStorage: { type: 'memory' },
+    ephemeralPaymentRequests: true,
     circuitArtifactsDir: '/nonexistent',
   } as never);
   return { sdk, session };
