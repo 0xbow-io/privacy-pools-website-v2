@@ -279,26 +279,41 @@ export function understatementRoundsToZero(
 }
 
 export type YieldEarnedDisplay = {
-  /** e.g. "+1.23 USDC", "<0.01 USDC", "0.00 USDC". */
+  /** e.g. "+1.23 USDC", "<0.01 USDC", "0 USDC", or "+1.23+ USDC" for a lower bound. */
   text: string;
-  /** The figure in underlying units, for a USD total. */
+  /** The figure in underlying units, for a USD total. A lower bound when `lowerBound`. */
   amount: number;
+  /** The SDK's understatement bound shows at display precision: `amount` is the floor of the range. */
+  lowerBound?: boolean;
 };
 
 /**
  * The row's earned text in the underlying (`symbol` is the display symbol:
- * USDC, USDT, ETH), or null for "—".
+ * USDC, USDT, ETH), or null for "—" when the SDK gave no figure.
  *
- * Null when the SDK gave no figure, and when its understatement bound does not
- * round to zero at display precision: the figure is then a lower bound whose
- * gap is visible, and the table has no way to say "at least". A negative
- * figure is only possible within the bound (the SDK answers `inconsistent`
- * beyond it), so it prints as zero.
+ * The SDK's figure can understate by up to `maxUnderstatement`. When that
+ * rounds to zero at display precision the figure prints as is. When it does
+ * not, the figure is printed as a lower bound: rounded DOWN to display
+ * precision and marked with a trailing "+", as the tile marks its own. It used
+ * to print "—" instead, and that hid every large position: a flow valued off
+ * the hourly rate history carries one hour of rate drift as its bound, about
+ * 4e-6 of the flow, which on 1762 USDC is 0.007 USDC, over the half cent
+ * USDC is shown to (QA of #67, the Ethereum USDC row on "—" while the small
+ * USDT rows had figures). A negative figure is only possible within the
+ * bound (the SDK answers `inconsistent` beyond it), so it prints as zero.
  */
 export function yieldEarnedDisplay(entry: YieldEarnedEntry | undefined, symbol: string): YieldEarnedDisplay | null {
   if (!entry || entry.status !== 'ok') return null;
-  if (!understatementRoundsToZero(entry.maxUnderstatement, entry.assetDecimals, symbol)) return null;
   const value = entry.earnedTotal > 0n ? entry.earnedTotal : 0n;
+  if (!understatementRoundsToZero(entry.maxUnderstatement, entry.assetDecimals, symbol)) {
+    // Floored, never rounded up: a lower bound must not overstate.
+    const hidden = entry.assetDecimals - displayFractionDigits(symbol);
+    const step = hidden > 0 ? 10n ** BigInt(hidden) : 1n;
+    const floored = value - (value % step);
+    const amount = Number(formatUnits(floored, entry.assetDecimals));
+    const formatted = formatTokenBalance(amount, symbol);
+    return { text: `${floored > 0n ? '+' : ''}${formatted}+ ${symbol}`, amount, lowerBound: true };
+  }
   const amount = Number(formatUnits(value, entry.assetDecimals));
   const formatted = formatTokenBalance(amount, symbol);
   if (value === 0n) return { text: `${formatted} ${symbol}`, amount: 0 };
@@ -346,7 +361,7 @@ export function yieldEarnedNotesForShare(
     }));
 }
 
-/** The page's total, in USD. `partial` when some yield row has no figure or no price. */
+/** The page's total, in USD. `partial` when some yield row has no figure, no price, or only a lower bound. */
 export type YieldEarnedTotal = { usd: number; partial: boolean };
 
 /**
@@ -363,6 +378,7 @@ export function totalYieldEarnedUsd(
   let partial = false;
   for (const row of rows) {
     if (!row.earned) { partial = true; continue; }
+    if (row.earned.lowerBound) partial = true;
     if (row.earned.amount === 0) { counted += 1; continue; }
     if (!(row.underlyingPriceUsd > 0)) { partial = true; continue; }
     total += row.earned.amount * row.underlyingPriceUsd;

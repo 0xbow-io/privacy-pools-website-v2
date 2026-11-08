@@ -244,7 +244,10 @@ describe('display threshold', () => {
     // Negative only within the bound: printed as zero, never red.
     expect(yieldEarnedDisplay(ok(-2n, 3n), 'USDC')).toEqual({ text: '0 USDC', amount: 0 });
     expect(yieldEarnedDisplay(ok(12_345_000_000_000_000n, 3n, 18), 'ETH')).toEqual({ text: '+0.01235 ETH', amount: 0.012345 });
-    expect(yieldEarnedDisplay(ok(5_000_000n, 10_000n), 'USDC')).toBeNull();
+    // A bound that shows at display precision: the floor of the range, marked as one.
+    expect(yieldEarnedDisplay(ok(5_009_999n, 10_000n), 'USDC')).toEqual({ text: '+5+ USDC', amount: 5, lowerBound: true });
+    expect(yieldEarnedDisplay(ok(1_239_999n, 7_048n), 'USDC')).toEqual({ text: '+1.23+ USDC', amount: 1.23, lowerBound: true });
+    expect(yieldEarnedDisplay(ok(4_000n, 7_048n), 'USDC')).toEqual({ text: '0+ USDC', amount: 0, lowerBound: true });
     expect(yieldEarnedDisplay({ status: 'unavailable', reason: 'no-rate-series' }, 'USDC')).toBeNull();
     expect(yieldEarnedDisplay(undefined, 'USDC')).toBeNull();
   });
@@ -262,6 +265,45 @@ describe('display threshold', () => {
     expect(totalYieldEarnedUsd([{ earned: b, underlyingPriceUsd: 0 }])).toBeNull();
     expect(totalYieldEarnedUsd([{ earned: null, underlyingPriceUsd: 1 }])).toBeNull();
     expect(totalYieldEarnedUsd([{ earned: { text: '0.00 ETH', amount: 0 }, underlyingPriceUsd: 0 }])).toEqual({ usd: 0, partial: false });
+  });
+
+  test('a large position with a rate-valued flow gets a figure, not "—" (QA of #67, Ethereum USDC)', () => {
+    // Mainnet ppUSDC's real hourly steps (public rate history, 2026-09-04).
+    const rateSeries = toYieldRateSeries(
+      rateHistory([[T0, '1000038'], [T0 + 3600, '1000042'], [T0 + 7200, '1000200']]),
+      SHARE,
+    );
+    // A note received between two observations (a swap into the share, a
+    // transfer in): valued off the bracket, whose width is the bound.
+    const compute = (shares: bigint) => computeYieldEarned({
+      share: SHARE,
+      shareDecimals: 18,
+      notes: [{ commitment: COMMITMENT_HEX, nullifier: '0x1234', shares, status: 'ACTIVE' as never, createdAt: T0 + 1800, originatedHere: false }],
+      depositFacts: [],
+      rateSeries,
+      events: {
+        deposits: [],
+        spends: [{ txHash: '0x01', at: T0 + 1800, nullifierHashes: ['0xdead'], outputCommitments: [COMMITMENT_HEX], withdrawnShares: null }],
+        ragequits: [],
+      } as never,
+      exchangeRateNow: 1_000_200n,
+      now: T0 + 7300,
+    });
+    const big = toYieldEarnedEntry(compute(1762n * 10n ** 18n), 6);
+    // One hour of drift on 1762 shares: 7048 raw, over the 5000 (half a cent) USDC shows.
+    expect(big).toEqual({ status: 'ok', earnedTotal: 278_396n, maxUnderstatement: 7_048n, assetDecimals: 6 });
+    expect(understatementRoundsToZero(7_048n, 6, 'USDC')).toBe(false);
+    expect(yieldEarnedDisplay(big, 'USDC')).toEqual({ text: '+0.27+ USDC', amount: 0.27, lowerBound: true });
+    // The same flow on a small position rounds away and prints exactly, as the USDT rows did.
+    const small = toYieldEarnedEntry(compute(477n * 10n ** 16n), 6);
+    expect(yieldEarnedDisplay(small, 'USDT')?.lowerBound).toBeUndefined();
+    // The tile counts the lower bound and says it is one.
+    const total = totalYieldEarnedUsd([
+      { earned: yieldEarnedDisplay(big, 'USDC'), underlyingPriceUsd: 1 },
+      { earned: yieldEarnedDisplay(small, 'USDT'), underlyingPriceUsd: 1 },
+    ]);
+    expect(total?.partial).toBe(true);
+    expect(total?.usd).toBeGreaterThan(0.27);
   });
 
   test('stored notes of a share reduce like the SDK reduces live ones', () => {

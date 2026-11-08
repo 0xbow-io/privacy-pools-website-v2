@@ -76,7 +76,8 @@ type PortfolioContextType = {
   chainId: number;
   /**
    * Sum of the yield rows' earned figures, USD-formatted, or null for "—"
-   * when no row has one. Ends in "+" when a row without a figure was left out.
+   * when no row has one. Ends in "+" when a row without a figure was left out
+   * or a row's figure is itself a lower bound.
    */
   yieldEarnedUsdFormatted: string | null;
 };
@@ -240,7 +241,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     error,
     chainDisplayName,
     chainId,
-    // "+" marks a lower bound: some yield row has no figure (or no price) yet.
+    // "+" marks a lower bound: some yield row has no figure (or no price) yet, or only a lower bound.
     yieldEarnedUsdFormatted: yieldEarnedUsd == null ? null : `${formatUsd(yieldEarnedUsd.usd)}${yieldEarnedUsd.partial ? '+' : ''}`,
   };
 
