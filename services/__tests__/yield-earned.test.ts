@@ -13,6 +13,7 @@ import {
   yieldEarnedDisplay,
   yieldEarnedEventsForChain,
   yieldEarnedKey,
+  yieldEarnedNotesForShare,
   type ChainTaggedSnapshot,
   type SnapshotEventsReducer,
   type YieldEarnedEntry,
@@ -248,14 +249,33 @@ describe('display threshold', () => {
     expect(yieldEarnedDisplay(undefined, 'USDC')).toBeNull();
   });
 
-  test('the USD total needs every row, and a price for every non-zero row', () => {
+  test('the USD total sums the priced rows and flags the ones it could not count', () => {
     const a = { text: '+1.00 USDC', amount: 1 };
     const b = { text: '+0.01000 ETH', amount: 0.01 };
     expect(totalYieldEarnedUsd([])).toBeNull();
-    expect(totalYieldEarnedUsd([{ earned: a, underlyingPriceUsd: 1 }, { earned: b, underlyingPriceUsd: 2500 }])).toBeCloseTo(26, 9);
-    expect(totalYieldEarnedUsd([{ earned: a, underlyingPriceUsd: 1 }, { earned: null, underlyingPriceUsd: 2500 }])).toBeNull();
+    const both = totalYieldEarnedUsd([{ earned: a, underlyingPriceUsd: 1 }, { earned: b, underlyingPriceUsd: 2500 }]);
+    expect(both?.usd).toBeCloseTo(26, 9);
+    expect(both?.partial).toBe(false);
+    // A row with no figure no longer holds the tile on "—" (prod 2026-10-21).
+    expect(totalYieldEarnedUsd([{ earned: a, underlyingPriceUsd: 1 }, { earned: null, underlyingPriceUsd: 2500 }])).toEqual({ usd: 1, partial: true });
+    expect(totalYieldEarnedUsd([{ earned: a, underlyingPriceUsd: 1 }, { earned: b, underlyingPriceUsd: 0 }])).toEqual({ usd: 1, partial: true });
     expect(totalYieldEarnedUsd([{ earned: b, underlyingPriceUsd: 0 }])).toBeNull();
-    expect(totalYieldEarnedUsd([{ earned: { text: '0.00 ETH', amount: 0 }, underlyingPriceUsd: 0 }])).toBe(0);
+    expect(totalYieldEarnedUsd([{ earned: null, underlyingPriceUsd: 1 }])).toBeNull();
+    expect(totalYieldEarnedUsd([{ earned: { text: '0.00 ETH', amount: 0 }, underlyingPriceUsd: 0 }])).toEqual({ usd: 0, partial: false });
+  });
+
+  test('stored notes of a share reduce like the SDK reduces live ones', () => {
+    const notes = [
+      { commitment: '0x01', value: '100', tokenId: SHARE.toUpperCase().replace('0X', '0x'), status: 'ACTIVE', createdAtBlock: '0x10', isOwned: true, depositSecret: '0x1' },
+      { commitment: '0x02', value: '5', tokenId: SHARE, status: 'SPENT', createdAtBlock: '0x20', isOwned: true },
+      { commitment: '0x03', value: '7', tokenId: OTHER_SHARE, status: 'ACTIVE', isOwned: true },
+      { commitment: '0x04', value: '9', tokenId: SHARE, status: 'ACTIVE', isOwned: false },
+    ] as unknown as Parameters<typeof yieldEarnedNotesForShare>[0];
+    const out = yieldEarnedNotesForShare(notes, SHARE, (c) => `${c}ff` as `0x${string}`, (b) => Number(BigInt(b)));
+    expect(out).toEqual([
+      { commitment: '0x01', nullifier: '0x01ff', shares: 100n, status: 'ACTIVE', createdAt: 16, originatedHere: true },
+      { commitment: '0x02', nullifier: '0x02ff', shares: 5n, status: 'SPENT', createdAt: 32, originatedHere: false },
+    ] as never);
   });
 
   test('positions are keyed by chain and lowercased share', () => {

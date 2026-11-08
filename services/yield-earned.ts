@@ -25,6 +25,7 @@ import type {
   YieldDepositFact as SdkYieldDepositFact,
   YieldEarned,
   YieldEarnedEvents,
+  YieldEarnedNote,
   YieldRateObservation,
   YieldRateSeries,
 } from '@privacy-pools-v2/sdk';
@@ -306,19 +307,66 @@ export function yieldEarnedDisplay(entry: YieldEarnedEntry | undefined, symbol: 
 }
 
 /**
- * The page's total, in USD, or null for "—". Every real yield row must have a
- * figure and a price: a sum that silently skips a position understates it.
+ * A stored note as the account export persists it (the SDK's `Note`), only the
+ * fields the earned compute reads.
+ */
+export type StoredYieldNote = {
+  commitment: string;
+  value: string | number | bigint;
+  tokenId: unknown;
+  status: YieldEarnedNote['status'];
+  createdAtBlock?: unknown;
+  isOwned?: boolean;
+  depositSecret?: unknown;
+};
+
+/**
+ * The wallet's notes of one share as the SDK's `YieldEarnedNote[]`: the same
+ * reduction `PoolSessionYieldEarned` does over its live note manager, run over
+ * a chain's STORED account export. That is how a share on a chain other than
+ * the session's gets its figure: the live manager only holds the session
+ * chain's notes. Pure: the nullifier hash and the timestamp parse are injected.
+ */
+export function yieldEarnedNotesForShare(
+  notes: readonly StoredYieldNote[],
+  share: string,
+  nullifierOf: (commitment: Hex) => Hex,
+  timestampOf: (createdAtBlock: Hex) => number | null,
+): YieldEarnedNote[] {
+  const shareKey = share.toLowerCase();
+  return notes
+    .filter((note) => note.isOwned === true && String(note.tokenId).toLowerCase() === shareKey)
+    .map((note) => ({
+      commitment: note.commitment as Hex,
+      nullifier: nullifierOf(note.commitment as Hex),
+      shares: BigInt(note.value),
+      status: note.status,
+      createdAt: timestampOf(String(note.createdAtBlock ?? '') as Hex),
+      originatedHere: note.depositSecret !== undefined,
+    }));
+}
+
+/** The page's total, in USD. `partial` when some yield row has no figure or no price. */
+export type YieldEarnedTotal = { usd: number; partial: boolean };
+
+/**
+ * The page's total, or null for "—" when no yield row has a priced figure.
+ * A row without one is left out and the total is flagged `partial`, so the
+ * tile shows what is known as a lower bound instead of waiting on a row that
+ * may never resolve, without passing a sum of some rows off as the whole.
  */
 export function totalYieldEarnedUsd(
   rows: readonly { earned: YieldEarnedDisplay | null; underlyingPriceUsd: number }[],
-): number | null {
-  if (rows.length === 0) return null;
+): YieldEarnedTotal | null {
   let total = 0;
+  let counted = 0;
+  let partial = false;
   for (const row of rows) {
-    if (!row.earned) return null;
-    if (row.earned.amount === 0) continue;
-    if (!(row.underlyingPriceUsd > 0)) return null;
+    if (!row.earned) { partial = true; continue; }
+    if (row.earned.amount === 0) { counted += 1; continue; }
+    if (!(row.underlyingPriceUsd > 0)) { partial = true; continue; }
     total += row.earned.amount * row.underlyingPriceUsd;
+    counted += 1;
   }
-  return total;
+  return counted === 0 ? null : { usd: total, partial };
 }

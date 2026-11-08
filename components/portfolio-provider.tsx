@@ -75,8 +75,8 @@ type PortfolioContextType = {
    */
   chainId: number;
   /**
-   * Sum of every yield row's earned figure, USD-formatted, or null for "—":
-   * a total that skipped a row without a figure would understate it.
+   * Sum of the yield rows' earned figures, USD-formatted, or null for "—"
+   * when no row has one. Ends in "+" when a row without a figure was left out.
    */
   yieldEarnedUsdFormatted: string | null;
 };
@@ -240,7 +240,8 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     error,
     chainDisplayName,
     chainId,
-    yieldEarnedUsdFormatted: yieldEarnedUsd == null ? null : formatUsd(yieldEarnedUsd),
+    // "+" marks a lower bound: some yield row has no figure (or no price) yet.
+    yieldEarnedUsdFormatted: yieldEarnedUsd == null ? null : `${formatUsd(yieldEarnedUsd.usd)}${yieldEarnedUsd.partial ? '+' : ''}`,
   };
 
   return (

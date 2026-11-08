@@ -3045,6 +3045,8 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
     session: poolSession,
     chainId: sessionTarget?.chainId ?? null,
     snapshot: eventSnapshot,
+    identity: sessionAddress ?? myAddress ?? null,
+    keystoreManager,
   });
 
   return (
