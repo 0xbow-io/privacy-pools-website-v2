@@ -6,14 +6,20 @@ import { PasskeyEoaError } from './errors';
 
 export type PrfGrant = { prf: Uint8Array; credentialId: string | null };
 
+export type PasskeyEoaAuthenticator = 'platform' | 'security-key';
+
 export function isPasskeyEoaSupported(): boolean {
   return false;
 }
 
-export async function requestPasskeyEoaPrf(_credentialId?: string | null): Promise<PrfGrant> {
+export function isPasskeyEoaSecurityKeySupported(): boolean {
+  return false;
+}
+
+export async function requestPasskeyEoaPrf(_credentialId?: string | null, _authenticator?: PasskeyEoaAuthenticator): Promise<PrfGrant> {
   throw new PasskeyEoaError('unsupported');
 }
 
-export async function createPasskeyEoaCredential(): Promise<PrfGrant> {
+export async function createPasskeyEoaCredential(_authenticator?: PasskeyEoaAuthenticator): Promise<PrfGrant> {
   throw new PasskeyEoaError('unsupported');
 }

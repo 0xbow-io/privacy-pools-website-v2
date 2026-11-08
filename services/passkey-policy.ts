@@ -10,9 +10,8 @@
 // derivation refuses those (services/signer-determinism.ts) because each
 // signature would derive a different, empty account. Once a wallet has proved
 // itself non-deterministic, or this browser already unlocked it with a
-// passkey, or the tab asked for security-key sign-in (?enable-security-key=1),
-// the user may pick a passkey or a security key for it
-// (services/passkey-choice.ts). This policy only sees the result: the pick.
+// passkey, the user may pick a passkey or a security key for it (one gate for
+// both, services/passkey-choice.ts). This policy only sees the result: the pick.
 
 export function passkeyUnlockDefault(input: {
   /** The build ships the passkey unlock at all (EXPO_PUBLIC_PASSKEY_PREVIEW !== '0'). */

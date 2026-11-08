@@ -14,26 +14,28 @@ import {
 const OWNER = '0x1111111111111111111111111111111111111111';
 const OTHER = '0x2222222222222222222222222222222222222222';
 const RP = 'privacypools.com';
-const base = { signerRefused: false, hasRecordedPasskey: false, isSmartWallet: false, securityKeyFlag: false };
+const base = { signerRefused: false, hasRecordedPasskey: false, isSmartWallet: false };
 
 describe('mayChoosePasskeyUnlock', () => {
-  test('an ordinary wallet gets nothing without the flag', () => {
+  test('an ordinary wallet gets neither: it keeps the wallet signature', () => {
     expect(mayChoosePasskeyUnlock({ ...base, kind: 'security-key' })).toBe(false);
     expect(mayChoosePasskeyUnlock({ ...base, kind: 'platform' })).toBe(false);
   });
-  test('the flag allows a security key up front, never a device passkey', () => {
-    expect(mayChoosePasskeyUnlock({ ...base, securityKeyFlag: true, kind: 'security-key' })).toBe(true);
-    expect(mayChoosePasskeyUnlock({ ...base, securityKeyFlag: true, kind: 'platform' })).toBe(false);
+  test('the security key has exactly the passkey gate, case by case', () => {
+    const cases = [
+      { ...base, isSmartWallet: true },
+      { ...base, signerRefused: true },
+      { ...base, hasRecordedPasskey: true },
+      base,
+    ];
+    for (const c of cases) {
+      expect(mayChoosePasskeyUnlock({ ...c, kind: 'security-key' })).toBe(mayChoosePasskeyUnlock({ ...c, kind: 'platform' }));
+    }
   });
-  test('a refused signer may pick either kind', () => {
-    expect(mayChoosePasskeyUnlock({ ...base, signerRefused: true, kind: 'security-key' })).toBe(true);
-    expect(mayChoosePasskeyUnlock({ ...base, signerRefused: true, kind: 'platform' })).toBe(true);
-  });
-  test('a wallet this browser already unlocked with a passkey gets it back without failing first', () => {
-    expect(mayChoosePasskeyUnlock({ ...base, hasRecordedPasskey: true, kind: 'platform' })).toBe(true);
-  });
-  test('a smart wallet may switch to a security key without the flag', () => {
+  test('smart wallets, refused signers and recorded credentials are offered both', () => {
     expect(mayChoosePasskeyUnlock({ ...base, isSmartWallet: true, kind: 'security-key' })).toBe(true);
+    expect(mayChoosePasskeyUnlock({ ...base, signerRefused: true, kind: 'security-key' })).toBe(true);
+    expect(mayChoosePasskeyUnlock({ ...base, hasRecordedPasskey: true, kind: 'platform' })).toBe(true);
   });
 });
 

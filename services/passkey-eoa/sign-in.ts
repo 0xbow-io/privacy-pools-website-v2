@@ -6,12 +6,12 @@ import type { Address } from 'viem';
 
 import { passkeyEoaAddressFromKey, withPasskeyEoaKey } from './derivation';
 import { PasskeyEoaError } from './errors';
-import type { PrfGrant } from './prf-source';
+import type { PasskeyEoaAuthenticator, PrfGrant } from './prf-source';
 import type { PasskeyEoaRecord } from './store';
 
 export type PasskeyPrompts = {
-  request: (credentialId: string | null) => Promise<PrfGrant>;
-  create: () => Promise<PrfGrant>;
+  request: (credentialId: string | null, authenticator?: PasskeyEoaAuthenticator) => Promise<PrfGrant>;
+  create: (authenticator?: PasskeyEoaAuthenticator) => Promise<PrfGrant>;
 };
 
 async function recordFromGrant(grant: PrfGrant): Promise<PasskeyEoaRecord> {
@@ -28,13 +28,14 @@ export async function passkeyEoaSignIn(
   prompts: PasskeyPrompts,
   mode: 'existing' | 'create',
   knownCredentialId: string | null,
+  authenticator: PasskeyEoaAuthenticator = 'platform',
 ): Promise<PasskeyEoaRecord> {
-  if (mode === 'create') return recordFromGrant(await prompts.create());
+  if (mode === 'create') return recordFromGrant(await prompts.create(authenticator));
   try {
-    return await recordFromGrant(await prompts.request(knownCredentialId));
+    return await recordFromGrant(await prompts.request(knownCredentialId, authenticator));
   } catch (e) {
     if (knownCredentialId && e instanceof PasskeyEoaError && e.failure === 'no-passkey') {
-      return recordFromGrant(await prompts.request(null));
+      return recordFromGrant(await prompts.request(null, authenticator));
     }
     throw e;
   }

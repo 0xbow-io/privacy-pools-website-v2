@@ -17,7 +17,6 @@ import {
   type PasskeyAuthenticatorKind,
   type PasskeyMarkerMeta,
 } from '@/services/passkey-choice';
-import { securityKeySignInEnabled } from '@/config/security-key-flag';
 
 // How long a sweep waits for a chain's held event snapshot before deferring that
 // chain to the feed grid (services/chain-sweep.ts waitForFeed).
@@ -1163,7 +1162,6 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
   const passkeyKind: PasskeyAuthenticatorKind = recordedPasskey?.credentialId
     ? (recordedPasskey.kind ?? 'platform')
     : (passkeyChosenForSigner ? passkeyChoice!.kind : 'platform');
-  const securityKeyFlagOn = passkeyFeatureOn && securityKeySignInEnabled();
   const isSmartWallet = !!smartWalletKey && smartWalletProbe?.key === smartWalletKey && smartWalletProbe.smart;
   // The failure reports name the KIND of wallet and its connector id, both
   // folded onto allowlists in services/error-reports-failure.ts. No address.
@@ -4191,8 +4189,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
   // it cannot repeat. Guarded on the observation, so nothing can turn an
   // ordinary wallet into a passkey account by calling this.
   // The same guard covers the security-key pick (services/passkey-choice.ts):
-  // a refused signer, a wallet this browser already unlocked with a passkey, a
-  // smart wallet, or a tab that asked for it with ?enable-security-key=1.
+  // a security key is offered exactly where the passkey is.
   const choosePasskeyKind = useCallback((kind: PasskeyAuthenticatorKind): boolean => {
     const current = address?.toLowerCase();
     if (!current || keyIdentity || !passkeyFeatureOn) return false;
@@ -4201,7 +4198,6 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
       signerRefused: refusedSigners.has(current),
       hasRecordedPasskey,
       isSmartWallet,
-      securityKeyFlag: securityKeyFlagOn,
     });
     if (!allowed) return false;
     const next = { owner: current, kind };
@@ -4210,7 +4206,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     passkeyChoiceRef.current = next;
     setPasskeyChoice(next);
     return true;
-  }, [address, keyIdentity, passkeyFeatureOn, refusedSigners, hasRecordedPasskey, isSmartWallet, securityKeyFlagOn]);
+  }, [address, keyIdentity, passkeyFeatureOn, refusedSigners, hasRecordedPasskey, isSmartWallet]);
   const choosePasskeyForRefusedSigner = useCallback(() => {
     const current = address?.toLowerCase();
     if (!current || !refusedSigners.has(current)) return;
@@ -4223,7 +4219,6 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
       signerRefused: signerRefusedDerivation,
       hasRecordedPasskey,
       isSmartWallet,
-      securityKeyFlag: securityKeyFlagOn,
     });
   const requestSecurityKeySetup = useCallback(() => {
     const current = address?.toLowerCase();

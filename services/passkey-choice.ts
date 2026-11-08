@@ -18,27 +18,26 @@ export const KNOWN_TRANSPORTS = ['usb', 'nfc', 'ble', 'hybrid', 'internal', 'sma
 
 /**
  * May the user switch THIS wallet's unlock to a passkey or security key?
+ * A security key has exactly the passkey's gate (Pat, 2026-11-08: offered
+ * wherever the passkey is, as the alternative next to it), so `kind` never
+ * changes the answer:
  *
- * - a wallet that proved it signs non-deterministically: yes, either kind
- *   (the signature path is a dead end for it);
- * - a wallet that this browser already unlocked with a passkey: yes, the
- *   recorded credential decides the kind (so a returning user does not have to
- *   fail the signature check again on every page load);
- * - a smart-contract wallet: it is already in passkey mode; a security key is
- *   just the other authenticator for it;
- * - any other wallet: a security key only when the tab asked for it
- *   (config/security-key-flag.ts), never a device passkey.
+ * - a smart-contract wallet: its unlock is the passkey by construction;
+ * - a wallet that proved it signs non-deterministically: the signature path
+ *   is a dead end for it;
+ * - a wallet that this browser already unlocked with a passkey or key: the
+ *   recorded credential decides the kind, so a returning user does not have to
+ *   fail the signature check again on every page load.
+ *
+ * Any other wallet keeps the wallet signature and sees neither.
  */
 export function mayChoosePasskeyUnlock(input: {
   kind: PasskeyAuthenticatorKind;
   signerRefused: boolean;
   hasRecordedPasskey: boolean;
   isSmartWallet: boolean;
-  securityKeyFlag: boolean;
 }): boolean {
-  if (input.signerRefused || input.hasRecordedPasskey) return true;
-  if (input.kind !== 'security-key') return false;
-  return input.isSmartWallet || input.securityKeyFlag;
+  return input.isSmartWallet || input.signerRefused || input.hasRecordedPasskey;
 }
 
 const OWNER_TAG_DOMAIN = 'ppv2-security-key-user:v1';

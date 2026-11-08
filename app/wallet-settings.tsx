@@ -29,7 +29,7 @@ export default function WalletSettingsScreen() {
   const isEmbedded = connector?.id === 'pools-embedded';
   const securedBy =
     isEmbedded && meta?.protection === 'passkey'
-      ? 'Passkey (biometric)'
+      ? (meta.passkey?.kind === 'security-key' ? 'Security key' : 'Passkey (biometric)')
       : isEmbedded
         ? 'Device keystore'
         : connector?.name ?? 'External wallet';

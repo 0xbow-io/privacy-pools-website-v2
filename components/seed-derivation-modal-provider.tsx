@@ -305,7 +305,16 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
   // that unlock offered up front, so a signer that cannot repeat its signature
   // does not have to fail the check again on every visit.
   const offerPasskeyInstead = passkeyPreviewEnabled && (signerRefusedDerivation || hasRecordedPasskey) && !passkeyActive && !pending && !baseAppCannotSign;
+  // Security key picked but nothing recorded yet: the device passkey stays one tap away.
+  const offerPasskeyBack = securityKeyMode && !hasRecordedPasskey && !pending && !baseAppCannotSign;
   const recordedSecurityKey = hasRecordedPasskey && passkeyKind === 'security-key';
+  const takePasskeyBack = useCallback(() => {
+    if (!choosePasskeyKind('platform')) return;
+    setSecurityKeyMissing(false);
+    // Still in passkey mode, only the authenticator changed (a ref): this tap
+    // can carry the prompt.
+    void handleSign();
+  }, [choosePasskeyKind, handleSign]);
   const takePasskeyOffer = useCallback(() => {
     if (hasRecordedPasskey) choosePasskeyKind(passkeyKind);
     else choosePasskeyForRefusedSigner();
@@ -316,8 +325,8 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
       ? 'Security key unlock is on for this wallet. Tap Sign in to continue.'
       : 'Passkey unlock is on for this wallet. Tap Sign in to continue.');
   }, [choosePasskeyForRefusedSigner, choosePasskeyKind, hasRecordedPasskey, passkeyKind, recordedSecurityKey]);
-  // Security key (YubiKey and other FIDO2 keys) picked up front, without a
-  // failed signature first. Allowed by services/passkey-choice.ts only.
+  // Security key (YubiKey and other FIDO2 keys): offered wherever the passkey
+  // is, as the alternative next to it (services/passkey-choice.ts, one gate).
   const offerSecurityKey = canChooseSecurityKey && !securityKeyMode && !pending && !baseAppCannotSign;
   const takeSecurityKeyOffer = useCallback(() => {
     if (!choosePasskeyKind('security-key')) return;
@@ -422,6 +431,16 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
                 testID="seed-derivation-use-passkey"
               >
                 <Text className="font-pp-semi-bold text-[14px] text-text">{recordedSecurityKey ? 'Use your security key' : hasRecordedPasskey ? 'Use your passkey' : 'Use a passkey instead'}</Text>
+              </Pressable>
+            )}
+
+            {offerPasskeyBack && (
+              <Pressable
+                className="items-center justify-center rounded-[10px] border border-border py-[12px]"
+                onPress={takePasskeyBack}
+                testID="seed-derivation-use-passkey-back"
+              >
+                <Text className="font-pp-semi-bold text-[14px] text-text">Use a passkey instead</Text>
               </Pressable>
             )}
 

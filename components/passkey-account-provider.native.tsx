@@ -18,7 +18,9 @@ import {
 import { passkeyFailureCopy } from '@/services/passkey-eoa/errors';
 import {
   createPasskeyEoaCredential,
+  isPasskeyEoaSecurityKeySupported,
   isPasskeyEoaSupported,
+  type PasskeyEoaAuthenticator,
   requestPasskeyEoaPrf,
 } from '@/services/passkey-eoa/prf-source';
 import { passkeyEoaSignIn } from '@/services/passkey-eoa/sign-in';
@@ -44,6 +46,7 @@ const prompts = { request: requestPasskeyEoaPrf, create: createPasskeyEoaCredent
 
 export function PasskeyAccountProvider({ children }: { children: ReactNode }) {
   const available = useMemo(() => isPasskeyEoaSupported(), []);
+  const securityKeyAvailable = useMemo(() => isPasskeyEoaSecurityKeySupported(), []);
   const { connector, isConnected } = useAccount();
   const { connectAsync, connectors } = useConnect();
   const { identityMode, sessionAddress, signOutAccountKey } = useSdkContext();
@@ -122,9 +125,9 @@ export function PasskeyAccountProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const signInMode = useCallback((mode: 'existing' | 'create', anyPasskey: boolean) => run(async () => {
+  const signInMode = useCallback((mode: 'existing' | 'create', anyPasskey: boolean, authenticator: PasskeyEoaAuthenticator) => run(async () => {
     const remembered = mode === 'existing' && !anyPasskey ? record?.credentialId ?? null : null;
-    const next = await passkeyEoaSignIn(prompts, mode, remembered);
+    const next = await passkeyEoaSignIn(prompts, mode, remembered, authenticator);
     await savePasskeyEoaRecord(kv, next);
     setRecord(next);
     // Nothing else to choose: go straight in with the passkey account.
@@ -139,10 +142,17 @@ export function PasskeyAccountProvider({ children }: { children: ReactNode }) {
   }), [run, record, imported.keys.length, pickWith, passkeyConnected, connectPasskey]);
 
   const signIn = useCallback(
-    (opts?: { anyPasskey?: boolean }) => signInMode('existing', opts?.anyPasskey === true),
+    (opts?: { anyPasskey?: boolean; securityKey?: boolean }) => signInMode(
+      'existing',
+      opts?.anyPasskey === true || opts?.securityKey === true,
+      opts?.securityKey ? 'security-key' : 'platform',
+    ),
     [signInMode],
   );
-  const create = useCallback(() => signInMode('create', false), [signInMode]);
+  const create = useCallback(
+    (opts?: { securityKey?: boolean }) => signInMode('create', false, opts?.securityKey ? 'security-key' : 'platform'),
+    [signInMode],
+  );
 
   const pick = useCallback((id: string) => run(async () => {
     if (!record) throw new Error('Sign in with your passkey first.');
@@ -151,6 +161,7 @@ export function PasskeyAccountProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<PasskeyAccountValue>(() => ({
     available,
+    securityKeyAvailable: available && securityKeyAvailable,
     passkeyAddress: record?.address ?? null,
     accounts,
     activeId,
@@ -159,7 +170,7 @@ export function PasskeyAccountProvider({ children }: { children: ReactNode }) {
     signIn,
     create,
     pick,
-  }), [available, record, accounts, activeId, busy, error, signIn, create, pick]);
+  }), [available, securityKeyAvailable, record, accounts, activeId, busy, error, signIn, create, pick]);
 
   return <PasskeyAccountContext.Provider value={value}>{children}</PasskeyAccountContext.Provider>;
 }
