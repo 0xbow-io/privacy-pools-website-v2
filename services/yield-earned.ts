@@ -55,7 +55,16 @@ export type YieldEarnedEntry =
       maxUnderstatement: bigint;
       /** Decimals of the underlying the two figures are in. */
       assetDecimals: number;
+      /**
+       * Shares the compute found the wallet still holding, raw share units.
+       * Zero against a row that holds shares means the compute ran before the
+       * notes reached it: that 0 is "not yet", not a figure (yieldEarnedRow).
+       */
+      heldShares: bigint;
     }
+  /** An input has not arrived yet (snapshot, a grid feed, the keys). Spinner, then a figure. */
+  | { status: 'loading'; reason: string }
+  /** No figure will come from these inputs. "—", no spinner. */
   | { status: 'unavailable'; reason: string };
 
 export type YieldEarnedByShare = ReadonlyMap<string, YieldEarnedEntry>;
@@ -257,6 +266,7 @@ export function toYieldEarnedEntry(result: YieldEarned, assetDecimals: number): 
     earnedTotal: result.earnedTotal,
     maxUnderstatement: result.maxUnderstatement,
     assetDecimals,
+    heldShares: result.heldShares,
   };
 }
 
@@ -361,28 +371,125 @@ export function yieldEarnedNotesForShare(
     }));
 }
 
-/** The page's total, in USD. `partial` when some yield row has no figure, no price, or only a lower bound. */
-export type YieldEarnedTotal = { usd: number; partial: boolean };
+/**
+ * One yield row's earned state. Three different things, never folded together:
+ *   - `loading`: no figure YET. Placeholder and a spinner, never "0";
+ *   - `unavailable`: no figure from these inputs. "—", no spinner;
+ *   - `ok`: a computed figure, which may honestly be 0 (a deposit minutes old).
+ */
+export type YieldEarnedRow =
+  | { state: 'loading' }
+  | { state: 'unavailable' }
+  | { state: 'ok'; display: YieldEarnedDisplay };
 
 /**
- * The page's total, or null for "—" when no yield row has a priced figure.
- * A row without one is left out and the total is flagged `partial`, so the
- * tile shows what is known as a lower bound instead of waiting on a row that
- * may never resolve, without passing a sum of some rows off as the whole.
+ * The row's state from its entry. `rowHoldsShares` is whether the portfolio
+ * row itself holds shares (active or pending).
+ *
+ * Loading covers three cases: no entry yet (the first compute has not
+ * finished), an input the hook is still waiting on, and a compute that came
+ * back "ok, 0 shares held" for a row that holds shares. That last one is how
+ * "0 USDC" and "$0.00" reached the page while loading (Nathaniel, QA #67): the
+ * SDK computes over the notes it has, and before the account's notes reach the
+ * note manager (or the chain's stored export) that is none, so it answers a
+ * confident 0. A position the wallet holds cannot have been computed over no
+ * notes, so that 0 is "not yet".
+ */
+export function yieldEarnedRow(
+  entry: YieldEarnedEntry | undefined,
+  symbol: string,
+  rowHoldsShares: boolean,
+): YieldEarnedRow {
+  if (!entry || entry.status === 'loading') return { state: 'loading' };
+  if (entry.status === 'unavailable') return { state: 'unavailable' };
+  if (rowHoldsShares && entry.heldShares === 0n) return { state: 'loading' };
+  const display = yieldEarnedDisplay(entry, symbol);
+  return display ? { state: 'ok', display } : { state: 'unavailable' };
+}
+
+/** What a figure still loading shows in place of a number, beside a spinner. Never "0". */
+export const LOADING_FIGURE = '-.--';
+export const LOADING_USD = `$${LOADING_FIGURE}`;
+
+/**
+ * The page's total, in USD.
+ *   - `loading`: no row has a figure yet and at least one is still computing;
+ *   - `unavailable`: no row has a figure and none is coming ("—");
+ *   - `ok`: the priced figures summed. `partial` when a row has no figure, no
+ *     price, or only a lower bound (the tile adds "+"). `loading` when a row
+ *     is still computing, so the tile keeps a small spinner beside the sum.
+ */
+export type YieldEarnedTotal =
+  | { state: 'loading' }
+  | { state: 'unavailable' }
+  | { state: 'ok'; usd: number; partial: boolean; loading: boolean };
+
+/**
+ * A row without a figure is left out and the total is flagged `partial`, so
+ * the tile shows what is known as a lower bound instead of waiting on a row
+ * that may never resolve, without passing a sum of some rows off as the whole.
+ * A row still loading is never counted as 0: with nothing else known the tile
+ * is `loading`, not "$0.00".
  */
 export function totalYieldEarnedUsd(
-  rows: readonly { earned: YieldEarnedDisplay | null; underlyingPriceUsd: number }[],
-): YieldEarnedTotal | null {
+  rows: readonly { earned: YieldEarnedRow; underlyingPriceUsd: number }[],
+): YieldEarnedTotal {
   let total = 0;
   let counted = 0;
   let partial = false;
+  let loading = false;
   for (const row of rows) {
-    if (!row.earned) { partial = true; continue; }
-    if (row.earned.lowerBound) partial = true;
-    if (row.earned.amount === 0) { counted += 1; continue; }
+    if (row.earned.state === 'loading') { loading = true; partial = true; continue; }
+    if (row.earned.state === 'unavailable') { partial = true; continue; }
+    const earned = row.earned.display;
+    if (earned.lowerBound) partial = true;
+    if (earned.amount === 0) { counted += 1; continue; }
     if (!(row.underlyingPriceUsd > 0)) { partial = true; continue; }
-    total += row.earned.amount * row.underlyingPriceUsd;
+    total += earned.amount * row.underlyingPriceUsd;
     counted += 1;
   }
-  return counted === 0 ? null : { usd: total, partial };
+  if (counted === 0) return loading ? { state: 'loading' } : { state: 'unavailable' };
+  return { state: 'ok', usd: total, partial, loading };
+}
+
+/** A header figure: its text, and whether a spinner sits beside it. */
+export type FigureDisplay = { text: string; loading: boolean };
+
+/** The "Yield earned" tile. Null renders "—". */
+export function yieldEarnedTileDisplay(
+  total: YieldEarnedTotal,
+  formatUsd: (usd: number) => string,
+): FigureDisplay | null {
+  if (total.state === 'loading') return { text: LOADING_USD, loading: true };
+  if (total.state === 'unavailable') return null;
+  return { text: `${formatUsd(total.usd)}${total.partial ? '+' : ''}`, loading: total.loading };
+}
+
+/**
+ * The "Pending" figure. It sums the account's pending notes, so while the
+ * account is still syncing a 0 there only means "none found yet", and a yield
+ * row's pending shares have no value until the share rate arrives. Neither is
+ * a figure: placeholder and spinner. A figure above 0 found mid-sync shows,
+ * with the spinner, since more may land. A rate that failed (not loading)
+ * stays "Value unavailable".
+ */
+export function pendingValueDisplay(params: {
+  /** Pools or prices not loaded: nothing on the page is known yet. */
+  pageLoading: boolean;
+  /** The account's notes are still syncing. */
+  accountSyncing: boolean;
+  /** Share rates still loading. */
+  ratesLoading: boolean;
+  value: number;
+  /** Some pending shares could not be valued (no rate or no price). */
+  valueUnavailable: boolean;
+  formatUsd: (usd: number) => string;
+}): FigureDisplay {
+  const { pageLoading, accountSyncing, ratesLoading, value, valueUnavailable, formatUsd } = params;
+  if (pageLoading) return { text: LOADING_USD, loading: true };
+  if (valueUnavailable) {
+    return ratesLoading ? { text: LOADING_USD, loading: true } : { text: 'Value unavailable', loading: false };
+  }
+  if (accountSyncing) return value > 0 ? { text: formatUsd(value), loading: true } : { text: LOADING_USD, loading: true };
+  return { text: formatUsd(value), loading: false };
 }

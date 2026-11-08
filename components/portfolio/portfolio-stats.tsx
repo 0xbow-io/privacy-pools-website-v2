@@ -1,6 +1,25 @@
-import { View, Text, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, View, Text, useWindowDimensions } from 'react-native';
 import { Card } from '@/components/ui/card';
 import { HoverHint } from '@/components/ui/hover-hint';
+import { useTheme } from '@/components/theme-provider';
+import { Colors } from '@/constants/theme';
+import { LOADING_USD } from '@/services/yield-earned';
+
+/**
+ * The spinner beside a header figure that is not known yet, or not final yet.
+ * Without it a placeholder read as a figure: "$0.00" and "0 USDC" were taken
+ * for real (Nathaniel, QA of #67).
+ */
+function FigureLoading({ label }: { label: string }) {
+  const { colorScheme } = useTheme();
+  return (
+    <View accessibilityLabel={label} testID="portfolio-figure-loading">
+      {/* nw-keep(data-color): spinner tint is a theme token into RN's
+          ActivityIndicator (no className path). */}
+      <ActivityIndicator size="small" color={Colors[colorScheme].textSecondary} />
+    </View>
+  );
+}
 
 function getResponsiveFontSize(width: number): number {
   if (width >= 785) return 24;
@@ -32,6 +51,10 @@ type PortfolioStatsProps = {
    * show: no yield position, or one of them has no figure (services/yield-earned.ts).
    */
   yieldEarnedUsd?: string | null;
+  /** A yield row is still computing: a spinner beside the figure (or the placeholder). */
+  yieldEarnedLoading?: boolean;
+  /** The pending figure is not final yet: a spinner beside it. */
+  pendingLoading?: boolean;
   hasData?: boolean;
   assets?: Asset[];
 };
@@ -66,6 +89,8 @@ export function PortfolioStats({
   assetsCount = 0,
   assetsLabel = 'No Assets here',
   yieldEarnedUsd = null,
+  yieldEarnedLoading = false,
+  pendingLoading = false,
   hasData = false,
   assets = [],
 }: PortfolioStatsProps) {
@@ -104,9 +129,12 @@ export function PortfolioStats({
               <Text className="font-pp-regular text-[12px] leading-[12px] text-text-secondary">
                 Pending Balance
               </Text>
-              <Text className="font-pp-bold text-[18px] leading-[18px] text-text-muted">
-                {pending}
-              </Text>
+              <View className="flex-row items-center gap-[6px]">
+                <Text className="font-pp-bold text-[18px] leading-[18px] text-text-muted">
+                  {pending}
+                </Text>
+                {pendingLoading ? <FigureLoading label="Pending balance loading" /> : null}
+              </View>
             </View>
           </View>
 
@@ -121,11 +149,14 @@ export function PortfolioStats({
                   Yield earned
                 </Text>
               </View>
-              <Text
-                className={`font-pp-bold text-[18px] leading-[18px] ${yieldEarnedUsd ? 'text-success' : 'text-text-muted'}`}
-              >
-                {yieldEarnedUsd ?? '—'}
-              </Text>
+              <View className="flex-row items-center gap-[6px]">
+                <Text
+                  className={`font-pp-bold text-[18px] leading-[18px] ${yieldEarnedUsd && yieldEarnedUsd !== LOADING_USD ? 'text-success' : 'text-text-muted'}`}
+                >
+                  {yieldEarnedUsd ?? '—'}
+                </Text>
+                {yieldEarnedLoading ? <FigureLoading label="Yield earned loading" /> : null}
+              </View>
             </View>
             <View className="my-[10px] w-[1px] self-stretch bg-border" />
             <View className="flex-1 gap-[6px] p-[16px]">
@@ -186,13 +217,17 @@ export function PortfolioStats({
               <Text className="font-pp-regular text-[12px] leading-[12px] text-right text-text-secondary">
                 Pending
               </Text>
-              <Text
-                className="font-pp-bold text-right text-text-muted"
-                // nw-keep(measured-or-inset): headline size follows the width-driven responsive scale
-                style={{ fontSize: responsiveFontSize, lineHeight: responsiveFontSize }}
-              >
-                {pending}
-              </Text>
+              <View className="flex-row items-center justify-end gap-[6px]">
+                {pendingLoading ? <FigureLoading label="Pending balance loading" /> : null}
+                <Text
+                  className="font-pp-bold text-right text-text-muted"
+                  testID="portfolio-stats-pending"
+                  // nw-keep(measured-or-inset): headline size follows the width-driven responsive scale
+                  style={{ fontSize: responsiveFontSize, lineHeight: responsiveFontSize }}
+                >
+                  {pending}
+                </Text>
+              </View>
             </View>
           </View>
         </View>
@@ -209,14 +244,17 @@ export function PortfolioStats({
               Yield earned
             </Text>
           </View>
-          <Text
-            className={`font-pp-bold ${yieldEarnedUsd ? 'text-success' : 'text-text-muted'}`}
-            testID="portfolio-stats-yield-earned"
-            // nw-keep(measured-or-inset): headline size follows the width-driven responsive scale
-            style={{ fontSize: responsiveFontSize, lineHeight: responsiveFontSize }}
-          >
-            {yieldEarnedUsd ?? '—'}
-          </Text>
+          <View className="flex-row items-center gap-[6px]">
+            <Text
+              className={`font-pp-bold ${yieldEarnedUsd && yieldEarnedUsd !== LOADING_USD ? 'text-success' : 'text-text-muted'}`}
+              testID="portfolio-stats-yield-earned"
+              // nw-keep(measured-or-inset): headline size follows the width-driven responsive scale
+              style={{ fontSize: responsiveFontSize, lineHeight: responsiveFontSize }}
+            >
+              {yieldEarnedUsd ?? '—'}
+            </Text>
+            {yieldEarnedLoading ? <FigureLoading label="Yield earned loading" /> : null}
+          </View>
         </View>
 
         {/* Divider */}

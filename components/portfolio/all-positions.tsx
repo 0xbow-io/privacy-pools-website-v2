@@ -11,7 +11,7 @@
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { useState } from 'react';
 import { getPoolPath } from '@/config/pool-paths';
-import { View, Text, Pressable, useWindowDimensions, Platform } from 'react-native';
+import { ActivityIndicator, View, Text, Pressable, useWindowDimensions, Platform } from 'react-native';
 import { DROPDOWN_SHADOW } from '@/components/ui/web-style-shims';
 import { useRouter } from 'expo-router';
 import { useShareYield } from '@/hooks/use-share-yield';
@@ -189,6 +189,8 @@ type Position = {
    * of earned.
    */
   earnedText?: string | null;
+  /** The earned figure is still computing: `earnedText` is a placeholder and a spinner sits beside it. */
+  earnedLoading?: boolean;
   /** Venue the yield comes from, e.g. "Aave v3". Small, muted, next to earned. */
   venueLabel?: string | null;
   /**
@@ -468,13 +470,21 @@ export function AllPositions({
                       zero; an em dash where the SDK gives no figure or its
                       error bound shows at display precision. */}
                   {showYieldEarned && (
-                    <View className="relative z-[1] flex-1 p-[8px]">
+                    <View className="relative z-[1] flex-1 flex-row items-center gap-[6px] p-[8px]">
                       <Text
-                        className={`font-pp-semi-bold text-[12px] leading-[12px] ${position.earnedText && (position.earnedText.startsWith('+') || position.earnedText.startsWith('<')) ? 'text-success' : 'text-text-muted'}`}
+                        className={`font-pp-semi-bold text-[12px] leading-[12px] ${!position.earnedLoading && position.earnedText && (position.earnedText.startsWith('+') || position.earnedText.startsWith('<')) ? 'text-success' : 'text-text-muted'}`}
                         testID="position-yield-earned"
                       >
                         {position.earnedText ?? '\u2014'}
                       </Text>
+                      {/* Still computing: a placeholder and this, never "0 USDC"
+                          (Nathaniel, QA of #67). nw-keep(data-color): spinner
+                          tint is a theme token into RN's ActivityIndicator. */}
+                      {position.earnedLoading ? (
+                        <View accessibilityLabel="Yield earned loading" testID="position-yield-earned-loading">
+                          <ActivityIndicator size="small" color={colors.textSecondary} />
+                        </View>
+                      ) : null}
                     </View>
                   )}
                   {/* Privacy Score */}

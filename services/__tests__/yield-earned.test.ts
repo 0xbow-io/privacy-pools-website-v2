@@ -3,8 +3,13 @@ import { computeYieldEarned, yieldEarnedEventsFromSnapshot } from '@privacy-pool
 
 import type { PpUsdcRateHistoryResponse, YieldDepositsResponse } from '@/services/api-types';
 import {
+  LOADING_USD,
   feedValue,
   missingSectionDrops,
+  pendingValueDisplay,
+  yieldEarnedRow,
+  yieldEarnedTileDisplay,
+  type YieldEarnedRow,
   toYieldDepositFacts,
   toYieldEarnedEntry,
   toYieldRateSeries,
@@ -225,7 +230,7 @@ describe('feed -> SDK input mapping', () => {
 
 describe('display threshold', () => {
   const ok = (earnedTotal: bigint, maxUnderstatement: bigint, assetDecimals = 6): YieldEarnedEntry =>
-    ({ status: 'ok', earnedTotal, maxUnderstatement, assetDecimals });
+    ({ status: 'ok', earnedTotal, maxUnderstatement, assetDecimals, heldShares: 1n });
 
   test('the bound must round to zero at display precision (half a unit)', () => {
     // USDC shows cents: half a cent is 5000 raw units.
@@ -253,18 +258,22 @@ describe('display threshold', () => {
   });
 
   test('the USD total sums the priced rows and flags the ones it could not count', () => {
-    const a = { text: '+1.00 USDC', amount: 1 };
-    const b = { text: '+0.01000 ETH', amount: 0.01 };
-    expect(totalYieldEarnedUsd([])).toBeNull();
+    const a: YieldEarnedRow = { state: 'ok', display: { text: '+1.00 USDC', amount: 1 } };
+    const b: YieldEarnedRow = { state: 'ok', display: { text: '+0.01000 ETH', amount: 0.01 } };
+    const none: YieldEarnedRow = { state: 'unavailable' };
+    expect(totalYieldEarnedUsd([])).toEqual({ state: 'unavailable' });
     const both = totalYieldEarnedUsd([{ earned: a, underlyingPriceUsd: 1 }, { earned: b, underlyingPriceUsd: 2500 }]);
-    expect(both?.usd).toBeCloseTo(26, 9);
-    expect(both?.partial).toBe(false);
+    expect(both.state === 'ok' ? both.usd : null).toBeCloseTo(26, 9);
+    expect(both).toMatchObject({ state: 'ok', partial: false, loading: false });
     // A row with no figure no longer holds the tile on "—" (prod 2026-10-21).
-    expect(totalYieldEarnedUsd([{ earned: a, underlyingPriceUsd: 1 }, { earned: null, underlyingPriceUsd: 2500 }])).toEqual({ usd: 1, partial: true });
-    expect(totalYieldEarnedUsd([{ earned: a, underlyingPriceUsd: 1 }, { earned: b, underlyingPriceUsd: 0 }])).toEqual({ usd: 1, partial: true });
-    expect(totalYieldEarnedUsd([{ earned: b, underlyingPriceUsd: 0 }])).toBeNull();
-    expect(totalYieldEarnedUsd([{ earned: null, underlyingPriceUsd: 1 }])).toBeNull();
-    expect(totalYieldEarnedUsd([{ earned: { text: '0.00 ETH', amount: 0 }, underlyingPriceUsd: 0 }])).toEqual({ usd: 0, partial: false });
+    expect(totalYieldEarnedUsd([{ earned: a, underlyingPriceUsd: 1 }, { earned: none, underlyingPriceUsd: 2500 }]))
+      .toEqual({ state: 'ok', usd: 1, partial: true, loading: false });
+    expect(totalYieldEarnedUsd([{ earned: a, underlyingPriceUsd: 1 }, { earned: b, underlyingPriceUsd: 0 }]))
+      .toEqual({ state: 'ok', usd: 1, partial: true, loading: false });
+    expect(totalYieldEarnedUsd([{ earned: b, underlyingPriceUsd: 0 }])).toEqual({ state: 'unavailable' });
+    expect(totalYieldEarnedUsd([{ earned: none, underlyingPriceUsd: 1 }])).toEqual({ state: 'unavailable' });
+    expect(totalYieldEarnedUsd([{ earned: { state: 'ok', display: { text: '0.00 ETH', amount: 0 } }, underlyingPriceUsd: 0 }]))
+      .toEqual({ state: 'ok', usd: 0, partial: false, loading: false });
   });
 
   test('a large position with a rate-valued flow gets a figure, not "—" (QA of #67, Ethereum USDC)', () => {
@@ -291,7 +300,7 @@ describe('display threshold', () => {
     });
     const big = toYieldEarnedEntry(compute(1762n * 10n ** 18n), 6);
     // One hour of drift on 1762 shares: 7048 raw, over the 5000 (half a cent) USDC shows.
-    expect(big).toEqual({ status: 'ok', earnedTotal: 278_396n, maxUnderstatement: 7_048n, assetDecimals: 6 });
+    expect(big).toEqual({ status: 'ok', earnedTotal: 278_396n, maxUnderstatement: 7_048n, assetDecimals: 6, heldShares: 1762n * 10n ** 18n });
     expect(understatementRoundsToZero(7_048n, 6, 'USDC')).toBe(false);
     expect(yieldEarnedDisplay(big, 'USDC')).toEqual({ text: '+0.27+ USDC', amount: 0.27, lowerBound: true });
     // The same flow on a small position rounds away and prints exactly, as the USDT rows did.
@@ -299,11 +308,11 @@ describe('display threshold', () => {
     expect(yieldEarnedDisplay(small, 'USDT')?.lowerBound).toBeUndefined();
     // The tile counts the lower bound and says it is one.
     const total = totalYieldEarnedUsd([
-      { earned: yieldEarnedDisplay(big, 'USDC'), underlyingPriceUsd: 1 },
-      { earned: yieldEarnedDisplay(small, 'USDT'), underlyingPriceUsd: 1 },
+      { earned: yieldEarnedRow(big, 'USDC', true), underlyingPriceUsd: 1 },
+      { earned: yieldEarnedRow(small, 'USDT', true), underlyingPriceUsd: 1 },
     ]);
-    expect(total?.partial).toBe(true);
-    expect(total?.usd).toBeGreaterThan(0.27);
+    expect(total.state === 'ok' && total.partial).toBe(true);
+    expect(total.state === 'ok' ? total.usd : 0).toBeGreaterThan(0.27);
   });
 
   test('stored notes of a share reduce like the SDK reduces live ones', () => {
@@ -322,5 +331,95 @@ describe('display threshold', () => {
 
   test('positions are keyed by chain and lowercased share', () => {
     expect(yieldEarnedKey(1, '0xC246aFb23482fF9596E9cee5f1f678eFe0EB1ad6')).toBe(`1:${SHARE}`);
+  });
+});
+
+// Nathaniel, QA of #67 (prod, Optimism USDC 967.37 at 3.77%): "Yield earned
+// $0.00" in the header and "0 USDC" on the row while the figure was loading.
+describe('loading is not zero, and neither is unavailable', () => {
+  const okEntry = (earnedTotal: bigint, heldShares: bigint): YieldEarnedEntry =>
+    ({ status: 'ok', earnedTotal, maxUnderstatement: 0n, assetDecimals: 6, heldShares });
+  const usd = (n: number) => `$${n.toFixed(2)}`;
+
+  test('a row with no entry yet, or one waiting on an input, is loading', () => {
+    expect(yieldEarnedRow(undefined, 'USDC', true)).toEqual({ state: 'loading' });
+    expect(yieldEarnedRow({ status: 'loading', reason: 'deposits-feed-loading' }, 'USDC', true)).toEqual({ state: 'loading' });
+    expect(yieldEarnedRow({ status: 'loading', reason: 'rate-history-loading' }, 'USDC', true)).toEqual({ state: 'loading' });
+  });
+
+  test('a 0 computed over no notes, for a row that holds shares, is loading (the observed "0 USDC")', () => {
+    // What the SDK answers before the account's notes reach it: ok, nothing held, 0 earned.
+    const beforeNotes = computeYieldEarned({
+      share: SHARE,
+      shareDecimals: 18,
+      notes: [],
+      depositFacts: [],
+      rateSeries: toYieldRateSeries(rateHistory([[T0, '1000000'], [T0 + 3600, '1000100']]), SHARE),
+      events: { deposits: [], spends: [], ragequits: [] } as never,
+      exchangeRateNow: 1_000_100n,
+      now: T0 + 3700,
+    });
+    const entry = toYieldEarnedEntry(beforeNotes, 6);
+    expect(entry).toMatchObject({ status: 'ok', earnedTotal: 0n, heldShares: 0n });
+    // The row holds 967 USDC worth of shares, so that 0 is "not yet".
+    expect(yieldEarnedRow(entry, 'USDC', true)).toEqual({ state: 'loading' });
+    // A row with nothing held left (all withdrawn) keeps a real 0.
+    expect(yieldEarnedRow(entry, 'USDC', false)).toEqual({ state: 'ok', display: { text: '0 USDC', amount: 0 } });
+  });
+
+  test('a computed 0 over held shares (a deposit minutes old) is a real 0', () => {
+    expect(yieldEarnedRow(okEntry(0n, 967n * 10n ** 18n), 'USDC', true))
+      .toEqual({ state: 'ok', display: { text: '0 USDC', amount: 0 } });
+    expect(yieldEarnedRow(okEntry(1_234_567n, 10n ** 18n), 'USDC', true))
+      .toEqual({ state: 'ok', display: { text: '+1.23 USDC', amount: 1.234567 } });
+  });
+
+  test('unavailable stays unavailable, with no spinner', () => {
+    expect(yieldEarnedRow({ status: 'unavailable', reason: 'deposit-fact-missing' }, 'USDC', true)).toEqual({ state: 'unavailable' });
+    expect(yieldEarnedTileDisplay(totalYieldEarnedUsd([{ earned: { state: 'unavailable' }, underlyingPriceUsd: 1 }]), usd)).toBeNull();
+  });
+
+  test('the tile: placeholder and spinner while nothing is known, never "$0.00"', () => {
+    const loading = totalYieldEarnedUsd([{ earned: { state: 'loading' }, underlyingPriceUsd: 1 }]);
+    expect(loading).toEqual({ state: 'loading' });
+    expect(yieldEarnedTileDisplay(loading, usd)).toEqual({ text: LOADING_USD, loading: true });
+    expect(LOADING_USD).not.toContain('0');
+    // Loading beside unavailable: still loading, a figure may come.
+    expect(totalYieldEarnedUsd([
+      { earned: { state: 'loading' }, underlyingPriceUsd: 1 },
+      { earned: { state: 'unavailable' }, underlyingPriceUsd: 1 },
+    ])).toEqual({ state: 'loading' });
+  });
+
+  test('the tile: the known part as a lower bound, with a spinner, while other rows load', () => {
+    const total = totalYieldEarnedUsd([
+      { earned: { state: 'ok', display: { text: '+2.50 USDC', amount: 2.5 } }, underlyingPriceUsd: 1 },
+      { earned: { state: 'loading' }, underlyingPriceUsd: 1 },
+    ]);
+    expect(total).toEqual({ state: 'ok', usd: 2.5, partial: true, loading: true });
+    expect(yieldEarnedTileDisplay(total, usd)).toEqual({ text: '$2.50+', loading: true });
+    // Every row computed, one of them a real 0: a plain figure, no spinner.
+    const done = totalYieldEarnedUsd([
+      { earned: { state: 'ok', display: { text: '+2.50 USDC', amount: 2.5 } }, underlyingPriceUsd: 1 },
+      { earned: { state: 'ok', display: { text: '0 USDC', amount: 0 } }, underlyingPriceUsd: 1 },
+    ]);
+    expect(yieldEarnedTileDisplay(done, usd)).toEqual({ text: '$2.50', loading: false });
+    // Only a real 0: "$0.00" is allowed then, and only then.
+    const zero = totalYieldEarnedUsd([{ earned: { state: 'ok', display: { text: '0 USDC', amount: 0 } }, underlyingPriceUsd: 1 }]);
+    expect(yieldEarnedTileDisplay(zero, usd)).toEqual({ text: '$0.00', loading: false });
+  });
+
+  test('pending: placeholder and spinner while loading or syncing, a real 0 once synced', () => {
+    const base = { pageLoading: false, accountSyncing: false, ratesLoading: false, value: 0, valueUnavailable: false, formatUsd: usd };
+    expect(pendingValueDisplay({ ...base, pageLoading: true })).toEqual({ text: LOADING_USD, loading: true });
+    // Mid-sync a 0 is "none found yet".
+    expect(pendingValueDisplay({ ...base, accountSyncing: true })).toEqual({ text: LOADING_USD, loading: true });
+    // Mid-sync a figure found so far shows, with the spinner.
+    expect(pendingValueDisplay({ ...base, accountSyncing: true, value: 12 })).toEqual({ text: '$12.00', loading: true });
+    // Pending shares waiting on the share rate: loading. A failed rate: unavailable, no spinner.
+    expect(pendingValueDisplay({ ...base, valueUnavailable: true, ratesLoading: true })).toEqual({ text: LOADING_USD, loading: true });
+    expect(pendingValueDisplay({ ...base, valueUnavailable: true })).toEqual({ text: 'Value unavailable', loading: false });
+    // Synced, nothing pending: a computed 0.
+    expect(pendingValueDisplay(base)).toEqual({ text: '$0.00', loading: false });
   });
 });

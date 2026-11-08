@@ -77,7 +77,7 @@ function PortfolioBody() {
   const tabClearance = useTabBarClearance();
   const { isConnected } = useAccount();
   const { sessionAddress } = useSdkContext();
-  const { positions, totalValue, totalValueFormatted, pendingValueFormatted, hasPositions, chainDisplayName, chainId, isLoading: portfolioLoading, yieldEarnedUsdFormatted } = usePortfolio();
+  const { positions, totalValue, totalValueFormatted, pendingDisplay, hasPositions, chainDisplayName, chainId, isLoading: portfolioLoading, yieldEarnedDisplay } = usePortfolio();
   // Live APY for real yield rows (feed first, env placeholder second).
   const liveApy = useResolvedYieldApy({ chainId });
   const { data: poolsData } = usePools();
@@ -119,6 +119,7 @@ function PortfolioBody() {
         myValueUsd: string;
         pendingLabel: string | null;
         earnedText?: string | null;
+        earnedLoading?: boolean;
         venueLabel?: string | null;
         aprText?: string | null;
         withdrawEnabled: boolean;
@@ -156,6 +157,7 @@ function PortfolioBody() {
             ? {
                 yield: true,
                 earnedText: p.earnedText ?? null,
+                earnedLoading: p.earnedLoading === true,
                 venueLabel: 'Aave v3',
                 aprText: liveApy.percent != null ? `${liveApy.percent.toFixed(2)}%` : null,
                 actionSymbol: p.shareSymbol,
@@ -177,7 +179,7 @@ function PortfolioBody() {
 
   // Only a real yield position fills the tile.
   const hasRealYield = positions.some((p) => p.isYield);
-  const yieldEarnedTile = hasRealYield ? yieldEarnedUsdFormatted : null;
+  const yieldEarnedTile = hasRealYield ? yieldEarnedDisplay : null;
 
   return (
     <View className="flex-1 bg-background">
@@ -218,9 +220,11 @@ function PortfolioBody() {
           <>
           <PortfolioStats
             netValue={portfolioLoading ? '—' : totalValueFormatted}
-            pending={portfolioLoading ? '—' : pendingValueFormatted}
+            pending={pendingDisplay.text}
+            pendingLoading={pendingDisplay.loading}
             assetsCount={positions.length}
-            yieldEarnedUsd={portfolioLoading ? null : yieldEarnedTile}
+            yieldEarnedUsd={yieldEarnedTile?.text ?? null}
+            yieldEarnedLoading={yieldEarnedTile?.loading === true}
             assetsLabel={hasPositions ? positions.map((p) => p.tokenSymbol).join(', ') : 'No assets yet'}
             hasData={hasPositions}
             assets={portfolioAssets}

@@ -68,8 +68,8 @@ function sameEntries(a: YieldEarnedByShare, b: YieldEarnedByShare): boolean {
     const y = b.get(key);
     if (!y || x.status !== y.status) return false;
     if (x.status === 'ok' && y.status === 'ok') {
-      if (x.earnedTotal !== y.earnedTotal || x.maxUnderstatement !== y.maxUnderstatement || x.assetDecimals !== y.assetDecimals) return false;
-    } else if (x.status === 'unavailable' && y.status === 'unavailable' && x.reason !== y.reason) {
+      if (x.earnedTotal !== y.earnedTotal || x.maxUnderstatement !== y.maxUnderstatement || x.assetDecimals !== y.assetDecimals || x.heldShares !== y.heldShares) return false;
+    } else if (x.status !== 'ok' && y.status !== 'ok' && x.reason !== y.reason) {
       return false;
     }
   }
@@ -142,6 +142,11 @@ export function useYieldEarned(params: {
     const markUnavailable = (next: Map<string, YieldEarnedEntry>, shares: readonly string[], cid: number, reason: string) => {
       for (const share of shares) next.set(yieldEarnedKey(cid, share), { status: 'unavailable', reason });
     };
+    // An input not here YET: the row shows a spinner, never a "0" and never
+    // the dash, which says no figure is coming (QA of #67: "0 USDC" while loading).
+    const markLoading = (next: Map<string, YieldEarnedEntry>, shares: readonly string[], cid: number, reason: string) => {
+      for (const share of shares) next.set(yieldEarnedKey(cid, share), { status: 'loading', reason });
+    };
     const sessionShares = namespaces.map((ns) => ns.deployment.ppUSDC);
 
     // The session chain, through each namespace's compute. Fails on its own:
@@ -152,17 +157,23 @@ export function useYieldEarned(params: {
     ) => {
       if (namespaces.length === 0) return;
       try {
-        // Not loaded, or this chain's part of it failed: without its spends a
-        // note that left would be valued as still held.
-        if (!snapshot || (snapshot.loadedChainIds && !snapshot.loadedChainIds.includes(chainId))) {
-          markUnavailable(next, sessionShares, chainId, 'snapshot-not-ready');
+        // Not loaded yet, or this chain's part of it failed: without its spends
+        // a note that left would be valued as still held. The first is a wait,
+        // the second is no figure (the snapshot waits for every chain, so a
+        // chain missing from a loaded one failed).
+        if (!snapshot) {
+          markLoading(next, sessionShares, chainId, 'snapshot-not-ready');
+          return;
+        }
+        if (snapshot.loadedChainIds && !snapshot.loadedChainIds.includes(chainId)) {
+          markUnavailable(next, sessionShares, chainId, 'snapshot-chain-failed');
           return;
         }
         const depositsFeed = feedValue(feedData(
           publicFeeds.read<YieldFeedResult<YieldDepositsResponse>>(feedYieldDeposits(chainId)),
         ));
         if (depositsFeed === undefined) {
-          markUnavailable(next, sessionShares, chainId, 'deposits-feed-loading');
+          markLoading(next, sessionShares, chainId, 'deposits-feed-loading');
           return;
         }
 
@@ -186,7 +197,7 @@ export function useYieldEarned(params: {
           try {
             const result = await ns.earned.compute({ depositFacts, rateSeries, events });
             entry = rateFeed === undefined
-              ? { status: 'unavailable', reason: 'rate-history-loading' }
+              ? { status: 'loading', reason: 'rate-history-loading' }
               : toYieldEarnedEntry(result, rateSeries?.assetDecimals ?? 0);
           } catch {
             entry = { status: 'unavailable', reason: 'exchange-rate-read-failed' };
@@ -212,7 +223,8 @@ export function useYieldEarned(params: {
       const identity = identityRef.current;
       const keystore = keystoreRef.current;
       if (!snapshot || !identity || !keystore) {
-        for (const cid of otherChains) markUnavailable(next, sharesOf(cid), cid, 'snapshot-not-ready');
+        // The snapshot, or the keys the stored notes are matched with, not here yet.
+        for (const cid of otherChains) markLoading(next, sharesOf(cid), cid, 'snapshot-not-ready');
         return;
       }
       let sdk: typeof import('@/services/sdk-runtime');
@@ -231,14 +243,14 @@ export function useYieldEarned(params: {
         const shares = getConfiguredYieldDeployments(cid);
         try {
           if (snapshot.loadedChainIds && !snapshot.loadedChainIds.includes(cid)) {
-            markUnavailable(next, sharesOf(cid), cid, 'snapshot-not-ready');
+            markUnavailable(next, sharesOf(cid), cid, 'snapshot-chain-failed');
             continue;
           }
           const depositsFeed = feedValue(feedData(
             publicFeeds.read<YieldFeedResult<YieldDepositsResponse>>(feedYieldDeposits(cid)),
           ));
           if (depositsFeed === undefined) {
-            markUnavailable(next, sharesOf(cid), cid, 'deposits-feed-loading');
+            markLoading(next, sharesOf(cid), cid, 'deposits-feed-loading');
             continue;
           }
           const notes = (loadStoredAccountExport(identity, cid)?.notes ?? []) as unknown as StoredYieldNote[];
@@ -253,7 +265,9 @@ export function useYieldEarned(params: {
               publicFeeds.read<YieldFeedResult<PpUsdcRateHistoryResponse>>(feedYieldRateHistory(cid, d.ppUSDC)),
             ));
             const rate = rates?.[shareRateKey(cid, d.ppUSDC)];
-            if (rateFeed === undefined) { next.set(key, { status: 'unavailable', reason: 'rate-history-loading' }); continue; }
+            if (rateFeed === undefined) { next.set(key, { status: 'loading', reason: 'rate-history-loading' }); continue; }
+            // No rates map yet is a wait. A map without this share is no figure.
+            if (!rates) { next.set(key, { status: 'loading', reason: 'exchange-rate-loading' }); continue; }
             if (!rate) { next.set(key, { status: 'unavailable', reason: 'exchange-rate-read-failed' }); continue; }
             const rateSeries = toYieldRateSeries(rateFeed, d.ppUSDC);
             try {
@@ -288,6 +302,13 @@ export function useYieldEarned(params: {
         const next = new Map<string, YieldEarnedEntry>();
         await computeSessionChain(next, snapshot);
         await computeOtherChains(next, snapshot);
+        // A share configured on the session chain that no namespace computes
+        // would otherwise have no entry, and no entry reads as "still loading"
+        // forever. It gets no figure, said once.
+        for (const d of getConfiguredYieldDeployments(chainId)) {
+          const key = yieldEarnedKey(chainId, d.ppUSDC);
+          if (!next.has(key)) next.set(key, { status: 'unavailable', reason: 'no-earned-namespace' });
+        }
         if (!cancelled) {
           setState((prev) => (prev.session === session && prev.chainId === chainId && sameEntries(prev.results, next)
             ? prev
