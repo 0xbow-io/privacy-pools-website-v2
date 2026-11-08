@@ -22,26 +22,35 @@ const pageScan = `(() => {
     const out = [];
     const body = document.body;
     if (!body) return out;
+    // A scoped guard reads only the surface a smoke owns (a selector); the
+    // default is the whole page.
+    const scope = window.__shareNameScope;
+    // A hovered (i) hint paints its bubble in a portal (role=tooltip), outside
+    // any scope: a scoped smoke only hovers hints inside its own surface.
+    const roots = scope ? Array.from(body.querySelectorAll(scope + ', [role="tooltip"]')) : [body];
     // The debug log panel (ppv2_debug) prints raw app logs, which name tokens
     // by their on-chain symbol. It is a developer surface, not copy.
     let debug = document.querySelector('[aria-label="Close debug logs"]');
     while (debug && debug !== body && getComputedStyle(debug).zIndex !== '999998') debug = debug.parentElement;
     if (debug === body) debug = null;
-    let text = body.innerText || '';
-    if (debug) text = text.split(debug.innerText || '').join('\\n');
-    for (const h of findShareNames(text)) out.push({ ...h, source: 'text' });
     const sel = attrs.map((a) => '[' + a + ']').join(',');
-    for (const el of body.querySelectorAll(sel)) {
-      if (debug && debug.contains(el)) continue;
-      for (const a of attrs) {
-        const v = el.getAttribute(a);
-        if (v) for (const h of findShareNames(v)) out.push({ ...h, source: a });
+    for (const root of roots) {
+      if (debug && debug.contains(root)) continue;
+      let text = root.innerText || '';
+      if (debug && root.contains(debug)) text = text.split(debug.innerText || '').join('\\n');
+      for (const h of findShareNames(text)) out.push({ ...h, source: 'text' });
+      for (const el of [root, ...root.querySelectorAll(sel)]) {
+        if (debug && debug.contains(el)) continue;
+        for (const a of attrs) {
+          const v = el.getAttribute && el.getAttribute(a);
+          if (v) for (const h of findShareNames(v)) out.push({ ...h, source: a });
+        }
       }
-    }
-    // A text field's typed value is the user's, not the app's copy, but a
-    // prefilled read-only value is the app talking.
-    for (const el of body.querySelectorAll('input[readonly],textarea[readonly],input[disabled]')) {
-      for (const h of findShareNames(el.value || '')) out.push({ ...h, source: 'value' });
+      // A text field's typed value is the user's, not the app's copy, but a
+      // prefilled read-only value is the app talking.
+      for (const el of root.querySelectorAll('input[readonly],textarea[readonly],input[disabled]')) {
+        for (const h of findShareNames(el.value || '')) out.push({ ...h, source: 'value' });
+      }
     }
     return out;
   };
@@ -80,7 +89,11 @@ export function formatHits(hits: GuardHit[]): string {
   return hits.map((h) => `"${h.match}" in ${h.source} at ${h.step} (${h.url}): ...${h.snippet}...`).join('\n  ');
 }
 
-export async function installShareNameGuard(page: Page, opts: { label?: string } = {}): Promise<ShareNameGuard> {
+export async function installShareNameGuard(page: Page, opts: {
+  label?: string;
+  /** CSS selector: scan only inside these elements. The whole page when omitted. */
+  scope?: string;
+} = {}): Promise<ShareNameGuard> {
   const seen = new Set<string>();
   const mine: GuardHit[] = [];
   let unreported = 0;
@@ -100,6 +113,7 @@ export async function installShareNameGuard(page: Page, opts: { label?: string }
     }
   };
   await page.exposeBinding('__shareNameHit', (_src, json: string) => record(JSON.parse(json)));
+  if (opts.scope) await page.addInitScript(`window.__shareNameScope = ${JSON.stringify(opts.scope)};`);
   await page.addInitScript(pageScan);
   if (!exitHooked) {
     exitHooked = true;
