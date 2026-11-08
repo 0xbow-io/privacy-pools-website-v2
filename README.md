@@ -70,3 +70,7 @@ For deployment source-of-truth and local SDK divergence, read `CLAUDE.md`,
 - `CLAUDE.md` has the current repo-specific operating notes.
 - `AGENTS.md` has agent hygiene rules for this repo.
 - `docs/` contains supporting design and integration notes.
+
+## License
+
+Creative Commons Attribution-NonCommercial 4.0 (CC BY-NC 4.0), same as v1. See [LICENSE.md](./LICENSE.md).
