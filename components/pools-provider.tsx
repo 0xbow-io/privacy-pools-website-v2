@@ -42,6 +42,7 @@ import { readClaimedInputMap } from '@/services/claim-records-store';
 import type { NoteCounts } from '@/services/self-transfer-row';
 import { findOwnActionIn, noteTimeMs, ownDepositBridgeAllowed } from '@/services/own-actions-core';
 import { deriveStellarActivity, stellarSentRecipientLookup, type StellarActivityNote } from '@/services/stellar-activity';
+import { listStellarSentDeposits } from '@/services/stellar/stellar-account';
 import { buildOwnHistoryEvents, ownDepositReviewStatus, type ActivityEvent } from '@/services/own-history-rows';
 import { useLabelDecisionsByChain } from '@/hooks/use-label-decisions-by-chain';
 import {
@@ -1940,6 +1941,11 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
           priceUsd: priceMap['XLM'] || priceMap['xlm'] || 0,
           ownAddress: stellarWallet.isConnected ? stellarWallet.address ?? '' : '',
           sentRecipient: stellarSentRecipientLookup(readAllSentTransfers(), STELLAR_TESTNET_ID),
+          sentDeposits: stellarWallet.isConnected && stellarWallet.address
+            ? listStellarSentDeposits(stellarWallet.address).map((c) => ({
+              txHash: c.txHash, recipient: c.recipient, amount: c.amount, tokenId: c.notes[0]?.tokenId ?? '', createdAt: c.createdAt,
+            }))
+            : [],
         })
       : null;
     {
