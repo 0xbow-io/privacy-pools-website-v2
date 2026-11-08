@@ -98,6 +98,7 @@ import { bumpPaymentRequestRevision } from '@/services/payment-request-revision'
 import { registerDebugSnapshot } from '@/services/debug-snapshots';
 import { blindClaimNote, blindNoteAddressHash, isUnregisteredRecipientError, toImportableNote, type StellarClaimNote } from '@/services/stellar/stellar-claim';
 import { findSentClaim, readSentClaims, saveSentClaim, SENT_CLAIMS_BASE_KEY, setSentClaimTx } from '@/services/stellar/stellar-sent-claims';
+import { CLAIMED_NOTES_BASE_KEY, DEPOSITS_FOR_BASE_KEY, readClaimedNotes, readDepositsFor, recordClaimedNotes, recordDepositFor } from '@/services/stellar/stellar-activity-records';
 import { isStellarAccountAddress, requestStates, type StellarRequestState } from '@/services/stellar/stellar-request';
 import type { StellarSdkPaymentRequest } from '@/services/payment-request-codec';
 import { envScopedStorageKey } from '@/config/app-environment';
@@ -505,10 +506,13 @@ class StellarAccount {
       : undefined;
     return buildStellarNoteOrigins({
       notes,
-      deposits: deposits.map((d) => ({ txHash: String(d.txHash), outputCommitment: String(d.outputCommitment), depositor: String(d.caller) })),
+      deposits: deposits.map((d) => ({ txHash: String(d.txHash), outputCommitment: String(d.outputCommitment), depositor: String(d.caller), value: String(d.depositedValue) })),
       transacts: transacts.map((t) => ({ txHash: String(t.txHash), outputCommitments: t.outputCommitments.map(String) })),
       logs: page.events.map((e) => ({ transactionHash: String(e.transactionHash), ledger: String(e.ledger), ledgerClosedAt: e.ledgerClosedAt })),
       spends,
+      // This account's deposits for others (local record): amount and time
+      // come from this same page, never from a request of their own.
+      authoredDepositTxHashes: this.snapshot.address ? readStellarDepositsFor(this.snapshot.address).map((d) => d.txHash) : [],
       ragequits: ragequits.map((r) => ({ txHash: String(r.txHash), commitment: String(r.commitment) })),
     });
   }
@@ -680,6 +684,15 @@ class StellarAccount {
       if (!receipt.status) throw new Error('The deposit transaction failed on-chain.');
       const txHash = receipt.txHash as string;
       if (claim) setSentClaimTx(sentClaimsStorage(), SENT_CLAIMS_KEY, claim.id, txHash);
+      // The recipient's note never reaches this account, so this device's own
+      // record is what lets the depositor see the payment (DEV-501).
+      if (params.recipient) {
+        recordDepositFor(sentClaimsStorage(), DEPOSITS_FOR_KEY, {
+          depositor: address,
+          txHash,
+          createdAt: Date.now(),
+        });
+      }
       onStage?.('syncing');
       await this.refreshLocal(session, address);
       return {
@@ -898,6 +911,13 @@ class StellarAccount {
       }
       // Best effort here (a just-sent note may not be indexed yet); saving requires it.
       await this.stampClaimedNotes(session, notes.map((n) => n.commitment as Hex), false);
+      // Already on chain: the activity shows the receipt now, not after the next sync.
+      recordClaimedNotes(sentClaimsStorage(), CLAIMED_NOTES_KEY, notes.map((n) => ({
+        owner: address,
+        commitment: n.commitment,
+        txHash: n.txHash,
+        claimedAt: Date.now(),
+      })));
       await this.refreshLocal(session, address);
       return { imported, already: notes.length - imported };
     });
@@ -1320,6 +1340,18 @@ if (typeof __DEV__ !== 'undefined' && __DEV__) {
 
 // The sender's saved one-time claims (services/stellar/stellar-sent-claims.ts).
 const SENT_CLAIMS_KEY = envScopedStorageKey(SENT_CLAIMS_BASE_KEY);
+const DEPOSITS_FOR_KEY = envScopedStorageKey(DEPOSITS_FOR_BASE_KEY);
+const CLAIMED_NOTES_KEY = envScopedStorageKey(CLAIMED_NOTES_BASE_KEY);
+
+/** Deposits this account made for other accounts, from this device's record (activity rows). */
+export function readStellarDepositsFor(depositor: string) {
+  return readDepositsFor(sentClaimsStorage(), DEPOSITS_FOR_KEY, depositor);
+}
+
+/** Notes this account claimed from one-time links on this device (activity rows). */
+export function readStellarClaimedNotes(owner: string) {
+  return readClaimedNotes(sentClaimsStorage(), CLAIMED_NOTES_KEY, owner);
+}
 
 function sentClaimsStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
   try {

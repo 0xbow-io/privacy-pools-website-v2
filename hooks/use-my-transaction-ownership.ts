@@ -167,7 +167,8 @@ export function useMyTransactionOwnership() {
     (tx: Transaction) =>
       tx.type === 'Deposit'
       && !!tx.txHash
-      && (outgoingDepositTxHashes.has(tx.txHash.toLowerCase()) || depositOwnership.notMine.has(tx.txHash.toLowerCase())),
+      // A Stellar deposit-for row is built from this device's own record.
+      && (!!tx.depositFor || outgoingDepositTxHashes.has(tx.txHash.toLowerCase()) || depositOwnership.notMine.has(tx.txHash.toLowerCase())),
     [outgoingDepositTxHashes, depositOwnership],
   );
   /**

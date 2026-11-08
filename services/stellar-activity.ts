@@ -74,7 +74,12 @@ export type StellarNoteOrigins = {
   /** Absent when the account's keys were not in memory for the read. */
   spends?: StellarSpend[];
   exits?: StellarExit[];
+  /** Deposits this account made for other accounts (txs from this device's
+   *  record), as the chain shows them. Amounts are base units. */
+  authored?: StellarAuthoredDeposit[];
 };
+
+export type StellarAuthoredDeposit = { txHash: string; amount: string; ledger: number; time: number };
 
 export type StellarActivityContext = {
   chainId: number;
@@ -89,6 +94,10 @@ export type StellarActivityContext = {
   sentRecipient?: (txHash: string) => string | null;
   /** Blind deposits this account made FOR someone (DEV-499), from its saved claims. */
   sentDeposits?: readonly { txHash: string | null; recipient: string; amount: string; tokenId: string; createdAt: number }[];
+  /** Deposits this account made for other accounts (this device's record). */
+  depositsFor?: readonly { txHash: string }[];
+  /** Notes this account claimed from one-time links (this device's record). */
+  claimed?: readonly { commitment: string; txHash: string; claimedAt: number }[];
 };
 
 export type StellarActivity = {
@@ -122,12 +131,14 @@ function toNumber(hex: string): number {
  */
 export function buildStellarNoteOrigins(input: {
   notes: readonly { commitment: string }[];
-  deposits: readonly { txHash: string; outputCommitment: string; depositor: string }[];
+  deposits: readonly { txHash: string; outputCommitment: string; depositor: string; value?: string }[];
   transacts: readonly { txHash: string; outputCommitments: readonly string[] }[];
   logs: readonly { transactionHash: string; ledger: string; ledgerClosedAt?: string }[];
   /** This account's spends, already matched (`reconstructStellarSpends`). */
   spends?: readonly Omit<StellarSpend, 'ledger' | 'time'>[];
   ragequits?: readonly { txHash: string; commitment: string }[];
+  /** Tx hashes of this account's deposits for others (local record). */
+  authoredDepositTxHashes?: readonly string[];
 }): StellarNoteOrigins {
   const wanted = new Set(input.notes.map((n) => canonicalCommitment(n.commitment)));
   const txAt = new Map<string, { ledger: number; time: number }>();
@@ -156,7 +167,11 @@ export function buildStellarNoteOrigins(input: {
     ?.filter((r) => wanted.has(canonicalCommitment(r.commitment)))
     .map((r) => ({ txHash: String(r.txHash), commitment: canonicalCommitment(r.commitment), ...at(r.txHash) }));
   const spends = input.spends?.map((s) => ({ ...s, ...at(s.txHash) }));
-  return { byCommitment, complete, ...(spends ? { spends } : {}), ...(exits ? { exits } : {}) };
+  const authoredTx = new Set((input.authoredDepositTxHashes ?? []).map(canonicalTx));
+  const authored = authoredTx.size === 0 ? undefined : input.deposits
+    .filter((d) => authoredTx.has(canonicalTx(d.txHash)) && d.value !== undefined && toBig(String(d.value)) !== null)
+    .map((d) => ({ txHash: String(d.txHash), amount: String(toBig(String(d.value))), ...at(d.txHash) }));
+  return { byCommitment, complete, ...(spends ? { spends } : {}), ...(exits ? { exits } : {}), ...(authored ? { authored } : {}) };
 }
 
 /**
@@ -214,6 +229,10 @@ function shortAddress(addr: string): string {
 
 function sameAccount(a: string, b: string): boolean {
   return !!a && !!b && a.toUpperCase() === b.toUpperCase();
+}
+
+function isOtherAccount(owner: string | undefined, own: string): boolean {
+  return !!owner && !!own && /^G[A-Z2-7]{55}$/i.test(owner) && !sameAccount(owner, own);
 }
 
 /**
@@ -275,19 +294,27 @@ function baseRow(
 
 export function deriveStellarActivity(
   notes: readonly StellarActivityNote[],
-  origins: StellarNoteOrigins | null,
+  originsOrNull: StellarNoteOrigins | null,
   ctx: StellarActivityContext,
 ): StellarActivity {
-  const empty: StellarActivity = { rows: [], depositCount: 0, receivedCount: 0, sentCount: 0, withdrawalCount: 0 };
-  if (!origins) return empty;
+  // No index read yet: nothing is proven, so only the claimed-link rows (which
+  // read Pending until indexed) can appear. An empty incomplete index makes
+  // every other section produce nothing.
+  const origins: StellarNoteOrigins = originsOrNull ?? { byCommitment: {}, complete: false };
 
+  const depositForTx = new Set((ctx.depositsFor ?? []).map((d) => canonicalTx(d.txHash)));
   // Own notes only, one per commitment, each with its origin (if indexed).
   const seen = new Set<string>();
   const own: Array<{ note: StellarActivityNote; origin: StellarNoteOrigin | undefined; order: number }> = [];
   for (const n of notes) {
     if (n.isOwned === false || !n.commitment) continue;
+    // Another account's note (a browser that also held the recipient's
+    // session) is never this account's activity (DEV-501).
+    if (isOtherAccount(n.ownerAddress, ctx.ownAddress)) continue;
     const c = canonicalCommitment(n.commitment);
     if (seen.has(c)) continue;
+    const o = origins.byCommitment[c];
+    if (o?.kind === 'deposit' && depositForTx.has(canonicalTx(o.txHash))) continue;
     seen.add(c);
     own.push({ note: n, origin: origins.byCommitment[c], order: own.length });
   }
@@ -381,6 +408,56 @@ export function deriveStellarActivity(
       });
     }
     receivedCount = receivedByTx.size;
+  }
+
+  // --- claimed from a link, not indexed yet: shown at once, but Pending and
+  // not counted. A link is made before its transfer is sent, so only the
+  // event index proves the money arrived; the indexed row above then takes over ---
+  const claimedByCommitment = new Map((ctx.claimed ?? []).map((c) => [canonicalCommitment(c.commitment), c]));
+  const claimedByTx = new Map<string, { note: StellarActivityNote; sum: bigint; claimedAt: number; txHash: string }>();
+  for (const { note, origin } of own) {
+    if (origin) continue;
+    const rec = claimedByCommitment.get(canonicalCommitment(note.commitment));
+    const raw = toBig(note.value);
+    if (!rec || raw === null) continue;
+    const tx = canonicalTx(rec.txHash);
+    // A link made before its transfer confirmed carries 0x0: one row per note then.
+    const key = /[^0]/.test(tx) ? tx : `note:${canonicalCommitment(note.commitment)}`;
+    const acc = claimedByTx.get(key);
+    if (acc) acc.sum += raw;
+    else claimedByTx.set(key, { note, sum: raw, claimedAt: rec.claimedAt, txHash: rec.txHash });
+  }
+  for (const { note, sum, claimedAt, txHash } of claimedByTx.values()) {
+    const time = Math.floor(claimedAt / 1000);
+    rows.push({
+      ...baseRow(note, { kind: 'transact', txHash, ledger: 0, time }, sum, ctx),
+      id: `stellar-in-${note.commitment}`,
+      type: 'Transfer',
+      direction: 'in',
+      reviewStatus: '',
+      status: 'pending',
+    });
+  }
+
+  // --- deposits made for another account: the tx from this device's record,
+  // amount and time from the deposit's own event. No recipient is kept, as on
+  // EVM, so the row names this account, the depositor, as EVM's does ---
+  const recorded = new Set((ctx.depositsFor ?? []).map((d) => canonicalTx(d.txHash)));
+  for (const d of origins.authored ?? []) {
+    const raw = toBig(d.amount);
+    if (raw === null || !recorded.has(canonicalTx(d.txHash))) continue;
+    rows.push({
+      ...eventRow(d.txHash, '', raw, d.time, ctx),
+      address: shortAddress(ctx.ownAddress),
+      fullAddress: ctx.ownAddress,
+      id: `stellar-deposit-for-${d.txHash}`,
+      type: 'Deposit',
+      depositFor: true,
+      // The recipient's note carries the review; the payer claims no verdict.
+      reviewStatus: '',
+      status: 'completed',
+      label: null,
+    });
   }
 
   // --- sent / withdrawn: matched by nullifier at sync time ---
