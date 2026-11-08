@@ -2,6 +2,22 @@ import { getVerifiedPoolAssociationSetLeaves } from '@/services/public-associati
 import { setPendingRelayOwner } from '@/services/pending-relays-store';
 import { canonicalizeExportTokenIds } from '@/services/canonical-token-id';
 import { createChainLimiter, feedHasData, snapshotActivityFingerprint, snapshotScanComplete, sweepChains, waitForFeed, earliestScanOptions, type ChainStepResult } from '@/services/chain-sweep';
+import { browserSupportsPrf, createPasskey, getPasskeyPrf, PasskeyCancelledError, PrfUnavailableError } from '@/services/passkey';
+import {
+  decodeMarkerMeta,
+  encodeMarkerMeta,
+  mayChoosePasskeyUnlock,
+  classifyUserHandle,
+  SECURITY_KEY_OTHER_WALLET_MESSAGE,
+  SECURITY_KEY_UNTAGGED_MESSAGE,
+  SecurityKeyNotFoundError,
+  SecurityKeyPrfUnsupportedError,
+  securityKeyUserId,
+  securityKeyUserName,
+  type PasskeyAuthenticatorKind,
+  type PasskeyMarkerMeta,
+} from '@/services/passkey-choice';
+import { securityKeySignInEnabled } from '@/config/security-key-flag';
 
 // How long a sweep waits for a chain's held event snapshot before deferring that
 // chain to the feed grid (services/chain-sweep.ts waitForFeed).
@@ -57,7 +73,6 @@ const getSdkSetup = () => import('@/services/sdk-runtime');
 import apiClient from '@/services/api-client';
 import { accountKeyFingerprint, decodeAccountKey, encodeAccountKey, type AccountKeyIdentity } from '@/services/account-key';
 import { registerDebugSnapshot } from '@/services/debug-snapshots';
-import { getPasskeyPrf, createPasskey } from '@/services/passkey';
 import { bumpPaymentRequestRevision } from '@/services/payment-request-revision';
 import { useDebug, isDebugModeActive } from '@/components/debug-provider';
 import { isStaleConnectorError, pruneBareRestoredConnection } from '@/services/stale-connector';
@@ -240,7 +255,21 @@ const passkeyUnlockEnabled = (): boolean => smartWalletPasskeyEnabled();
 const PASSKEY_CRED_PREFIX = 'ppv2_passkey_cred_v2|';
 const LEGACY_PASSKEY_MARKER_KEY = 'ppv2_passkey_preview_v1';
 
-type PasskeyMarker = { credentialId?: string; ownerAddress: string; rpId?: string };
+// Which authenticator holds that credential (device passkey or security key)
+// and the transports it reported, so the next unlock names the credential in
+// allowCredentials and the browser goes straight to it. A separate item: the
+// credential item keeps its old shape, and a marker without metadata reads as
+// a device passkey, which is what every marker before this was. Losing it is
+// harmless: allowCredentials with the id alone still finds the credential.
+const PASSKEY_META_PREFIX = 'ppv2_passkey_meta_v1|';
+
+type PasskeyMarker = {
+  credentialId?: string;
+  ownerAddress: string;
+  rpId?: string;
+  kind?: PasskeyAuthenticatorKind;
+  transports?: AuthenticatorTransport[];
+};
 
 function getRpId(): string {
   // Apex RP ID for every *.privacypools.com page (services/passkey-rp-id.ts).
@@ -280,15 +309,17 @@ function loadPasskeyMarkerFor(ownerAddress: string, rpId: string): PasskeyMarker
   if (!passkeyUnlockEnabled()) return null;
   const key = passkeyMarkerKey(ownerAddress, rpId);
   let credentialId: string | undefined;
+  let meta: PasskeyMarkerMeta = { kind: 'platform', transports: [] };
   if (typeof window !== 'undefined') {
     migrateLegacyPasskeyMarker();
     try {
       credentialId = window.localStorage?.getItem(PASSKEY_CRED_PREFIX + key) ?? undefined;
+      meta = decodeMarkerMeta(window.localStorage?.getItem(PASSKEY_META_PREFIX + key));
     } catch {
       credentialId = undefined;
     }
   }
-  return credentialId ? { ownerAddress, credentialId, rpId } : null;
+  return credentialId ? { ownerAddress, credentialId, rpId, kind: meta.kind, transports: meta.transports } : null;
 }
 
 /**
@@ -301,6 +332,17 @@ function persistPasskeyMarker(marker: PasskeyMarker): boolean {
   if (typeof window === 'undefined') return false;
   try {
     const item = PASSKEY_CRED_PREFIX + key;
+    // Metadata first: a credential item that exists always has its kind next
+    // to it. A failed metadata write is not fatal (see PASSKEY_META_PREFIX).
+    try {
+      if (marker.credentialId && marker.kind) {
+        window.localStorage?.setItem(PASSKEY_META_PREFIX + key, encodeMarkerMeta({ kind: marker.kind, transports: marker.transports ?? [] }));
+      } else if (!marker.credentialId) {
+        window.localStorage?.removeItem(PASSKEY_META_PREFIX + key);
+      }
+    } catch {
+      // best effort
+    }
     if (marker.credentialId) window.localStorage?.setItem(item, marker.credentialId);
     else window.localStorage?.removeItem(item);
     return (window.localStorage?.getItem(item) ?? null) === (marker.credentialId ?? null);
@@ -329,6 +371,94 @@ async function withWebLock<T>(name: string, fn: () => Promise<T>): Promise<T> {
   return locks.request(name, { ifAvailable: true }, async (lock) => {
     if (!lock) throw new Error(PASSKEY_SETUP_ELSEWHERE_MESSAGE);
     return fn();
+  });
+}
+
+// Browser-level PRF support, read once ahead of any click (a local capability
+// query, no network) so the security-key setup can refuse an unsupported
+// browser BEFORE it writes a useless credential onto the key, without an
+// extra await inside the click's user activation. undefined = not read yet.
+let prfSupportCache: boolean | null | undefined;
+function warmPrfSupport(): void {
+  if (prfSupportCache !== undefined || Platform.OS !== 'web') return;
+  prfSupportCache = null;
+  void browserSupportsPrf().then((v) => { prfSupportCache = v; }).catch(() => { prfSupportCache = null; });
+}
+
+/**
+ * Security-key unlock for an owner with no credential recorded on this browser.
+ *
+ * find: a discoverable sign-in steered to security keys. The credential's
+ *   userHandle must carry this owner's tag (services/passkey-choice.ts), so a
+ *   key set up for another wallet is refused instead of silently unlocking a
+ *   different account. Nothing found (or the prompt dismissed: WebAuthn cannot
+ *   tell the two apart) → SecurityKeyNotFoundError, and the dialog offers setup.
+ * setup: a new discoverable credential on a roaming authenticator, only after
+ *   the user asked for it. Refused up front when the browser says it has no
+ *   PRF, and not recorded when the key did not enable PRF (no hmac-secret).
+ *
+ * Both record the credential for the owner, so every later unlock is a
+ * targeted allowCredentials sign-in. The PRF is requested in the same
+ * assertion, so find costs one touch and setup two at most.
+ */
+async function unlockWithSecurityKey(p: {
+  ownerAddress: string;
+  rpId: string;
+  mode: 'find' | 'setup';
+}): Promise<{ prfFirst: `0x${string}`; credentialId: string }> {
+  const ownerLc = p.ownerAddress.toLowerCase();
+  const rpId = p.rpId;
+  if (p.mode === 'find') {
+    let res: Awaited<ReturnType<typeof getPasskeyPrf>>;
+    try {
+      res = await getPasskeyPrf({ rpId, challenge: randomChallenge(), authenticator: 'security-key' });
+    } catch (e) {
+      if (e instanceof PasskeyCancelledError) throw new SecurityKeyNotFoundError();
+      if (e instanceof PrfUnavailableError) throw new SecurityKeyPrfUnsupportedError();
+      throw e;
+    }
+    const found = classifyUserHandle(res.userHandle, ownerLc, rpId);
+    if (found === 'other-owner') throw new SecurityKeyNotFoundError(SECURITY_KEY_OTHER_WALLET_MESSAGE);
+    if (found === 'untagged') throw new SecurityKeyNotFoundError(SECURITY_KEY_UNTAGGED_MESSAGE);
+    if (!persistPasskeyMarker({ credentialId: res.credentialId, ownerAddress: ownerLc, rpId, kind: 'security-key', transports: [] })) {
+      throw new Error(PASSKEY_STORAGE_MESSAGE);
+    }
+    return { prfFirst: res.prf.first, credentialId: res.credentialId };
+  }
+
+  if (prfSupportCache === false) throw new SecurityKeyPrfUnsupportedError();
+  return withWebLock(`ppv2-passkey-create|${passkeyMarkerKey(ownerLc, rpId)}`, async () => {
+    const raced = loadPasskeyMarkerFor(ownerLc, rpId);
+    if (raced?.credentialId) {
+      const res = await getPasskeyPrf({ rpId, challenge: randomChallenge(), credentialId: raced.credentialId, transports: raced.transports, authenticator: raced.kind });
+      return { prfFirst: res.prf.first, credentialId: res.credentialId };
+    }
+    const name = securityKeyUserName(ownerLc);
+    const created = await createPasskey({
+      rpId,
+      rpName: 'Privacy Pools',
+      userId: securityKeyUserId(ownerLc, rpId, randomChallenge().slice(0, 16)),
+      userName: name,
+      userDisplayName: name,
+      challenge: randomChallenge(),
+      authenticator: 'security-key',
+    });
+    // No PRF on this key or browser: the credential cannot derive an account.
+    // Not recorded, so the next attempt can use a different key.
+    if (!created.prfEnabled) throw new SecurityKeyPrfUnsupportedError();
+    if (!persistPasskeyMarker({ credentialId: created.credentialId, ownerAddress: ownerLc, rpId, kind: 'security-key', transports: created.transports })) {
+      throw new Error(PASSKEY_STORAGE_MESSAGE);
+    }
+    if (created.prf?.first) return { prfFirst: created.prf.first, credentialId: created.credentialId };
+    // Security keys usually return hmac-secret output only on assertion: one
+    // more touch, targeted at the credential just made.
+    try {
+      const res = await getPasskeyPrf({ rpId, challenge: randomChallenge(), credentialId: created.credentialId, transports: created.transports, authenticator: 'security-key' });
+      return { prfFirst: res.prf.first, credentialId: res.credentialId };
+    } catch (e) {
+      if (e instanceof PrfUnavailableError) throw new SecurityKeyPrfUnsupportedError();
+      throw e;
+    }
   });
 }
 
@@ -842,6 +972,23 @@ interface SdkContextValue {
   /** Offer that wallet the passkey instead (no-op unless the refusal was actually observed). */
   choosePasskeyForRefusedSigner: () => void;
   /**
+   * The authenticator the next passkey unlock uses for the connected wallet:
+   * the recorded credential's kind when this browser has one, else the user's
+   * pick (device passkey by default).
+   */
+  passkeyKind: PasskeyAuthenticatorKind;
+  /** This browser has a passkey or security key recorded for the connected wallet. */
+  hasRecordedPasskey: boolean;
+  /** The user may pick a security key for the connected wallet right now (services/passkey-choice.ts). */
+  canChooseSecurityKey: boolean;
+  /** Unlock the connected wallet with this kind of authenticator. No-op unless allowed. Returns whether the choice was taken. */
+  choosePasskeyKind: (kind: PasskeyAuthenticatorKind) => boolean;
+  /**
+   * The next security-key unlock creates a credential on the key instead of
+   * looking for one. Set synchronously so the same tap can carry the prompt.
+   */
+  requestSecurityKeySetup: () => void;
+  /**
    * The Base / Coinbase app signer failed sign-in for the connected address this
    * session: the dialog asks the user to use another wallet.
    */
@@ -989,12 +1136,34 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
   // Set when the user takes the offer. Separate from the observation above so
   // hitting the error does not silently change the unlock under them: the
   // dialog shows a choice, and this is the choice.
-  const [passkeyForSigner, setPasskeyForSigner] = useState<string | null>(null);
+  // `kind` is the authenticator picked (device passkey or security key). It
+  // only matters while this browser has no credential recorded for the owner:
+  // a recorded one always decides (loadPasskeyMarkerFor).
+  const [passkeyChoice, setPasskeyChoice] = useState<{ owner: string; kind: PasskeyAuthenticatorKind } | null>(null);
+  // Read inside the unlock (a callback), so the latest pick is seen without a re-render.
+  const passkeyChoiceRef = useRef<{ owner: string; kind: PasskeyAuthenticatorKind } | null>(null);
+  useEffect(() => { passkeyChoiceRef.current = passkeyChoice; }, [passkeyChoice]);
+  // Owner whose next security-key unlock should CREATE a credential (the user
+  // pressed "Set up this key" after the key had none). One shot.
+  const securityKeySetupRef = useRef<string | null>(null);
   const signerRefusedDerivation = !!address && refusedSigners.has(address.toLowerCase());
   // Base / Coinbase app signers that failed sign-in this session (in memory: a
   // fixed Base app gets the signature path back on the next load).
   const [baseAppRefused, setBaseAppRefused] = useState<ReadonlySet<string>>(() => new Set());
-  const passkeyChosenForSigner = !!address && passkeyForSigner === address.toLowerCase();
+  const passkeyChosenForSigner = !!address && passkeyChoice?.owner === address.toLowerCase();
+  // The credential this browser recorded for the connected wallet (localStorage
+  // only, public data). Bumped after a new record so the dialog follows.
+  const [passkeyMarkerRevision, setPasskeyMarkerRevision] = useState(0);
+  const recordedPasskey = useMemo(
+    () => (address && !keyIdentity && passkeyFeatureOn ? loadPasskeyMarkerFor(address.toLowerCase(), getRpId()) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the revision is the storage change signal
+    [address, keyIdentity, passkeyFeatureOn, passkeyMarkerRevision],
+  );
+  const hasRecordedPasskey = !!recordedPasskey?.credentialId;
+  const passkeyKind: PasskeyAuthenticatorKind = recordedPasskey?.credentialId
+    ? (recordedPasskey.kind ?? 'platform')
+    : (passkeyChosenForSigner ? passkeyChoice!.kind : 'platform');
+  const securityKeyFlagOn = passkeyFeatureOn && securityKeySignInEnabled();
   const isSmartWallet = !!smartWalletKey && smartWalletProbe?.key === smartWalletKey && smartWalletProbe.smart;
   // The failure reports name the KIND of wallet and its connector id, both
   // folded onto allowlists in services/error-reports-failure.ts. No address.
@@ -1169,7 +1338,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
       hasKeyIdentity: !!keyIdentity,
       supportedChain: isSupportedEvmChainId(chainId),
       hasAddress: !!address,
-      signerRefusedDerivation: passkeyChosenForSigner,
+      passkeyChosen: passkeyChosenForSigner,
     });
     if (passkeyModeRef.current === enabled) return;
     // Nothing committed yet (first unlock still deriving, or never unlocked):
@@ -1344,11 +1513,32 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
           const haveCredForOwner = !!marker?.credentialId;
           let prfFirst: `0x${string}`;
           let credentialId: string;
+          const chosen = passkeyChoiceRef.current;
+          const chosenKind: PasskeyAuthenticatorKind = chosen?.owner === ownerLc ? chosen.kind : 'platform';
           if (haveCredForOwner) {
-            // Known passkey for this owner → targeted sign-in (no QR fallback).
-            const res = await getPasskeyPrf({ rpId: getRpId(), challenge: randomChallenge(), credentialId: marker!.credentialId });
+            // Known passkey or security key for this owner → targeted sign-in
+            // (allowCredentials names it, with its transports, so the browser
+            // goes to that authenticator and nothing else).
+            const res = await getPasskeyPrf({
+              rpId: getRpId(),
+              challenge: randomChallenge(),
+              credentialId: marker!.credentialId,
+              transports: marker!.transports,
+              authenticator: marker!.kind,
+            });
             prfFirst = res.prf.first;
             credentialId = res.credentialId;
+          } else if (chosenKind === 'security-key') {
+            const setup = securityKeySetupRef.current === ownerLc;
+            securityKeySetupRef.current = null;
+            const outcome = await unlockWithSecurityKey({
+              ownerAddress: String(derivationAddress),
+              rpId: getRpId(),
+              mode: setup ? 'setup' : 'find',
+            });
+            prfFirst = outcome.prfFirst;
+            credentialId = outcome.credentialId;
+            setPasskeyMarkerRevision((n) => n + 1);
           } else {
             // First time for this owner under this RP ID → CREATE a passkey (the
             // native "save passkey" prompt), not a GET (which would dead-end to
@@ -1372,7 +1562,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
               // still current, or a wallet switch during the prompt orphans the
               // credential and the owner's next tap creates another (codex on
               // PR #36). Provider state below still waits for stillCurrent().
-              if (!persistPasskeyMarker({ credentialId: created.credentialId, ownerAddress: String(derivationAddress), rpId })) {
+              if (!persistPasskeyMarker({ credentialId: created.credentialId, ownerAddress: String(derivationAddress), rpId, kind: 'platform', transports: created.transports })) {
                 // A record this page alone remembers is not a record: after a reload
                 // the owner would create another credential and a different account.
                 // Refuse before the identity can receive funds (codex on PR #36).
@@ -1390,6 +1580,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
               const res = await getPasskeyPrf({ rpId, challenge: randomChallenge(), credentialId });
               prfFirst = res.prf.first;
             }
+            setPasskeyMarkerRevision((n) => n + 1);
           }
           const sdkSetup = await getSdkSetup();
           const pkKm = sdkSetup.derivePasskeyKeystoreManager(prfFirst);
@@ -3999,11 +4190,50 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
   // Take the offer: unlock THIS wallet with a passkey instead of a signature
   // it cannot repeat. Guarded on the observation, so nothing can turn an
   // ordinary wallet into a passkey account by calling this.
+  // The same guard covers the security-key pick (services/passkey-choice.ts):
+  // a refused signer, a wallet this browser already unlocked with a passkey, a
+  // smart wallet, or a tab that asked for it with ?enable-security-key=1.
+  const choosePasskeyKind = useCallback((kind: PasskeyAuthenticatorKind): boolean => {
+    const current = address?.toLowerCase();
+    if (!current || keyIdentity || !passkeyFeatureOn) return false;
+    const allowed = mayChoosePasskeyUnlock({
+      kind,
+      signerRefused: refusedSigners.has(current),
+      hasRecordedPasskey,
+      isSmartWallet,
+      securityKeyFlag: securityKeyFlagOn,
+    });
+    if (!allowed) return false;
+    const next = { owner: current, kind };
+    // The ref too, so a smart wallet (already in passkey mode) can carry the
+    // prompt on this same tap.
+    passkeyChoiceRef.current = next;
+    setPasskeyChoice(next);
+    return true;
+  }, [address, keyIdentity, passkeyFeatureOn, refusedSigners, hasRecordedPasskey, isSmartWallet, securityKeyFlagOn]);
   const choosePasskeyForRefusedSigner = useCallback(() => {
     const current = address?.toLowerCase();
     if (!current || !refusedSigners.has(current)) return;
-    setPasskeyForSigner(current);
-  }, [address, refusedSigners, setPasskeyForSigner]);
+    choosePasskeyKind('platform');
+  }, [address, refusedSigners, choosePasskeyKind]);
+  const canChooseSecurityKey = !!address && !keyIdentity && passkeyFeatureOn && !hasRecordedPasskey
+    && isSupportedEvmChainId(chainId)
+    && mayChoosePasskeyUnlock({
+      kind: 'security-key',
+      signerRefused: signerRefusedDerivation,
+      hasRecordedPasskey,
+      isSmartWallet,
+      securityKeyFlag: securityKeyFlagOn,
+    });
+  const requestSecurityKeySetup = useCallback(() => {
+    const current = address?.toLowerCase();
+    if (!current) return;
+    if (passkeyChoiceRef.current?.owner !== current || passkeyChoiceRef.current.kind !== 'security-key') return;
+    securityKeySetupRef.current = current;
+  }, [address]);
+  useEffect(() => {
+    if (canChooseSecurityKey) warmPrfSupport();
+  }, [canChooseSecurityKey]);
   const baseAppCannotSign = !!address && baseAppRefused.has(address.toLowerCase());
 
   const signOutAccountKey = useCallback(() => {
@@ -4165,6 +4395,11 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     passkeyActive,
     signerRefusedDerivation,
     choosePasskeyForRefusedSigner,
+    passkeyKind,
+    hasRecordedPasskey,
+    canChooseSecurityKey,
+    choosePasskeyKind,
+    requestSecurityKeySetup,
     baseAppCannotSign,
     keystoreIdentityStatus,
     assertCanDeposit,

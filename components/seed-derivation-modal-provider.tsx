@@ -16,6 +16,7 @@ import {
 import { isCoinbaseWalletIdentity, resolveWalletIdentity } from '@/services/wallet-signature-timeout';
 import { BASE_APP_NOTICE_BODY, BASE_APP_NOTICE_TITLE, BASE_APP_USE_ANOTHER_WALLET, isBaseAppCannotSign } from '@/services/base-app-passkey-choice';
 import { waitForReconnectSettled, walletErrorLine } from '@/services/wallet-reconnect';
+import { SecurityKeyNotFoundError } from '@/services/passkey-choice';
 import { useWalletConnectModal } from '@/components/wallet-connect-modal-provider';
 
 /** After this long without a wallet answer, say so and let the user close. */
@@ -79,7 +80,9 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
     keysReady, ensureInitialized, error, passkeyActive, isInitializing, identityMode,
     isSmartWallet, smartWalletProbeSettled, passkeyPreviewEnabled, signerRefusedDerivation, sessionTarget,
     choosePasskeyForRefusedSigner, baseAppCannotSign,
+    passkeyKind, hasRecordedPasskey, canChooseSecurityKey, choosePasskeyKind, requestSecurityKeySetup,
   } = usePoolSession();
+  const securityKeyMode = passkeyActive && passkeyKind === 'security-key';
   const { disconnectAsync } = useDisconnect();
   const walletPicker = useWalletConnectModal();
 
@@ -90,6 +93,8 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
   const walletReconnecting = status === 'reconnecting' && !passkeyActive;
   const [pending, setPending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // The security key had no sign-in for this wallet: offer to set it up.
+  const [securityKeyMissing, setSecurityKeyMissing] = useState(false);
   // Continuation for the action that triggered the prompt (e.g. reopening
   // the deposit modal once the signature lands).
   const onSignedRef = useRef<(() => void) | null>(null);
@@ -161,6 +166,7 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
     const attempt = ++signAttemptRef.current;
     const isCurrent = () => signAttemptRef.current === attempt;
     setErrorMessage(null);
+    setSecurityKeyMissing(false);
     setPending(true);
     setSlowSign(false);
     // Capture before the await: the keysReady state flush inside
@@ -214,6 +220,11 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
       // The Base app cannot sign: the dialog shows the use-another-wallet notice.
       if (isBaseAppCannotSign(err)) {
         setErrorMessage(null);
+        return;
+      }
+      if (err instanceof SecurityKeyNotFoundError || (err as { name?: unknown } | null)?.name === 'SecurityKeyNotFoundError') {
+        setSecurityKeyMissing(true);
+        setErrorMessage(message);
         return;
       }
       if (err instanceof KeySourceChangedError) {
@@ -290,14 +301,41 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
     }
     void walletPicker.open();
   }, [closeSeedDerivationModal, disconnectAsync, walletPicker]);
-  const offerPasskeyInstead = passkeyPreviewEnabled && signerRefusedDerivation && !passkeyActive && !pending && !baseAppCannotSign;
+  // A wallet this browser already unlocked with a passkey or security key gets
+  // that unlock offered up front, so a signer that cannot repeat its signature
+  // does not have to fail the check again on every visit.
+  const offerPasskeyInstead = passkeyPreviewEnabled && (signerRefusedDerivation || hasRecordedPasskey) && !passkeyActive && !pending && !baseAppCannotSign;
+  const recordedSecurityKey = hasRecordedPasskey && passkeyKind === 'security-key';
   const takePasskeyOffer = useCallback(() => {
-    choosePasskeyForRefusedSigner();
+    if (hasRecordedPasskey) choosePasskeyKind(passkeyKind);
+    else choosePasskeyForRefusedSigner();
     // The mode flips in a state update, so this tap cannot also carry the
     // WebAuthn prompt (it would lose the user activation). Say what to do next
     // rather than leaving a dialog that looks unchanged.
-    setErrorMessage('Passkey unlock is on for this wallet. Tap Sign in to continue.');
-  }, [choosePasskeyForRefusedSigner]);
+    setErrorMessage(recordedSecurityKey
+      ? 'Security key unlock is on for this wallet. Tap Sign in to continue.'
+      : 'Passkey unlock is on for this wallet. Tap Sign in to continue.');
+  }, [choosePasskeyForRefusedSigner, choosePasskeyKind, hasRecordedPasskey, passkeyKind, recordedSecurityKey]);
+  // Security key (YubiKey and other FIDO2 keys) picked up front, without a
+  // failed signature first. Allowed by services/passkey-choice.ts only.
+  const offerSecurityKey = canChooseSecurityKey && !securityKeyMode && !pending && !baseAppCannotSign;
+  const takeSecurityKeyOffer = useCallback(() => {
+    if (!choosePasskeyKind('security-key')) return;
+    setSecurityKeyMissing(false);
+    if (passkeyActive) {
+      // Already in passkey mode (smart wallet): only the authenticator
+      // changed, which the provider reads from a ref, so this tap can carry
+      // the prompt.
+      void handleSign();
+      return;
+    }
+    setErrorMessage('Security key unlock is on for this wallet. Tap Sign in to continue.');
+  }, [choosePasskeyKind, passkeyActive, handleSign]);
+  const setUpSecurityKey = useCallback(() => {
+    requestSecurityKeySetup();
+    setSecurityKeyMissing(false);
+    void handleSign();
+  }, [requestSecurityKeySetup, handleSign]);
 
   return (
     <SeedDerivationModalContext.Provider value={{ openSeedDerivationModal, closeSeedDerivationModal, isOpen }}>
@@ -310,7 +348,7 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
             <View className="flex-row items-start justify-between gap-[12px]">
               <View className="flex-1 gap-[6px]">
                 <Text className="font-pp-medium text-[11px] tracking-[2px] text-text-muted">PRIVACY POOLS V2</Text>
-                <Text className="font-pp-bold text-[22px] leading-[26px] text-text">{passkeyActive ? 'Unlock with passkey' : 'Unlock your account'}</Text>
+                <Text className="font-pp-bold text-[22px] leading-[26px] text-text">{securityKeyMode ? 'Unlock with security key' : passkeyActive ? 'Unlock with passkey' : 'Unlock your account'}</Text>
               </View>
               <Pressable
                 className="h-[36px] w-[36px] items-center justify-center rounded-control border border-border-light"
@@ -325,7 +363,9 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
             </View>
 
             <Text className="font-pp-regular text-[13px] leading-[19px] text-text-secondary">
-              {passkeyActive
+              {securityKeyMode
+                ? 'Use your security key to unlock your private balances and payment history.'
+                : passkeyActive
                 ? (isSmartWallet
                   ? 'Smart-contract wallet detected. Use a passkey on this device to unlock your private balances and payment history.'
                   : 'Use your passkey to unlock your private balances and payment history.')
@@ -363,7 +403,7 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
                 disabled={pending}
               >
                 <Text className="font-pp-semi-bold text-[14px] text-button-primary-text">
-                  {walletReconnecting ? 'Waiting for your wallet…' : pending ? (passkeyActive ? 'Check your device…' : 'Check your wallet…') : 'Sign in'}
+                  {walletReconnecting ? 'Waiting for your wallet…' : pending ? (securityKeyMode ? 'Touch your security key…' : passkeyActive ? 'Check your device…' : 'Check your wallet…') : 'Sign in'}
                 </Text>
               </Pressable>
             </View>
@@ -381,7 +421,29 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
                 onPress={takePasskeyOffer}
                 testID="seed-derivation-use-passkey"
               >
-                <Text className="font-pp-semi-bold text-[14px] text-text">Use a passkey instead</Text>
+                <Text className="font-pp-semi-bold text-[14px] text-text">{recordedSecurityKey ? 'Use your security key' : hasRecordedPasskey ? 'Use your passkey' : 'Use a passkey instead'}</Text>
+              </Pressable>
+            )}
+
+            {securityKeyMode && securityKeyMissing && !pending && (
+              <Pressable
+                className="items-center justify-center rounded-[10px] border border-border py-[12px]"
+                onPress={setUpSecurityKey}
+                testID="seed-derivation-security-key-setup"
+              >
+                <Text className="font-pp-semi-bold text-[14px] text-text">Set up this key</Text>
+              </Pressable>
+            )}
+
+            {offerSecurityKey && (
+              <Pressable
+                className="flex-row items-center justify-center gap-[8px] rounded-[10px] border border-border py-[12px]"
+                onPress={takeSecurityKeyOffer}
+                testID="seed-derivation-use-security-key"
+              >
+                {/* nw-keep(data-color): key glyph color is the text theme token into the vector-icon sink */}
+                <Ionicons name="key-outline" size={16} color={colors.text} />
+                <Text className="font-pp-semi-bold text-[14px] text-text">Use a security key</Text>
               </Pressable>
             )}
 

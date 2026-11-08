@@ -34,3 +34,16 @@ describe('passkeyUnlockDefault', () => {
     expect(passkeyUnlockDefault({ ...base, enabled: false })).toBe(false);
   });
 });
+
+describe('passkeyUnlockDefault: the user pick', () => {
+  const eoa = { ...base, isSmartWallet: false };
+  test('a pick allowed by services/passkey-choice.ts turns the passkey on for an EOA', () => {
+    expect(passkeyUnlockDefault({ ...eoa, passkeyChosen: true })).toBe(true);
+    expect(passkeyUnlockDefault({ ...eoa, passkeyChosen: false })).toBe(false);
+  });
+  test('a pick does not outrank the other gates', () => {
+    expect(passkeyUnlockDefault({ ...eoa, passkeyChosen: true, enabled: false })).toBe(false);
+    expect(passkeyUnlockDefault({ ...eoa, passkeyChosen: true, hasKeyIdentity: true })).toBe(false);
+    expect(passkeyUnlockDefault({ ...eoa, passkeyChosen: true, supportedChain: false })).toBe(false);
+  });
+});
