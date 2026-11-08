@@ -50,7 +50,7 @@ jobs:
   # regressions reached prod.
   prod-shield-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -90,3 +90,22 @@ jobs:
         env:
           PROBE_URL: http://localhost:8081
         run: bun scripts/e2e/prod-yield-destination.ts
+      # Read-only browser smokes on the same prod-config server: a fresh random
+      # wallet that refuses every transaction, so nothing here needs a deposit
+      # or can send one. Every *.smoke.ts in scripts/e2e/smoke runs, each with
+      # the share-name guard on its pages (scripts/e2e/share-name-guard.ts).
+      # Runs even when the Shield smoke above failed: separate verdicts.
+      - name: No-deposit smokes
+        if: ${{ !cancelled() }}
+        env:
+          PROBE_URL: http://localhost:8081
+        run: bun scripts/e2e/smoke/run-all.ts
+      - name: Smoke screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-screenshots
+          path: .e2e-shots/smoke-*.png
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
