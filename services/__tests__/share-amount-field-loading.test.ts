@@ -15,7 +15,7 @@ const read = (file: string) => readFileSync(new URL(`../../${file}`, import.meta
 
 // Execute the real hook with local state/effect and feed adapters. No global
 // module mocks, React Native imports, DOM, timers or network dependencies.
-function fieldHarness(initialAmount = '') {
+function fieldHarness(initialAmount = '', fieldRate: ShareRate | null = rate) {
   const states: unknown[] = [];
   let cursor = 0;
   let effects: (() => void)[] = [];
@@ -28,9 +28,9 @@ function fieldHarness(initialAmount = '') {
     useState: (initial: unknown) => { const i = cursor++; if (!(i in states)) states[i] = initial;
       return [states[i], (value: unknown) => { states[i] = value; }]; },
     useEffect: (effect: () => void) => { effects.push(effect); },
-    useShareRates: () => ({ rateFor: () => rate }),
+    useShareRates: () => ({ rateFor: () => fieldRate ?? undefined }),
     useAllChainsPriceMap: () => ({ asset: 2000 }),
-    useBalanceDisplay: () => (exact: string) => shareBalanceDisplay({ sharesExact: exact, shareSymbol: 'ppETH', rate, priceMap: {}, fallbackPrice: 0 }),
+    useBalanceDisplay: () => (exact: string) => shareBalanceDisplay({ sharesExact: exact, shareSymbol: 'ppETH', rate: fieldRate ?? undefined, priceMap: {}, fallbackPrice: 0 }),
     getTokenMetadataBySymbol: () => ({ address: 'share' }),
     formatUnits, shareAmountFromUnderlying, shareRateSnapshotKey, shareUsdDisplayExact,
     parseTokenAmount, sanitizeAmountInput, displayTokenSymbol, isShareSymbol,
@@ -97,4 +97,16 @@ test('all four amount-field surfaces explicitly identify unresolved caps and acc
     expect(call.slice(0, call.indexOf('});') + 3)).toContain('capKnown:');
     expect(call.slice(0, call.indexOf('});') + 3)).toContain('onAmountResolved:');
   }
+});
+
+// Pat's QA on #26: before the rate loads (or on Swap, which never converts)
+// the label was the share's own symbol, so chips and Withdraw presets read
+// "ppETH". The coin, whatever the rate.
+test('the field label never names the share, with or without a rate', () => {
+  expect(fieldHarness('0.1').render().symbol).toBe('ETH');
+  const noRate = fieldHarness('0.1', null).render();
+  expect(noRate.symbol).toBe('ETH');
+  expect(noRate.underlyingAvailable).toBe(false);
+  // Display only: without a rate the amount stays the exact share count.
+  expect(noRate.value).toBe('0.1');
 });

@@ -66,7 +66,9 @@ export function useShareAmountField(args: { amount: string; symbol: string; chai
   const draft = pendingEdit || sameEdit ? edit : null;
   return {
     value: draft?.denomination === 'underlying' ? draft.text : rate && amount ? numericDisplay(amount) : amount,
-    symbol: rate ? displayTokenSymbol(rate.underlyingSymbol) : symbol,
+    // Never the share's own name, even before the rate is known: the coin it
+    // holds (Pat, DEV-591 QA: "ppUSDC" on the chip and the preset chips).
+    symbol: rate ? displayTokenSymbol(rate.underlyingSymbol) : displayTokenSymbol(symbol),
     usdAvailable,
     underlyingAvailable: !!rate,
     usdValue: draft?.denomination === 'usd' && (pendingEdit || draft.priceExact === priceExact) ? draft.text : amount ? usdDisplay(amount) : '',

@@ -398,3 +398,28 @@ export function sdkErrorText(err: unknown, units: ErrorUnits | null | undefined,
   }
   return message || fallback;
 }
+
+/**
+ * The net deposit value a `depositBelowMinimum` refusal was computed on, in
+ * the OUTPUT asset's base units (`ErrorUnits.output`): what the swap would
+ * deposit after relayer and swap fees. Null for any other error. The Swap form
+ * shows this figure as "You receive privately" next to the refusal, so the
+ * headline and the minimum check name the same number (Pat's QA on #26).
+ */
+export function depositBelowMinimumValue(err: unknown): bigint | null {
+  const amounts = readErrorAmounts(err);
+  if (amounts?.code === 'depositBelowMinimum' && typeof amounts.values.value === 'bigint') return amounts.values.value;
+  let current: unknown = err;
+  for (let depth = 0; depth < 5 && current; depth++) {
+    const message = current instanceof Error ? current.message : typeof current === 'string' ? current : '';
+    const m = message.match(/Deposit value (\d+) is below the Entrypoint minimum (\d+)/);
+    if (m) return BigInt(m[1]!);
+    current = (current as { cause?: unknown }).cause;
+  }
+  return null;
+}
+
+/** `value` exactly as the depositBelowMinimum sentence prints it, without the symbol. */
+export function depositValueText(wei: bigint, decimals: number): string {
+  return short(wei, decimals);
+}

@@ -3,6 +3,7 @@ import { useAssetStatistics } from '@/hooks/use-asset-statistics';
 import { DEPOSIT_FAQ_URL } from '@/config/support';
 import { spendableBalanceLabel } from '@/services/spendable-balance-label';
 import { useShareAmountField } from '@/hooks/use-share-amount-field';
+import { depositValueText } from '@/services/sdk-error-amounts';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { SWAP_DEPOSIT_REFUND_NOTE } from '@/services/swap-deposit-copy';
@@ -240,7 +241,7 @@ export function ActionHub({
   const outCard = tight ? 'gap-[6px] px-[16px] py-[12px]' : 'gap-[12px] px-[16px] py-[20px]';
   const { openWithdrawModal, closeWithdrawModal, inlineActive: withdrawInline, isOpen: withdrawIsOpen, inlineStep: withdrawStep, syncInlineAmount: syncWithdrawAmount, inlineAmount: withdrawAmount, inlineToken: withdrawToken, syncInlineToken: syncWithdrawToken, spendabilityLoading: withdrawSpendabilityLoading, spendabilityError: withdrawSpendabilityError, retrySpendability, getSpendableBalanceWei: getWithdrawSpendableBalanceWei, getWithdrawMaxWei } = useWithdrawModal();
   const { openTransferModal, closeTransferModal, inlineActive: transferInline, isOpen: transferIsOpen, syncInlineAmount: syncTransferAmount, getTransferMaxWei, inlineStep: transferStep, inlineAmount: transferAmount, inlineToken: transferToken, syncInlineToken: syncTransferToken } = useTransferModal();
-  const { openSwapModal, closeSwapModal, isOpen: swapIsOpen, inlineActive: swapInline, inlineStep: swapStep, inlineSend: swapInlineSend, inlineRecipientRegistration: swapRecipientRegistration, syncInlineForm: syncSwapForm } = useSwapModal();
+  const { openSwapModal, closeSwapModal, isOpen: swapIsOpen, inlineActive: swapInline, inlineStep: swapStep, inlineSend: swapInlineSend, inlineRecipientRegistration: swapRecipientRegistration, syncInlineForm: syncSwapForm, inlineQuotedNet: swapQuotedNetRaw } = useSwapModal();
   const {
     openRequestPaymentModal, closePaymentRequestModal,
     inlineActive: requestInline, isOpen: requestIsOpen,
@@ -1042,8 +1043,23 @@ export function ActionHub({
     // that call, net of its bridge fee, not the cheapest plain bridge.
     destinationCall: swapCrossChain,
   });
+  // A Review press refused below the pool minimum carries the net deposit it
+  // was priced at (relayer and swap fees out). While the form still asks for
+  // that same swap, the headline IS that figure, printed as the refusal prints
+  // it, so the two never disagree (Pat's QA on #26: "~10.04 USDT" beside
+  // "about 9.6391 USDT, below the pool's minimum"). From the press's own
+  // quote: nothing is fetched for it.
+  const swapQuotedNet = swapQuotedNetRaw && swapOutToken
+    && swapQuotedNetRaw.grossWei === swapAmountWei
+    && swapQuotedNetRaw.inputToken.toLowerCase() === swapFromAddress.toLowerCase()
+    && swapQuotedNetRaw.outputToken.toLowerCase() === swapOutToken.address.toLowerCase()
+    && swapQuotedNetRaw.destinationChainId === swapDestChainId
+    ? swapQuotedNetRaw.wei
+    : null;
   const swapPreviewText = !swapOutUnits
     ? null
+    : swapQuotedNet !== null && swapOutToken
+      ? `~${depositValueText(swapQuotedNet, swapOutToken.decimals)}`
     : swapPreviewIdentity && swapPreviewInWei !== null && swapPreviewInWei > 0n
       ? `~${formatSwapExitEstimate(swapPreviewInWei, swapOutUnits.decimals)}`
       : swapPreview.status === 'ok'
@@ -2519,8 +2535,8 @@ export function ActionHub({
     }, underlyingEntry: action === 'withdraw' || action === 'send' });
   // Swap keeps share entry on purpose: the field holds the exact share count
   // the swap spends, and an underlying edit would clamp to the cap and hide the
-  // flow's own over-balance message. So `amountField.symbol` is the raw share
-  // name there, and the Swap chip names the coin instead (DEV-591, QA on #26).
+  // flow's own over-balance message. So the field never converts there, and
+  // the Swap chip names the coin itself (DEV-591, QA on #26).
   // Display only: the amount and what the swap submits are unchanged.
   const fillMax = () => {
     // Withdraw's max is the shielded balance, and while the association set is
@@ -4193,23 +4209,30 @@ export function ActionHub({
             </View>
 
             {swapOutToken && swapOutUnits && swapPreviewText && (() => {
-              const output = swapPreviewIdentity ? swapPreviewInWei : swapPreview.status === 'ok' ? swapPreview.toAmount : null;
+              const output = swapQuotedNet !== null ? null : swapPreviewIdentity ? swapPreviewInWei : swapPreview.status === 'ok' ? swapPreview.toAmount : null;
               const label = output == null ? null : estimatedUsdLabel(previewOutputUsd(output, swapOutUnits.decimals, feePricing.tokenUsdOf(swapDestChainId, swapToFunding, swapOutUnits.symbol)) ?? 0);
               return label ? <Text className="font-pp-sans text-[12px] text-text-secondary" testID="hub-swap-output-usd">{label}</Text> : null;
             })()}
             <View className="flex-row flex-wrap items-center gap-[6px]">
               {(() => {
-                const note = swapPreviewText
+                // The relayer fee is only known from the relayer's quote at
+                // review (a request the press makes), so the figure above is
+                // BEFORE it, and the pool minimum is checked on what is left.
+                // Pat's QA: "~10.04 USDT" here, then "about 9.61 USDT, below
+                // the pool's minimum of 10" at review.
+                const note = swapQuotedNet !== null
+                  ? 'After relayer and swap fees, from the review quote. The pool minimum applies to this amount.'
+                  : swapPreviewText
                   ? swapBridgeFeeText
-                    ? `Estimate, after a ~$${swapBridgeFeeText} bridge fee. The exact rate is quoted at review.`
-                    : 'Estimate. The exact rate is quoted at review; relayer and swap fees come out of the amount you swap.'
-                  : 'Quoted at review, once the route is priced. Relayer and swap fees come out of the amount you swap.';
+                    ? `Estimate after a ~$${swapBridgeFeeText} bridge fee, before relayer fees. Review shows the exact amount, and the pool minimum applies to what is left.`
+                    : 'Estimate before relayer fees. Review shows the exact amount, and the pool minimum applies to what is left.'
+                  : 'Quoted at review, once the route is priced. Relayer and swap fees come out of the amount you swap, and the pool minimum applies to what is left.';
                 // Phone web: the long note folds into a hint behind a short label.
                 return tight ? (
                   <HoverHint hint={note} wrap testID="hub-swap-quote-hint">
                     <View className="flex-row items-center gap-[4px]">
                       <Text className="font-pp-sans text-[12.5px] text-text-secondary">{swapPreviewText
-                        ? swapBridgeFeeText ? `Estimate, after a ~$${swapBridgeFeeText} bridge fee` : 'Estimate, after fees'
+                        ? swapQuotedNet !== null ? 'After fees, from the review quote' : 'Estimate, before relayer fees'
                         : 'Quoted at review, after fees'}</Text>
                       {/* nw-keep(data-color): glyph colour is a runtime theme token (vector-icon sink) */}
                       <Ionicons name="information-circle-outline" size={12} color={colors.textMuted} />

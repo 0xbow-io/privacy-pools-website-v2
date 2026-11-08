@@ -105,7 +105,7 @@ describe('no raw share symbol can reach a render', () => {
 
   /**
    * QA on #26: the exemption above holds only where the field enters the
-   * underlying. With no rate lookup, `amountField.symbol` IS the share symbol,
+   * underlying. On a face that never converts (Swap), the chip must name the coin itself,
    * so the hub's pool chip printed it on Swap. The faces come from the code:
    * the chip's own condition and the hook's `underlyingEntry`. A chip face the
    * hook does not enter underlying on must name the coin before it reaches

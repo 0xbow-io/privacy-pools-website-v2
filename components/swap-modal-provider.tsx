@@ -71,7 +71,7 @@ import {
 import { conversionFundingToken, intentTargetRefusal } from '@/config/intent-targets';
 import { getConfiguredYieldDeploymentForAsset } from '@/config/yield';
 import { conversionFundingUnits } from '@/services/shield-conversion-units';
-import { sdkErrorText } from '@/services/sdk-error-amounts';
+import { depositBelowMinimumValue, sdkErrorText } from '@/services/sdk-error-amounts';
 import { isRelayerNullifierInFlight, isRelayWaitTimeout, relayInFlightMessage } from '@/services/transfer-outcome';
 import { isPendingRelayBlocked } from '@/services/pending-relays-core';
 import { assertNoPendingRelay } from '@/services/pending-relays-store';
@@ -275,6 +275,15 @@ export type InlineSwapFormPatch = {
 export const SWAP_SEND_NO_CLAIM = 'No claim link needed. They\u2019ll find it automatically.';
 export const SWAP_SEND_CLAIM_WHY = 'They have no account to find it with, so the link is how they claim it.';
 
+/** See `inlineQuotedNet`. `wei` is in the output asset's base units. */
+export type InlineQuotedNet = {
+  grossWei: bigint;
+  inputToken: string;
+  outputToken: string;
+  destinationChainId: number;
+  wei: bigint;
+};
+
 type SwapModalContextType = {
   /** True when the flow opened or deferred; false when it refused the request. */
   openSwapModal: (options?: OpenSwapModalOptions) => boolean;
@@ -292,6 +301,13 @@ type SwapModalContextType = {
   inlineSend: boolean;
   /** Registration of a recipient the hub's Swap tab pushed, for its row's hint (DEV-510). */
   inlineRecipientRegistration: 'idle' | 'checking' | 'registered' | 'unregistered' | 'unknown';
+  /**
+   * The net deposit value the last Review press was refused on as below the
+   * pool minimum, for the request it priced. The hub shows it as "You receive
+   * privately" while its form still matches, so the headline and the refusal
+   * name one number. From that press's own quote: nothing is fetched for it.
+   */
+  inlineQuotedNet: InlineQuotedNet | null;
   syncInlineForm: (patch: InlineSwapFormPatch) => void;
 };
 
@@ -305,6 +321,7 @@ const SwapModalContext = createContext<SwapModalContextType>({
   inlineMode: 'wallet',
   inlineSend: false,
   inlineRecipientRegistration: 'idle',
+  inlineQuotedNet: null,
   syncInlineForm: () => {},
 });
 
@@ -652,6 +669,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
   }, [reshieldSnapshot, chainId, feePricing]);
   const [isQuoting, setIsQuoting] = useState(false);
   const [swapError, setSwapError] = useState<string | null>(null);
+  const [quotedNet, setQuotedNet] = useState<InlineQuotedNet | null>(null);
   // Chain FROZEN at submission — explorer/polling must not follow a later
   // app-chain switch (codex round 3, P2).
   const [txChainId, setTxChainId] = useState<number | null>(null);
@@ -1862,6 +1880,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     const isCurrent = () => guardRef.current.isCurrent(requestToken, requestKey);
     setIsQuoting(true);
     setSwapError(null);
+    setQuotedNet(null);
     setSwapUnavailable(false);
     try {
       // Swap-send only: the recipient must already be able to receive a private
@@ -2017,6 +2036,18 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       if (!isCurrent()) return;
       log('error', 'Swap', 'Reshield estimate failed', { error: String(err) });
+      // Below the pool minimum: keep the net figure the refusal was computed
+      // on, so the form's headline shows the same number as the error.
+      const netWei = depositBelowMinimumValue(err);
+      if (netWei !== null) {
+        setQuotedNet({
+          grossWei,
+          inputToken: requestFromToken.address,
+          outputToken: requestOutputToken.address,
+          destinationChainId: requestDestination,
+          wei: netWei,
+        });
+      }
       if (err instanceof ReshieldPreflightError) {
         setSwapError(swapErrorText(err, 'The swap failed.'));
       } else if (isSwapUnavailableError(err)) {
@@ -2676,9 +2707,10 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       inlineMode: mode,
       inlineSend: isOpen && inlineSend,
       inlineRecipientRegistration: isOpen ? swapSendRegistration : 'idle',
+      inlineQuotedNet: isOpen && inlineHubActive && !inlineSend ? quotedNet : null,
       syncInlineForm,
     }),
-    [openSwapModal, closeSwapModal, isOpen, inlineHubActive, inlineSend, step, mode, swapSendRegistration, syncInlineForm],
+    [openSwapModal, closeSwapModal, isOpen, inlineHubActive, inlineSend, step, mode, swapSendRegistration, syncInlineForm, quotedNet],
   );
 
   const explorerUrl = txHash ? getExplorerTxUrl(txChainId ?? chainId, txHash) : null;
