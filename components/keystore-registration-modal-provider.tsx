@@ -8,6 +8,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAccount, useConfig, usePublicClient, useSendTransaction, useSwitchChain } from 'wagmi';
 import { getAccount } from 'wagmi/actions';
 import type { Address as ViemAddress, Hex } from 'viem';
+import { useShareNameText } from '@/hooks/use-share-rates';
 
 import { useTheme } from '@/components/theme-provider';
 import { Colors } from '@/constants/theme';
@@ -263,6 +264,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
   // chain directly; a cross-chain open is about the OTHER one.
   const [targetChainId, setTargetChainId] = useState<number | null>(null);
   const chainId = targetChainId ?? activeChainId;
+  const shareText = useShareNameText(chainId);
   const crossChainTarget = targetChainId !== null && targetChainId !== activeChainId;
   const withOpLock = useOpLock();
   const publicClient = usePublicClient({ chainId });
@@ -1234,7 +1236,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
             {!gaslessEligible && !quotedPlan && stuckMessage && (
               <View className="gap-[6px] rounded-control border border-warning bg-warning-bg px-[12px] py-[10px]">
                 <Text className="font-pp-semi-bold text-[12px] text-warning">This wallet can&apos;t pay for registration</Text>
-                <Text className="font-pp-regular text-[12px] leading-[18px] text-warning">{stuckMessage}</Text>
+                <Text className="font-pp-regular text-[12px] leading-[18px] text-warning">{shareText(stuckMessage)}</Text>
               </View>
             )}
 
@@ -1244,7 +1246,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
             )}
             {errorMessage && (
               <View className="rounded-control border border-[#E11D48] px-[12px] py-[10px]">
-                <Text className="font-pp-medium text-[12px] leading-[17px] text-[#E11D48]">{errorMessage}</Text>
+                <Text className="font-pp-medium text-[12px] leading-[17px] text-[#E11D48]">{shareText(errorMessage)}</Text>
               </View>
             )}
 
@@ -1254,8 +1256,8 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
                 indicator would imply the flow had started. */}
             {pending && statusMessage
               ? (quotedPlan
-                ? <FlowProgress message={statusMessage} />
-                : <Text className="font-pp-regular text-[12px] leading-[18px] text-text-secondary">{statusMessage}</Text>)
+                ? <FlowProgress message={statusMessage} chainId={chainId} />
+                : <Text className="font-pp-regular text-[12px] leading-[18px] text-text-secondary">{shareText(statusMessage)}</Text>)
               : null}
 
             {/* The way out, said out loud while the wallet has the prompt. It

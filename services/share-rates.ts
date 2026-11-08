@@ -9,7 +9,8 @@
 // and the live rate come from hooks/use-share-rates.ts.
 import { formatUnits, parseUnits, type Address } from 'viem';
 import { formatTokenBalance, isStablecoin } from '@/services/token-format';
-import { displayTokenSymbol } from '@/services/share-display';
+import { formatShortfallAmount } from '@/services/relayed-payment-shortfall';
+import { displayTokenSymbol, isShareSymbol, tokenAmountLabel, type ShareRateOf } from '@/services/share-display';
 
 export const SHARE_CONVERT_ABI = [
   {
@@ -104,3 +105,76 @@ export function formatShareAsUnderlying(value: number, rate: ShareRate): string 
   return `${formatTokenBalance(value, symbol)} ${symbol}`;
 }
 
+
+/**
+ * Rate lookup by share symbol for free text (withoutShareNames), which names a
+ * share but not its chain. With `chainId` only that chain's share counts. Without
+ * one a symbol converts only when EVERY configured deployment of it
+ * (`configured`, the feed's own list) has a rate and they agree to one part in
+ * a million. A deployment whose read failed is missing from `rates`, and the
+ * rates that are present say nothing about it, so the text then keeps the
+ * approximate share count rather than pick a chain it cannot see.
+ */
+export function shareRateOf(
+  rates: readonly ShareRate[],
+  chainId?: number,
+  configured: readonly Pick<ShareRate, 'chainId' | 'share' | 'shareSymbol'>[] = [],
+): ShareRateOf {
+  return (shareSymbol) => {
+    const upper = shareSymbol.toUpperCase();
+    const matching = rates.filter((r) => r.shareSymbol.toUpperCase() === upper && (chainId === undefined || r.chainId === chainId));
+    if (chainId === undefined) {
+      const expected = configured.filter((d) => d.shareSymbol.toUpperCase() === upper);
+      const covered = expected.every((d) => matching.some((r) => r.chainId === d.chainId && r.share.toLowerCase() === d.share.toLowerCase()));
+      if (expected.length === 0 || !covered) return undefined;
+    }
+    const values = matching
+      .map((r) => Number(formatUnits(r.assetsPerShare, r.underlyingDecimals)))
+      .filter((v) => Number.isFinite(v) && v > 0);
+    if (values.length === 0) return undefined;
+    const lo = Math.min(...values);
+    const hi = Math.max(...values);
+    return (hi - lo) / lo <= 1e-6 ? values[0] : undefined;
+  };
+}
+
+/**
+ * A base-unit amount of `units` as display text. A share with its live rate
+ * reads as the underlying it is worth, converted in integers; a share without
+ * one is its count under the underlying's name, marked approximate
+ * (tokenAmountLabel); anything else is itself. `format` writes the figure
+ * (default: every significant digit, like formatUnits).
+ */
+export function shareWeiText(
+  wei: bigint,
+  units: { symbol: string; decimals: number },
+  rate: ShareRate | undefined,
+  format: (wei: bigint, decimals: number, symbol: string) => string = (v, d) => formatUnits(v, d),
+): string {
+  if (isShareSymbol(units.symbol) && rate && rate.shareDecimals === units.decimals) {
+    const assets = (wei * rate.assetsPerShare) / 10n ** BigInt(rate.shareDecimals);
+    const symbol = displayTokenSymbol(rate.underlyingSymbol);
+    return `${format(assets, rate.underlyingDecimals, symbol)} ${symbol}`;
+  }
+  return tokenAmountLabel(format(wei, units.decimals, displayTokenSymbol(units.symbol)), units.symbol);
+}
+
+/**
+ * A FEE in `units` as display text, never read low: a share with its rate is
+ * converted rounding UP and written with the cost formatter (also rounding up),
+ * as "~0.0043 ETH"; without a rate it is the share count, rounded up and marked
+ * approximate; a plain token is its own figure, rounded up. Caps and spendable
+ * figures round DOWN elsewhere; a fee is a cost, so it rounds the other way.
+ */
+export function feeShareText(wei: bigint, units: { symbol: string; decimals: number }, rate: ShareRate | undefined): string {
+  if (isShareSymbol(units.symbol) && rate && rate.shareDecimals === units.decimals) {
+    const one = 10n ** BigInt(rate.shareDecimals);
+    const product = wei * rate.assetsPerShare;
+    const assets = product / one + (product % one > 0n ? 1n : 0n);
+    const symbol = displayTokenSymbol(rate.underlyingSymbol);
+    return `~${formatShortfallAmount(assets, rate.underlyingDecimals, true, symbol)} ${symbol}`;
+  }
+  const symbol = displayTokenSymbol(units.symbol);
+  const figure = formatShortfallAmount(wei, units.decimals, true, symbol);
+  return `${isShareSymbol(units.symbol) ? '≈' : '~'}${isShareSymbol(units.symbol) ? ' ' : ''}${figure} ${symbol}`;
+}

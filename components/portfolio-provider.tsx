@@ -24,6 +24,7 @@ import { getKnownTokenMetadata, isStablecoin, formatTokenBalance } from '@/confi
 import { buildPortfolioPositions } from '@/services/portfolio-positions';
 import { formatUsdPrecise } from '@/services/format-fiat';
 import { totalYieldEarnedUsd, yieldEarnedDisplay, yieldEarnedKey, type YieldEarnedDisplay } from '@/services/yield-earned';
+import { tokenAmountLabel } from '@/services/share-display';
 
 // --- Types ---
 
@@ -191,8 +192,8 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       let pendingLabel: string | null = null;
       if (p.pendingBalance > 0) {
         pendingLabel = p.pendingValueUnavailable
-          ? `${`${formatTokenBalance(p.pendingBalance, p.shareSymbol ?? p.tokenSymbol)} ${p.shareSymbol ?? p.tokenSymbol}`} pending. Value unavailable.`
-          : `${formatTokenBalance(p.pendingBalance, p.tokenSymbol)} ${p.tokenSymbol} pending`;
+          ? `${tokenAmountLabel(formatTokenBalance(p.pendingBalance, p.shareSymbol ?? p.tokenSymbol), p.shareSymbol ?? p.tokenSymbol)} pending. Value unavailable.`
+          : `${tokenAmountLabel(formatTokenBalance(p.pendingBalance, p.tokenSymbol), p.tokenSymbol)} pending`;
       }
       return {
         tokenSymbol: p.tokenSymbol,

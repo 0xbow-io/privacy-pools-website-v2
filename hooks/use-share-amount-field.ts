@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { formatUnits } from 'viem';
 import { useShareRates } from '@/hooks/use-share-rates';
 import { useAllChainsPriceMap } from '@/hooks/use-all-chains-price-map';
-import { useBalanceDisplay } from '@/hooks/use-balance-display';
+import { formatTokenBalanceDown } from '@/services/token-format';
 import { getTokenMetadataBySymbol } from '@/config/tokens';
 import { isShareSymbol, displayTokenSymbol } from '@/services/share-display';
 import { shareRateSnapshotKey, shareUsdDisplayExact } from '@/services/share-balance-display';
@@ -17,23 +17,24 @@ export function useShareAmountField(args: { amount: string; symbol: string; chai
   const { amount, symbol, chainId, maxSharesExact, capKnown, onAmountResolved, underlyingEntry = true } = args;
   const { rateFor } = useShareRates();
   const prices = useAllChainsPriceMap(chainId);
-  const balanceDisplay = useBalanceDisplay(chainId);
   const rate = underlyingEntry && isShareSymbol(symbol) ? rateFor(chainId, getTokenMetadataBySymbol(symbol, chainId)?.address) : undefined;
   // No stablecoin fallback: dollar ENTRY requires a real price from the grid.
   const price = rate ? prices[rate.underlying.toLowerCase()] ?? prices[rate.underlyingSymbol] ?? prices[displayTokenSymbol(rate.underlyingSymbol)] : undefined;
   const priceExact = typeof price === 'number' && Number.isFinite(price) && price > 0
-    ? price.toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 100 }) : undefined;
+    ? price.toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 20 }) : undefined;
   const usdAvailable = shareUsdDisplayExact('0', rate, priceExact) !== null;
   const rateKey = shareRateSnapshotKey(rate);
   const fieldKey = `${chainId}:${symbol}:${underlyingEntry}`;
   const [edit, setEdit] = useState<{ shares: string; text: string; rateKey: string; priceExact?: string; denomination: 'underlying' | 'usd'; tooSmall: boolean; fieldKey: string; maxSharesExact: string; capKnown: boolean; pending: boolean } | null>(null);
   const numericDisplay = (shares: string) => {
-    const shown = balanceDisplay(shares || '0', symbol, chainId).text.split(' ')[0];
-    // Compact or threshold labels are not valid editable numbers.
-    if (/^\d+(?:\.\d+)?$/.test(shown)) return shown;
     if (!rate) return shares;
-    const wei = parseTokenAmount(shares, rate.shareDecimals) * rate.assetsPerShare / 10n ** BigInt(rate.shareDecimals);
-    return formatUnits(wei, rate.underlyingDecimals);
+    const wei = parseTokenAmount(shares || '0', rate.shareDecimals) * rate.assetsPerShare / 10n ** BigInt(rate.shareDecimals);
+    // Rounded DOWN from the exact converted decimal (cubic on #324): a shown cap
+    // or MAX never reads above what the shares are worth. Typing the shown MAX
+    // back is still the exact cap (shareAmountFromUnderlying's displayedMax).
+    const shown = formatTokenBalanceDown(formatUnits(wei, rate.underlyingDecimals), displayTokenSymbol(rate.underlyingSymbol));
+    // Compact or threshold labels are not valid editable numbers.
+    return /^\d+(?:\.\d+)?$/.test(shown) ? shown : formatUnits(wei, rate.underlyingDecimals);
   };
   const usdDisplay = (shares: string) => shareUsdDisplayExact(shares, rate, priceExact, { field: true }) ?? '';
   const sameEdit = edit?.shares === amount && edit.rateKey === rateKey
@@ -66,7 +67,11 @@ export function useShareAmountField(args: { amount: string; symbol: string; chai
   const draft = pendingEdit || sameEdit ? edit : null;
   return {
     value: draft?.denomination === 'underlying' ? draft.text : rate && amount ? numericDisplay(amount) : amount,
-    symbol: rate ? displayTokenSymbol(rate.underlyingSymbol) : symbol,
+    // Never the share's own name (2026-11-07). Without a rate the field holds the
+    // share count, so the label says it is approximate.
+    unitLabel: rate ? displayTokenSymbol(rate.underlyingSymbol) : `${isShareSymbol(symbol) && underlyingEntry ? '≈ ' : ''}${displayTokenSymbol(symbol)}`,
+    /** An exact share amount as the field writes it, with its coin: what MAX shows, for messages that must agree with it. */
+    display: (shares: string) => (rate ? `${numericDisplay(shares)} ${displayTokenSymbol(rate.underlyingSymbol)}` : null),
     usdAvailable,
     underlyingAvailable: !!rate,
     usdValue: draft?.denomination === 'usd' && (pendingEdit || draft.priceExact === priceExact) ? draft.text : amount ? usdDisplay(amount) : '',

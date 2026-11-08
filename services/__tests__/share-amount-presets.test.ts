@@ -33,11 +33,11 @@ test('Use maximum keeps an exact share string, without treating it as underlying
 
 test('both quick-preset surfaces label literals and convert presses; percentages and Send Max stay shares', () => {
   const withdraw = read('components/withdraw-modal-provider.tsx');
-  expect(withdraw).toContain('`${formatQuickAmount(preset)} ${amountField.symbol}`');
+  expect(withdraw).toContain('`${formatQuickAmount(preset)} ${amountField.unitLabel}`');
   expect(withdraw).not.toContain('balanceDisplay(preset, selectedToken');
   const hub = read('components/home/action-hub.tsx');
   expect(hub).toContain("const next = a === 'withdraw' ? amountField.toShares(preset) : preset;");
-  expect(hub).toContain('`${preset} ${amountField.symbol}`');
+  expect(hub).toContain('`${preset} ${amountField.unitLabel}`');
   expect(hub).toContain('const next = sanitizeAmountInput(maxText, payMeta.decimals);');
   const panel = read('components/pools/pool-action-panel.tsx');
   expect(panel).toContain('setTypedAmount(sanitizeAmountInput(formatUnits(part, decimals), decimals));');

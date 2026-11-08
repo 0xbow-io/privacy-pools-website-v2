@@ -1740,7 +1740,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
         poolValueTokenAmount: tokenAmount,
         poolValueToken: tokenAmount > 0
           ? formatTokenAmount(tokenAmount, displaySymbol)
-          : `0 ${displaySymbol}`,
+          : `0 ${displaySymbol}`, // raw-data: poolValueToken renders through approxUnderlyingText
         // "Total funds accepted" prefers the ASP's cumulative-approved-deposits
         // stat; when the ASP has no per-pool stats (Sui), fall back to the
         // event-summed deposit total so the column isn't a misleading $0.
@@ -2244,14 +2244,14 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
       // The hero total must be the sum of the ROWS: re-deriving decimals from
       // the static TOKEN_DECIMALS table and a symbol-only price made the total
       // disagree with the rows it summarises (kimi review, finding 7).
-      rowUsd.set(`${entry.chainId}:${entry.symbol.toLowerCase()}`, {
+      rowUsd.set(`${entry.chainId}:${entry.symbol.toLowerCase()}`, { // not-rendered: map key
         symbol: entry.symbol,
         balanceUsd: balanceUsdValue,
         pendingUsd: pendingUsdValue,
       });
       return {
         // Chain-qualified: the same symbol can hold value on several chains.
-        id: `${entry.chainId}:${entry.symbol.toLowerCase()}`,
+        id: `${entry.chainId}:${entry.symbol.toLowerCase()}`, // not-rendered: row id
         name: entry.symbol,
         tokenAddress: entry.tokenAddress,
         chainId: entry.chainId,

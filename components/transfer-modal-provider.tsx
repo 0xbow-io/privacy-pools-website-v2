@@ -136,6 +136,9 @@ import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { FeeWarning } from '@/components/fee-warning';
 import { relayedSpendBreakdown } from '@/services/fee-warning';
 import { SHIELDED_TRANSFER_GAS } from '@/services/transfer-fee-estimate';
+import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
+import { feeShareText, shareWeiText, type ShareRate } from '@/services/share-rates';
+import { formatTokenBalanceDown } from '@/services/token-format';
 
 // Web-only styles
 
@@ -409,6 +412,9 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   // chain against itself and could never fire.
   const chainId = useActiveEvmChain().id;
   const balanceDisplay = useBalanceDisplay(chainId);
+  const shareText = useShareNameText(chainId);
+  // Feed-grid rates (no request): a share figure in an error reads as its underlying.
+  const { rateFor } = useShareRates();
   const withOpLock = useOpLock();
   const queryClient = useQueryClient();
   // Sui/EVM branch follows the app-wide chain SELECTION (the single routing
@@ -498,7 +504,9 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   // selectedSymbol/selectedDecimals follow the pill (and the chain-snap effect),
   // so a chain switch mid-loading reformatted a latched USDC amount as ETH
   // (audit, 2026-08-29).
-  const [sentUnits, setSentUnits] = useState<{ symbol: string; decimals: number } | null>(null);
+  // The units AND the share rate the send was made at, latched at submit: a
+  // chain switch afterwards must not re-price the receipt at another chain's rate.
+  const [sentUnits, setSentUnits] = useState<{ symbol: string; decimals: number; rate?: ShareRate } | null>(null);
   const [recipientInput, setRecipientInput] = useState('');
   const [recipientAddress, setRecipientAddress] = useState('');
   const [resolvedRecipientName, setResolvedRecipientName] = useState<string | null>(null);
@@ -1286,6 +1294,14 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     [activeNotes],
   );
   const maxSpendableFormatted = formatUnits(maxSpendableWei, selectedDecimals);
+  // RULE (Pat 2026-10-21, applied to Send 2026-11-07): for a share note the Send
+  // field shows and accepts the UNDERLYING at the note's live rate, while
+  // `amount` stays the exact share string. MAX stores the exact share balance
+  // and, untouched, is never re-parsed. A typed figure crosses
+  // shareAmountFromUnderlying once: same rate snapshot, rounded down, clamped to
+  // the exact balance. Without a rate the field holds the share count, labelled
+  // approximate. Nothing below this line reads the displayed text.
+  const amountField = useShareAmountField({ amount, symbol: selectedSymbol, chainId, maxSharesExact: maxSpendableFormatted, capKnown: !isLoadingNotes, onAmountResolved: setAmount, underlyingEntry: !isSui });
   /** Everything spendable of this token, before the one-transfer note caps. */
   const eligibleTotalWei = useMemo(
     () => activeNotes.reduce((sum, n) => { try { return sum + BigInt(n.value); } catch { return sum; } }, 0n),
@@ -1471,6 +1487,37 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   const consolidationAwaitingConfirmation = isConsolidating && step === 'success'
     && (relayPending === 'pending' || outcomeUnknown);
 
+  // A figure in the selected note's units as shown. With the live rate it is
+  // written exactly as the amount field writes it (amountField.display), so MAX,
+  // the field and every limit in these messages name the same number, and typing
+  // a named limit back sends that exact share amount. Before the rate arrives it
+  // is the approximate share count; `cap` then floors it.
+  const selectedRate = isSui || isStellar ? undefined : rateFor(activeEvmChainId, selectedTokenId);
+  const fieldDisplay = amountField.display;
+  const noteFigure = useCallback((wei: bigint, cap?: { enteredWei: bigint }) => (
+    (isShareSymbol(selectedSymbol) ? fieldDisplay(formatUnits(wei, selectedDecimals)) : null) ?? shareWeiText(
+      wei,
+      { symbol: selectedSymbol, decimals: selectedDecimals },
+      selectedRate,
+      cap
+        ? (v, d) => (d === selectedDecimals ? capText(v, cap.enteredWei, d) : capText(v, v + 1n, d))
+        : undefined,
+    )
+  ), [selectedSymbol, selectedDecimals, selectedRate, fieldDisplay]);
+  // An estimate ("~"), unless the figure already says it is approximate.
+  const noteFigureAbout = useCallback((wei: bigint) => {
+    const text = noteFigure(wei);
+    return text.startsWith('≈') ? text : `~${text}`;
+  }, [noteFigure]);
+  // A FEE never reads low: a share fee is converted rounding UP and written with
+  // the cost formatter (formatShortfallAmount, up), not the field's rounded-down
+  // writer. A plain token keeps its exact figure, which is never low either.
+  const feeFigure = useCallback((wei: bigint) => (
+    isShareSymbol(selectedSymbol)
+      ? feeShareText(wei, { symbol: selectedSymbol, decimals: selectedDecimals }, selectedRate)
+      : noteFigureAbout(wei)
+  ), [selectedSymbol, selectedDecimals, selectedRate, noteFigureAbout]);
+
   const amountError = useMemo(() => {
     if (!amount || enteredAmount === 0) return null;
     if (enteredAmount < 0) return 'Amount must be positive';
@@ -1492,7 +1539,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     if (enteredAmountWei > maxSpendableWei) {
       // DEV-437: floored so it reads below the entry, and the reason is the
       // real one (the note caps only when they are what binds).
-      const cap = tokenAmountLabel(capText(maxSpendableWei, enteredAmountWei, selectedDecimals), selectedSymbol);
+      const cap = noteFigure(maxSpendableWei, { enteredWei: enteredAmountWei });
       return overCapReason(eligibleTotalWei, maxSpendableWei) === 'note-caps'
         ? `Maximum sendable in one transfer is ${cap}`
         : `Exceeds your shielded balance of ${cap}`;
@@ -1509,23 +1556,18 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
       TRANSFER_MAX_LABELS,
     );
     if (!liveSelection.covered) {
-      return `Insufficient selected balance (${tokenAmountLabel(formatUnits(liveSelection.accumulated, selectedDecimals), selectedSymbol)} selected)`;
+      return `Insufficient selected balance (${noteFigure(liveSelection.accumulated)} selected)`;
     }
     // Send-exact with an amount at or under the fee: there is nothing left to
     // deliver, so block here rather than letting the relay path discover it.
     if (relayFeeExceeds) {
-      return `Amount plus the relayer fee (~${formatUnits(relayFeeCeiled ?? 0n, selectedDecimals)} ${isShareSymbol(selectedSymbol) ? selectedSymbol : displayTokenSymbol(selectedSymbol)}) exceeds what one transfer can send. Send at most ${tokenAmountLabel(formatUnits(relayFeeMaxSend, selectedDecimals), selectedSymbol)}, or uncheck "Recipient receives the exact amount".`;
+      return `Amount plus the relayer fee (${feeFigure(relayFeeCeiled ?? 0n)}) exceeds what one transfer can send. Send at most ${noteFigure(relayFeeMaxSend)}, or uncheck "Recipient receives the exact amount".`;
     }
     if (sendExactBelowFee) {
-      return `Send at least a little more than the relayer fee (~${formatUnits(relayFeeReserveWei ?? 0n, selectedDecimals)} ${isShareSymbol(selectedSymbol) ? selectedSymbol : displayTokenSymbol(selectedSymbol)}), or the recipient gets nothing`;
+      return `Send at least a little more than the relayer fee (${feeFigure(relayFeeReserveWei ?? 0n)}), or the recipient gets nothing`;
     }
     return null;
-  }, [stellarLocked, amount, enteredAmount, enteredAmountWei, activeNotes, selectedDecimals, selectedSymbol, maxSpendableWei, eligibleTotalWei, isSui, suiActiveTotal, suiMaxLineageTotal, sendExactBelowFee, relayFeeReserveWei, relayFeeExceeds, relayFeeCeiled, relayFeeMaxSend, connectedAddress, isStellar, stellarConnected, altDecimals, altSymbol, stellarSendFee]);
-
-  // Render error figures at the same display boundary as balances. The
-  // validation memo above remains in shares and has no rate dependencies.
-  const displayAmountError = amountError?.replace(/(?:≈\s*)?(\d+(?:\.\d+)?)\s+(ppETH|ppUSDC|ppUSDT)\b/gi,
-    (_, exact: string, symbol: string) => balanceDisplay(exact, symbol, chainId).text);
+  }, [stellarLocked, amount, enteredAmount, enteredAmountWei, activeNotes, selectedDecimals, selectedSymbol, noteFigure, noteFigureAbout, feeFigure, maxSpendableWei, eligibleTotalWei, isSui, suiActiveTotal, suiMaxLineageTotal, sendExactBelowFee, relayFeeReserveWei, relayFeeExceeds, relayFeeCeiled, relayFeeMaxSend, connectedAddress, isStellar, stellarConnected, altDecimals, altSymbol, stellarSendFee]);
 
   const recipientError = useMemo(() => {
     const trimmed = recipientInput.trim();
@@ -2049,7 +2091,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           throw new Error(`The relayer fee (~${formatUnits(feeBudget, selectedDecimals)} ${displayTokenSymbol(selectedSymbol)}) is at least the amount you entered, so nothing would reach the recipient. Send a little more.`);
         }
         setSentAmountWei(net);
-        setSentUnits({ symbol: selectedSymbol, decimals: selectedDecimals });
+        setSentUnits({ symbol: selectedSymbol, decimals: selectedDecimals, rate: selectedRate });
         log('info', 'Transfer', 'Send-exact: netted the relayer fee out of the entered amount', {
           entered: enteredAmountWei.toString(), net: net.toString(), feeBudget: feeBudget.toString(),
         });
@@ -2071,7 +2113,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           throw new Error('The relayer fee increased. Review the updated quote before trying again. Nothing was sent.');
         }
         setSentAmountWei(sendAmountWei);
-        setSentUnits({ symbol: selectedSymbol, decimals: selectedDecimals });
+        setSentUnits({ symbol: selectedSymbol, decimals: selectedDecimals, rate: selectedRate });
       }
       // These inputs are spent now, so each selection also merges the spare
       // notes of the deposits it already uses. Forced inputs stay as pinned.
@@ -2127,6 +2169,8 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           availableAmount: formatUnits(selection.accumulated, selectedDecimals),
           tokenSymbol: selectedSymbol,
           maxInputs: TRANSFER_MAX_INPUTS,
+          decimals: selectedDecimals,
+          rate: rateFor(activeEvmChainId, selectedTokenId),
         }));
       }
       const verifiedInputCommitments = selection.selectedNotes.map((note) => note.commitment as Hash);
@@ -2405,8 +2449,11 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           const feeMoved = feeMovedUp(relayFeeEstimate, quotedRelayFee) ? ' The fee changed since your last quote.' : '';
           // Same shortfall wording as Pay request (Mike, #282): the fee is
           // inside "needs", costs round up, what can be used rounds down.
-          const amt = (v: bigint, up: boolean) =>
-            isShareSymbol(selectedSymbol) ? balanceDisplay(formatShortfallAmount(v, selectedDecimals, up, selectedSymbol), selectedSymbol, chainId).text : tokenAmountLabel(formatShortfallAmount(v, selectedDecimals, up, selectedSymbol), selectedSymbol);
+          // A share figure is written as the amount field writes it (noteFigure),
+          // so "Send at most" is a number the user can type back.
+          const amt = (v: bigint, up: boolean) => (isShareSymbol(selectedSymbol)
+            ? noteFigure(v)
+            : tokenAmountLabel(formatShortfallAmount(v, selectedDecimals, up, selectedSymbol), selectedSymbol));
           // The guard checks the notes picked for this amount, not the account:
           // only call the balance short when the one-transfer cap is short too
           // (cubic on #282).
@@ -3267,7 +3314,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     }
   }, [
     isSui, isStellar, suiSession, stellarSession, stellarActiveNotes, altDecimals,
-    ensureInitialized, connectedAddress, amount, selectedSymbol, recipientAddress,
+    ensureInitialized, connectedAddress, amount, selectedSymbol, rateFor, selectedRate, noteFigure, recipientAddress,
     hideAddress, relayFeeEstimate, maxSpendableWei, sendTransactionAsync, walletAddress, sendExactActive,
     selectedNoteCommitments, enteredAmountWei, selectedTokenId, chainId, forcedInputs, feeDisplayGrain, selectedDecimals,
     transfer, prepareRelayed, log, noteManager, keystoreManager,
@@ -3536,14 +3583,16 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   // should name: in send-exact mode the typed figure is the debit, not the
   // delivery, and showing the typed figure on the review and success screens
   // would overstate what was sent.
-  const amountField = useShareAmountField({ amount, symbol: selectedSymbol, chainId, maxSharesExact: formatUnits(maxSpendableWei, selectedDecimals), capKnown: !isLoadingNotes, onAmountResolved: setAmount, underlyingEntry: !isSui });
   const transferAmountFormatted = sentAmountWei != null
     // Gross mode nets an ESTIMATED fee until the relayer's binding fee is
     // known at relay time; the marker says so (codex #1/#2).
-    ? `${sendExactActive ? '~' : ''}${balanceDisplay(formatUnits(sentAmountWei, sentUnits?.decimals ?? selectedDecimals), sentUnits?.symbol ?? selectedSymbol, explorerChainId).text}`
+    ? `${sendExactActive ? '~' : ''}${sentUnits
+      // Rounded down, like the field, at the rate latched with the send.
+      ? shareWeiText(sentAmountWei, sentUnits, sentUnits.rate, isShareSymbol(sentUnits.symbol) ? (v, d, sym) => formatTokenBalanceDown(formatUnits(v, d), sym) : undefined)
+      : noteFigure(sentAmountWei)}`
     : sendExactActive
-      ? balanceDisplay(formatUnits(recipientAmountWei, selectedDecimals), selectedSymbol, chainId).text
-      : balanceDisplay(amount || '0', selectedSymbol, chainId).text;
+      ? noteFigure(recipientAmountWei)
+      : noteFigure(enteredAmountWei);
 
   // A settled send must not leave its amount in the form. `amount` feeds the
   // "Recipient receives" card, and openTransferModal was the ONLY thing that
@@ -3616,6 +3665,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                 selected={forcedInputs ?? []} fee={consolidationFee}
                 decimals={selectedDecimals} symbol={selectedSymbol}
                 error={consolidationContextError ?? transferError}
+                chainId={chainId}
                 onChange={changeConsolidationSelection}
                 onReview={() => { if (!consolidationError) { reportTransferError(null); setStep('review'); } }}
                 onClose={requestCloseTransferModal}
@@ -3725,15 +3775,15 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                       keyboardType="numeric"
                     />
                     <Text className="text-[14px] ml-[8px] text-[#737373] font-pp-medium">
-                      {amountField.symbol}
+                      {amountField.unitLabel}
                     </Text>
                   </View>
                   )}
                   <BalanceAmount view={balanceDisplay(amount || '0', selectedSymbol, chainId)} className="text-[12px] text-text-secondary" />
-                  {amountField.error ? <Text className="text-[12px] text-danger">{amountField.error}</Text> : null}
+                  {amountField.error ? <Text className="text-[12px] text-danger">{shareText(amountField.error)}</Text> : null}
                   {amountError && (
                     <Text className="text-[12px] text-[#E53935] font-pp-regular">
-                      {displayAmountError}
+                      {shareText(amountError)}
                     </Text>
                   )}
                   {/* The fee rides on top, so an amount just under the cap (a
@@ -3772,7 +3822,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                     <Text className="text-[12px] mt-[4px] text-[#737373] font-pp-regular">
                       One transfer combines up to {TRANSFER_MAX_INPUTS} notes from{' '}
                       {TRANSFER_MAX_LABELS} deposits; the most you can send at once is{' '}
-                      {isShareSymbol(selectedSymbol) ? balanceDisplay(formatUnits(maxSpendableWei, selectedDecimals), selectedSymbol, chainId).text : tokenAmountLabel(capText(maxSpendableWei, enteredAmountWei, selectedDecimals), selectedSymbol)}.
+                      {noteFigure(maxSpendableWei, { enteredWei: enteredAmountWei })}.
                     </Text>
                   )}
                 </View>
@@ -3889,7 +3939,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                     // the toggle is moot: state the real semantics (as Withdraw does).
                     <Text className="text-[12px] leading-[16px] text-text-secondary font-pp-regular" testID="send-fee-comes-out">
                       {relayFeeCeiled != null
-                        ? `The relayer fee comes out of this amount. The recipient receives ~${balanceDisplay(formatUnits(recipientAmountWei, selectedDecimals), selectedSymbol, chainId).text}.`
+                        ? `The relayer fee comes out of this amount. The recipient receives ${noteFigureAbout(recipientAmountWei)}.`
                         : 'The relayer fee comes out of this amount.'}
                     </Text>
                   ) : !isSui && !isSwapSend && hideAddress ? (
@@ -3904,10 +3954,10 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                       </Pressable>
                       <Text className="text-[12px] leading-[16px] text-text-secondary font-pp-regular">
                         {(() => {
-                          const fee = relayFeeCeiled != null && enteredAmountWei > 0n ? ` (~${balanceDisplay(formatUnits(relayFeeCeiled, selectedDecimals), selectedSymbol, chainId).text})` : '';
+                          const fee = relayFeeCeiled != null && enteredAmountWei > 0n ? ` (${feeFigure(relayFeeCeiled)})` : '';
                           return receiveExact
                             ? `The relayer fee${fee} is added on top of the amount you entered.`
-                            : `Sends exactly what you entered: the relayer fee${fee} comes out of it, so the recipient receives ${relayFeeCeiled != null && enteredAmountWei > 0n ? `~${balanceDisplay(formatUnits(recipientAmountWei, selectedDecimals), selectedSymbol, chainId).text}` : 'a little less'}.`;
+                            : `Sends exactly what you entered: the relayer fee${fee} comes out of it, so the recipient receives ${relayFeeCeiled != null && enteredAmountWei > 0n ? noteFigureAbout(recipientAmountWei) : 'a little less'}.`;
                         })()}
                       </Text>
                     </View>
@@ -4136,7 +4186,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                 {new Set(consolidationSelection?.map((note) => note.label.toLowerCase())).size > 1 && (
                   <Text className="font-pp-regular text-[12px] leading-[18px] text-text-secondary">Each deposit stays separate, but the selected groups share one on-chain transaction.</Text>
                 )}
-                {(transferError || consolidationError) && <Text accessibilityRole="alert" className="text-[13px] text-warning font-pp-regular">{transferError ?? consolidationError}</Text>}
+                {(transferError || consolidationError) && <Text accessibilityRole="alert" className="text-[13px] text-warning font-pp-regular">{shareText(transferError ?? consolidationError)}</Text>}
                 <View className="flex-row gap-[10px]">
                   <Pressable accessibilityRole="button" className="h-[46px] px-[18px] border border-border rounded-control items-center justify-center" onPress={backToConsolidationNotes}>
                     <Text className="font-pp-medium text-[14px] text-text">Back</Text>
@@ -4187,7 +4237,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                     <Text className="text-[14px] leading-[24px]">
                       <Text className="text-[14px] text-[#737373] font-pp-bold">Relayer fee: </Text>
                       <Text className="text-[14px] text-[#737373] font-pp-regular">
-                        ~{balanceDisplay(formatUnits(relayFeeCeiled, selectedDecimals), selectedSymbol, chainId).text}
+                        {feeFigure(relayFeeCeiled)}
                       </Text>
                     </Text>
                   )}
@@ -4219,7 +4269,9 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                           as either cash-register change or an edit action. */}
                       <Text className="text-[14px] text-[#737373] font-pp-bold">Remaining: </Text>
                       <Text className="text-[14px] text-[#737373] font-pp-regular">
-                        {balanceDisplay(formatUnits((isSui ? suiChosen.sum : totalSelectedValue) - enteredAmountWei, selectedDecimals), selectedSymbol, chainId).text}
+                        {(isSui ? suiChosen.sum : totalSelectedValue) - enteredAmountWei >= 0n
+                          ? noteFigure((isSui ? suiChosen.sum : totalSelectedValue) - enteredAmountWei)
+                          : tokenAmountLabel(formatUnits((isSui ? suiChosen.sum : totalSelectedValue) - enteredAmountWei, selectedDecimals), selectedSymbol)}
                       </Text>
                     </Text>
                   )}
@@ -4268,7 +4320,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                   <Text className="text-center font-pp-sans-semi-bold text-[15px] text-text">
                     Consolidating {transferAmountFormatted}
                   </Text>
-                  <FlowProgress message={consolidationAwaitingConfirmation ? 'Waiting for on-chain confirmation…' : loadingMessage} />
+                  <FlowProgress message={consolidationAwaitingConfirmation ? 'Waiting for on-chain confirmation…' : loadingMessage} chainId={chainId} />
                   {consolidationAwaitingConfirmation && <Text className="text-center font-pp-regular text-[13px] text-text-secondary">Confirmation is taking longer than usual. You can close this modal; your balance and history update when the result is known.</Text>}
                 </View>
               ) : (
@@ -4280,7 +4332,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                   {/* Same horizontal staged indicator the shield flow uses —
                       it derives its phase from the live loading message. */}
                   <View className="w-full items-center justify-center gap-[16px] py-[16px]">
-                    <FlowProgress message={loadingMessage} />
+                    <FlowProgress message={loadingMessage} chainId={chainId} />
                   </View>
 
                   <View className="items-center gap-[4px]">

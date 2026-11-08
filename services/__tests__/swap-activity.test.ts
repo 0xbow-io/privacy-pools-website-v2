@@ -398,9 +398,9 @@ describe('activity assembly: recorded on the sending device', () => {
       expect(rowTypeLabel(row)).toBe('Deposit via swap');
       expect(swapHeadline(row, (leg) => `${leg.tokenAmount} ${leg.asset}`)).toBe('≈ 0.5012 ETH → 1250 USDC');
     }
-    // Without a rate the share leg keeps its own units.
+    // Without a rate the share leg reads as its coin, approximately.
     expect(swapHeadline({ ...after.mine[0], asset: 'ppUSDC' }, (leg) => tokenAmountLabel(String(leg.tokenAmount), leg.asset)))
-      .toBe('≈ 0.5012 ETH → 1250 ppUSDC');
+      .toBe('≈ 0.5012 ETH → ≈ 1250 USDC');
     // Never a swap, never a Reshield: no record, no decoration.
     expect(assemble([shieldNote], [], [indexed]).mine[0].swappedFrom).toBeUndefined();
   });

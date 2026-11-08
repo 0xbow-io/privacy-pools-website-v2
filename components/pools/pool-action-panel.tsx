@@ -253,7 +253,7 @@ export function PoolActionPanel({
               <View className="flex-row items-center gap-[6px] rounded-pill border border-border bg-card-background px-[10px] py-[5px]">
                 <TokenIcon size={18} />
                 <Text numberOfLines={1} className="font-pp-semi-bold text-[13px] text-text">
-                  {active.spendsPool ? amountField.symbol : displayTokenSymbol(amountSymbol)}
+                  {active.spendsPool ? amountField.unitLabel : displayTokenSymbol(amountSymbol)}
                 </Text>
               </View>
             </View>

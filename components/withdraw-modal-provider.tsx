@@ -207,6 +207,7 @@ import { useNativeMockBlock } from '@/hooks/use-native-mock-block';
 import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { FeeWarning } from '@/components/fee-warning';
 import { buildFeeBreakdown, gasCostUsd, quoteGas, splitRelayerFee, swapLossUsd, type FeeGasReading } from '@/services/fee-warning';
+import { useShareNameText } from '@/hooks/use-share-rates';
 
 const WITHDRAW_RELAY_METHOD = /^relay(Withdrawal|RegisterAndWithdrawal|WithAnnounce)$/;
 const SWAP_EXIT_PENDING_MESSAGE = 'The relayer accepted this withdrawal, but it has not been included in a block yet. It has not failed and can still land, so these funds are held for it. Your balance and history update on their own once it settles; if it is still pending after 10 minutes, report it from the pending notice.';
@@ -569,6 +570,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   const balanceDisplay = useBalanceDisplay(chainId);
   const spendableLabel = (exact: string, symbol: string, cid: number) =>
     spendableBalanceLabel(exact, symbol, () => balanceDisplay(exact, symbol, cid).text);
+  const shareText = useShareNameText(chainId);
   const withOpLock = useOpLock();
   // Chain FROZEN at submission — explorer links must not follow a later
   // app-chain switch (codex round 3, P2).
@@ -3337,7 +3339,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           reasons: [
             !t.isActive && 'not ACTIVE',
             !t.inSpendableSet && 'not in ASP spendable set',
-            !t.matchesToken && `token ${t.tokenSymbol} != ${selectedToken}`,
+            !t.matchesToken && `token ${t.tokenSymbol} != ${selectedToken}`, // not-rendered: diagnostic log payload
             !t.matchesPA && `label != selectedPA (${selectedPA})`,
           ].filter(Boolean),
         })),
@@ -5013,7 +5015,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     onPress={() => setTokenDropdownOpen(!tokenDropdownOpen)}
                   >
                     <Text className="text-[16px] leading-[16px] flex-1 text-text font-pp-regular">
-                      {amountField.symbol}
+                      {amountField.unitLabel}
                     </Text>
                     <Pressable
                       className="flex-row items-center gap-[4px] px-[8px] py-[4px] border border-border-light rounded-control"
@@ -5119,7 +5121,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                         </Text>
                       </View>
                       {isShareSymbol(selectedToken) ? <BalanceAmount view={balanceDisplay(amount || '0', selectedToken, chainId)} className="text-[12px] text-text-secondary" /> : null}
-                      {amountField.error ? <Text className="text-[12px] text-danger">{amountField.error}</Text> : null}
+                      {amountField.error ? <Text className="text-[12px] text-danger">{shareText(amountField.error)}</Text> : null}
                       <View className="shrink gap-[6px] items-end">
                         <View className="flex-row items-center gap-[4px] flex-wrap justify-end">
                           <Text className="text-[14px] text-[#999999] text-right font-pp-regular">
@@ -5216,7 +5218,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                           disabled={spendabilityBlocked}
                         >
                           <Text className={`text-[13px] font-pp-regular ${active ? 'text-tint' : 'text-text'}`}>
-                            {isShareSymbol(selectedToken) ? `${formatQuickAmount(preset)} ${amountField.symbol}` : formatQuickAmount(preset)}
+                            {isShareSymbol(selectedToken) ? `${formatQuickAmount(preset)} ${amountField.unitLabel}` : formatQuickAmount(preset)}
                           </Text>
                         </Pressable>
                       );
@@ -6009,7 +6011,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                   {/* FlowProgress prints the live message under the rail
                       itself, so this must not repeat it (QA saw "Preparing
                       withdrawal proof..." twice). */}
-                  <FlowProgress message={loadingMessage} />
+                  <FlowProgress message={loadingMessage} chainId={chainId} />
                   {/* Batch progress bar: N proofs take minutes — show how far
                       along the batch is so the app never looks stuck. */}
                   {batchProgress ? (
@@ -6056,7 +6058,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                 </Text>
                 <View className="w-full border rounded-control p-[12px] border-warning bg-warning-bg">
                   <Text className="text-[13px] leading-[19px] font-pp-medium text-warning">
-                    {withdrawError}
+                    {shareText(withdrawError)}
                   </Text>
                 </View>
                 <PendingRelayNotice chainId={chainId} owner={connectedAddress} />
@@ -6095,7 +6097,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     Something went wrong
                   </Text>
                   <Text className="text-[13px] leading-[20px] text-center font-pp-regular text-danger">
-                    {withdrawError || 'An unexpected error occurred. Please try again.'}
+                    {shareText(withdrawError) || 'An unexpected error occurred. Please try again.'}
                   </Text>
                 </View>
 

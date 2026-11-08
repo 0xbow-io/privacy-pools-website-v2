@@ -76,8 +76,8 @@ describe('the rename is honest about what a share count is', () => {
       expect(isShareSymbol(share)).toBe(true);
       expect(displayTokenSymbol(share)).toBe(underlying);
       const text = approxUnderlyingText(`5 ${share}`, share);
-      expect(text).toBe(`5 ${share}`);
-      expect(text).toContain(share);
+      expect(text).toBe(`≈ 5 ${underlying}`);
+      expect(text).not.toContain(share);
     });
   }
 

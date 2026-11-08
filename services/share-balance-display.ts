@@ -12,26 +12,28 @@
 // is unit-testable (bun cannot load config/tokens).
 //
 // Rate known: the UNDERLYING the shares are worth ("0.1 ETH", USD from the
-// underlying's price) plus a one-line hint naming the share count. The count
+// underlying's price) plus a one-line hint giving the share count. The count
 // and symbol always come from the same token identity: shares use the share's
 // decimals, the converted figure the underlying's (shareExactAsUnderlying).
 //
-// Rate unknown (loading, read gap): the share count under the SHARE's own
-// symbol ("0.09989 ppETH"), never under the coin's name, so it cannot read as a
-// fee ("0.09989 ETH" for a 0.1 ETH shield). Display only: nothing here feeds a
+// Rate unknown (loading, read gap): the share count under the coin's name,
+// marked approximate ("≈ 0.09989 ETH"), the rule in services/share-display.ts.
+// The share's own symbol is never shown (Mike, 2026-11-07: share names
+// everywhere confused people), and the ≈ says it is not an exact ETH figure, so
+// a 0.1 ETH shield does not read as a fee. Display only: nothing here feeds a
 // MAX or withdraw amount, those keep reading the exact share strings.
 import { formatUnits } from 'viem';
 import { parseTokenAmount } from '@/services/token-amount';
 import { formatTokenBalance } from '@/services/token-format';
-import { displayTokenSymbol } from '@/services/share-display';
+import { displayTokenSymbol, tokenAmountLabel } from '@/services/share-display';
 import { formatShareAsUnderlying, shareExactAsUnderlying, underlyingPriceFor, type ShareRate } from '@/services/share-rates';
 
 export type ShareBalanceDisplay = {
   /** The figure in `symbol`, as a number. */
   amount: number;
-  /** The coin the figure is in: the underlying when converted, else the share. */
+  /** The coin name shown: always the underlying (the share is never named). */
   symbol: string;
-  /** "0.1 ETH" or "0.09989 ppETH". */
+  /** "0.1 ETH", or "≈ 0.09989 ETH" for an unconverted share count. */
   text: string;
   /** USD for the figure; approximate when not converted. */
   usd: number;
@@ -63,17 +65,18 @@ export function shareBalanceDisplay(args: {
       usd: underlying * underlyingPriceFor(rate, priceMap),
       converted: true,
       hint: shares > 0
-        ? `${formatTokenBalance(shares, shareSymbol)} ${shareSymbol} shares, worth ${text} today. Shares keep their count, their value grows as yield accrues.`
+        ? `${formatTokenBalance(shares, shareSymbol)} shares, worth ${text} today. Shares keep their count, their value grows as yield accrues.`
         : null,
     };
   }
-  // Nothing held: the coin's name reads right, and "0 ppETH" is a spelling the
-  // pool page does not show. Holdings stay under the share's own symbol.
-  const symbol = shares > 0 ? shareSymbol : displayTokenSymbol(shareSymbol);
+  // Nothing held reads as a plain zero; a holding is the share count under the
+  // coin's name, marked approximate (tokenAmountLabel).
+  const symbol = displayTokenSymbol(shareSymbol);
+  const figure = formatTokenBalance(shares, symbol);
   return {
     amount: shares,
     symbol,
-    text: `${formatTokenBalance(shares, symbol)} ${symbol}`,
+    text: shares > 0 ? tokenAmountLabel(figure, shareSymbol) : `${figure} ${symbol}`,
     usd: shares * fallbackPrice,
     converted: false,
     hint: null,

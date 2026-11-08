@@ -448,7 +448,7 @@ export function describeSwapSendsSoFar(
   cleanup?: AllowanceCleanup,
   swap?: SwapSubmissionState | null,
 ): string {
-  const symbol = token?.symbol ?? 'your pay token';
+  const symbol = token ? displayTokenSymbol(token.symbol) : 'your pay token';
   const stillLive = liveAllowancesAfter(sent);
   const broadcast = broadcastApprovals(sent);
   const pending = broadcast.filter((record) => record.pending);

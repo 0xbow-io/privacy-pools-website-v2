@@ -79,7 +79,7 @@ import { fiatEntryAvailable, formatUsdLabel, sanitizeUsdInput, shieldDestination
 import { getUiParam, pushUiParamEntry, retireUiParamEntry, rebaseUiParamEntry, subscribeUiUrl } from '@/components/ui-url-events';
 import { useShareYield } from '@/hooks/use-share-yield';
 import { useYieldVaultProbeVersion } from '@/hooks/use-yield-vault-probe';
-import { displayTokenSymbol, isShareSymbol, shareRedemptionDisclosure } from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol, shareRedemptionDisclosure, tokenAmountLabel } from '@/services/share-display';
 import { amountInputDisplay, formatTokenBalance, groupThousands, isStablecoin, stripAmountSeparators } from '@/services/token-format';
 import { conversionFundingToken, targetAcceptsConversion } from '@/config/intent-targets';
 import { getYieldShareToken } from '@/services/share-yield';
@@ -94,7 +94,7 @@ import { useWalletTokens } from '@/components/wallet-tokens-provider';
 import { listShieldPools, defaultPoolFor, type ShieldPool } from '@/services/shield-pools';
 import { fetchLifiContractCallDeliverable } from '@/services/lifi-quote';
 import { useSwapPreview } from '@/hooks/use-swap-preview';
-import { useShareRates } from '@/hooks/use-share-rates';
+import { useShareRates, useShareNameText } from '@/hooks/use-share-rates';
 import { previewInputAmount, previewIsIdentity, previewOutputUsd } from '@/services/swap-preview-input';
 import { formatSwapExitEstimate } from '@/services/swap-exit-estimate';
 import { sizeConvertingDeposit } from '@/services/cross-pay-sizing';
@@ -829,6 +829,7 @@ export function ActionHub({
     router.push(poolHubTabPath(path, action, id) as Parameters<typeof router.push>[0]);
     return true;
   }, [chainId, pathname, action, router]);
+  const shareText = useShareNameText(chainId);
   // Registration state of the typed recipient, checked while typing so the
   // form says what is about to happen BEFORE Shield is pressed: a deposit to
   // an unregistered address works, but it ends in a one-time claim link the
@@ -3159,8 +3160,8 @@ export function ActionHub({
     const fiatTokenLine = a === 'shield'
       ? `${amount || '0'} ${displayTokenSymbol(payMeta.symbol)}`
       : a === 'request'
-        ? `${requestAmount || '0'} ${isShareSymbol(requestToken.symbol) ? requestToken.symbol : displayTokenSymbol(requestToken.symbol)}`
-        : `${amountField.value || '0'} ${amountField.symbol}`;
+        ? tokenAmountLabel(requestAmount || '0', requestToken.symbol)
+        : `${amountField.value || '0'} ${amountField.unitLabel}`;
     // A created request is frozen into its payload and its pay link: the figure
     // stays visible but inert. The PILL stays live — switching the token is the
     // documented way back to the form.
@@ -3204,7 +3205,7 @@ export function ActionHub({
           className={`items-center rounded-[6px] border px-[7px] py-[3px] ${activePreset ? 'border-tint' : 'border-border bg-card-background'} ${outOfReach ? 'opacity-40' : ''}`}
         >
           <Text className={`text-[11px] font-pp-regular ${activePreset ? 'text-tint' : outOfReach ? 'text-text-secondary' : 'text-text'}`}>
-            {zoneFiatEntry ? usdChipLabel(preset, fiatPrice) : groupThousands(a === 'withdraw' && isShareSymbol(tokenMeta.symbol) ? `${preset} ${amountField.symbol}` : preset)}
+            {zoneFiatEntry ? usdChipLabel(preset, fiatPrice) : groupThousands(a === 'withdraw' && isShareSymbol(tokenMeta.symbol) ? `${preset} ${amountField.unitLabel}` : preset)}
           </Text>
         </Pressable>
       );
@@ -3540,7 +3541,7 @@ export function ActionHub({
               <TokenNetworkIcon symbol={tokenMeta.symbol} size={28} badgeSize={16} badgeTestnetLabel={false} chainId={chainId} />
               {/* nw-keep(data-color): per-asset runtime hue */}
               <Text className="font-pp-sans-semi-bold text-[15px]" style={{ color: hue.fg }}>
-                {amountField.symbol}
+                {amountField.unitLabel}
               </Text>
               {/* nw-keep(data-color): caret color is a runtime theme token (vector-icon sink) */}
               <Ionicons name="chevron-down" size={14} color={colors.text} />
@@ -3620,9 +3621,8 @@ export function ActionHub({
               <Ionicons name="swap-vertical" size={12} color={colors.textMuted} />
             </Pressable>
           ) : null}
-
           {a === action && (a === 'withdraw' || a === 'send') && amountField.error ? (
-            <Text className="font-pp-sans text-[12px] text-danger">{amountField.error}</Text>
+            <Text className="font-pp-sans text-[12px] text-danger">{shareText(amountField.error)}</Text>
           ) : null}
           {/* flex-NOwrap + min-w-0 on the right text: wrapping would grow the
               card (both reviews reproduced it with long balance+pending at
@@ -3999,7 +3999,7 @@ export function ActionHub({
           className={`font-pp-sans text-[12px] ${shieldCapVerdict.reason === 'pending' ? 'text-text-muted' : 'text-[#E53935]'}`}
           testID="hub-shield-cap"
         >
-          {shieldCapVerdict.message}
+          {shareText(shieldCapVerdict.message)}
         </Text>
       )}
 
@@ -4296,7 +4296,7 @@ export function ActionHub({
           <Text className="text-center font-pp-sans-semi-bold text-[15px] text-text">
             Depositing {depositFlow.depositAmountFormatted}
           </Text>
-          <FlowProgress message={depositFlow.loadingMessage} />
+          <FlowProgress message={depositFlow.loadingMessage} chainId={chainId} />
           {/* "Deposit from" route cost, once the quote exists — the wallet is
               about to ask for an amount of the paying token the user never typed. */}
           {depositFlow.swapRouteEstimate && !depositFlow.swapConsent ? (
@@ -4328,7 +4328,7 @@ export function ActionHub({
               ) : null}
               {depositFlow.swapConsent.needsApproval ? (
                 <Text className="font-pp-sans text-[12px] leading-[17px] text-text-secondary">
-                  Two transactions: a {depositFlow.swapConsent.paySymbol} approval first, then the swap.
+                  Two transactions: a {displayTokenSymbol(depositFlow.swapConsent.paySymbol)} approval first, then the swap.
                 </Text>
               ) : null}
               {/* DEV-436: the wallet preview shows the unused slippage come back. */}
@@ -4742,7 +4742,7 @@ export function ActionHub({
         )}
 
         {picker.error && (
-          <Text className="text-center font-pp-sans text-[12px] text-danger">{picker.error}</Text>
+          <Text className="text-center font-pp-sans text-[12px] text-danger">{shareText(picker.error)}</Text>
         )}
 
         {!picker.wcUri && <Pressable onPress={closePicker} accessibilityRole="button" className="min-h-[44px] flex-row items-center justify-center gap-[8px]" hitSlop={8}>
