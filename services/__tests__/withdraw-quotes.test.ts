@@ -367,13 +367,14 @@ describe('topNAcrossLabels (mixed-label per-proof cap)', () => {
 });
 
 describe('DEV-408: the swap shortfall names the coin and marks share amounts approximate', () => {
-  test('a ppUSDT shortfall without a rate reads as USDT shares, never the share name (DEV-591)', async () => {
+  test('a ppUSDT shortfall without a rate reads under USDT, approximate, never the share name or "shares" (DEV-591)', async () => {
     const { noteShortfallMessage } = await import('@/services/swap-note-shortfall');
     const msg = noteShortfallMessage({ reason: 'input-cap', selectableWei: 18_972789n, withheldWei: 0n }, { symbol: 'ppUSDT', decimals: 6 });
     expect(msg).not.toContain('ppUSDT');
-    expect(msg).toContain('18.972789 USDT shares');
+    expect(msg).toContain('≈ 18.972789 USDT');
+    expect(msg).not.toMatch(/\bshares\b/i);
     const waiting = noteShortfallMessage({ reason: 'unapproved', selectableWei: 0n, withheldWei: 5_000000n }, { symbol: 'ppUSDT', decimals: 6 });
-    expect(waiting).toBe('None of your USDT notes are approved yet. 5 USDT shares is waiting.');
+    expect(waiting).toBe('None of your USDT notes are approved yet. ≈ 5 USDT is waiting.');
   });
   test('a plain token is unchanged', async () => {
     const { noteShortfallMessage } = await import('@/services/swap-note-shortfall');

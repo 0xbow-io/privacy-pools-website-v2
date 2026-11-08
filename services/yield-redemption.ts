@@ -57,7 +57,7 @@ export function planYieldRedemption(input: {
   // leaves the pool is request + fee. The gross is what the router receives
   // and what the SDK's `amount` / `amountOut` both take on this route.
   if (received <= 0n || received !== requestedWei) {
-    return { refusal: `the relayer would deliver ${received} shares, the user asked for ${requestedWei}` };
+    return { refusal: `the relayer would deliver ${received}, not the ${requestedWei} requested` };
   }
   if (fee < 0n || sent !== received + fee) {
     return { refusal: `the relayer's gross ${sent} is not recipient ${received} + fee ${fee}` };

@@ -16,6 +16,7 @@ import { withPublicSwapRows } from '@/services/swap-route-evidence';
 import { swapHeadline, type SwapLeg } from '@/services/swap-rows';
 import { consolidationHeadline } from '@/services/self-transfer-row';
 import { Pressable, Text, View, useWindowDimensions } from 'react-native';
+import { ShareFigure } from '@/components/ui/share-figure';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Colors, TokenHues } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
@@ -78,7 +79,7 @@ export function ActivityRow({ tx, colors }: { tx: Transaction; colors: typeof Co
       </View>
       <View className="flex-1 gap-[1px]">
         <Text className="font-pp-sans-medium text-[13px] text-text" numberOfLines={1}>
-          {rowTypeLabel(tx)} · <Text className="font-pp-mono">{consolidationHeadline(tx) ?? swapHeadline(tx, swapAmount) ?? amountView.text}</Text>
+          {rowTypeLabel(tx)} · <Text className="font-pp-mono">{consolidationHeadline(tx) ?? swapHeadline(tx, swapAmount) ?? <ShareFigure view={amountView} />}</Text>
         </Text>
         <Text className="font-pp-sans text-[11.5px] text-text-muted" numberOfLines={1}>
           {timeAgo(tx.timestamp, now)} · {tx.chain}

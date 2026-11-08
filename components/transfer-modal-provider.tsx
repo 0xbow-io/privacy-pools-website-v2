@@ -26,6 +26,7 @@ import { ProgressStages, progressStageIndex } from '@/components/ui/progress-sta
 import { CheckCircleIcon, CloseIcon, SpinnerIcon } from '@/components/ui/modal-icons';
 import { DROPDOWN_SHADOW, WEB_FIXED_POSITION, WEB_BLUR_BACKDROP, WEB_NO_OUTLINE } from '@/components/ui/web-style-shims';
 import { View, Text, Pressable, Platform, useWindowDimensions, TextInput, Animated, Easing, Linking, ScrollView } from 'react-native';
+import { ShareFigure } from '@/components/ui/share-figure';
 import type { TextStyle } from 'react-native';
 import Svg, { Path, Circle, Rect } from 'react-native-svg';
 import { useAccount, usePublicClient, useSendTransaction } from 'wagmi';
@@ -3537,13 +3538,18 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   // delivery, and showing the typed figure on the review and success screens
   // would overstate what was sent.
   const amountField = useShareAmountField({ amount, symbol: selectedSymbol, chainId, maxSharesExact: formatUnits(maxSpendableWei, selectedDecimals), capKnown: !isLoadingNotes, onAmountResolved: setAmount, underlyingEntry: !isSui });
+  // The same figure as a view: while the share rate loads, a rendered figure is
+  // a shimmer (ShareFigure), never a share count.
+  const transferAmountView = sentAmountWei != null
+    ? balanceDisplay(formatUnits(sentAmountWei, sentUnits?.decimals ?? selectedDecimals), sentUnits?.symbol ?? selectedSymbol, explorerChainId)
+    : sendExactActive
+      ? balanceDisplay(formatUnits(recipientAmountWei, selectedDecimals), selectedSymbol, chainId)
+      : balanceDisplay(amount || '0', selectedSymbol, chainId);
   const transferAmountFormatted = sentAmountWei != null
     // Gross mode nets an ESTIMATED fee until the relayer's binding fee is
     // known at relay time; the marker says so (codex #1/#2).
-    ? `${sendExactActive ? '~' : ''}${balanceDisplay(formatUnits(sentAmountWei, sentUnits?.decimals ?? selectedDecimals), sentUnits?.symbol ?? selectedSymbol, explorerChainId).text}`
-    : sendExactActive
-      ? balanceDisplay(formatUnits(recipientAmountWei, selectedDecimals), selectedSymbol, chainId).text
-      : balanceDisplay(amount || '0', selectedSymbol, chainId).text;
+    ? `${sendExactActive ? '~' : ''}${transferAmountView.text}`
+    : transferAmountView.text;
 
   // A settled send must not leave its amount in the form. `amount` feeds the
   // "Recipient receives" card, and openTransferModal was the ONLY thing that
@@ -3772,7 +3778,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                     <Text className="text-[12px] mt-[4px] text-[#737373] font-pp-regular">
                       One transfer combines up to {TRANSFER_MAX_INPUTS} notes from{' '}
                       {TRANSFER_MAX_LABELS} deposits; the most you can send at once is{' '}
-                      {isShareSymbol(selectedSymbol) ? balanceDisplay(formatUnits(maxSpendableWei, selectedDecimals), selectedSymbol, chainId).text : tokenAmountLabel(capText(maxSpendableWei, enteredAmountWei, selectedDecimals), selectedSymbol)}.
+                      {isShareSymbol(selectedSymbol) ? <ShareFigure view={balanceDisplay(formatUnits(maxSpendableWei, selectedDecimals), selectedSymbol, chainId)} /> : tokenAmountLabel(capText(maxSpendableWei, enteredAmountWei, selectedDecimals), selectedSymbol)}.
                     </Text>
                   )}
                 </View>
@@ -4174,7 +4180,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                   <Text className="text-[14px] leading-[24px]">
                     <Text className="text-[14px] text-[#737373] font-pp-bold">Amount: </Text>
                     <Text className="text-[14px] text-[#737373] font-pp-regular">
-                      {transferAmountFormatted}
+                      {transferAmountView.loading ? <ShareFigure view={transferAmountView} /> : transferAmountFormatted}
                     </Text>
                   </Text>
                   <Text className="text-[14px] leading-[24px]">
@@ -4187,7 +4193,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                     <Text className="text-[14px] leading-[24px]">
                       <Text className="text-[14px] text-[#737373] font-pp-bold">Relayer fee: </Text>
                       <Text className="text-[14px] text-[#737373] font-pp-regular">
-                        ~{balanceDisplay(formatUnits(relayFeeCeiled, selectedDecimals), selectedSymbol, chainId).text}
+                        ~<ShareFigure view={balanceDisplay(formatUnits(relayFeeCeiled, selectedDecimals), selectedSymbol, chainId)} />
                       </Text>
                     </Text>
                   )}
@@ -4219,7 +4225,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                           as either cash-register change or an edit action. */}
                       <Text className="text-[14px] text-[#737373] font-pp-bold">Remaining: </Text>
                       <Text className="text-[14px] text-[#737373] font-pp-regular">
-                        {balanceDisplay(formatUnits((isSui ? suiChosen.sum : totalSelectedValue) - enteredAmountWei, selectedDecimals), selectedSymbol, chainId).text}
+                        <ShareFigure view={balanceDisplay(formatUnits((isSui ? suiChosen.sum : totalSelectedValue) - enteredAmountWei, selectedDecimals), selectedSymbol, chainId)} />
                       </Text>
                     </Text>
                   )}
@@ -4266,7 +4272,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
               isConsolidating ? (
                 <View className="w-full justify-center gap-[10px] px-[16px] py-[18px]">
                   <Text className="text-center font-pp-sans-semi-bold text-[15px] text-text">
-                    Consolidating {transferAmountFormatted}
+                    Consolidating {transferAmountView.loading ? <ShareFigure view={transferAmountView} /> : transferAmountFormatted}
                   </Text>
                   <FlowProgress message={consolidationAwaitingConfirmation ? 'Waiting for on-chain confirmation…' : loadingMessage} />
                   {consolidationAwaitingConfirmation && <Text className="text-center font-pp-regular text-[13px] text-text-secondary">Confirmation is taking longer than usual. You can close this modal; your balance and history update when the result is known.</Text>}
@@ -4285,7 +4291,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
 
                   <View className="items-center gap-[4px]">
                     <Text className="text-center text-text font-pp-regular text-[24px]">
-                      {transferAmountFormatted}
+                      {transferAmountView.loading ? <ShareFigure view={transferAmountView} /> : transferAmountFormatted}
                     </Text>
                   </View>
                 </>

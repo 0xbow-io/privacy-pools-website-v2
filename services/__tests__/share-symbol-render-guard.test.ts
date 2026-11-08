@@ -153,7 +153,7 @@ describe('no raw share symbol can reach a render', () => {
   test('the display rules rename shares and leave plain tokens alone', () => {
     expect(displayTokenSymbol('ppUSDT')).toBe('USDT');
     expect(displayTokenSymbol('USDC')).toBe('USDC');
-    expect(approxUnderlyingText('1.5 ppUSDC', 'ppUSDC')).toBe('1.5 ppUSDC');
+    expect(approxUnderlyingText('1.5 ppUSDC', 'ppUSDC')).toBe('≈ 1.5 USDC');
     expect(approxUnderlyingText('1.5 USDC', 'USDC')).toBe('1.5 USDC');
   });
 });

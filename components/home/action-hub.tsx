@@ -20,6 +20,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { CARD_SHADOW, WEB_NO_OUTLINE } from '@/components/ui/web-style-shims';
 import { HoverHint } from '@/components/ui/hover-hint';
 import { ActivityIndicator, Animated, Easing, Linking, Platform, Pressable, ScrollView as RNScrollView, Text, TextInput, useWindowDimensions, View, type ViewStyle } from 'react-native';
+import { ShareFigure } from '@/components/ui/share-figure';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useIsFocused, useLocalSearchParams, useNavigation, usePathname, useRouter } from 'expo-router';
 import { useAccount, useBalance, useEstimateFeesPerGas, usePublicClient, useReadContract } from 'wagmi';
@@ -3682,7 +3683,10 @@ export function ActionHub({
                       : 'Shielded balance'}
               </Text>
               <Text className="font-pp-mono text-[12.5px] text-primary">
-                {groupThousands(a === 'shield'
+                {/* A share figure waiting on its rate is a shimmer, never a share count. */}
+                {a !== 'shield' && !stellarLocked && pageBalanceView.loading && !(a === 'withdraw' ? (withdrawBalanceUnavailable || withdrawBalanceLoading) : poolsLoading)
+                  ? <ShareFigure view={pageBalanceView} />
+                  : groupThousands(a === 'shield'
                   ? (walletBalanceLoading
                     ? '—'
                     // walletBalanceText is the PAY token's balance (formatted with
@@ -3713,7 +3717,7 @@ export function ActionHub({
               // hover/press hint on the Shielded figure instead, flagged by a
               // small amber dot so there is something to hover.
               <HoverHint
-                hint={!poolsLoading ? [pageBalanceView.hint, pageShielded.pending > 0 ? `+${pagePendingView.text} pending. ${pagePendingView.hint ?? ''}` : null].filter(Boolean).join(' ') || null : null}
+                hint={!poolsLoading ? [pageBalanceView.hint, pageShielded.pending > 0 ? (pagePendingView.loading ? 'Pending.' : `+${pagePendingView.text} pending. ${pagePendingView.hint ?? ''}`) : null].filter(Boolean).join(' ') || null : null}
                 testID="hub-shielded-pending-hint"
               >
                 <Text
@@ -3731,7 +3735,7 @@ export function ActionHub({
                       ? 'sign in to view'
                       : poolsLoading
                       ? '—'
-                      : groupThousands(pageBalanceView.text)}
+                      : <ShareFigure view={{ ...pageBalanceView, text: groupThousands(pageBalanceView.text) }} />}
                   </Text>
                   {!poolsLoading && pageBalanceView.hint ? <Text className="text-text-muted">{' ⓘ'}</Text> : null}
                   {!poolsLoading && pageShielded.pending > 0 ? (
@@ -3742,7 +3746,7 @@ export function ActionHub({
               </HoverHint>
             ) : pageShielded.pending > 0 ? (
               <View className="flex-row items-center gap-[4px]">
-                <Pill tone="warning" label={`+${groupThousands(pagePendingView.text)} pending`} />
+                <Pill tone="warning" label={pagePendingView.loading ? 'Pending' : `+${groupThousands(pagePendingView.text)} pending`} />
                 <ShareCountHint hint={pagePendingView.hint} />
               </View>
             ) : null}

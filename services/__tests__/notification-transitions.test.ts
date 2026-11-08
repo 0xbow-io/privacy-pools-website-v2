@@ -182,11 +182,11 @@ test('share deposit approval and decline use approximate coin quantities with a 
   }
 });
 
-test('share deposit notifications without a rate keep their share units', () => {
+test('share deposit notifications without a rate read under the coin, approximate, never the share name or "shares"', () => {
   for (const status of ['approved', 'declined']) {
     const t = tx({ status, asset: 'ppETH', tokenAmount: 0.1 });
-    expect(buildTransitionEvent(t).description).toBe('0.10 ppETH');
-    expect(buildTransitionEvent(t, amountDisplay(undefined)).description).toBe('0.10 ppETH');
+    expect(buildTransitionEvent(t).description).toBe('≈ 0.10 ETH');
+    expect(buildTransitionEvent(t, amountDisplay(undefined)).description).toBe('≈ 0.10 ETH');
   }
 });
 

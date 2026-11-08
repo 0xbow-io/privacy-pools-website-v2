@@ -2,9 +2,8 @@
 // amounts, validation, quotes, relayer and on-chain values stay in shares
 // (exact strings/bigints). Never convert an amount to underlying and back,
 // never feed a displayed underlying figure into an operation.
-// Display headlines use underlying through shareBalanceDisplay; shares appear
-// only in the (i) hint, in fields labelled with the share symbol, or while the
-// rate is unknown. Never print a share count under the underlying symbol.
+// Display headlines use underlying through shareBalanceDisplay. The screen
+// never shows the word "shares" or a share's own symbol (Pat, hard rule).
 // Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
 // MAX retains the original exact shares. USD edits use an exact decimal price
 // in that same boundary. No other operation converts display back.
@@ -12,29 +11,36 @@
 // is unit-testable (bun cannot load config/tokens).
 //
 // Rate known: the UNDERLYING the shares are worth ("0.1 ETH", USD from the
-// underlying's price) plus a one-line hint naming the share count. The count
+// underlying's price) plus a one-line hint on how the value grows. The count
 // and symbol always come from the same token identity: shares use the share's
 // decimals, the converted figure the underlying's (shareExactAsUnderlying).
 //
-// Rate unknown (loading, read gap): a held share count under the SHARE's own
-// symbol ("0.09989 ppETH"), never under the coin's name, so it cannot read as a
-// fee ("0.09989 ETH" for a 0.1 ETH shield). Nothing held is the one exception:
-// zero is zero in any unit, so it reads under the coin ("0.00 ETH") and
-// `symbol` is the coin, not the share. Display only: nothing here feeds a MAX
+// Rate unknown (loading, read gap): a held share is `loading`, and a rendered
+// figure shows the shimmer (components/ui/share-figure.tsx) until the rate
+// arrives. `text` then holds the count under the coin, marked approximate
+// ("≈ 0.09989 ETH"), only for plain-text messages that cannot hold a shimmer.
+// Nothing held reads as a plain zero under the coin ("0.00 ETH"). `symbol` is
+// always the coin, never the share. Display only: nothing here feeds a MAX
 // or withdraw amount, those keep reading the exact share strings.
 import { formatUnits } from 'viem';
 import { parseTokenAmount } from '@/services/token-amount';
 import { formatTokenBalance } from '@/services/token-format';
-import { displayTokenSymbol } from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol, tokenAmountLabel } from '@/services/share-display';
 import { formatShareAsUnderlying, shareExactAsUnderlying, underlyingPriceFor, type ShareRate } from '@/services/share-rates';
 
 export type ShareBalanceDisplay = {
   /** The figure in `symbol`, as a number. */
   amount: number;
-  /** The coin the figure is in: the underlying when converted or nothing is held, else the share. */
+  /** The coin the figure is in: always the underlying's name, never the share's. */
   symbol: string;
-  /** "0.1 ETH", "0.09989 ppETH", or "0.00 ETH" when nothing is held. */
+  /**
+   * "0.1 ETH", or "0.00 ETH" when nothing is held. While loading, the share
+   * count marked approximate ("≈ 0.09989 ETH"): a fallback for plain-text
+   * messages only. A rendered figure shows the shimmer instead (ShareFigure).
+   */
   text: string;
+  /** A share is held and its rate is not known yet: render a shimmer, not `text`. */
+  loading: boolean;
   /** USD for the figure; approximate when not converted. */
   usd: number;
   converted: boolean;
@@ -65,20 +71,23 @@ export function shareBalanceDisplay(args: {
       usd: underlying * underlyingPriceFor(rate, priceMap),
       converted: true,
       hint: shares > 0
-        ? `${formatTokenBalance(shares, shareSymbol)} ${shareSymbol} shares, worth ${text} today. Shares keep their count, their value grows as yield accrues.`
+        ? `Worth ${text} today, the value grows as yield accrues.`
         : null,
+      loading: false,
     };
   }
-  // Nothing held: the coin's name reads right, and "0 ppETH" is a spelling the
-  // pool page does not show. Holdings stay under the share's own symbol.
-  const symbol = shares > 0 ? shareSymbol : displayTokenSymbol(shareSymbol);
+  // Nothing held reads as a plain zero; a holding is the share count under the
+  // coin's name, marked approximate (tokenAmountLabel).
+  const symbol = displayTokenSymbol(shareSymbol);
+  const figure = formatTokenBalance(shares, symbol);
   return {
     amount: shares,
     symbol,
-    text: `${formatTokenBalance(shares, symbol)} ${symbol}`,
+    text: shares > 0 ? tokenAmountLabel(figure, shareSymbol) : `${figure} ${symbol}`,
     usd: shares * fallbackPrice,
     converted: false,
     hint: null,
+    loading: isShareSymbol(shareSymbol) && shares > 0,
   };
 }
 

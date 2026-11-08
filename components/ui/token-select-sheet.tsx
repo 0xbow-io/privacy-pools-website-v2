@@ -15,6 +15,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { CloseIcon } from '@/components/ui/modal-icons';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { FlatList, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { ShareFigure } from '@/components/ui/share-figure';
 import type { ViewStyle } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { useQuery } from '@tanstack/react-query';
@@ -194,6 +195,8 @@ type TokenRow = {
    * asset has none (or the pools data has not resolved) — never a fake 0.
    */
   privateBalance?: string;
+  /** The same balance as a view: a shimmer while the share rate loads. */
+  privateBalanceView?: { text: string; symbol: string; loading?: boolean };
   privateHint?: string | null;
   /** Directly depositable on the active chain (present in the pool config). */
   poolSupported: boolean;
@@ -647,7 +650,7 @@ export function TokenSelectSheet({
           : (token.unavailableReason ? token.walletUsdValue : undefined),
         // Custom (pasted) tokens are not pool assets, so they have no shielded
         // balance by definition.
-        ...(!custom && priv && balanceMode !== 'none' ? { privateBalance: priv.text, privateHint: priv.hint } : {}),
+        ...(!custom && priv && balanceMode !== 'none' ? { privateBalance: priv.text, privateBalanceView: priv, privateHint: priv.hint } : {}),
         poolSupported: !custom,
         custom,
         poolAsset: !custom && !!token.poolAsset,
@@ -882,7 +885,7 @@ export function TokenSelectSheet({
           {row.privateHint ? <ShareCountHint hint={row.privateHint} /> : null}
           {row.privateBalance ? (
             <Text className="font-pp-regular text-[11px] text-text-muted">
-              {row.privateBalance} private
+              {row.privateBalanceView ? <ShareFigure view={row.privateBalanceView} /> : row.privateBalance} private
             </Text>
           ) : null}
         </View>

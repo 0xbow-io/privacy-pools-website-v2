@@ -10,7 +10,7 @@
  *
  * Pure so it can be tested: the component that owns the note set cannot be.
  */
-import { displayTokenSymbol, shareCountLabel } from '@/services/share-display';
+import { displayTokenSymbol, tokenAmountLabel } from '@/services/share-display';
 import { formatTokenUnits } from '@/services/intent-swaps';
 
 export type NoteShortfallReason = 'unapproved' | 'input-cap' | 'insufficient';
@@ -59,7 +59,7 @@ export function noteShortfallMessage(
   formatAmount?: (wei: bigint) => string,
 ): string {
   const coin = displayTokenSymbol(units.symbol);
-  const amount = formatAmount ?? ((wei: bigint) => shareCountLabel(formatTokenUnits(wei, units.decimals), units.symbol));
+  const amount = formatAmount ?? ((wei: bigint) => tokenAmountLabel(formatTokenUnits(wei, units.decimals), units.symbol));
   if (shortfall.selectableWei <= 0n && shortfall.reason === 'unapproved') {
     return `None of your ${coin} notes are approved yet. ${amount(shortfall.withheldWei)} is waiting.`;
   }

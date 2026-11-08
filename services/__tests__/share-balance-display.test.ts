@@ -46,16 +46,19 @@ describe('shareBalanceDisplay', () => {
     expect(v.usd).toBeGreaterThan(0.09989 * 2459);
   });
 
-  test('the hint names the share count under the share symbol and the worth', () => {
+  test('the hint names the worth, never the share or the word shares', () => {
     const v = shareBalanceDisplay({ sharesExact: '0.09989', shareSymbol: 'ppETH', rate: PP_ETH, priceMap: PRICES, fallbackPrice: 0 });
-    expect(v.hint).toBe('0.09989 ppETH shares, worth 0.10 ETH today. Shares keep their count, their value grows as yield accrues.');
+    expect(v.hint).toBe('Worth 0.10 ETH today, the value grows as yield accrues.');
+    expect(v.loading).toBe(false);
     expect(v.hint).not.toContain('—');
   });
 
-  test('no rate: the share count under the SHARE symbol, never labelled ETH', () => {
+  test('no rate: loading, and the text fallback is the count under the coin, approximate', () => {
     const v = shareBalanceDisplay({ sharesExact: '0.09989', shareSymbol: 'ppETH', rate: undefined, priceMap: PRICES, fallbackPrice: 2459 });
     expect(v.converted).toBe(false);
-    expect(v.text).toBe('0.09989 ppETH');
+    expect(v.text).toBe('≈ 0.09989 ETH');
+    expect(v.symbol).toBe('ETH');
+    expect(v.loading).toBe(true);
     expect(v.hint).toBeNull();
     expect(v.usd).toBeCloseTo(0.09989 * 2459, 6);
   });
@@ -75,7 +78,7 @@ describe('shareBalanceDisplay', () => {
     expect(v.amount).toBeCloseTo(38.103924, 5);
     // a stablecoin with no quote is $1
     expect(v.usd).toBeCloseTo(38.103924, 5);
-    expect(v.hint).toBe('38.10 ppUSDC shares, worth 38.10 USDC today. Shares keep their count, their value grows as yield accrues.');
+    expect(v.hint).toBe('Worth 38.10 USDC today, the value grows as yield accrues.');
   });
 
   test('a string that is not a plain decimal never becomes a share count', () => {
@@ -93,15 +96,15 @@ test('display conversion leaves the exact share input used by spend paths unchan
   const submittedBeforeDisplay = parseTokenAmount(amount, 18);
   const view = shareBalanceDisplay({ sharesExact: amount, shareSymbol: 'ppETH', rate: PP_ETH, priceMap: PRICES, fallbackPrice: 0 });
   expect(view.text).toBe('0.10 ETH');
-  expect(view.hint).toContain('ppETH shares');
+  expect(view.hint).not.toMatch(/ppETH|shares?/i);
   expect(parseTokenAmount(amount, 18)).toBe(99891872636417805n);
   expect(parseTokenAmount(amount, 18)).toBe(submittedBeforeDisplay);
 });
 
-test('ppUSDT uses its own decimals and symbol, with a share fallback before rates arrive', () => {
+test('ppUSDT uses its own decimals and symbol, loading under the coin before rates arrive', () => {
   const rate = { ...PP_USDC, shareSymbol: 'ppUSDT', underlyingSymbol: 'USDT' };
   const args = { sharesExact: '38.100000000000000001', shareSymbol: 'ppUSDT', priceMap: {}, fallbackPrice: 0 };
   expect(shareBalanceDisplay({ ...args, rate }).text).toBe('38.10 USDT');
-  expect(shareBalanceDisplay({ ...args, rate: undefined }).text).toBe('38.10 ppUSDT');
+  expect(shareBalanceDisplay({ ...args, rate: undefined }).text).toBe('≈ 38.10 USDT');
   expect(parseTokenAmount(args.sharesExact, 18)).toBe(38100000000000000001n);
 });

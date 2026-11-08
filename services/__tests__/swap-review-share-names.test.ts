@@ -8,13 +8,14 @@
  *
  * The renamed figure must also stay honest. A share count is not the same
  * number as the underlying, so the review converts it at the live rate
- * (`swapView`), and until the rate is known reads it as "5 USDC shares"
- * (`shareCountLabel`), never as the share's own name (DEV-591).
+ * (`swapView`). Until the rate is known a rendered figure is a shimmer
+ * (ShareFigure), and plain text reads "≈ 5 USDC" (`tokenAmountLabel`), never
+ * the share's own name and never the word "shares" (DEV-591).
  */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { displayTokenSymbol, isShareSymbol, shareCountLabel } from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol, tokenAmountLabel } from '@/services/share-display';
 
 const SOURCE = readFileSync(
   join(new URL('.', import.meta.url).pathname, '..', '..', 'components', 'swap-modal-provider.tsx'),
@@ -78,16 +79,17 @@ describe('the rename is honest about what a share count is', () => {
     test(`${share} reads as ${underlying}, never as itself`, () => {
       expect(isShareSymbol(share)).toBe(true);
       expect(displayTokenSymbol(share)).toBe(underlying);
-      // Without a rate the count is plainly shares of the coin (DEV-591).
-      const text = shareCountLabel('5', share);
-      expect(text).toBe(`5 ${underlying} shares`);
+      // Without a rate, plain text reads the count under the coin, approximate.
+      const text = tokenAmountLabel('5', share);
+      expect(text).toBe(`≈ 5 ${underlying}`);
+      expect(text).not.toMatch(/\bshares\b/i);
       expect(text).not.toContain(share);
     });
   }
 
   test('a plain asset is left exactly as it was', () => {
     for (const plain of ['USDC', 'cBTC', 'BNB']) {
-      expect(shareCountLabel('5', plain)).toBe(`5 ${plain}`);
+      expect(tokenAmountLabel('5', plain)).toBe(`5 ${plain}`);
     }
   });
 });
