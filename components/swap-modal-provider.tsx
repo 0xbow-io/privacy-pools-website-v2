@@ -18,6 +18,7 @@ import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
 import { AlertCircleIcon, CaretDownIcon, CheckCircleIcon, CloseIcon } from '@/components/ui/modal-icons';
 import { WEB_NO_OUTLINE } from '@/components/ui/web-style-shims';
 import { View, Text, Pressable, Platform, useWindowDimensions, TextInput, Animated, ScrollView, Linking } from 'react-native';
+import { ShareFigure } from '@/components/ui/share-figure';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Svg, { Circle } from 'react-native-svg';
 import { useAccount } from 'wagmi';
@@ -2775,7 +2776,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[12px] leading-[17px] text-text-muted font-pp-regular">You swap</Text>
                     <Text className="text-[12px] leading-[17px] text-text-muted font-pp-regular">
-                      Available: {(poolsLoading ? '—' : balanceDisplay(formatUnits(balanceWei, fromToken.decimals), fromToken.symbol, chainId).text)}
+                      Available: {poolsLoading ? '—' : <ShareFigure view={balanceDisplay(formatUnits(balanceWei, fromToken.decimals), fromToken.symbol, chainId)} />}
                     </Text>
                     {!poolsLoading ? <ShareCountHint hint={balanceDisplay(formatUnits(balanceWei, fromToken.decimals), fromToken.symbol, chainId).hint} /> : null}
                   </View>
@@ -3333,11 +3334,11 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                   </View>
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[13px] text-text-muted font-pp-medium">Estimated received</Text>
-                    <Text className="text-[13px] text-text font-pp-regular">{balanceDisplay(snapshot.display.estimatedOutput, snapshot.outputToken.symbol, snapshot.destinationChainId).text}</Text>
+                    <Text className="text-[13px] text-text font-pp-regular"><ShareFigure view={balanceDisplay(snapshot.display.estimatedOutput, snapshot.outputToken.symbol, snapshot.destinationChainId)} /></Text>
                   </View>
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[13px] text-text-muted font-pp-medium">Min received</Text>
-                    <Text className="text-[13px] text-text font-pp-bold">{balanceDisplay(snapshot.display.minReceived, snapshot.outputToken.symbol, snapshot.destinationChainId).text}</Text>
+                    <Text className="text-[13px] text-text font-pp-bold"><ShareFigure view={balanceDisplay(snapshot.display.minReceived, snapshot.outputToken.symbol, snapshot.destinationChainId)} /></Text>
                   </View>
                   {!!snapshot.display.rate && (
                     <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
@@ -3567,7 +3568,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                 </Text>
                 {!snapshot.crossChain && (
                   <Text className="w-full text-center text-[12px] text-text-muted font-pp-regular">
-                    Min {balanceDisplay(snapshot.display.minReceived, snapshot.outputToken.symbol, snapshot.destinationChainId).text} to your recipient.
+                    Min <ShareFigure view={balanceDisplay(snapshot.display.minReceived, snapshot.outputToken.symbol, snapshot.destinationChainId)} /> to your recipient.
                   </Text>
                 )}
                 {snapshot.crossChain && (

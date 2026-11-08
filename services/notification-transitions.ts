@@ -1,4 +1,4 @@
-import { displayTokenSymbol, shareCountLabel } from '@/services/share-display';
+import { displayTokenSymbol, tokenAmountLabel } from '@/services/share-display';
 import { formatTokenBalance } from '@/services/token-format';
 // Pure pending→settled transition detection for the in-app status toasts.
 // No store/network/RN imports so it stays unit-testable under the bun runner;
@@ -50,7 +50,7 @@ const isOpen = (status: string): boolean => isPending(status) || isPoiRequired(s
 
 /** "0.50 ETH" / "26 USDC": the shared balance format (formatTokenBalance). */
 function formatAmount(value: number, asset: string): string {
-  return shareCountLabel(formatTokenBalance(value, displayTokenSymbol(asset)), asset);
+  return tokenAmountLabel(formatTokenBalance(value, displayTokenSymbol(asset)), asset);
 }
 
 /** Normalize a feed type string to its base form: "deposit" → "Deposit",

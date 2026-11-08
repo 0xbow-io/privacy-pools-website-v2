@@ -3,7 +3,9 @@
  * Send ("Processing Transfer", amount "0.101 ETH"). Shares read as their coin
  * everywhere the Send flow, its receipts, the activity row that follows, the
  * payment-request pay flow and the claim link render, with or without a live
- * rate. While the rate loads a share count reads "0.1 ETH shares".
+ * rate. While the rate loads a rendered figure is a shimmer (view.loading), and
+ * plain text reads the count under the coin, marked approximate ("≈ 0.1 ETH").
+ * Never a share name, never the word "shares".
  *
  * The share list comes from CONFIG (every environment's token registry), and
  * every builder below is RUN for each share, with and without a rate. The
@@ -21,7 +23,7 @@ import { buildTransitionEvent, type TransitionTx } from '@/services/notification
 import { shareAmountFromUnderlying } from '@/services/share-amount-entry';
 import { shareBalanceDisplay, shareRateSnapshotKey, shareUsdDisplayExact } from '@/services/share-balance-display';
 import {
-  displayTokenSymbol, isShareSymbol, shareCountLabel, shareFreeText, shareUnitLabel, tokenAmountLabel, underlyingOnlyView,
+  displayTokenSymbol, isShareSymbol, shareFreeText, tokenAmountLabel, underlyingOnlyView,
 } from '@/services/share-display';
 import type { ShareRate } from '@/services/share-rates';
 import { parseTokenAmount, sanitizeAmountInput } from '@/services/token-amount';
@@ -96,7 +98,7 @@ function amountFieldSymbol(share: Share, rate: ShareRate | undefined): string {
     useBalanceDisplay: () => (exact: string) => shareBalanceDisplay({ sharesExact: exact, shareSymbol: share.symbol, rate, priceMap: {}, fallbackPrice: 0 }),
     getTokenMetadataBySymbol: () => ({ address: '0x01' }),
     formatUnits, shareAmountFromUnderlying, shareRateSnapshotKey, shareUsdDisplayExact,
-    parseTokenAmount, sanitizeAmountInput, displayTokenSymbol, isShareSymbol, shareUnitLabel,
+    parseTokenAmount, sanitizeAmountInput, displayTokenSymbol, isShareSymbol,
   }, ['useShareAmountField']);
   const field = (hooks.useShareAmountField as (args: object) => { symbol: string })({
     amount: '0.1', symbol: share.symbol, chainId: 1, maxSharesExact: '1', capKnown: true, onAmountResolved: () => {},
@@ -130,7 +132,9 @@ describe('what the Send flow renders never names a share', () => {
           // transferAmountFormatted ("~" in send-exact mode), settled amount,
           // the claim link amount, the activity row and the notification row.
           for (const shown of [view.text, `~${view.text}`, view.hint ?? '', view.symbol]) expect(shown).not.toMatch(SHARE_NAME);
-          if (!rate && exact !== '0') expect(view.text.endsWith(`${coin} shares`)).toBe(true);
+          for (const shown of [view.text, view.hint ?? '']) expect(shown).not.toMatch(/\bshares?\b/i);
+          expect(view.loading).toBe(!rate && exact !== '0');
+          if (!rate && exact !== '0') expect(view.text).toBe(`≈ ${view.text.replace(/^≈ /, '').split(' ')[0]} ${coin}`);
           if (rate) expect(view.converted).toBe(true);
         }
         // Numbers (activity rows pass tokenAmount as a number).
@@ -150,7 +154,8 @@ describe('what the Send flow renders never names a share', () => {
       }
 
       test(`${label}: amount errors, the way the validation memo builds them`, () => {
-        // The memo stays in shares (tokenAmountLabel / the share's own name);
+        // The memo keeps share counts (tokenAmountLabel, or the share's own name
+        // in SDK text);
         // displayAmountError and reportTransferError rewrite at the boundary.
         const built = [
           `Maximum sendable in one transfer is ${tokenAmountLabel('0.5', share.symbol)}`,
@@ -162,18 +167,17 @@ describe('what the Send flow renders never names a share', () => {
           `Insufficient ${share.symbol} balance: need 1,000.5 ${share.symbol}, have ≈ 2 ${share.symbol.toUpperCase()}`,
         ];
         for (const message of built) {
-          expect(message).toMatch(SHARE_NAME);
           const shown = shareFreeText(message, text);
           expect(shown).not.toMatch(SHARE_NAME);
           expect(shown).toContain(coin);
-          if (!rate) expect(shown).toContain(`${coin} shares`);
+          expect(shown).not.toMatch(/\bshares?\b/i);
         }
       });
 
       test(`${label}: the amount field unit`, () => {
         const unit = amountFieldSymbol(share, rate);
         expect(unit).not.toMatch(SHARE_NAME);
-        expect(unit).toBe(rate ? coin : `${coin} shares`);
+        expect(unit).toBe(coin);
       });
 
       test(`${label}: the notification and toast for a transfer`, () => {
@@ -193,20 +197,21 @@ describe('what the Send flow renders never names a share', () => {
       );
       expect(msg).not.toBeNull();
       expect(msg!).not.toMatch(SHARE_NAME);
-      expect(msg!).toContain(`${coin} shares`);
+      expect(msg!).not.toMatch(/\bshares?\b/i);
+      expect(msg!).toContain(coin);
     });
 
-    test(`${share.symbol}: request labels and counts`, () => {
-      expect(shareUnitLabel(share.symbol)).toBe(`${coin} shares`);
-      expect(shareCountLabel('0.01', share.symbol)).toBe(`0.01 ${coin} shares`);
-      expect(shareFreeText(`Received payment imported as 0.5 ${share.symbol}.`)).toBe(`Received payment imported as 0.5 ${coin} shares.`);
+    test(`${share.symbol}: request labels and counts name the coin only`, () => {
+      expect(displayTokenSymbol(share.symbol)).toBe(coin);
+      expect(tokenAmountLabel('0.01', share.symbol)).toBe(`≈ 0.01 ${coin}`);
+      expect(shareFreeText(`Received payment imported as 0.5 ${share.symbol}.`)).toBe(`Received payment imported as ≈ 0.5 ${coin}.`);
+      expect(shareFreeText(`Received ≈ 0.5 ${share.symbol}.`)).toBe(`Received ≈ 0.5 ${coin}.`);
     });
   }
 
   test('plain tokens pass through untouched', () => {
     expect(shareFreeText('Send at most 1.5 USDC')).toBe('Send at most 1.5 USDC');
-    expect(shareUnitLabel('USDC')).toBe('USDC');
-    expect(shareCountLabel('1.5', 'USDC')).toBe('1.5 USDC');
+    expect(tokenAmountLabel('1.5', 'USDC')).toBe('1.5 USDC');
     expect(shareFreeDisplay(undefined)('1.5', 'USDC', 1).text).toBe('1.50 USDC');
   });
 });
@@ -258,7 +263,7 @@ describe('Send surfaces only use the share-free display rules', () => {
     expect(stripComments(read('components/ui/flow-progress.tsx'))).toContain('{shareFreeText(message)}');
     const pr = stripComments(read('components/payment-request-modal-provider.tsx'));
     for (const name of ['statusMessage', 'warningMessage', 'errorMessage']) expect(pr).toContain(`{shareFreeText(${name})}`);
-    expect(pr).toContain('Amount ({shareUnitLabel(requestTokenSymbol)})');
+    expect(pr).toContain('Amount ({displayTokenSymbol(requestTokenSymbol)})');
   });
 
   test('the deposit toast uses the share-free view', () => {

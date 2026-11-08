@@ -2,7 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-import { approxUnderlyingText, displayTokenSymbol } from '@/services/share-display';
+import { shareBalanceDisplay } from '@/services/share-balance-display';
+import {
+  approxUnderlyingText, displayTokenSymbol, shareAmountText, shareReviewHeadline, tokenAmountLabel, underlyingOnlyView,
+} from '@/services/share-display';
+import type { ShareRate } from '@/services/share-rates';
 
 /**
  * DEV-428: a share's own name (ppUSDC / ppUSDT / ppETH) must never reach the
@@ -98,7 +102,138 @@ describe('no raw share symbol can reach a render', () => {
   test('the display rules rename shares and leave plain tokens alone', () => {
     expect(displayTokenSymbol('ppUSDT')).toBe('USDT');
     expect(displayTokenSymbol('USDC')).toBe('USDC');
-    expect(approxUnderlyingText('1.5 ppUSDC', 'ppUSDC')).toBe('1.5 ppUSDC');
+    expect(approxUnderlyingText('1.5 ppUSDC', 'ppUSDC')).toBe('≈ 1.5 USDC');
     expect(approxUnderlyingText('1.5 USDC', 'USDC')).toBe('1.5 USDC');
+  });
+});
+
+/**
+ * Pat's hard rule, QA on #29 and #26 (Mike): the screen shows USDC, USDT or
+ * ETH, never a share's name and never the word "shares", in any state (rate
+ * loading, no rate, errors, toasts, activity, notifications). A figure that
+ * waits on the rate is a shimmer (components/ui/share-figure.tsx), not a share
+ * count label.
+ *
+ * Part 1 RUNS every display helper for every share, with and without a rate.
+ * Part 2 scans every string literal, template and JSX text in components/,
+ * hooks/, app/ and services/ for the word "shares". Data that is not copy (an
+ * ABI parameter name, a record key, a field lookup) and log lines are exempt.
+ */
+describe('the word "shares" never reaches a screen', () => {
+  const SHARES_WORD = /\bshares\b/i;
+  const SHARE_SYMBOLS = ['ppUSDC', 'ppUSDT', 'ppETH'];
+  const NO_SHARE_NAME = /\bpp(?:USDC|USDT|ETH)\b/i;
+  const RATE_OF = (share: string): ShareRate => {
+    const coin = displayTokenSymbol(share);
+    const underlyingDecimals = coin === 'ETH' ? 18 : 6;
+    return {
+      chainId: 1,
+      share: '0x0000000000000000000000000000000000000001',
+      underlying: '0x0000000000000000000000000000000000000002',
+      shareSymbol: share,
+      shareDecimals: 18,
+      assetsPerShare: 10_007n * 10n ** BigInt(underlyingDecimals) / 10_000n,
+      underlyingSymbol: coin === 'ETH' ? 'WETH' : coin,
+      underlyingDecimals,
+    };
+  };
+  const clean = (text: string | null | undefined) => {
+    expect(text ?? '').not.toMatch(SHARES_WORD);
+    expect(text ?? '').not.toMatch(NO_SHARE_NAME);
+  };
+
+  for (const share of SHARE_SYMBOLS) {
+    const coin = displayTokenSymbol(share);
+    test(`${share}: labels are the plain coin, amounts never a share count label`, () => {
+      expect(coin).toMatch(/^(?:USDC|USDT|ETH)$/);
+      expect(tokenAmountLabel('0.1', share)).toBe(`≈ 0.1 ${coin}`);
+      expect(approxUnderlyingText(`0.1 ${share}`, share)).toBe(`≈ 0.1 ${coin}`);
+      const format = (n: number) => String(n);
+      expect(shareAmountText({ amount: 0.1, assetSymbol: share, underlyingAmount: null, format })).toBe(`≈ 0.1 ${coin}`);
+      expect(shareReviewHeadline({ isShare: true, shares: 0.1, shareSymbol: share, underlyingSymbol: coin, underlying: null, pending: false, format })).toBe(`≈ 0.1 ${coin}`);
+      for (const text of [tokenAmountLabel('0.1', share), approxUnderlyingText(`0.1 ${share}`, share)]) clean(text);
+    });
+
+    test(`${share}: a balance view loads as a shimmer, then reads the converted coin`, () => {
+      for (const rate of [undefined, RATE_OF(share)]) {
+        for (const sharesExact of ['0', '0.00999', '12.5']) {
+          const view = underlyingOnlyView(shareBalanceDisplay({ sharesExact, shareSymbol: share, rate, priceMap: {}, fallbackPrice: 0 }), share);
+          clean(view.text);
+          clean(view.hint);
+          expect(view.symbol).toBe(coin);
+          // Held, no rate: the figure is a loading state, not a label.
+          expect(view.loading).toBe(!rate && sharesExact !== '0');
+        }
+      }
+    });
+  }
+
+  test('a plain token is untouched by the label helpers', () => {
+    expect(tokenAmountLabel('1.5', 'USDC')).toBe('1.5 USDC');
+    expect(tokenAmountLabel('1.5', 'WETH')).toBe('1.5 ETH');
+    expect(approxUnderlyingText('1.5 USDC', 'USDC')).toBe('1.5 USDC');
+    expect(shareBalanceDisplay({ sharesExact: '1.5', shareSymbol: 'USDC', rate: undefined, priceMap: {}, fallbackPrice: 1 }).loading).toBe(false);
+  });
+
+  const SCAN_DIRS = ['components', 'hooks', 'app', 'services'];
+  const scanSources = (dir: string): string[] => {
+    const out: string[] = [];
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      if (name === '__tests__' || name === 'node_modules') continue;
+      if (statSync(p).isDirectory()) out.push(...scanSources(p));
+      else if (/\.(ts|tsx)$/.test(name)) out.push(p);
+    }
+    return out;
+  };
+  const withoutComments = (src: string) => src
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+    .replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1');
+  // Not copy: ABI parameter names, record keys and field lookups ("shares" as data).
+  const DATA_TOKEN = /(?:\bname:\s*|\bhas\(|\bf\(|\[)\s*(['"`])shares\1/g;
+  const LOG_CALL = /(?:\blog|\bconsole\.\w+)\(.*$/;
+  const STRING = /'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`/g;
+  const JSX_TEXT = />([^<>{}]+)</g;
+  const CODE_START = /^(?:return|const|let|var|if|else|import|export|type|case|await|throw|async|function|for|while|new)\b/;
+  /** Every piece of copy on a line: literals, same-line JSX text, a JSX text line. */
+  const copyOn = (line: string): string[] => {
+    const code = line.replace(LOG_CALL, '').replace(DATA_TOKEN, '');
+    // Interpolations are code, not copy; a TS generic (`Array<X>, y: Z<W>`) is not JSX text.
+    const out = [
+      ...(code.match(STRING) ?? []).map((s) => s.replace(/\$\{[^{}]*\}/g, '')),
+      ...[...code.matchAll(JSX_TEXT)].map((m) => m[1]!).filter((t) => !/[:=();]/.test(t)),
+    ];
+    const bare = code.replace(STRING, '').replace(/\{[^{}]*\}/g, '').trim();
+    if (/^[A-Za-z][A-Za-z'’,.!? ]*$/.test(bare) && bare.includes(' ') && !CODE_START.test(bare)) out.push(bare);
+    return out;
+  };
+
+  test('the scan catches copy and skips data, logs and identifiers', () => {
+    const hit = (line: string) => copyOn(line).some((c) => SHARES_WORD.test(c));
+    expect(hit("throw new Error('Your shares were not unwrapped.');")).toBe(true);
+    expect(hit('return `${amount} ${coin} shares`;')).toBe(true);
+    expect(hit('<Text>0.1 ETH shares</Text>')).toBe(true);
+    expect(hit('          Shares keep their count')).toBe(true);
+    expect(hit("inputs: [{ name: 'shares', type: 'uint256' }],")).toBe(false);
+    expect(hit("text: (f) => `${f('shares')} redeems to nothing after fees.`,")).toBe(false);
+    expect(hit("log('info', 'Yield', `minted ${n} shares`);")).toBe(false);
+    expect(hit('const shares = sized.shares;')).toBe(false);
+    expect(hit('return shares;')).toBe(false);
+    expect(hit('const hex = `0x${shares.toString(16)}`;')).toBe(false);
+    expect(hit('function f(a: Array<X>, shares: ReturnType<Y>) {')).toBe(false);
+  });
+
+  test('no string literal or JSX text in UI or service copy says "shares"', () => {
+    const offenders: string[] = [];
+    for (const dir of SCAN_DIRS) {
+      for (const file of scanSources(join(ROOT, dir))) {
+        withoutComments(readFileSync(file, 'utf8')).split('\n').forEach((line, i) => {
+          for (const c of copyOn(line)) {
+            if (SHARES_WORD.test(c)) offenders.push(`${relative(ROOT, file)}:${i + 1}: ${c.trim().slice(0, 120)}`);
+          }
+        });
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 });

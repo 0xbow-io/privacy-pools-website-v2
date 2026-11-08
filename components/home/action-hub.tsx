@@ -1,7 +1,6 @@
 import { spendableBalanceLabel } from '@/services/spendable-balance-label';
 import { useShareAmountField } from '@/hooks/use-share-amount-field';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
-import { shareUnitLabel } from '@/services/share-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { SWAP_DEPOSIT_REFUND_NOTE } from '@/services/swap-deposit-copy';
 import { ENS_UNSUPPORTED_MESSAGE, isPotentialEnsName } from '@/services/ens';
@@ -17,6 +16,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { CARD_SHADOW, WEB_NO_OUTLINE } from '@/components/ui/web-style-shims';
 import { HoverHint } from '@/components/ui/hover-hint';
 import { ActivityIndicator, Animated, Easing, Linking, Platform, Pressable, ScrollView as RNScrollView, Text, TextInput, useWindowDimensions, View, type ViewStyle } from 'react-native';
+import { ShareFigure } from '@/components/ui/share-figure';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useIsFocused, useLocalSearchParams, useNavigation, usePathname, useRouter } from 'expo-router';
 import { useAccount, useBalance, useEstimateFeesPerGas, usePublicClient, useReadContract } from 'wagmi';
@@ -3139,7 +3139,7 @@ export function ActionHub({
     const fiatTokenLine = a === 'shield'
       ? `${amount || '0'} ${displayTokenSymbol(payMeta.symbol)}`
       : a === 'request'
-        ? `${requestAmount || '0'} ${shareUnitLabel(requestToken.symbol)}`
+        ? `${requestAmount || '0'} ${displayTokenSymbol(requestToken.symbol)}`
         : `${amountField.value || '0'} ${amountField.symbol}`;
     // A created request is frozen into its payload and its pay link: the figure
     // stays visible but inert. The PILL stays live — switching the token is the
@@ -3643,10 +3643,10 @@ export function ActionHub({
                       ? 'Retry'
                       : withdrawBalanceLoading
                         ? '—'
-                        : spendableBalanceLabel(withdrawSpendableExact, pageTargetSymbol, () => pageBalanceView.text))
+                        : pageBalanceView.loading ? <ShareFigure view={pageBalanceView} /> : spendableBalanceLabel(withdrawSpendableExact, pageTargetSymbol, () => pageBalanceView.text))
                     : (poolsLoading
                       ? '—'
-                      : pageBalanceView.text)}
+                      : <ShareFigure view={pageBalanceView} />)}
               </Text>
             </Pressable>
             {a !== 'shield' && !poolsLoading && !stellarLocked && !(a === 'withdraw' && withdrawBalanceBlocked) ? <ShareCountHint hint={pageBalanceView.hint} /> : null}
@@ -3660,7 +3660,7 @@ export function ActionHub({
               // hover/press hint on the Shielded figure instead, flagged by a
               // small amber dot so there is something to hover.
               <HoverHint
-                hint={!poolsLoading ? [pageBalanceView.hint, pageShielded.pending > 0 ? `+${pagePendingView.text} pending. ${pagePendingView.hint ?? ''}` : null].filter(Boolean).join(' ') || null : null}
+                hint={!poolsLoading ? [pageBalanceView.hint, pageShielded.pending > 0 ? (pagePendingView.loading ? 'Pending.' : `+${pagePendingView.text} pending. ${pagePendingView.hint ?? ''}`) : null].filter(Boolean).join(' ') || null : null}
                 testID="hub-shielded-pending-hint"
               >
                 <Text
@@ -3678,7 +3678,7 @@ export function ActionHub({
                       ? 'sign in to view'
                       : poolsLoading
                       ? '—'
-                      : pageBalanceView.text}
+                      : <ShareFigure view={pageBalanceView} />}
                   </Text>
                   {!poolsLoading && pageBalanceView.hint ? <Text className="text-text-muted">{' ⓘ'}</Text> : null}
                   {!poolsLoading && pageShielded.pending > 0 ? (
@@ -3689,7 +3689,7 @@ export function ActionHub({
               </HoverHint>
             ) : pageShielded.pending > 0 ? (
               <View className="flex-row items-center gap-[4px]">
-                <Pill tone="warning" label={`+${pagePendingView.text} pending`} />
+                <Pill tone="warning" label={pagePendingView.loading ? 'Pending' : `+${pagePendingView.text} pending`} />
                 <ShareCountHint hint={pagePendingView.hint} />
               </View>
             ) : null}

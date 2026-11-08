@@ -71,11 +71,11 @@ describe('a share amount uses underlying only after conversion', () => {
       .toBe('49.91384 USDC');
   });
 
-  test('without the rate it keeps the share COUNT under its own symbol', () => {
+  test('without the rate the share COUNT reads under the coin, approximate, never the share name', () => {
     // Without a rate the figure is still a share count, not USDC.
     const text = shareAmountText({ amount: 49.879113693, assetSymbol: 'ppUSDC', underlyingAmount: null, format: fmt });
-    expect(text).toBe('49.87911 ppUSDC');
-    expect(text).toContain('ppUSDC');
+    expect(text).toBe('≈ 49.87911 USDC');
+    expect(text).not.toContain('ppUSDC');
     expect(parseFloat(text.replace('≈ ', ''))).toBeLessThan(49.913840);
   });
 
@@ -86,15 +86,15 @@ describe('a share amount uses underlying only after conversion', () => {
   });
 
   test('USDT shares follow the same rule, so this is not a USDC special case', () => {
-    expect(shareAmountText({ amount: 10, assetSymbol: 'ppUSDT', underlyingAmount: null, format: fmt })).toBe('10.00000 ppUSDT');
+    expect(shareAmountText({ amount: 10, assetSymbol: 'ppUSDT', underlyingAmount: null, format: fmt })).toBe('≈ 10.00000 USDT');
     expect(shareAmountText({ amount: 10, assetSymbol: 'ppUSDT', underlyingAmount: 10.007, format: fmt })).toBe('10.00700 USDT');
   });
 
-  test('a pre-formatted share fallback keeps its own units', () => {
-    expect(approxUnderlyingText('1.23K ppUSDC', 'ppUSDC')).toBe('1.23K ppUSDC');
-    expect(approxUnderlyingText('0.0000 ppUSDT', 'ppUSDT')).toBe('0.0000 ppUSDT');
+  test('a pre-formatted share fallback reads under the coin, approximate', () => {
+    expect(approxUnderlyingText('1.23K ppUSDC', 'ppUSDC')).toBe('≈ 1.23K USDC');
+    expect(approxUnderlyingText('0.0000 ppUSDT', 'ppUSDT')).toBe('≈ 0.0000 USDT');
     // Case as the ASP sends it.
-    expect(approxUnderlyingText('5 PPUSDC', 'ppUSDC')).toBe('5 PPUSDC');
+    expect(approxUnderlyingText('5 PPUSDC', 'ppUSDC')).toBe('≈ 5 USDC');
     // Idempotent: a string already marked is not marked twice.
     expect(approxUnderlyingText('≈ 1.23K USDC', 'ppUSDC')).toBe('≈ 1.23K USDC');
     // Non-shares and empties pass straight through.
@@ -117,9 +117,9 @@ describe('share review figures', () => {
     const base = { isShare: true, shares: 100, shareSymbol: 'ppUSDC', underlyingSymbol: 'USDC', format };
     expect(shareReviewHeadline({ ...base, underlying: 105.2, pending: false })).toBe('≈ 105.2 USDC');
     expect(shareReviewHeadline({ ...base, underlying: null, pending: true })).toBe('Estimating USDC…');
-    // The read failed: the fallback is a share count, so it names the share.
-    expect(shareReviewHeadline({ ...base, underlying: null, pending: false })).toBe('100 ppUSDC');
-    expect(shareReviewHeadline({ ...base, underlying: null, pending: false })).toContain('ppUSDC');
+    // The read failed: the count under the coin, approximate, never the share.
+    expect(shareReviewHeadline({ ...base, underlying: null, pending: false })).toBe('≈ 100 USDC');
+    expect(shareReviewHeadline({ ...base, underlying: null, pending: false })).not.toContain('ppUSDC');
     expect(shareReviewHeadline({ ...base, isShare: false, shareSymbol: 'ETH', underlyingSymbol: 'ETH', underlying: null, pending: false })).toBe('100 ETH');
   });
 });

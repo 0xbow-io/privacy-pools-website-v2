@@ -20,7 +20,7 @@ import { setReceiveSetup } from '@/services/receive-setup';
 import { isSupersededLegacyPool, poolDisplayLabel } from '@/config/pool-paths';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ACTIVE_ENVIRONMENT } from '@/config/environments';
-import { tokenAmountLabel, isShareSymbol, displayTokenSymbol, shareFreeText, shareUnitLabel } from '@/services/share-display';
+import { tokenAmountLabel, isShareSymbol, displayTokenSymbol, shareFreeText } from '@/services/share-display';
 import { assertPaymentRequestBounds, PaymentRequestBoundsError } from '@/services/payment-request-bounds';
 import { assertDepositCap } from '@/services/deposit-cap';
 import { getPrice } from '@/services/price-service';
@@ -4157,11 +4157,11 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                   {/* Same split as the token: inline, the hub's amount card owns
                       the figure and pushes it here. */}
                   {!inlineHubActive ? (<>
-                  <Text className="font-pp-semi-bold text-[12px] text-text-secondary">Amount ({shareUnitLabel(requestTokenSymbol)})</Text>
+                  <Text className="font-pp-semi-bold text-[12px] text-text-secondary">Amount ({displayTokenSymbol(requestTokenSymbol)})</Text>
                   <TextInput
                     value={amountInput}
                     onChangeText={(text) => setAmountInput(sanitizeAmountInput(text, requestTokenDecimals))}
-                    placeholder={`${!isSui && isStablecoin(selectedToken.symbol) ? '5' : '0.01'} ${shareUnitLabel(requestTokenSymbol)}`}
+                    placeholder={`${!isSui && isStablecoin(selectedToken.symbol) ? '5' : '0.01'} ${displayTokenSymbol(requestTokenSymbol)}`}
                     // nw-keep(data-color): placeholder color is a TextInput sink (theme token, no className path)
                     placeholderTextColor={colors.textMuted}
                     keyboardType="numeric"

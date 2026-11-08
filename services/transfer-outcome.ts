@@ -1,4 +1,4 @@
-import { shareCountLabel } from '@/services/share-display';
+import { tokenAmountLabel } from '@/services/share-display';
 import { formatShortfallAmount } from '@/services/relayed-payment-shortfall';
 // How a failed transfer attempt is classified, and why it matters.
 //
@@ -175,7 +175,7 @@ export function translateSdkTransactError(
     // the share's own name (services/share-display.ts).
     // Costs round up, what the notes hold rounds down (Mike, #282).
     const f = (v: bigint, up: boolean) =>
-      shareCountLabel(formatShortfallAmount(v, token.decimals, up, token.symbol), token.symbol);
+      tokenAmountLabel(formatShortfallAmount(v, token.decimals, up, token.symbol), token.symbol);
     return `Your balance isn't high enough. This payment needs ${f(requested, true)}. The notes selected for it hold ${f(available, false)}. You are ${f(short, true)} short. Nothing was sent and no notes were spent.`;
   }
   if (/Too few noteAddressHashes/i.test(message)) {
