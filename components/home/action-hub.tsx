@@ -79,7 +79,7 @@ import { fiatEntryAvailable, formatUsdLabel, sanitizeUsdInput, shieldDestination
 import { getUiParam, pushUiParamEntry, retireUiParamEntry, rebaseUiParamEntry, subscribeUiUrl } from '@/components/ui-url-events';
 import { useShareYield } from '@/hooks/use-share-yield';
 import { useYieldVaultProbeVersion } from '@/hooks/use-yield-vault-probe';
-import { displayTokenSymbol, isShareSymbol, shareRedemptionDisclosure, tokenAmountLabel } from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol, presetChipLabel, shareRedemptionDisclosure, tokenAmountLabel } from '@/services/share-display';
 import { amountInputDisplay, formatTokenBalance, groupThousands, isStablecoin, stripAmountSeparators } from '@/services/token-format';
 import { conversionFundingToken, targetAcceptsConversion } from '@/config/intent-targets';
 import { getYieldShareToken } from '@/services/share-yield';
@@ -3205,7 +3205,7 @@ export function ActionHub({
           className={`items-center rounded-[6px] border px-[7px] py-[3px] ${activePreset ? 'border-tint' : 'border-border bg-card-background'} ${outOfReach ? 'opacity-40' : ''}`}
         >
           <Text className={`text-[11px] font-pp-regular ${activePreset ? 'text-tint' : outOfReach ? 'text-text-secondary' : 'text-text'}`}>
-            {zoneFiatEntry ? usdChipLabel(preset, fiatPrice) : groupThousands(a === 'withdraw' && isShareSymbol(tokenMeta.symbol) ? `${preset} ${amountField.unitLabel}` : preset)}
+            {zoneFiatEntry ? usdChipLabel(preset, fiatPrice) : (a === 'withdraw' && isShareSymbol(tokenMeta.symbol) ? presetChipLabel(groupThousands(preset), amountField.unitLabel) : groupThousands(preset))}
           </Text>
         </Pressable>
       );

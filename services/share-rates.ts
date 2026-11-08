@@ -167,14 +167,25 @@ export function shareWeiText(
  * figures round DOWN elsewhere; a fee is a cost, so it rounds the other way.
  */
 export function feeShareText(wei: bigint, units: { symbol: string; decimals: number }, rate: ShareRate | undefined): string {
+  const text = costShareText(wei, units, rate);
+  return text.startsWith('≈') ? text : `~${text}`;
+}
+
+/**
+ * A COST in `units` as display text ("This payment needs 1.0042 ETH"), never
+ * read low: feeShareText without the estimate mark. A share with its rate is
+ * converted rounding UP and written rounding up; without a rate it is the share
+ * count, rounded up and marked approximate; a plain token is itself, rounded up.
+ */
+export function costShareText(wei: bigint, units: { symbol: string; decimals: number }, rate: ShareRate | undefined): string {
   if (isShareSymbol(units.symbol) && rate && rate.shareDecimals === units.decimals) {
     const one = 10n ** BigInt(rate.shareDecimals);
     const product = wei * rate.assetsPerShare;
     const assets = product / one + (product % one > 0n ? 1n : 0n);
     const symbol = displayTokenSymbol(rate.underlyingSymbol);
-    return `~${formatShortfallAmount(assets, rate.underlyingDecimals, true, symbol)} ${symbol}`;
+    return `${formatShortfallAmount(assets, rate.underlyingDecimals, true, symbol)} ${symbol}`;
   }
   const symbol = displayTokenSymbol(units.symbol);
   const figure = formatShortfallAmount(wei, units.decimals, true, symbol);
-  return `${isShareSymbol(units.symbol) ? '≈' : '~'}${isShareSymbol(units.symbol) ? ' ' : ''}${figure} ${symbol}`;
+  return `${isShareSymbol(units.symbol) ? '≈ ' : ''}${figure} ${symbol}`;
 }

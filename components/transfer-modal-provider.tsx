@@ -137,7 +137,7 @@ import { FeeWarning } from '@/components/fee-warning';
 import { relayedSpendBreakdown } from '@/services/fee-warning';
 import { SHIELDED_TRANSFER_GAS } from '@/services/transfer-fee-estimate';
 import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
-import { feeShareText, shareWeiText, type ShareRate } from '@/services/share-rates';
+import { costShareText, feeShareText, shareWeiText, type ShareRate } from '@/services/share-rates';
 import { formatTokenBalanceDown } from '@/services/token-format';
 
 // Web-only styles
@@ -2449,10 +2449,12 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           const feeMoved = feeMovedUp(relayFeeEstimate, quotedRelayFee) ? ' The fee changed since your last quote.' : '';
           // Same shortfall wording as Pay request (Mike, #282): the fee is
           // inside "needs", costs round up, what can be used rounds down.
-          // A share figure is written as the amount field writes it (noteFigure),
-          // so "Send at most" is a number the user can type back.
+          // A share limit is written as the amount field writes it (noteFigure,
+          // rounding down), so "Send at most" is a number the user can type
+          // back; the share "needs" figure is a cost, converted and written
+          // rounding UP (costShareText), so it never reads low.
           const amt = (v: bigint, up: boolean) => (isShareSymbol(selectedSymbol)
-            ? noteFigure(v)
+            ? (up ? costShareText(v, { symbol: selectedSymbol, decimals: selectedDecimals }, selectedRate) : noteFigure(v))
             : tokenAmountLabel(formatShortfallAmount(v, selectedDecimals, up, selectedSymbol), selectedSymbol));
           // The guard checks the notes picked for this amount, not the account:
           // only call the balance short when the one-transfer cap is short too

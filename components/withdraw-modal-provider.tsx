@@ -198,7 +198,7 @@ import { feeWithinReviewed, relayerFeeJitterAllowance } from '@/services/relayer
 import { quoteMatchesSignedCommitment } from '@/services/relayer-quote-integrity';
 import { decodeGasTopUpWei, formatGasTopUp } from '@/services/gas-top-up';
 import { setReceiveSetup } from '@/services/receive-setup';
-import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, netSharesWei, previewReceiveFigure, shareRedemptionDisclosure, shareReviewHeadline } from '@/services/share-display';
+import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, netSharesWei, presetChipLabel, previewReceiveFigure, shareRedemptionDisclosure, shareReviewHeadline } from '@/services/share-display';
 import { sdkErrorText, type ErrorUnits } from '@/services/sdk-error-amounts';
 import { RelayFeeIncreasedError, relayWithdrawalWithFreshQuote } from '@/services/relayed-withdrawal';
 import { PREVIEW_REDEEM_ABI } from '@/services/deposit-limits';
@@ -5218,7 +5218,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                           disabled={spendabilityBlocked}
                         >
                           <Text className={`text-[13px] font-pp-regular ${active ? 'text-tint' : 'text-text'}`}>
-                            {isShareSymbol(selectedToken) ? `${formatQuickAmount(preset)} ${amountField.unitLabel}` : formatQuickAmount(preset)}
+                            {isShareSymbol(selectedToken) ? presetChipLabel(formatQuickAmount(preset), amountField.unitLabel) : formatQuickAmount(preset)}
                           </Text>
                         </Pressable>
                       );

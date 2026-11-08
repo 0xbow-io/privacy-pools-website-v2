@@ -15,6 +15,8 @@
 // UI amounts use the converted value when available; otherwise share counts
 // read "≈" under their coin name until the rate is known.
 
+import { displayFractionDigits, isStablecoin } from '@/services/token-format';
+
 /** Share symbol (upper-cased) → the underlying it is denominated in. */
 const SHARE_UNDERLYING: Record<string, string> = {
   PPUSDC: 'USDC',
@@ -215,16 +217,53 @@ export type ShareNameText = {
 /** Underlying units one whole share is worth, by share symbol; undefined while unknown. */
 export type ShareRateOf = (shareSymbol: string) => number | undefined;
 
-/** A figure as written in text ("1,234.5", "1.23K") times a rate, written the same way. */
-function convertFigure(figure: string, rate: number): string | null {
+// Words that make the figure after them a COST (rounded up) or a LIMIT
+// (rounded down). The nearest one before the figure, in the same clause, wins.
+const COST_WORDS = /\b(fees?|needs?|needed|requires?|required|costs?|minimum|min|at least|short(?:fall)?|missing)\b/gi;
+const LIMIT_WORDS = /\b(max(?:imum)?|at most|up to|ha(?:ve|s)|available|balance|limit|cap|spendable|left|remaining)\b/gi;
+
+function lastIndexOfWord(text: string, words: RegExp): number {
+  let last = -1;
+  words.lastIndex = 0;
+  for (let m = words.exec(text); m; m = words.exec(text)) last = m.index;
+  return last;
+}
+
+/**
+ * Which way a converted figure rounds, from the words before it in its clause:
+ * a cost ("fee", "needs", "at least") rounds UP so it never reads low, anything
+ * else (a max, a balance, a bare figure) rounds DOWN so typing it back is never
+ * refused (Pat: caps/limits/spendable down, fees/costs/needed up).
+ */
+export function figureRounding(before: string): 'up' | 'down' {
+  const clause = before.split(/[.;!?\n](?=\s|$)|,\s/).pop() ?? '';
+  return lastIndexOfWord(clause, COST_WORDS) > lastIndexOfWord(clause, LIMIT_WORDS) ? 'up' : 'down';
+}
+
+/**
+ * A figure as written in text ("1,234.5", "1.23K") times a rate, written the
+ * same way. Precision is the underlying's display digits (2 for a stablecoin, 5
+ * otherwise), so an integer figure keeps the rate ("1 ppETH" at 1.04 is
+ * "1.04 ETH", not "1 ETH"); trailing zeros beyond the written precision go, and
+ * a stablecoin with cents shows both. Rounds in `direction`, never to nearest.
+ */
+function convertFigure(figure: string, rate: number, underlying: string, direction: 'up' | 'down'): string | null {
   const m = /^([\d,]+)(?:\.(\d+))?([KMB]?)$/i.exec(figure);
   if (!m) return null;
   const value = Number(`${m[1].replace(/,/g, '')}.${m[2] ?? '0'}`) * rate;
   if (!Number.isFinite(value)) return null;
-  const digits = Math.min(Math.max(m[2]?.length ?? 0, m[3] ? 2 : 0), 6);
-  return `${value.toLocaleString('en-US', {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
+  const written = m[2]?.length ?? 0;
+  const digits = Math.min(Math.max(written, m[3] ? 2 : displayFractionDigits(underlying)), 6);
+  const scale = 10 ** digits;
+  // A hair of slack so float noise (1.15 x 100 = 114.99999…) does not cost a unit.
+  const units = direction === 'up' ? Math.ceil(value * scale * (1 - 1e-12)) : Math.floor(value * scale * (1 + 1e-12));
+  const exact = (units / scale).toFixed(digits);
+  const [, frac = ''] = exact.split('.');
+  let keep = Math.max(written, frac.replace(/0+$/, '').length);
+  if (keep > 0 && isStablecoin(underlying)) keep = Math.max(keep, 2);
+  return `${(units / scale).toLocaleString('en-US', {
+    minimumFractionDigits: keep,
+    maximumFractionDigits: keep,
     useGrouping: m[1].includes(','),
   })}${m[3]}`;
 }
@@ -235,7 +274,8 @@ function convertFigure(figure: string, rate: number): string | null {
  * the text a flow keeps, logs or reports. A bare share name becomes the
  * underlying's name. A figure written right before a share name is a share
  * count: with the live rate (`rateOf`, from the share-rate feed) it is
- * converted to the underlying and written at the same precision; without one
+ * converted to the underlying (convertFigure: a cost rounds up, a limit or
+ * anything else rounds down, see figureRounding); without one
  * it stays the share count under the underlying's name, marked approximate,
  * the rule in shareAmountText. Text without a share name is returned untouched.
  */
@@ -246,13 +286,25 @@ export function withoutShareNames(text: string | null | undefined, rateOf?: Shar
   SHARE_WORD.lastIndex = 0;
   if (!SHARE_WORD.test(text)) return text;
   SHARE_WORD.lastIndex = 0;
-  const marked = text.replace(SHARE_FIGURE, (_m, mark: string | undefined, figure: string, share: string) => {
+  const marked = text.replace(SHARE_FIGURE, (_m, mark: string | undefined, figure: string, share: string, offset: number) => {
     const underlying = SHARE_UNDERLYING[share.toUpperCase()];
     const rate = rateOf?.(share.toUpperCase());
-    const converted = rate != null && Number.isFinite(rate) && rate > 0 ? convertFigure(figure, rate) : null;
+    const converted = rate != null && Number.isFinite(rate) && rate > 0
+      ? convertFigure(figure, rate, underlying, figureRounding(text.slice(0, offset)))
+      : null;
     return converted != null
       ? `${mark ?? ''}${converted} ${underlying}`
       : `${mark ?? '≈ '}${figure} ${underlying}`;
   });
   return marked.replace(SHARE_WORD, (share: string) => SHARE_UNDERLYING[share.toUpperCase()]);
+}
+
+/**
+ * A quick-amount chip: the preset figure and its unit. While the rate is
+ * unknown the unit carries the approximate mark ("≈ ETH"), which belongs in
+ * front of the number, so the chip reads "≈ 0.1 ETH", never "0.1 ≈ ETH".
+ */
+export function presetChipLabel(figure: string, unitLabel: string): string {
+  const approx = /^[≈~]\s*/.exec(unitLabel);
+  return approx ? `≈ ${figure} ${unitLabel.slice(approx[0].length)}` : `${figure} ${unitLabel}`;
 }

@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { parseUnits } from 'viem';
 
-import { withoutShareNames } from '@/services/share-display';
-import { feeShareText, shareRateOf, shareWeiText, type ShareRate } from '@/services/share-rates';
+import { figureRounding, presetChipLabel, withoutShareNames } from '@/services/share-display';
+import { costShareText, feeShareText, shareRateOf, shareWeiText, type ShareRate } from '@/services/share-rates';
 import { formatRelayedPaymentShortfall } from '@/services/relayed-payment-shortfall';
 import { checkDepositCap } from '@/services/deposit-cap';
 
@@ -40,13 +40,44 @@ const PP_ETH: ShareRate = {
 describe('withoutShareNames converts a quoted share count at the live rate', () => {
   const mainnet = shareRateOf([PP_USDC_MAINNET, PP_USDC_BASE, PP_ETH], 1);
 
-  test('with a rate: the figure is converted, at the precision it was written', () => {
+  test('with a rate: the figure is converted, keeping the rate even on an integer', () => {
     expect(withoutShareNames('Need 100.00 ppUSDC, have 20.00 ppUSDC', mainnet)).toBe('Need 105.00 USDC, have 21.00 USDC');
-    expect(withoutShareNames('Fee 1.23K ppUSDC.', mainnet)).toBe('Fee 1.29K USDC.');
-    expect(withoutShareNames('1,000.5 ppETH left', mainnet)).toBe('1,500.8 ETH left');
+    expect(withoutShareNames('Fee 1.23K ppUSDC.', mainnet)).toBe('Fee 1.30K USDC.'); // 1.2915K, a fee: up
+    expect(withoutShareNames('1,000.5 ppETH left', mainnet)).toBe('1,500.75 ETH left');
     // A marker the text already carried stays; none is added to a converted figure.
-    expect(withoutShareNames('≈ 2 ppUSDC', mainnet)).toBe('≈ 2 USDC');
-    expect(withoutShareNames('Relayer fee 4 ppUSDC', mainnet)).toBe('Relayer fee 4 USDC');
+    expect(withoutShareNames('≈ 2 ppUSDC', mainnet)).toBe('≈ 2.10 USDC');
+    expect(withoutShareNames('Relayer fee 4 ppUSDC', mainnet)).toBe('Relayer fee 4.20 USDC');
+  });
+
+  // The P3 on #72: nearest rounding at the source precision made a limit read
+  // higher than it is, and an integer figure lost the rate.
+  test('a limit rounds DOWN, so typing it back is never refused', () => {
+    const at = (rate: number) => () => rate;
+    expect(withoutShareNames('max 1.99 ppUSDC', at(1.003))).toBe('max 1.99 USDC'); // 1.99597, not 2.00
+    expect(withoutShareNames('max 10 ppUSDC', at(1.06))).toBe('max 10.60 USDC'); // not 11
+    expect(withoutShareNames('up to 1 ppETH', at(1.04))).toBe('up to 1.04 ETH'); // not 1
+    expect(withoutShareNames('1 ppETH', at(1.04))).toBe('1.04 ETH');
+    // Truncated at the underlying's display digits (5 for ETH), never rounded up.
+    expect(withoutShareNames('You can send at most 0.3 ppETH', at(1.03333))).toBe('You can send at most 0.30999 ETH'); // 0.309999, not 0.31
+    expect(withoutShareNames('balance 1 ppETH', at(1.0000099))).toBe('balance 1 ETH'); // 1.0000099: below the display step
+  });
+
+  test('a cost rounds UP, so it never reads low', () => {
+    const at = (rate: number) => () => rate;
+    expect(withoutShareNames('This payment needs 1.99 ppUSDC', at(1.003))).toBe('This payment needs 2.00 USDC');
+    expect(withoutShareNames('Relayer fee 1 ppETH', at(1.0000011))).toBe('Relayer fee 1.00001 ETH');
+    // Each figure takes the nearest word before it in its own clause.
+    expect(withoutShareNames('Needs 1.99 ppUSDC, max 1.99 ppUSDC', at(1.003))).toBe('Needs 2.00 USDC, max 1.99 USDC');
+  });
+
+  test('figureRounding: nearest cost or limit word in the clause, down by default', () => {
+    expect(figureRounding('This payment needs ')).toBe('up');
+    expect(figureRounding('Fee ')).toBe('up');
+    expect(figureRounding('Minimum ')).toBe('up');
+    expect(figureRounding('Send at most ')).toBe('down');
+    expect(figureRounding('The fee is too high. You can use up to ')).toBe('down');
+    expect(figureRounding('Needs 2 USDC. Balance ')).toBe('down');
+    expect(figureRounding('')).toBe('down');
   });
 
   test('without a rate: the share count, renamed and marked approximate', () => {
@@ -166,5 +197,32 @@ describe('a Send fee never reads low', () => {
     const text = feeShareText(parseUnits('0.00412345', 18), { symbol: 'ppETH', decimals: 18 }, undefined);
     expect(text).toBe('≈ 0.004124 ETH');
     expect(text).not.toMatch(/pp/i);
+  });
+});
+
+describe('a relayed shortfall "needs" figure never reads low', () => {
+  test('a share cost converts rounding UP, without the estimate mark', () => {
+    // 1.00005 shares x 1.05 = 1.0500525 USDC: shown as 1.06, not 1.05.
+    expect(costShareText(parseUnits('1.00005', 18), { symbol: 'ppUSDC', decimals: 18 }, PP_USDC_MAINNET)).toBe('1.06 USDC');
+    expect(costShareText(parseUnits('0.0041', 18), { symbol: 'ppETH', decimals: 18 }, PP_ETH)).toBe('0.00615 ETH');
+  });
+
+  test('without a rate: the approximate share count, rounded up', () => {
+    expect(costShareText(parseUnits('0.00412345', 18), { symbol: 'ppETH', decimals: 18 }, undefined)).toBe('≈ 0.004124 ETH');
+  });
+
+  test('feeShareText is the same figure marked as an estimate', () => {
+    expect(feeShareText(parseUnits('0.0041', 18), { symbol: 'ppETH', decimals: 18 }, PP_ETH)).toBe('~0.00615 ETH');
+  });
+});
+
+describe('preset chip label', () => {
+  test('with a rate: figure then unit', () => {
+    expect(presetChipLabel('0.1', 'ETH')).toBe('0.1 ETH');
+  });
+
+  test('without a rate the approximate mark goes before the number', () => {
+    expect(presetChipLabel('0.1', '≈ ETH')).toBe('≈ 0.1 ETH');
+    expect(presetChipLabel('1,000', '≈ USDC')).toBe('≈ 1,000 USDC');
   });
 });
