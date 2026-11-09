@@ -56,6 +56,10 @@ async function typeAmount(page, key: string, value: string) {
   await sleep(1500);
 }
 
+// The app's pay link is /pay#<payload> (older ones /pay/<payload>): the path
+// AND the fragment are the request, so keep both and drop the origin.
+const payPath = (link: string) => { const u = new URL(link); return `${u.pathname}${u.hash}`; };
+
 // ---------------------------------------------------------------- 1. requester
 let payLink = '';
 const req = await launch('send-request', { guardScope: SCOPE });
@@ -96,7 +100,7 @@ try {
     payLink = await page.evaluate(() => {
       for (const el of Array.from(document.querySelectorAll('input,textarea,*'))) {
         const v = (el as HTMLInputElement).value || (el.children.length === 0 ? el.textContent : '') || '';
-        const m = /https?:\/\/[^\s]+\/pay\/[A-Za-z0-9_-]+/.exec(v);
+        const m = /https?:\/\/[^\s]+\/pay[#\/][A-Za-z0-9_.-]+/.exec(v);
         if (m) return m[0];
       }
       return '';
@@ -123,8 +127,7 @@ try {
   const { page } = payer;
   const rate = await hold(page, isShareRateRead);
   if (payLink) {
-    const path = new URL(payLink).pathname;
-    await open(page, path);
+    await open(page, payPath(payLink));
     check(await connect(page), 'payer: the read-only wallet connects');
     await sleep(6000);
     check(/5(\.0+)?\s*USDC|USDC/.test(await payer.text()), 'payer: the pay page names the coin');
@@ -140,7 +143,7 @@ try {
   check(rate.held() > 0, 'payer: the share-rate reads were held', `${rate.held()} held`);
   rate.release();
   if (payLink) {
-    await open(page, new URL(payLink).pathname);
+    await open(page, payPath(payLink));
     await sleep(8000);
     await payer.guardStep('pay link, rate loaded');
   }
