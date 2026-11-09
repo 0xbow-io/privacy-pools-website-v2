@@ -21,6 +21,7 @@ import { hubTokenCatalog, heldSymbolsFor, preferredHubToken, emptySpendToken } f
 import { poolDisplayLabel } from '@/config/pool-paths';
 import React, { createContext, useContext, useState, useCallback, useEffect, useLayoutEffect, useReducer, useRef, useMemo } from 'react';
 import { KeySourceChangedError } from '@/components/sdk-provider';
+import { PasskeyTapRequiredError } from '@/services/passkey-unlock-plan';
 import { normalizeHex, truncateAddress } from '@/services/hex-format';
 import { FlowProgress } from '@/components/ui/flow-progress';
 import { staleBundleMessage } from '@/services/stale-bundle';
@@ -84,6 +85,7 @@ import {
 import { subscribeProofProgress } from '@/services/proof-progress';
 import { isFeeCommitmentExpired } from '@/services/fee-commitment';
 import { isReprovableRelayRefusal } from '@/services/relayed-transfer';
+import { amountInputDisplay, formatTokenBalanceDown, groupThousands, stripAmountSeparators } from '@/services/token-format';
 import { getActionableTokens, getKnownTokenMetadata, getTokenMetadataBySymbol, getTokenMetadata, isStablecoin, formatTokenBalance as sharedFormatTokenBalance } from '@/config/tokens';
 
 import { assertRelayerSwapProcessor } from '@/services/relayer-details';
@@ -181,6 +183,7 @@ import { PairArrow } from '@/components/ui/pair-arrow';
 import { TokenSelectSheet } from '@/components/ui/token-select-sheet';
 import { CopyIconButton } from '@/components/ui/copy-address';
 import { OpShell } from '@/components/op-shell';
+import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 import { useInlineOpsCapable } from '@/hooks/use-inline-ops-capable';
 import { isRelayerNullifierInFlight, isRelayerOutOfGas, isRelayerRateLimited, isRelayerUnreachable, isRelayWaitTimeout, relayerOutOfGasMessage, relayerRateLimitedMessage, relayInFlightMessage, timedOutRelayTxHash } from '@/services/transfer-outcome';
 import { aspBusyMessage } from '@/services/asp-backoff';
@@ -196,7 +199,7 @@ import { feeWithinReviewed, relayerFeeJitterAllowance } from '@/services/relayer
 import { quoteMatchesSignedCommitment } from '@/services/relayer-quote-integrity';
 import { decodeGasTopUpWei, formatGasTopUp } from '@/services/gas-top-up';
 import { setReceiveSetup } from '@/services/receive-setup';
-import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, netSharesWei, shareRedemptionDisclosure, shareReviewHeadline, swapRateText } from '@/services/share-display';
+import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, netSharesWei, previewReceiveFigure, shareRedemptionDisclosure, shareReviewHeadline, swapRateText } from '@/services/share-display';
 import { FigureText } from '@/components/ui/share-figure';
 import { sdkErrorText, type ErrorUnits } from '@/services/sdk-error-amounts';
 import { RelayFeeIncreasedError, relayWithdrawalWithFreshQuote } from '@/services/relayed-withdrawal';
@@ -671,6 +674,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   const [txHash, setTxHash] = useState<string | null>(null);
   const [amount, setAmount] = useState('');
   const [amountFieldWidth, setAmountFieldWidth] = useState(0);
+  // Grouped figures (4,526.5) only while nobody types in the field.
+  const [amountInputFocused, setAmountInputFocused] = useState(false);
   // DEV-229: "Recipient receives the exact amount" (default on). The SDK
   // releases `amount + fee` from the pool and the recipient nets `amount`
   // (PoolSessionWithdraw: amountOut = amount + feeAmount). So checked = the
@@ -1158,6 +1163,13 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       if (err instanceof KeySourceChangedError) {
         autoInitKeyRef.current = null;
         log('debug', 'Withdraw', `Session init superseded, retrying: ${message}`);
+        return;
+      }
+      // A passkey unlock waits for a tap in the unlock dialog, which the
+      // provider opens; opening Withdraw must not start WebAuthn itself (QA on
+      // PR #63). The guard stays set, so this does not loop.
+      if (err instanceof PasskeyTapRequiredError) {
+        log('debug', 'Withdraw', `Session init on open waits for the passkey tap: ${message}`);
         return;
       }
       log('error', 'Withdraw', `Session init on open failed: ${message}`, err);
@@ -1854,6 +1866,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     pending: reviewRedeemEnabled && !reviewRedeemFailed && reviewNetUnderlyingNum == null,
     format: sharedFormatTokenBalance,
   });
+  // The greyed receive figure on the form, before Review: the same redeemed
+  // underlying, never the share count under the coin's name.
+  const previewNet = previewReceiveFigure({ isShare: selectedIsShare, amount: reviewNet, underlying: reviewNetUnderlyingNum });
   // The dollar total beside it: the redeemed underlying at the underlying's
   // price, never shares × that price (codex P2 on 0cea0b3). Null hides the
   // line while the conversion is unknown.
@@ -4969,6 +4984,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           isDark={isDark}
           sheetAnim={sheetAnim}
           onClose={closeWithdrawModal}
+          closeBlocked={step === 'loading'}
           cardClassName={`relative items-center overflow-hidden border border-border bg-card-background ${step === 'withdraw' ? 'gap-[20px]' : 'gap-[16px]'} ${(step === 'loading' || step === 'success') ? 'justify-center' : ''} ${
             isSheet
               ? 'w-full max-w-full px-[16px] py-[24px] pt-[28px] rounded-t-card rounded-b-none border-b-0 mb-0'
@@ -5083,13 +5099,16 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                           className={`text-[24px] leading-[30px] p-0 m-0 font-pp-regular ${amount ? 'text-text' : 'text-[#999999]'}`}
                           // nw-keep(platform-css): web-only outline reset + text cursor have no className path (empty on native)
                           // nw-keep(measured-or-inset): font size shrinks to the measured field width for long figures
-                          style={[WEB_NO_OUTLINE, Platform.OS === 'web' ? { cursor: 'text' } as unknown as TextStyle : {}, { fontSize: fitAmountFontSize(amountField.value, amountFieldWidth, 24) }]}
+                          style={[WEB_NO_OUTLINE, Platform.OS === 'web' ? { cursor: 'text' } as unknown as TextStyle : {}, { fontSize: fitAmountFontSize(amountInputDisplay(amountField.value, amountInputFocused), amountFieldWidth, 24) }]}
                           onLayout={(e) => setAmountFieldWidth(Math.round(e.nativeEvent.layout.width))}
-                          value={amountField.value}
+                          value={amountInputDisplay(amountField.value, amountInputFocused)}
+                          onFocus={() => setAmountInputFocused(true)}
+                          onBlur={() => setAmountInputFocused(false)}
                           placeholder="0"
                           placeholderTextColor="#999999"
-                          onChangeText={(text) => {
-                            const val = sanitizeAmountInput(amountField.toShares(text), tokenDecimalsForDisplay);
+                          onChangeText={(typed) => {
+                            // A pasted "4,526.50" is "4526.50": separators are display only.
+                            const val = sanitizeAmountInput(amountField.toShares(stripAmountSeparators(typed)), tokenDecimalsForDisplay);
                             setAmount(val);
                             setSelectedTab(null);
                             // Amount is part of the swap-quote key.
@@ -5117,7 +5136,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                               ? 'Loading shielded balance…'
                               : spendabilityError
                                 ? 'Shielded balance unavailable'
-                                : `Available: ${spendableLabel(isSui ? String(displayAvailableNum) : formatUnits(resolveDisplayAvailableWei({ isSwapExit, batchEnabled, spendableWei: currentBalance.active, singleProofCapWei: availableWei }), selectedTokenDecimals), selectedToken, chainId)}`}
+                                : `Available: ${groupThousands(spendableLabel(isSui ? String(displayAvailableNum) : formatUnits(resolveDisplayAvailableWei({ isSwapExit, batchEnabled, spendableWei: currentBalance.active, singleProofCapWei: availableWei }), selectedTokenDecimals), selectedToken, chainId))}`}
                           </Text>
                           <ShareCountHint hint={balanceDisplay(isSui ? String(displayAvailableNum) : formatUnits(resolveDisplayAvailableWei({ isSwapExit, batchEnabled, spendableWei: currentBalance.active, singleProofCapWei: availableWei }), selectedTokenDecimals), selectedToken, chainId).hint} />
                           <ModalInfoIcon color="#999999" />
@@ -5158,10 +5177,10 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                         current route's per-transaction cap (#214). */}
                     <View className="flex-row justify-between">
                       <Text className="text-[12px] text-[#4D4D4D] font-pp-regular">
-                        Balance: {spendabilityBlocked ? '—' : spendableLabel(formatUnits(currentBalance.active, selectedTokenDecimals), selectedToken, chainId)}
+                        Balance: {spendabilityBlocked ? '—' : groupThousands(spendableLabel(formatUnits(currentBalance.active, selectedTokenDecimals), selectedToken, chainId))}
                       </Text>
                       <Text className="text-[12px] text-[#999999] font-pp-regular">
-                        Pending: {spendabilityBlocked ? '—' : balanceDisplay(formatUnits(currentBalance.pending, selectedTokenDecimals), selectedToken, chainId).text}
+                        Pending: {spendabilityBlocked ? '—' : groupThousands(balanceDisplay(formatUnits(currentBalance.pending, selectedTokenDecimals), selectedToken, chainId).text)}
                       </Text>
                     </View>
                     {spendabilityError ? (
@@ -5242,7 +5261,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                               {enteredAmount > 0
                                 ? (isSwapExit
                                   ? (swapExitEstimateText ?? '—')
-                                  : reviewNet.toLocaleString('en-US', { maximumFractionDigits: 6 }))
+                                  : (previewNet == null ? '—' : groupThousands(formatTokenBalanceDown(previewNet, recvSymbol))))
                                 : '0'}
                             </Text>
                             <Pressable
@@ -5546,11 +5565,11 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     <View className="flex-1 gap-[1px]">
                       <Text className="font-pp-sans-medium text-[13px] text-text" numberOfLines={1}>Unshielding</Text>
                       <Text className="font-pp-sans text-[11.5px] text-text-muted" numberOfLines={1}>
-                        {poolName} · {balanceDisplay(batchPlan ? 0 : remainingAmount, selectedToken, chainId).text} left after
+                        {poolName} · {groupThousands(balanceDisplay(batchPlan ? 0 : remainingAmount, selectedToken, chainId).text)} left after
                       </Text>
                     </View>
                     <View className="items-end gap-[1px]">
-                      <Text className="font-pp-mono text-[13px] text-text">{balanceDisplay(swapSnapshot ? formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals) : String(grossNum), swapSnapshot ? swapReviewInputSymbol : selectedToken, swapSnapshot?.poolChainId ?? chainId).text}</Text>
+                      <Text className="font-pp-mono text-[13px] text-text">{groupThousands(balanceDisplay(swapSnapshot ? formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals) : String(grossNum), swapSnapshot ? swapReviewInputSymbol : selectedToken, swapSnapshot?.poolChainId ?? chainId).text)}</Text>
                       <Text className="font-pp-sans text-[11.5px] text-text-muted">${grossUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}</Text>
                     </View>
                   </View>
@@ -5575,7 +5594,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       )}
                     </View>
                     <View className="items-end gap-[1px]">
-                      <Text className="font-pp-mono text-[13px] text-text">{netLabel}</Text>
+                      <Text className="font-pp-mono text-[13px] text-text">{groupThousands(netLabel)}</Text>
                       {netUsd != null ? <Text className="font-pp-sans text-[11.5px] text-text-muted">${netUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}</Text> : null}
                     </View>
                   </View>
@@ -5584,12 +5603,12 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       no relayer yet: the withdrawal is sent from this account. */}
                   {isStellar ? (
                     <Text className="py-[9px] font-pp-sans text-[11.5px] text-text-muted">
-                      {`Relayer fee ~${formatUnits(estimateStellarRelayFee(parseTokenAmount(amount, altDecimals)), altDecimals)} XLM (0.5%), added on top. Sent by the testnet relayer, not your account.`}
+                      {`Relayer fee up to ${formatUnits(estimateStellarRelayFee(parseTokenAmount(amount, altDecimals)), altDecimals)} XLM (0.5% plus network cost), added on top; any unused part returns as change. Sent by the testnet relayer, not your account.`}
                     </Text>
                   ) : (
                   <View className="flex-row flex-wrap items-center justify-between gap-[6px] py-[9px]">
                     <Text className="font-pp-sans text-[11.5px] text-text-muted">
-                      Relayer fee {swapSnapshot ? `${balanceDisplay(swapSnapshot.display.relayerFee, swapReviewInputSymbol, swapSnapshot.poolChainId).text}` : (batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text} (~${balanceDisplay(swapSnapshot ? swapSnapshot.display.relayerFee : String(reviewFee), swapSnapshot ? swapReviewInputSymbol : (batchPlan || isStellar) ? selectedToken : resolvedFee.symbol, swapSnapshot?.poolChainId ?? chainId).usd.toFixed(2)})
+                      Relayer fee {groupThousands(swapSnapshot ? `${balanceDisplay(swapSnapshot.display.relayerFee, swapReviewInputSymbol, swapSnapshot.poolChainId).text}` : (batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text)} (~${groupThousands(balanceDisplay(swapSnapshot ? swapSnapshot.display.relayerFee : String(reviewFee), swapSnapshot ? swapReviewInputSymbol : (batchPlan || isStellar) ? selectedToken : resolvedFee.symbol, swapSnapshot?.poolChainId ?? chainId).usd.toFixed(2))})
                     </Text>
                     <View className="flex-row items-center gap-[10px]">
                       <Pressable className="flex-row items-center gap-[3px]" onPress={() => setRelayerSelectorOpen((v) => !v)}>
@@ -5871,7 +5890,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       {/* The fee's OWN asset and decimals (services/relayer-fee.ts),
                           not the withdrawn token's. When they differ the symbol
                           says so instead of relabelling one asset as another. */}
-                      Relayer fee: {swapSnapshot ? `${balanceDisplay(swapSnapshot.display.relayerFee, swapReviewInputSymbol, swapSnapshot.poolChainId).text}` : (batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text} (~${balanceDisplay(swapSnapshot ? swapSnapshot.display.relayerFee : String(reviewFee), swapSnapshot ? swapReviewInputSymbol : (batchPlan || isStellar) ? selectedToken : resolvedFee.symbol, swapSnapshot?.poolChainId ?? chainId).usd.toFixed(2)})
+                      Relayer fee: {groupThousands(swapSnapshot ? `${balanceDisplay(swapSnapshot.display.relayerFee, swapReviewInputSymbol, swapSnapshot.poolChainId).text}` : (batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text)} (~${groupThousands(balanceDisplay(swapSnapshot ? swapSnapshot.display.relayerFee : String(reviewFee), swapSnapshot ? swapReviewInputSymbol : (batchPlan || isStellar) ? selectedToken : resolvedFee.symbol, swapSnapshot?.poolChainId ?? chainId).usd.toFixed(2))})
                     </Text>
                   </View>
                   <FeeWarning breakdown={withdrawFeeBreakdown} testID="withdraw-fee-warning" />
@@ -6126,9 +6145,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
 
                 <View className="items-center gap-[5px]">
                   <Text className="text-[24px] text-text font-pp-regular">
-                    {swapSnapshot
+                    {groupThousands(swapSnapshot
                       ? `≥ ${balanceDisplay(swapSnapshot.display.minReceived, swapSnapshot.outputToken.symbol, swapSnapshot.destinationChainId).text}`
-                      : successNetLabel}
+                      : successNetLabel)}
                   </Text>
                   <Text className="text-[14px] text-[#737373] font-pp-regular">
                     {swapSnapshot
@@ -6195,6 +6214,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           the pair can route, in which case picking one turns the exit into a
           cross-chain delivery. */}
       {isOpen && receiveSelectorOpen && (
+        <HubErrorBoundary onRetry={() => setReceiveSelectorOpen(false)}>
         <TokenSelectSheet
           tokens={receiveTokens}
           networks={receiveDestinations.map((id) => ({
@@ -6305,6 +6325,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           onClose={() => setReceiveSelectorOpen(false)}
           title="Receive as"
         />
+        </HubErrorBoundary>
       )}
     </WithdrawModalContext.Provider>
   );

@@ -4,7 +4,7 @@ import { ReceiptWrongNetworkCopy } from '@/components/receipt-wrong-network';
 import { receiptChain } from '@/services/receipt-chain-registry';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useAccount } from 'wagmi';
 
 import { getChainConfig, defaultChainId } from '@/config/chains';
@@ -15,6 +15,7 @@ import { isStellarClaimLink } from '@/services/stellar/stellar-claim';
 import { StellarClaimNoteScreen } from '@/components/stellar-claim-note';
 import { usePoolSession } from '@/hooks/use-pool-session';
 import { useSessionChainId } from '@/hooks/use-session-chain-id';
+import { useShareLinkPayload } from '@/hooks/use-share-link-payload';
 import { useNoteImport } from '@/hooks/use-note-import';
 import { useLinkApproval } from '@/hooks/use-link-approval';
 import { isBlockedApproval, LINK_APPROVAL_COPY } from '@/services/link-approval-rules';
@@ -47,14 +48,13 @@ import {
 
 /** Stellar claim links (`xlmn.…`) have their own page; everything else is the EVM one. */
 export default function ImportNoteScreen() {
-  const params = useLocalSearchParams<{ encoded?: string | string[] }>();
-  const encoded = Array.isArray(params.encoded) ? params.encoded[0] : params.encoded;
+  const encoded = useShareLinkPayload();
   if (isStellarClaimLink(encoded)) return <StellarClaimNoteScreen encoded={encoded as string} />;
   return <EvmImportNoteScreen />;
 }
 
 function EvmImportNoteScreen() {
-  const params = useLocalSearchParams<{ encoded?: string | string[] }>();
+  const encoded = useShareLinkPayload();
   const router = useRouter();
   const { address } = useAccount();
   const { keysReady, sessionAddress, identityMode } = usePoolSession();
@@ -89,8 +89,6 @@ function EvmImportNoteScreen() {
     busy || hasUnanchoredLocalNote,
     'Only in this tab. The link restores it.',
   );
-
-  const encoded = Array.isArray(params.encoded) ? params.encoded[0] : params.encoded;
 
   const receipt = useMemo(() => {
     if (!encoded) return null;

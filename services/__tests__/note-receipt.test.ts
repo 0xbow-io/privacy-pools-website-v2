@@ -88,7 +88,7 @@ describe('note-receipt envelope', () => {
     };
     const url = buildSentReceiptUrl([disclosure as never]);
     expect(url).not.toBeNull();
-    expect(url!).toContain('/import-note/');
+    expect(url!).toContain('/import-note#');
     const decoded = decodeNoteReceiptFromUrl(extractNoteReceiptEncoded(url!)!);
     expect(decoded).not.toBeNull();
     expect(decoded!.chainId).toBe(11155111);

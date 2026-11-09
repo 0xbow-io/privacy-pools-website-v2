@@ -8,11 +8,30 @@
 name: e2e-crosschain-fast
 
 # It spends REAL mainnet funds from E2E_ACCOUNT_A_PK (a 0.001 ETH swap on OP,
-# and sometimes a shield and a bridge), so it never runs on its own: only by
-# hand, `gh workflow run e2e-crosschain-fast.yml --ref <branch>`. Never on
-# pull_request, where anyone able to push a branch could run changed script
-# code with that key. Input dry_run=true quotes and stops before any transaction.
+# and sometimes a shield and a bridge, about 0.0048 ETH a run). It runs on every
+# push to main (one per release, Zeeshan on #36: dev would drain the account in
+# about three runs), never on a pull request. It uses the repo-level E2E_ACCOUNT_A_PK, the same
+# key the other e2e workflows use (Pat, 2026-11-03), so the `e2e-mainnet`
+# environment only limits which branches run this job, not who holds the key. Run by hand with
+# `gh workflow run e2e-crosschain-fast.yml --ref dev`. Input dry_run=true quotes
+# and stops before any transaction.
 on:
+  push:
+    branches: [main]
+    paths:
+      - "services/**"
+      - "components/**"
+      - "hooks/**"
+      - "config/**"
+      - "scripts/e2e/**"
+      - "scripts/visual/**"
+      - "modules/**"
+      - "constants/**"
+      - "patches/**"
+      - "vendor/**"
+      - "package.json"
+      - "bun.lock"
+      - ".github/workflows/e2e-crosschain-fast.yml"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -36,6 +55,9 @@ concurrency:
 
 jobs:
   swap:
+    # Only dev and main may deploy to this environment (repo settings), and the
+    # mainnet key is stored on it, so no PR branch can read it.
+    environment: e2e-mainnet
     runs-on: ubuntu-latest
     # Above the script's worst case, below the browser run's 150: gas bridge 20
     # + approval 45 + delivery 30 + registration, proving and the note landing
@@ -48,6 +70,9 @@ jobs:
         with:
           lfs: true
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest

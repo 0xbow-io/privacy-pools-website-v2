@@ -74,7 +74,8 @@ describe('Stellar withdraw cap', () => {
   test('amount + fee always fits the inputs, and is close to the best', () => {
     for (const inputs of [0n, 1n, 10_000_000n, 123_456_789n, 999_999_999n, 50_000_000_000n, 1_000_000_000_000n]) {
       const max = maxStellarWithdrawForInputs(inputs);
-      expect(max + estimateStellarRelayFee(max)).toBeLessThanOrEqual(inputs);
+      // Inputs at or under the fee's fixed cost term cannot fund any withdrawal.
+      if (max > 0n) expect(max + estimateStellarRelayFee(max)).toBeLessThanOrEqual(inputs);
       if (inputs > 0n) {
         const next = max + 2n;
         expect(next + estimateStellarRelayFee(next)).toBeGreaterThan(inputs);
@@ -124,6 +125,46 @@ describe('Stellar error copy', () => {
     const message = stellarErrorMessage(raw);
     expect(message).toMatch(/error #21/);
     expect(message).not.toMatch(/Diagnostic|Not enough XLM/);
+  });
+
+  // The text a refused send reaches the flows with: the SDK's wallet interactor
+  // wraps the RPC's send error (the RPC itself is the only stub).
+  async function refusedSend(code: string): Promise<string> {
+    const sdk = await import('@privacy-pools-v2/stellar-sdk');
+    const passphrase = 'Test SDF Network ; September 2015';
+    const wallet = new sdk.FreighterWalletInteractor({
+      networkPassphrase: passphrase,
+      provider: {
+        getAddress: async () => G,
+        getNetworkPassphrase: async () => passphrase,
+        signTransaction: async (xdr: string) => xdr,
+      },
+      rpcInteractor: {
+        submitTransaction: async () => { throw new sdk.StellarTransactionSendFailed(code); },
+      } as unknown as ConstructorParameters<typeof sdk.FreighterWalletInteractor>[0]['rpcInteractor'],
+    });
+    try {
+      await wallet.sendTransaction('AAAA');
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+    throw new Error('expected the send to fail');
+  }
+
+  test('an expired transaction says what happened and that a retry is safe', async () => {
+    const message = stellarErrorMessage(await refusedSend('txTooLate'));
+    expect(message).toMatch(/took too long/);
+    // Scoped to this transaction: in the two-step account setup the first one may already be on chain.
+    expect(message).toMatch(/This transaction was not sent/);
+    expect(message).not.toMatch(/Nothing was sent/);
+    expect(message).not.toMatch(/txTooLate|—/);
+  });
+
+  test('a stale sequence asks for a retry instead of printing the code', async () => {
+    const message = stellarErrorMessage(await refusedSend('txBadSeq'));
+    expect(message).toMatch(/This transaction was not sent/);
+    expect(message).not.toMatch(/Nothing was sent/);
+    expect(message).not.toMatch(/txBadSeq|—/);
   });
 
   test('user-facing copy has no em dashes', () => {

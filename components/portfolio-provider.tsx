@@ -23,7 +23,17 @@ import { getConfiguredYieldDeployments } from '@/config/yield';
 import { getKnownTokenMetadata, isStablecoin, formatTokenBalance } from '@/config/tokens';
 import { buildPortfolioPositions } from '@/services/portfolio-positions';
 import { formatUsdPrecise } from '@/services/format-fiat';
-import { totalYieldEarnedUsd, yieldEarnedDisplay, yieldEarnedKey, type YieldEarnedDisplay } from '@/services/yield-earned';
+import { usePoolSession } from '@/hooks/use-pool-session';
+import {
+  FIGURE_LOADING,
+  pendingValueDisplay,
+  totalYieldEarnedUsd,
+  yieldEarnedKey,
+  yieldEarnedRow,
+  yieldEarnedTileDisplay,
+  type FigureDisplay,
+  type YieldEarnedRow,
+} from '@/services/yield-earned';
 
 // --- Types ---
 
@@ -54,6 +64,8 @@ export type PortfolioPosition = {
    * for "—" (no figure, or one whose error bound shows at display precision).
    */
   earnedText?: string | null;
+  /** Yield row only: the earned figure is still computing. `earnedText` is null, the row draws a shimmer. */
+  earnedLoading?: boolean;
 };
 
 type PortfolioContextType = {
@@ -61,7 +73,8 @@ type PortfolioContextType = {
   totalValue: number;
   totalValueFormatted: string;
   pendingValue: number;
-  pendingValueFormatted: string;
+  /** The Pending figure as shown: no text (a shimmer) while it is not known yet. */
+  pendingDisplay: FigureDisplay;
   isLoading: boolean;
   hasPositions: boolean;
   error: string | null;
@@ -75,10 +88,13 @@ type PortfolioContextType = {
    */
   chainId: number;
   /**
-   * Sum of every yield row's earned figure, USD-formatted, or null for "—":
-   * a total that skipped a row without a figure would understate it.
+   * The Yield earned tile. The sum of the yield rows' figures, USD-formatted,
+   * ending in "+" when a row without a figure was left out or a row's figure
+   * is itself a lower bound, with `loading` while a row is still computing.
+   * No text (a shimmer) while no row has a figure yet and one is
+   * coming. Null renders "—": no row has a figure and none is coming.
    */
-  yieldEarnedUsdFormatted: string | null;
+  yieldEarnedDisplay: FigureDisplay | null;
 };
 
 // --- Context ---
@@ -113,6 +129,11 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   const { data: poolsData, yieldEarned, isLoading: poolsLoading, error: poolsError } = usePools();
   const { rateFor, loading: ratesLoading } = useShareRates();
   const balanceDisplay = useBalanceDisplay(chainId);
+  // Local session state only, no request. While the account is still syncing
+  // a pending 0 only means "none found yet" (the balance hero reads the same
+  // flags, components/pools/my-privacy-pools.tsx).
+  const { isSyncing, isInitializing, isInitialized, keysReady, error: sessionError } = usePoolSession();
+  const accountSyncing = isSyncing || (!sessionError && (isInitializing || (keysReady && !isInitialized)));
 
   // Off the public-feed grid, not a query. The chain-scoped getAllPrices()
   // this replaces shared the scheduler's cache scope, but only while that
@@ -141,6 +162,9 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       redeemableUnderlying: underlyingPerShare == null ? 0 : Number(pool.balanceTokenExact) * underlyingPerShare,
       hasShares: Number(pool.balanceTokenExact) > 0,
       pendingShares: parseUnits(pool.pendingTokenExact || '0', deployment.ppUSDCDecimals),
+      // Whether the row holds shares at all: a compute that found none for it ran before the notes did.
+      holdsShares: parseUnits(pool.balanceTokenExact || '0', deployment.ppUSDCDecimals) > 0n
+        || parseUnits(pool.pendingTokenExact || '0', deployment.ppUSDCDecimals) > 0n,
       ppUSDCDecimals: deployment.ppUSDCDecimals,
       valueLoading: !rate && ratesLoading,
       valueError: !rate && !ratesLoading,
@@ -170,16 +194,22 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
 
     // Earned per yield row, in the underlying the row is shown in. Read from
     // PoolsProvider, which computes it on its own cadence; nothing here asks.
-    const earnedRows: { earned: YieldEarnedDisplay | null; underlyingPriceUsd: number }[] = [];
-    const earnedFor = (p: (typeof aggregated.positions)[number]): YieldEarnedDisplay | null => {
+    const earnedRows: { earned: YieldEarnedRow; underlyingPriceUsd: number }[] = [];
+    const earnedFor = (p: (typeof aggregated.positions)[number]): YieldEarnedRow | null => {
       if (!p.isYield) return null;
       // A yield row with no chain has no figure; it must still count, or the
       // tile would sum the others and silently read low.
       if (p.chainId === undefined) {
-        earnedRows.push({ earned: null, underlyingPriceUsd: 0 });
-        return null;
+        earnedRows.push({ earned: { state: 'unavailable' }, underlyingPriceUsd: 0 });
+        return { state: 'unavailable' };
       }
-      const earned = yieldEarnedDisplay(yieldEarned.get(yieldEarnedKey(p.chainId, p.tokenAddress)), p.tokenSymbol);
+      const source = yieldSources.find((s) => s.chainId === p.chainId
+        && s.ppUSDCAddress.toLowerCase() === p.tokenAddress.toLowerCase());
+      const earned = yieldEarnedRow(
+        yieldEarned.get(yieldEarnedKey(p.chainId, p.tokenAddress)),
+        p.tokenSymbol,
+        source?.holdsShares ?? p.withdrawEnabled,
+      );
       earnedRows.push({ earned, underlyingPriceUsd: priceFor('', p.tokenSymbol, p.chainId) });
       return earned;
     };
@@ -208,7 +238,11 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         ...(p.shareSymbol ? { shareSymbol: p.shareSymbol } : {}),
         valueUnavailable: p.valueUnavailable,
         withdrawEnabled: p.withdrawEnabled,
-        ...(p.isYield ? { earnedText: earned?.text ?? null } : {}),
+        ...(p.isYield
+          ? earned?.state === 'loading'
+            ? { earnedText: null, earnedLoading: true }
+            : { earnedText: earned?.state === 'ok' ? earned.display.text : null, earnedLoading: false }
+          : {}),
       };
     });
 
@@ -223,6 +257,17 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   }, [poolsData.myPools, priceMap, chainId, yieldSources, yieldEarned, balanceDisplay]);
 
   const isLoading = poolsLoading || pricesLoading;
+  // Pools or prices not in yet: nothing in the header is known, so every
+  // figure there is a shimmer, never "$0.00".
+  const yieldEarnedTile = isLoading ? FIGURE_LOADING : yieldEarnedTileDisplay(yieldEarnedUsd, formatUsd);
+  const pendingDisplay = pendingValueDisplay({
+    pageLoading: isLoading,
+    accountSyncing,
+    ratesLoading,
+    value: pendingValue,
+    valueUnavailable: pendingValueUnavailable,
+    formatUsd,
+  });
   // usePools surfaces a string. The Error branch that used to be here existed
   // for the price query's thrown object, and the price read is not a query any
   // more: the grid keeps the last good map through a failed tick, so there is
@@ -234,13 +279,13 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     totalValue,
     totalValueFormatted: formatUsd(totalValue),
     pendingValue,
-    pendingValueFormatted: pendingValueUnavailable ? 'Value unavailable' : formatUsd(pendingValue),
+    pendingDisplay,
     isLoading,
     hasPositions,
     error,
     chainDisplayName,
     chainId,
-    yieldEarnedUsdFormatted: yieldEarnedUsd == null ? null : formatUsd(yieldEarnedUsd),
+    yieldEarnedDisplay: yieldEarnedTile,
   };
 
   return (

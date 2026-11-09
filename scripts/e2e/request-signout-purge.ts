@@ -66,8 +66,8 @@ async function runPath(path: string) {
         await unlockIfPrompted(page);
         const backup = page.getByTestId('unregistered-download');
         if (await backup.isVisible().catch(() => false)) await backup.click();
-        created = /\/pay\//.test(await bodyText(page))
-          || await page.evaluate(() => Array.from(document.querySelectorAll('input')).some((i) => (i.value || '').includes('/pay/')));
+        created = /\/pay#/.test(await bodyText(page))
+          || await page.evaluate(() => Array.from(document.querySelectorAll('input')).some((i) => (i.value || '').includes('/pay#')));
         if (!created) await sleep(2000);
       }
     }

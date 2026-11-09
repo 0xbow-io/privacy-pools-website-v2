@@ -124,7 +124,7 @@ try {
       if (!(await clickButton(payee.page, 'Create request'))) {
         record('create request', false, 'Create request not pressable');
       } else {
-        payUrl = await waitForLink(payee.page, '/pay/');
+        payUrl = await waitForLink(payee.page, '/pay#');
         await payee.shot('request-created');
         record('create request', !!payUrl, payUrl ? `link ${payUrl}` : 'no /pay/ link appeared on the card');
       }

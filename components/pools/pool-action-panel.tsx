@@ -272,10 +272,10 @@ export function PoolActionPanel({
         ) : (
           <View className="gap-[6px] rounded-inner bg-background-secondary p-[14px]">
             <Text numberOfLines={1} className="font-pp-semi-bold text-[14px] leading-[18px] text-text">
-              Get paid without an address
+              Request a private payment
             </Text>
             <Text numberOfLines={2} className="font-pp-regular text-[12px] leading-[17px] text-text-secondary">
-              Share a link. The payer never learns your balance.
+              Share a payment link. Review identity details before sharing.
             </Text>
           </View>
         )}

@@ -9,7 +9,7 @@
  * and the advice reads as nonsense.
  */
 import { describe, expect, test } from 'bun:test';
-import { friendlySwapError, relaySwapRefusalText } from '@/services/swap-error-copy';
+import { friendlySwapError, isSwapValueOverRelayerCap, relaySwapRefusalText, SWAP_VALUE_CAP_TEXT } from '@/services/swap-error-copy';
 
 const USDC = { decimals: 6, symbol: 'USDC' };
 const NAT = 'Invalid transact params: LiFi needs 18623284 input but only 18623008 available after fee. Reduce the amount or retry.';
@@ -109,5 +109,27 @@ describe('relaySwapRefusalText (DEV-459)', () => {
     // Not from the relayer interactor at all.
     expect(relaySwapRefusalText(new Error(BNB_400))).toBeNull();
     expect(relaySwapRefusalText(BNB_400)).toBeNull();
+  });
+});
+
+// DEV-588: the relayer's per-chain swap value cap (maxSwapValueWei, 0.44 BNB on
+// BNB Chain). The error is the SDK's own class, so the name and message are the
+// ones a user would hit, not a copy of them.
+describe('swap value over the relayer cap', () => {
+  test('the SDK refusal reads as one short line, without base units', async () => {
+    const { SwapValueExceedsRelayerCap } = await import('@privacy-pools-v2/sdk');
+    const err = new SwapValueExceedsRelayerCap(500000000000000000n, 440000000000000000n);
+    const { sdkErrorText } = await import('@/services/sdk-error-amounts');
+    const text = sdkErrorText(err, { input: { decimals: 18, symbol: 'BNB' } }, 'fallback');
+    expect(text).toBe(SWAP_VALUE_CAP_TEXT);
+    expect(text).not.toMatch(/\d{6,}|max_swap_value_wei|—/);
+    // Also when the class was lost on the way and only the message survived.
+    expect(isSwapValueOverRelayerCap(new Error(err.message))).toBe(true);
+  });
+
+  test('a relayer refusal naming the cap reads the same; anything else does not', () => {
+    expect(isSwapValueOverRelayerCap(new Error('HTTP 400: {"message":"swapValue exceeds max_swap_value_wei"}'))).toBe(true);
+    expect(isSwapValueOverRelayerCap(new Error('HTTP 400: fee commitment has expired'))).toBe(false);
+    expect(isSwapValueOverRelayerCap(undefined)).toBe(false);
   });
 });

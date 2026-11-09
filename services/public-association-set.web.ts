@@ -43,9 +43,9 @@ export async function getVerifiedPoolAssociationSetLeaves(chainId: number): Prom
         }
         return await approvedLabelCache.leaves({ getLeaves: () => readAssociationSetLeaves(http, leavesUrl) }, chainId, poolKey) as Hash[];
       },
-      root: () => readAssociationSetRoot(() => client!.readContract({
+      root: () => approvedLabelCache.chainRoot(chainId, () => readAssociationSetRoot(() => client!.readContract({
         address: registry as Address, abi: ASP_ROOT_ABI, functionName: 'latestASPRoot',
-      })),
+      }))),
     }, Boolean(LEGACY_CONFIG)));
   } catch (error) {
     // Native/unsupported browsers and worker startup failures retain the

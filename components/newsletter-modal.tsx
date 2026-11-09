@@ -5,6 +5,7 @@ import { Modal } from '@/components/ui/modal';
 import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import { useBackHandler } from '@/hooks/use-back-handler';
+import { TURNSTILE_INTEGRITY, TURNSTILE_SCRIPT_SRC, TURNSTILE_SCRIPT_URL } from '@/config/turnstile';
 
 const TURNSTILE_SITE_KEY = process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY || '';
 const NEWSLETTER_API_URL =
@@ -75,7 +76,13 @@ export function NewsletterModal({ visible, onClose }: { visible: boolean; onClos
     };
     const mountWidget = () => {
       const api = getApi();
-      if (disposed || !api || turnstileWidgetId.current !== null) return;
+      if (disposed || turnstileWidgetId.current !== null) return;
+      // The script loaded but did not install `window.turnstile` (it threw, or the
+      // integrity check blocked it): say so instead of leaving a blank captcha.
+      if (!api) {
+        fail();
+        return;
+      }
       try {
         turnstileWidgetId.current = api.render(el, {
           sitekey: TURNSTILE_SITE_KEY,
@@ -98,7 +105,7 @@ export function NewsletterModal({ visible, onClose }: { visible: boolean; onClos
       }
     };
     let script = document.querySelector<HTMLScriptElement>(
-      'script[src^="https://challenges.cloudflare.com/turnstile/v0/api.js"]',
+      `script[src^="${TURNSTILE_SCRIPT_URL}"]`,
     );
     const scriptFailed = () => {
       script?.remove();
@@ -112,7 +119,10 @@ export function NewsletterModal({ visible, onClose }: { visible: boolean; onClos
       script.addEventListener('load', mountWidget);
       script.addEventListener('error', scriptFailed);
       if (isNew) {
-        script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+        script.src = TURNSTILE_SCRIPT_SRC;
+        // Pinned bytes: the browser refuses the script if the hash differs (config/turnstile.ts).
+        script.integrity = TURNSTILE_INTEGRITY;
+        script.crossOrigin = 'anonymous';
         script.async = true;
         // This listener belongs to the script, not the modal. A failed load
         // must be retryable even if every modal listener has been removed.

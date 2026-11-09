@@ -158,7 +158,7 @@ export function buildShareLinkForRecord(
       ...(record.expiresAt ? { expiresAt: record.expiresAt as Hex } : {}),
       createdAt: createdAtMs > 0 ? new Date(createdAtMs).toISOString() : new Date().toISOString(),
     };
-    return `${linkBase}/pay/${encodePaymentRequestPayloadForUrl(payload)}`;
+    return `${linkBase}/pay#${encodePaymentRequestPayloadForUrl(payload)}`;
   } catch {
     return null;
   }

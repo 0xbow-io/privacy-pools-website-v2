@@ -8,6 +8,7 @@ import {
   DEFAULT_APP_ENVIRONMENT,
   appEnvironmentLabel,
   envScopedStorageKey,
+  isStagingOnlyHostname,
   parseAppEnvironment,
   readAppEnvironment,
   resolveAppEnvironment,
@@ -101,6 +102,37 @@ describe('readAppEnvironment', () => {
     const storage = memoryStorage();
     expect(readAppEnvironment({ search: '?env=devnet', storage })).toBe('prod');
     expect(storage.getItem(APP_ENVIRONMENT_STORAGE_KEY)).toBeNull();
+  });
+});
+
+describe('staging-only hostnames (the dev-branch test domain)', () => {
+  test('recognises the test hosts and nothing else', () => {
+    expect(isStagingOnlyHostname('test.privacypools.com')).toBe(true);
+    expect(isStagingOnlyHostname('TEST.privacypools.com')).toBe(true);
+    expect(isStagingOnlyHostname('testnet.privacypools.com')).toBe(true);
+    expect(isStagingOnlyHostname('v2.privacypools.com')).toBe(false);
+    expect(isStagingOnlyHostname('privacypools.com')).toBe(false);
+    expect(isStagingOnlyHostname('test.privacypools.com.evil.example')).toBe(false);
+    expect(isStagingOnlyHostname('')).toBe(false);
+    expect(isStagingOnlyHostname(null)).toBe(false);
+  });
+
+  test('always staging: ?env=prod, a stored prod choice and a prod build default are ignored', () => {
+    const hostname = 'test.privacypools.com';
+    const storage = memoryStorage({ [APP_ENVIRONMENT_STORAGE_KEY]: 'prod' });
+    expect(readAppEnvironment({ hostname, search: '?env=prod', storage, buildDefault: 'prod' })).toBe('staging');
+    expect(readAppEnvironment({ hostname, search: '', storage: null })).toBe('staging');
+  });
+
+  test('nothing is written to storage on a staging-only host', () => {
+    const storage = memoryStorage({ [APP_ENVIRONMENT_STORAGE_KEY]: 'prod' });
+    readAppEnvironment({ hostname: 'test.privacypools.com', search: '?env=staging', storage });
+    expect(storage.map.get(APP_ENVIRONMENT_STORAGE_KEY)).toBe('prod');
+  });
+
+  test('other hosts keep the normal precedence', () => {
+    expect(readAppEnvironment({ hostname: 'v2.privacypools.com', search: '?env=staging', storage: null })).toBe('staging');
+    expect(readAppEnvironment({ hostname: 'v2.privacypools.com', search: '', storage: null })).toBe('prod');
   });
 });
 

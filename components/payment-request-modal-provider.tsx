@@ -1,3 +1,4 @@
+import { paymentRequestRecipientLabel } from '@/services/payment-request-disclosure';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 // RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
 // amounts, validation, quotes, relayer and on-chain values stay in shares
@@ -1421,7 +1422,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         setOutputPayload(JSON.stringify(request, null, 2));
         setCreatedDraft({ amountLabel: frozenAmountLabel, amountHint: frozenView.hint });
         const stellarPayLink = canUseBrowserApis()
-          ? withStellarLinkParams(`${shareLinkBase()}/pay/${encodeStellarBlindRequest(request)}`, ACTIVE_APP_ENVIRONMENT, { stagingMainnet: STAGING_MAINNET_EXPLICIT })
+          ? withStellarLinkParams(`${shareLinkBase()}/pay#${encodeStellarBlindRequest(request)}`, ACTIVE_APP_ENVIRONMENT, { stagingMainnet: STAGING_MAINNET_EXPLICIT })
           : null;
         if (stellarPayLink) setPayLink(stellarPayLink);
         // Listed under Payment Requests (this tab, and kept in this browser
@@ -1682,7 +1683,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         setOutputPayload(JSON.stringify(request, null, 2));
         setCreatedDraft({ amountLabel: frozenAmountLabel, amountHint: frozenView.hint });
         const createdPayLink = canUseBrowserApis()
-          ? `${shareLinkBase()}/pay/${encodePaymentRequestPayloadForUrl(request)}`
+          ? `${shareLinkBase()}/pay#${encodePaymentRequestPayloadForUrl(request)}`
           : null;
         if (createdPayLink) setPayLink(createdPayLink);
         // Session-scoped listing (product call): the request must show in the
@@ -1842,7 +1843,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
 
         setCreatedDraft({ amountLabel: frozenAmountLabel, amountHint: frozenView.hint });
       if (canUseBrowserApis()) {
-        setPayLink(`${shareLinkBase()}/pay/${encodePaymentRequestPayloadForUrl(shareableRequest)}`);
+        setPayLink(`${shareLinkBase()}/pay#${encodePaymentRequestPayloadForUrl(shareableRequest)}`);
       }
       toast({
         title: shareableRequest.signature
@@ -2423,7 +2424,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         };
         setOutputPayload(JSON.stringify(receiptPayload, null, 2));
         if (canUseBrowserApis()) {
-          setReceiveLink(`${shareLinkBase()}/receive/${encodePaymentReceiptPayloadForUrl(receiptPayload)}`);
+          setReceiveLink(`${shareLinkBase()}/receive#${encodePaymentReceiptPayloadForUrl(receiptPayload)}`);
         }
         // Persist everything the receipt link needs (upsert REPLACES by
         // txHash, so the base fields ride along). Until 2026-08-25 this
@@ -3395,7 +3396,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         };
         setOutputPayload(JSON.stringify(receiptPayload, null, 2));
         if (canUseBrowserApis()) {
-          setReceiveLink(`${shareLinkBase()}/receive/${encodePaymentReceiptPayloadForUrl(receiptPayload)}`);
+          setReceiveLink(`${shareLinkBase()}/receive#${encodePaymentReceiptPayloadForUrl(receiptPayload)}`);
         }
         recordPaidRequest({
           ...paidViaTransfer,
@@ -3974,7 +3975,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         verifiedWalletUrl,
         noticeTitle: txHash
           ? 'Payment sent'
-          : previewPayExpired && requestSignatureStatus !== 'invalid' ? 'Request expired' : 'Double-blind payment',
+          : previewPayExpired && requestSignatureStatus !== 'invalid' ? 'Request expired' : 'Private payment request',
         // The receipt-sharing instruction is ONLY true for legacy v1 payments
         // (receiveLink present). SDK-native and v2 payments auto-discover and
         // produce NO receipt - telling every payer to "share the receipt" sent
@@ -4108,9 +4109,9 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                       dead preview card. */}
                   {inlineHubActive && !outputPayload ? (
                     <View className="gap-[8px] rounded-control bg-background-secondary px-[16px] py-[22px]">
-                      <Text className="font-pp-sans-semi-bold text-[17px] text-text">Get paid without an address</Text>
+                      <Text className="font-pp-sans-semi-bold text-[17px] text-text">Request a private payment</Text>
                       <Text className="font-pp-sans text-[13px] leading-[19px] text-text-secondary">
-                        Create a payment request and share the link. The payer never learns your balance; you never expose your history.
+                        Create a payment link to receive into Privacy Pools.
                       </Text>
                     </View>
                   ) : null}
@@ -4171,6 +4172,11 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                   {isShareSymbol(requestTokenSymbol) ? <Text className="text-[12px] text-text-secondary">Estimated value</Text> : null}
                   <BalanceAmount view={balanceDisplay(amountInput || '0', requestTokenSymbol, chainId)} className="text-[12px] text-text-secondary" />
                   </>) : null}
+                  {!isSui && !isStellar && !outputPayload ? (
+                    <Text className="font-pp-regular text-[12px] leading-[17px] text-text-secondary" testID="request-wallet-disclosure">
+                      Registered requests include your wallet address.
+                    </Text>
+                  ) : null}
                   {!isSui && !isStellar && canSignPaymentRequest ? (
                     /* One compact line: toggle + (when on) the display-name
                        input. Checking it makes the connected wallet sign the
@@ -4184,7 +4190,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                           {/* nw-keep(data-color): checkmark glyph color is the card-background theme token into the vector-icon sink */}
                           {shouldSignRequest ? <Ionicons name="checkmark" size={12} color={colors.cardBackground} /> : null}
                         </View>
-                        <Text className="font-pp-semi-bold text-[13px] text-text">Display your name</Text>
+                        <Text className="font-pp-semi-bold text-[13px] text-text">Show name and wallet</Text>
                       </Pressable>
                       {/* Always mounted so the row (and the modal) never changes
                           height when toggled. Just hidden and inert while off. */}
@@ -4241,9 +4247,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                   {mode === 'pay' && previewPayRequest && !payRunning ? (
                     <View className="gap-[6px] rounded-control border border-border-light p-[12px]">
                       {/* Request code lives in the card above — not repeated here. */}
-                      {/* Accurate again: the share link no longer carries
-                          recipientAddress at all (2026-08-31). */}
-                      <Text className="font-pp-regular text-[12px] text-text">Recipient: hidden (double-blind)</Text>
+                      <Text className="font-pp-regular text-[12px] text-text">Recipient: {paymentRequestRecipientLabel(previewPayRequest)}</Text>
                       <Text className="font-pp-regular text-[12px] text-text">Token: {previewRequestToken ? (previewRequestToken.known ? poolDisplayLabel(previewRequestToken.symbol, previewPayRequest.chainId) : previewRequestToken.label) : previewPayRequest.tokenId}</Text>
                       <Text className="font-pp-regular text-[12px] text-text">
                         Amount: {previewRequestToken ? (previewRequestToken.known ? balanceDisplay(formatUnits(BigInt(previewPayRequest.amount), previewRequestToken.decimals), previewRequestToken.symbol, previewPayRequest.chainId, previewPayRequest.tokenId).text : previewRequestToken.label) : previewPayRequest.amount}

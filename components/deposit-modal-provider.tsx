@@ -1,5 +1,6 @@
 import { SWAP_DEPOSIT_REFUND_NOTE } from '@/services/swap-deposit-copy';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
+import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 import { shieldHeadroomRoomText } from '@/services/shield-headroom-copy';
 import { relaunchReady } from '@/services/deposit-relaunch';
 import { simulateWithAllowanceOverride } from '@/services/allowance-override-sim';
@@ -18,7 +19,7 @@ import { reportErrorReport } from '@/services/error-reports';
 import { classifyFailure } from '@/services/error-reports-cause';
 import { stellarErrorReportStage, type ErrorReportStage } from '@/services/error-reports-failure';
 import { TEST_MODE } from '@/config/env';
-import { DEPOSIT_FAQ_URL, SUPPORT_FORM_URL, SUPPORT_TELEGRAM_URL } from '@/config/support';
+import { DEPOSIT_FAQ_URL, SUPPORT_TELEGRAM_URL } from '@/config/support';
 import { ENTRYPOINT_ASSETS_ABI, getMinimumDepositAmount, getVettingFeeBPS, type EntrypointAssetConfig } from '@/services/entrypoint-assets';
 import { sameSymbol } from '@/services/symbol-match';
 import { formatDepositMinimum, friendlyDepositError, PREVIEW_MINT_ABI, requiredUnderlyingForMinShares, scaleUnits } from '@/services/deposit-limits';
@@ -159,7 +160,7 @@ import { useAllChainsPriceMap, usePriceFeedsSettled } from '@/hooks/use-all-chai
 import apiClient from '@/services/api-client';
 import { invalidateTransactionCaches } from '@/services/cache';
 import { NoteStatus, type Note, type PoolSession, type YieldDeployment } from '@/services/sdk-types';
-import { getConfiguredNativeYieldDeployment, getConfiguredYieldDepositDeploymentForUnderlying, getConfiguredYieldDeploymentForAsset, getNativeYieldDepositDeployment, getYieldDepositDeploymentForUnderlying, getYieldDeploymentsForChain, YIELD_APY_PERCENT, YIELD_OPT_OUT_FEE, yieldOptOutFeeActive } from '@/config/yield';
+import { getConfiguredNativeYieldDeployment, getConfiguredYieldDepositDeploymentForUnderlying, getConfiguredYieldDeploymentForAsset, getNativeYieldDepositDeployment, getYieldDepositDeploymentForUnderlying, getYieldDeploymentsForChain, VAULT_DEPOSITS_PAUSED_MESSAGE, YIELD_APY_PERCENT, YIELD_OPT_OUT_FEE, yieldDepositsPausedOnChain, yieldOptOutFeeActive } from '@/config/yield';
 import { PP_ROUTER_QUOTE_ABI, toYieldDepositFor } from '@/services/yield-deposit-for';
 import { toNativeYieldDeposit } from '@/services/yield-native-deposit';
 import { useYieldVaultProbeVersion } from '@/hooks/use-yield-vault-probe';
@@ -368,6 +369,10 @@ function cannotShieldMessage(options: { tokenSymbol?: string; tokenAddress?: str
   const meta = (options.tokenAddress ? getKnownTokenMetadata(options.tokenAddress, chainId) : undefined)
     ?? (options.tokenSymbol ? getTokenMetadataBySymbol(options.tokenSymbol, chainId) : undefined);
   const symbol = meta?.symbol ?? options.tokenSymbol ?? 'That token';
+  // Vault deposits are paused (EXPO_PUBLIC_YIELD_DEPOSITS_PAUSED): the share,
+  // its underlying and a native coin with a vault route all say so, before the
+  // "not verified yet" and "coming soon" readings below.
+  if (meta?.depositPaused) return VAULT_DEPOSITS_PAUSED_MESSAGE;
   // A yield share whose vault is not verified yet: the deposit is paid in the
   // underlying through the PPRouter, and that route only opens once the vault
   // has been checked on chain. Say so, and that it is a wait, not a refusal.
@@ -1640,14 +1645,20 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       depositErrorReportRef.current.phase = 'wallet-connect';
       setLoadingMessage(describeStellarStage('unlocking'));
       try {
+        const { buildStellarClaimUrl } = await import('@/services/stellar/stellar-claim-url');
+        if (!live()) return;
         const res = await stellarSession.deposit({
           amount: amountBase,
           recipient: depositRecipientRef.current ?? undefined,
           shouldContinue: live,
           onStage: (stage) => { if (!live()) return; depositErrorReportRef.current.phase = stellarErrorReportStage(stage); setLoadingMessage(describeStellarStage(stage)); },
+          // An unregistered recipient gets a blind deposit and a claim link,
+          // as on EVM (DEV-499). Saved for the sender before signing.
+          onClaimReady: (notes) => { if (live()) setClaimReceiptUrl(buildStellarClaimUrl(notes)); },
         });
         // A run the user closed must not paint its hash into a newer flow.
         if (!live()) return;
+        if (res.claimNotes) setClaimReceiptUrl(buildStellarClaimUrl(res.claimNotes));
         setTxHash(res.txHash);
         setTxChainId(STELLAR_TESTNET_ID);
         setStellarLabelPending(res.pendingLabel ? { owner: stellarOwner, item: res.pendingLabel } : null);
@@ -1656,6 +1667,9 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
         const message = err instanceof Error ? err.message : String(err);
         log('error', 'Deposit', `Stellar deposit failed: ${message}`, err);
         if (!live()) return;
+        // Not on the success card: drop the link. If the tx did land, sync
+        // attaches it to the saved claim and the row offers it again.
+        setClaimReceiptUrl(null);
         if (/Superseded/.test(message)) { setStep('deposit'); return; }
         if (/reject|denied|cancel|declined/i.test(message)) {
           setStep('deposit');
@@ -2651,6 +2665,15 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       const liveYieldIsNative = selectedToken.isNative && liveDeployment?.nativeMode === true;
       const useYieldPath = yieldAvailable && yieldOn && !!liveDeployment;
       depositErrorReportRef.current.isYield = useYieldPath;
+      // Vault deposits paused on this chain: an asset whose deposits land in a
+      // vault is refused here, before anything is prepared, and never shielded
+      // plainly into the closed or superseded pool. The configured route (not
+      // the verified one) decides, so a pending probe cannot slip past it.
+      if (yieldDepositsPausedOnChain(depositChainId) && (selectedToken.isNative
+        ? getConfiguredNativeYieldDeployment(depositChainId) !== undefined
+        : getConfiguredYieldDepositDeploymentForUnderlying(depositChainId, selectedToken.address) !== undefined)) {
+        throw new Error(VAULT_DEPOSITS_PAUSED_MESSAGE);
+      }
       // The native coin on a chain with a CONFIGURED native-mode route has one
       // way in: the router. If the verified route is not available right now
       // (probe pending or failed) the deposit is refused, never shielded plainly
@@ -4324,6 +4347,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
           // nw-keep(platform-css): web-only position:fixed to anchor the backdrop over scrolling content (empty on native)
           style={WEB_FIXED_POSITION}
         >
+          <HubErrorBoundary onRetry={closeDepositModal}>
           {/* Blur overlay */}
           <Pressable
             className={`absolute inset-0 ${isDark ? 'bg-[rgba(0,0,0,0.6)]' : 'bg-[rgba(255,255,255,0.6)]'}`}
@@ -4787,12 +4811,6 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
                 </Text>
               </Pressable>
               <View className="w-[1px] h-[12px] bg-[#4D4D4D]" />
-              <Pressable onPress={() => Linking.openURL(SUPPORT_FORM_URL)}>
-                <Text className="text-[12px] text-[#4D4D4D] font-pp-regular">
-                  Support
-                </Text>
-              </Pressable>
-              <View className="w-[1px] h-[12px] bg-[#4D4D4D]" />
               <Pressable onPress={() => Linking.openURL(SUPPORT_TELEGRAM_URL)} testID="deposit-support-telegram">
                 <Text className="text-[12px] text-[#4D4D4D] font-pp-regular">
                   Telegram
@@ -4800,6 +4818,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
               </Pressable>
             </View>
           </Animated.View>
+          </HubErrorBoundary>
         </View>
       )}
 
@@ -4829,6 +4848,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
               isNative: t.isNative,
               name: TOKEN_NAMES[t.symbol],
               comingSoon: true,
+              depositPaused: t.depositPaused === true,
             })),
           ]}
           networks={supportedNetworks}

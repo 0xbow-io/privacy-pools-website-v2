@@ -24,10 +24,12 @@
  * safe to point at a string whose provenance you have not checked.
  */
 export function previewNoteReceiptUrl(url: string): string {
-  const marker = '/import-note/';
+  const marker = '/import-note';
   // FIRST occurrence, deliberately: a later marker inside a query or fragment
   // must not be allowed to preserve the real payload ahead of it.
   const at = url.indexOf(marker);
-  if (at === -1) return '…';
-  return `${url.slice(0, at + marker.length)}…`;
+  // `/import-note#<payload>`, or `/import-note/<payload>` in older links.
+  const separator = url[at + marker.length];
+  if (at === -1 || (separator !== '#' && separator !== '/')) return '…';
+  return `${url.slice(0, at + marker.length + 1)}…`;
 }

@@ -47,9 +47,9 @@ try {
       payUrl = await seller.page.evaluate(() => {
         for (const el of Array.from(document.querySelectorAll('input, textarea'))) {
           const v = (el as HTMLInputElement).value || '';
-          if (/https?:\/\/[^\s"']*\/pay\//.test(v)) return v.trim();
+          if (/https?:\/\/[^\s"']*\/pay#/.test(v)) return v.trim();
         }
-        const m = (document.body?.innerText || '').match(/https?:\/\/[^\s"']*\/pay\/[^\s"']*/);
+        const m = (document.body?.innerText || '').match(/https?:\/\/[^\s"']*\/pay#[^\s"']*/);
         return m ? m[0] : null;
       });
       if (!payUrl) await sleep(2000);
@@ -79,7 +79,7 @@ if (payUrl) {
     // "Pay via Wallet" exists only for legacy (v1/v2) requests; an SDK-native
     // request is private-transfer only BY DESIGN, so the control expectation
     // follows the payload kind rather than assuming both buttons.
-    const encoded = payUrl.slice(payUrl.indexOf('/pay/') + 5).replace(/[?#].*$/, '');
+    const encoded = payUrl.slice(payUrl.indexOf('/pay#') + 5).replace(/[?#].*$/, '');
     const kind = (() => { try { return decodePaymentRequestPayloadFromUrl(decodeURIComponent(encoded)).kind; } catch { return 'undecodable'; } })();
     const expectWallet = kind !== 'ppv2-sdk-payment-request';
     record('J-d wallet session offers the pay paths its request kind allows', privBtn && walletBtn === expectWallet,

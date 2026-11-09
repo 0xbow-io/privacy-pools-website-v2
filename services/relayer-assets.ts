@@ -34,27 +34,126 @@ export function relayerAssetSupport(listed: Set<string> | null, tokenAddress: st
   return listed.has(tokenAddress.toLowerCase()) ? 'supported' : 'unsupported';
 }
 
+/**
+ * A read of `/v1/details` that failed: the relayer answered with an error
+ * status (a 429 from its throttler, most often) or did not answer at all.
+ * `retryAfterMs` is the wait the relayer asked for, when a header says so.
+ */
+export class RelayerReadError extends Error {
+  constructor(readonly status: number | null, readonly retryAfterMs: number | null) {
+    super(status === null ? 'relayer details unreachable' : `relayer details answered ${status}`);
+    this.name = 'RelayerReadError';
+  }
+}
+
+/**
+ * Pure: the wait in ms a response asks for, from `Retry-After` or any
+ * `Retry-After-<bucket>` header (the prod relayer sends `retry-after-relay`
+ * with its 429s). Seconds only; the longest one wins. Null when none is
+ * readable, which includes a header the browser hides because CORS does not
+ * expose it.
+ */
+export function relayerRetryAfterMs(headers: Pick<Headers, 'forEach'> | null | undefined): number | null {
+  let best: number | null = null;
+  headers?.forEach((value, name) => {
+    if (!/^retry-after(-[a-z0-9_-]+)?$/i.test(name)) return;
+    const seconds = Number(value.trim());
+    if (Number.isFinite(seconds) && seconds >= 0) best = Math.max(best ?? 0, seconds * 1000);
+  });
+  return best;
+}
+
+/** Retries after a failed read before the deposit says it cannot check. */
+export const RELAYER_READ_RETRIES = 3;
+const RETRY_CAP_MS = 60_000;
+
+/**
+ * Pure: how long to wait before retry `attempt` (0-based). The relayer's own
+ * Retry-After when it sent one, else 10 s, 20 s, 30 s. Capped at a minute.
+ * The prod relayer does not expose its retry headers to the browser (no
+ * Access-Control-Expose-Headers), so the fallback is what runs: three retries
+ * spanning a full minute, enough to outlast its ~55 s throttle, and fewer
+ * reads, since each one spends the per-IP relay budget a withdrawal also
+ * needs (Zeeshan on #59).
+ * A throttled read used to fail at once and the deposit refused for five
+ * minutes (Pat on a VPN exit, 2026-11-02, whose per-IP budget other users had
+ * spent).
+ */
+export function relayerRetryDelayMs(attempt: number, error: unknown): number {
+  const asked = error instanceof RelayerReadError ? error.retryAfterMs : null;
+  return Math.min(asked ?? 10_000 * (attempt + 1), RETRY_CAP_MS);
+}
+
+// The last list each chain's relayer returned. Which assets a relayer supports
+// changes on a deploy, not between two reads, so a recent good answer stands in
+// for a throttled one instead of refusing the deposit.
+const LAST_GOOD_MS = 10 * 60_000;
+const lastGood = new Map<number, { at: number; assets: Set<string> }>();
+
+/** Remember a good read of `chainId`'s list (exported for tests). */
+export function rememberRelayerAssets(chainId: number, assets: Set<string>, now = Date.now()): void {
+  lastGood.set(chainId, { at: now, assets });
+}
+
+/** The list from a good read of `chainId` in the last ten minutes, if any. */
+export function recentRelayerAssets(chainId: number, now = Date.now()): Set<string> | null {
+  const hit = lastGood.get(chainId);
+  return hit && now - hit.at <= LAST_GOOD_MS ? hit.assets : null;
+}
+
+/**
+ * The relayer's asset list for `chainId`, null when the chain has no relayer.
+ * Throws RelayerReadError when the read fails and no recent good list exists,
+ * so a caller that retries (the deposit's query) can.
+ */
+export async function fetchRelayerAssetAddressesOrThrow(chainId: number, timeoutMs = 8_000): Promise<Set<string> | null> {
+  const { getChainConfig } = await import('@/config/chains');
+  const url = getChainConfig(chainId)?.relayerBaseUrl;
+  if (!url) return null;
+  let res: Response;
+  try {
+    res = await policedFetch('relayer', url, `${url.replace(/\/+$/, '')}/v1/details`, {
+      signal: typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(timeoutMs) : undefined,
+    });
+  } catch {
+    const recent = recentRelayerAssets(chainId);
+    if (recent) return recent;
+    throw new RelayerReadError(null, null);
+  }
+  if (!res.ok) {
+    const recent = recentRelayerAssets(chainId);
+    if (recent) return recent;
+    throw new RelayerReadError(res.status, relayerRetryAfterMs(res.headers));
+  }
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    // A 200 whose body is not JSON (a proxy page, a cut-off answer) is a failed read too.
+    const recent = recentRelayerAssets(chainId);
+    if (recent) return recent;
+    throw new RelayerReadError(res.status, null);
+  }
+  const assets = parseRelayerAssetAddresses(body, chainId);
+  rememberRelayerAssets(chainId, assets);
+  return assets;
+}
+
 /** The relayer's asset list for `chainId`, or null when it cannot be read (fail closed upstream). */
 export async function fetchRelayerAssetAddresses(chainId: number, timeoutMs = 8_000): Promise<Set<string> | null> {
   try {
-    const { getChainConfig } = await import('@/config/chains');
-    const url = getChainConfig(chainId)?.relayerBaseUrl;
-    if (!url) return null;
-    const res = await policedFetch('relayer', url, `${url.replace(/\/+$/, '')}/v1/details`, {
-      signal: typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(timeoutMs) : undefined,
-    });
-    if (!res.ok) return null;
-    return parseRelayerAssetAddresses(await res.json(), chainId);
+    return await fetchRelayerAssetAddressesOrThrow(chainId, timeoutMs);
   } catch {
     return null;
   }
 }
 
 /** Copy for a REFUSED yield deposit, by verdict. Only a problem gets words: the
- *  in-flight first read shows nothing (Pat, 2026-09-04). */
+ *  in-flight first read shows nothing (Pat, 2026-09-04). This is a deposit, so
+ *  the words are about the deposit, not about withdrawing (Pat, 2026-11-02). */
 export function relayerShareExitMessage(verdict: Exclude<RelayerAssetSupport, 'supported'>, underlyingSymbol: string, _shareSymbol?: string): string {
-  if (verdict === 'unsupported') return `${underlyingSymbol} deposits open once the relayer supports withdrawing this pool. Not yet.`;
-  return `Cannot confirm that the relayer supports withdrawing this pool right now. Try again in a moment.`;
+  if (verdict === 'unsupported') return `${underlyingSymbol} deposits are not open on this network yet.`;
+  return `Could not reach the relayer to check ${underlyingSymbol} deposits. Try again in a minute.`;
 }
 
 /**

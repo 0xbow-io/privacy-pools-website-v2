@@ -39,7 +39,7 @@ async function setup() {
 }
 
 describe('whole-history pool reads in a sync pass', () => {
-  test('one read for any number of per-note lookups inside a pass, one per lookup outside', async () => {
+  test('one read for any number of per-note lookups inside a pass, none for later lookups', async () => {
     const { rpc, adapter } = await setup();
 
     for (const count of [1, 7]) {
@@ -53,9 +53,10 @@ describe('whole-history pool reads in a sync pass', () => {
       expect(wholePoolReads()).toHaveLength(1);
     }
 
+    // Outside a pass the SDK's own note index (built from those whole-pool reads) answers.
     requested = [];
     await Promise.all(hashes(3, 1).map((c) => adapter.getCommitmentValue(c as never)));
-    expect(wholePoolReads()).toHaveLength(3);
+    expect(wholePoolReads()).toHaveLength(0);
   });
 
   test('no request carries a note-derived value', async () => {

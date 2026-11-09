@@ -13,5 +13,5 @@ import { withStellarLinkParams } from '@/services/stellar/stellar-link';
 export function buildStellarClaimUrl(notes: readonly StellarClaimNote[]): string | null {
   const base = PAY_URL_BASE || (typeof window !== 'undefined' && window.location?.origin ? window.location.origin : '');
   if (!base) return null;
-  return withStellarLinkParams(`${base}/import-note/${encodeStellarClaim(notes)}`, ACTIVE_APP_ENVIRONMENT, { stagingMainnet: STAGING_MAINNET_EXPLICIT });
+  return withStellarLinkParams(`${base}/import-note#${encodeStellarClaim(notes)}`, ACTIVE_APP_ENVIRONMENT, { stagingMainnet: STAGING_MAINNET_EXPLICIT });
 }

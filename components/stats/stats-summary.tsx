@@ -1,5 +1,5 @@
 import { Fragment } from 'react';
-import { useWindowDimensions, Text, View } from 'react-native';
+import { useWindowDimensions, Linking, Platform, Text, View } from 'react-native';
 import { Card } from '@/components/ui/card';
 import { formatUsd } from '@/services/format-fiat';
 import { serverTransfersCount } from '@/services/global-stats';
@@ -11,6 +11,8 @@ type Tile = {
   /** Secondary line — the same figure over the last 24h, where the ASP has one. */
   sub: string | null;
 };
+
+const ATTRIBUTION_URL = 'https://0xbow.io';
 
 /**
  * Figure size for a five-across row. The card tops out at 1100px, so each
@@ -172,6 +174,9 @@ export function StatsSummary({ stats }: { stats: GlobalStatisticsView }) {
   }
 
   const freshness = freshnessText(totals.cacheTimestamp ?? undefined);
+  const attributionLinkProps = Platform.OS === 'web'
+    ? ({ href: ATTRIBUTION_URL, hrefAttrs: { target: '_blank', rel: 'noopener noreferrer' } } as object)
+    : { onPress: () => Linking.openURL(ATTRIBUTION_URL) };
 
   return (
     <Card noPadding>
@@ -220,7 +225,14 @@ export function StatsSummary({ stats }: { stats: GlobalStatisticsView }) {
       {freshness === null ? null : (
         <View className="px-[20px] py-[12px]">
           <Text className="font-pp-regular text-[11px] leading-[12px] text-text-muted">
-            ASP figures as of {freshness}
+            <Text
+              accessibilityRole="link"
+              accessibilityLabel="0xbow.io"
+              className="underline"
+              {...attributionLinkProps}
+            >
+              0xbow.io
+            </Text>{' '}figures as of {freshness}
           </Text>
         </View>
       )}

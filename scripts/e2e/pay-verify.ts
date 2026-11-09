@@ -68,10 +68,10 @@ try {
         // first, body text as a fallback.
         for (const el of Array.from(document.querySelectorAll('input, textarea'))) {
           const v = (el as HTMLInputElement).value || '';
-          if (/https?:\/\/[^\s"']*\/pay\//.test(v)) return v.trim();
+          if (/https?:\/\/[^\s"']*\/pay#/.test(v)) return v.trim();
         }
         const text = document.body?.innerText || '';
-        const m = text.match(/https?:\/\/[^\s"']*\/pay\/[^\s"']*/);
+        const m = text.match(/https?:\/\/[^\s"']*\/pay#[^\s"']*/);
         return m ? m[0] : null;
       });
       if (!payUrl) await sleep(2000);
@@ -80,7 +80,7 @@ try {
       await payee.shot(`create-attempt-${attempt}`);
       const around = await payee.page.evaluate(() => {
         const t = document.body?.innerText || '';
-        const i = t.indexOf('/pay/');
+        const i = t.indexOf('/pay#');
         return i === -1 ? `(no /pay/ substring; ${t.length} chars)` : t.slice(Math.max(0, i - 120), i + 160);
       });
       console.log(`  attempt ${attempt}: link not matched; context: ${around.replace(/\n/g, ' | ').slice(0, 300)}`);
@@ -89,7 +89,7 @@ try {
   record('create signed request', !!payUrl, payUrl ? 'signed /pay link created' : 'no /pay link appeared');
   if (!payUrl) throw new Error('no pay link');
 
-  const encoded = payUrl.slice(payUrl.indexOf('/pay/') + 5).replace(/[?#].*$/, '');
+  const encoded = payUrl.slice(payUrl.indexOf('/pay#') + 5).replace(/[?#].*$/, '');
   const payload = decodePaymentRequestPayloadFromUrl(decodeURIComponent(encoded));
   const signed = 'signature' in payload && !!payload.signature;
   record('link carries the signature', signed, signed ? `signer ${payload.signature.signer}` : 'payload has no signature - toggle did not take');

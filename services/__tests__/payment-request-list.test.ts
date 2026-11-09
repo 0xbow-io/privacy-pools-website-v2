@@ -83,11 +83,11 @@ describe('buildShareLinkForRecord', () => {
     const rec = record();
     const link = buildShareLinkForRecord(SEPOLIA, rec, 'https://example.test');
     expect(link).not.toBeNull();
-    expect(link!.startsWith('https://example.test/pay/')).toBe(true);
+    expect(link!.startsWith('https://example.test/pay#')).toBe(true);
 
     // decodePaymentRequestPayloadFromUrl is byte-identical to the shipped
     // baseline decoder — this is the old-build compatibility check.
-    const decoded = decodePaymentRequestPayloadFromUrl(link!.split('/pay/')[1]);
+    const decoded = decodePaymentRequestPayloadFromUrl(link!.split('/pay#')[1]);
     expect(decoded.kind).toBe('ppv2-sdk-payment-request');
     if (decoded.kind !== 'ppv2-sdk-payment-request') throw new Error('unreachable');
     expect(decoded.chainId).toBe(SEPOLIA);
@@ -109,7 +109,7 @@ describe('buildShareLinkForRecord', () => {
     const rec = record();
     const realSecrets = (rec.noteSecretsMap as [string, string][]).map(([, secret]) => secret);
     const link = buildShareLinkForRecord(SEPOLIA, rec, 'https://example.test')!;
-    const encoded = link.split('/pay/')[1];
+    const encoded = link.split('/pay#')[1];
 
     // Decoded tuples carry only the fixed placeholder in the value slot.
     const decoded = decodePaymentRequestPayloadFromUrl(encoded);
@@ -193,7 +193,7 @@ describe('buildPaymentRequestRows', () => {
     expect(rows[1].status).toBe('OPEN');
     expect(rows[1].assetSymbol).toBe('ETH');
     expect(rows[1].amountFormatted).toBe('1');
-    expect(rows[1].payLink).toContain('/pay/');
+    expect(rows[1].payLink).toContain('/pay#');
     // Open row with a link needs no re-issue fallback.
     expect(rows[1].reissue).toBeNull();
   });
@@ -305,6 +305,6 @@ describe('buildPaymentRequestRows', () => {
     const bad = rows.find((r) => r.id === hash(0xbad))!;
     expect(bad.createdAtMs).toBe(0);
     // The good record's link is intact.
-    expect(rows.find((r) => r.id === hash(1))!.payLink).toContain('/pay/');
+    expect(rows.find((r) => r.id === hash(1))!.payLink).toContain('/pay#');
   });
 });

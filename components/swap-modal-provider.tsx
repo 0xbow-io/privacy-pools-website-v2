@@ -102,6 +102,7 @@ import { assertRelayerSwapProcessor } from '@/services/relayer-details';
 import { registerSwapHandoff } from '@/services/swap-handoff';
 import { noteShortfall, noteShortfallMessage } from '@/services/swap-note-shortfall';
 import { OpShell } from '@/components/op-shell';
+import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 import { FlowProgress } from '@/components/ui/flow-progress';
 import { useInlineOpsCapable } from '@/hooks/use-inline-ops-capable';
 import {
@@ -2720,6 +2721,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
           isDark={colorScheme === 'dark'}
           sheetAnim={sheetAnim}
           onClose={closeSwapModal}
+          closeBlocked={step === 'executing'}
           // Conflicting box props (width/max-w/padding/radius) live in exactly ONE
           // branch so class order can't flip the RN style-array override result.
           cardClassName={`relative max-h-[92%] items-center gap-[16px] overflow-hidden border border-border bg-card-background ${
@@ -2861,9 +2863,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                     <Ionicons name="shield-checkmark-outline" size={14} color={colors.primary} />
                     {(() => {
                       const note = crossChainReshield && swapSend
-                        ? `Stays private: the output is swapped and bridged, and deposited as a new shielded note for the recipient on ${destinationName}.`
+                        ? `Deposits privately for the recipient on ${destinationName}. Failed destination delivery can pay the public fallback wallet.`
                         : crossChainReshield
-                        ? `Stays private: the output is re-deposited as a new shielded note in your account. No wallet address is involved unless the far side fails${showRecipientField ? ', and the address below is where that would land' : ''}.`
+                        ? 'Deposits privately into your account. Failed destination delivery can pay the public fallback wallet.'
                         : swapSend
                           ? 'Stays private: the output is deposited as a new shielded note owned by the recipient. Nothing is paid to a wallet, and the recipient and amount are not published.'
                           : 'Stays private: the output is re-deposited as a new shielded note in your account. No wallet address is involved.';
@@ -2872,8 +2874,8 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                           <View className="min-w-0 shrink flex-row items-center gap-[4px]">
                             {/* The fallback wallet stays on screen: it is where a failed cross-chain leg lands. */}
                             <Text className="shrink text-[12px] leading-[17px] text-text-secondary font-pp-regular">
-                              {crossChainReshield && !swapSend && showRecipientField && !crossChainSendField
-                                ? 'Stays private. If the far side fails, it lands at the address below.'
+                              {crossChainReshield
+                                ? 'Private deposit · public fallback'
                                 : 'Stays private'}
                             </Text>
                             {/* nw-keep(data-color): glyph colour is a runtime theme token (vector-icon sink) */}
@@ -3110,10 +3112,10 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
               <ScrollView className="w-full" contentContainerClassName="gap-[14px]">
                 <Text className="w-full text-center text-[24px] text-text font-pp-sans-bold">Review swap</Text>
                 <View className="flex-row justify-center">
-                  <View className="rounded-legacy-6 border border-success px-[8px] py-[3px]">
-                    <Text className="text-[10px] tracking-[0.4px] text-success font-pp-semi-bold">
+                  <View className={`rounded-legacy-6 border px-[8px] py-[3px] ${reshieldSnapshot.destinationChainId !== chainId ? 'border-warning' : 'border-success'}`}>
+                    <Text className={`text-[10px] tracking-[0.4px] font-pp-semi-bold ${reshieldSnapshot.destinationChainId !== chainId ? 'text-warning' : 'text-success'}`}>
                       {reshieldSnapshot.destinationChainId !== chainId
-                        ? 'STAYS PRIVATE · CROSSES CHAINS'
+                        ? 'PRIVATE DEPOSIT · PUBLIC FALLBACK'
                         : 'STAYS PRIVATE · 1 TRANSACTION'}
                     </Text>
                   </View>
@@ -3125,7 +3127,8 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                     address on that chain. Saying this at Review is the only
                     place it can still change the decision. */}
                 {reshieldSnapshot.destinationChainId !== chainId && (
-                  <View className="w-full gap-[6px] rounded-legacy-8 border border-border bg-background-secondary px-[12px] py-[10px]">
+                  <View className="w-full gap-[6px] rounded-legacy-8 border border-warning bg-warning-bg px-[12px] py-[10px]">
+                    <Text className="text-[12px] font-pp-semi-bold text-warning">Public fallback</Text>
                     <Text className="text-[12px] leading-[17px] text-text-secondary font-pp-regular">
                       The new note lands in the {getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`} pool. This chain&apos;s transaction confirms first; the deposit over there follows and can take a few minutes.
                     </Text>
@@ -3193,7 +3196,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                     <Text className="text-[13px] text-text-muted font-pp-medium">
                       {reshieldSnapshot.recipient ? 'New shielded note for them (at least)' : 'New shielded note (at least)'}
                     </Text>
-                    <BalanceAmount view={balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-bold" />
+                    <BalanceAmount view={balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-bold" showUsd />
                   </View>
                   {reshieldSnapshot.recipient && (
                     <View className="flex-row flex-wrap items-center justify-between gap-[8px]" testID="swap-send-review-recipient">
@@ -3227,7 +3230,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                 </View>
                 {reshieldHintOpen && (
                   <Text className="w-full text-[12px] leading-[17px] text-text-secondary font-pp-regular">
-                    Confirming proves the deposit on your device and only then takes the relayer&apos;s final quote, so the exact amounts are fixed at submission. The transaction is atomic. If it fails, nothing leaves the pool.
+                    {reshieldSnapshot.destinationChainId !== chainId
+                      ? 'Amounts are fixed at submission. The source transaction is atomic; destination delivery can fail and pay the public fallback wallet.'
+                      : 'Amounts are fixed at submission. The transaction is atomic: if it fails, nothing leaves the pool.'}
                   </Text>
                 )}
 
@@ -3299,8 +3304,8 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
               <ScrollView className="w-full" contentContainerClassName="gap-[14px]">
                 <Text className="w-full text-center text-[24px] text-text font-pp-sans-bold">Review swap</Text>
                 <View className="flex-row justify-center">
-                  <View className="rounded-legacy-6 border border-success px-[8px] py-[3px]">
-                    <Text className="text-[10px] tracking-[0.4px] text-success font-pp-semi-bold">
+                  <View className={`rounded-legacy-6 border px-[8px] py-[3px] ${snapshot.crossChain ? 'border-warning' : 'border-success'}`}>
+                    <Text className={`text-[10px] tracking-[0.4px] font-pp-semi-bold ${snapshot.crossChain ? 'text-warning' : 'text-success'}`}>
                       {snapshot.crossChain ? `CROSS-CHAIN · TO ${snapshot.destinationName.toUpperCase()}` : 'SAME CHAIN · 1 TRANSACTION'}
                     </Text>
                   </View>
@@ -3334,7 +3339,8 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                   </View>
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[13px] text-text-muted font-pp-medium">Estimated received</Text>
-                    <Text className="text-[13px] text-text font-pp-regular"><ShareFigure view={balanceDisplay(snapshot.display.estimatedOutput, snapshot.outputToken.symbol, snapshot.destinationChainId)} /></Text>
+                    <BalanceAmount view={balanceDisplay(snapshot.display.estimatedOutput, snapshot.outputToken.symbol, snapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" showUsd />
+
                   </View>
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[13px] text-text-muted font-pp-medium">Min received</Text>
@@ -3620,6 +3626,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
           deposit modal uses. The network pane IS the destination-chain
           picker; it lists one chain until cross-chain destinations exist. */}
       {isOpen && selectorOpen && (
+        <HubErrorBoundary onRetry={() => setSelectorOpen(false)}>
         <TokenNetworkSelector
           tokens={outputTokens}
           networks={destinationChains}
@@ -3645,6 +3652,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
           onClose={() => setSelectorOpen(false)}
           networkTitle="Destination network"
         />
+        </HubErrorBoundary>
       )}
     </SwapModalContext.Provider>
   );

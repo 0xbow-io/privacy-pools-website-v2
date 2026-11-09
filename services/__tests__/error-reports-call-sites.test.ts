@@ -189,7 +189,14 @@ const REVIEWED: Record<string, {
     message: 'client-failed',
     flags: {},
     spreads: [],
-    code: ['errorName', 'componentFrame'],
+    code: ['errorName', 'componentFrame', 'errorShape', 'componentPosition'],
+  },
+  // The action card's own boundary: same call, same identifiers.
+  'components/home/hub-error-boundary.tsx': {
+    message: 'client-failed',
+    flags: {},
+    spreads: [],
+    code: ['errorName', 'componentFrame', 'errorShape', 'componentPosition'],
   },
 };
 

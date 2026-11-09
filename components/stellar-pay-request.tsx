@@ -19,7 +19,7 @@ import { formatUnits } from 'viem';
 import { useStellarWallet } from '@/components/stellar-wallet-provider';
 import { useTransferModal } from '@/components/transfer-modal-provider';
 import { STELLAR_TESTNET_ID, getExplorerTxUrl } from '@/config/chains';
-import { STELLAR_XLM } from '@/config/stellar-deployment';
+import { STELLAR_XLM, stellarTransferRelayFee } from '@/config/stellar-deployment';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { toStellarSdkPaymentRequest } from '@/services/payment-request-codec';
@@ -55,6 +55,9 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
   const stroops = link ? BigInt(link.request.amount) : null;
   const amountText = stroops !== null ? formatUnits(stroops, STELLAR_XLM.decimals) : null;
   const amountLabel = amountText ? `${amountText} XLM` : null;
+  // Paid through the relayer: its fee comes on top of the amount.
+  const relayFee = stellarTransferRelayFee();
+  const totalLabel = stroops !== null ? `up to ${formatUnits(stroops + relayFee, STELLAR_XLM.decimals)} XLM` : null;
   const paymentCode = link
     ? short(link.format === 'blind' ? link.request.paymentId.replace(/^0x/, '') : link.request.requestId.replace(/-/g, ''))
     : '';
@@ -129,16 +132,19 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
       await signIn();
       return;
     }
+    // A relayed payment pays the relayer's fee from the same notes.
+    const fee = stellarTransferRelayFee();
+    const need = stroops + fee;
     const pick = selectGreedyTransferInputs(
       stellarSession.spendableNotes as unknown as UiNote[],
-      stroops,
+      need,
       TRANSFER_MAX_INPUTS,
       TRANSFER_MAX_LABELS,
     );
     if (!pick.covered) {
       const available = formatUnits(stellarSession.spendableTotal, STELLAR_XLM.decimals);
-      setError(stellarSession.spendableTotal < stroops
-        ? `Insufficient Stellar balance (${available} XLM available).`
+      setError(stellarSession.spendableTotal < need
+        ? `Insufficient Stellar balance (${available} XLM available${fee > 0n ? `, plus a relayer fee of up to ${formatUnits(fee, STELLAR_XLM.decimals)} XLM` : ''}).`
         : `One transfer can spend up to ${TRANSFER_MAX_INPUTS} notes from ${TRANSFER_MAX_LABELS} deposits.`);
       return;
     }
@@ -201,12 +207,16 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
               <Text className="font-pp-medium text-[14px] text-text">1x Private pool payment</Text>
               <Text className="font-pp-semi-bold text-[14px] text-text">{amountLabel}</Text>
             </View>
+            <View className="flex-row items-center justify-between gap-[12px]">
+              <Text className="font-pp-medium text-[14px] text-text">Relayer fee</Text>
+              <Text className="font-pp-semi-bold text-[14px] text-text" testID="stellar-pay-fee">up to {formatUnits(relayFee, STELLAR_XLM.decimals)} XLM</Text>
+            </View>
 
             <View className="border-t border-dashed border-border-light" />
 
             <View className="flex-row items-center justify-between">
               <Text className="font-pp-bold text-[16px] text-text">Total</Text>
-              <Text className="font-pp-bold text-[16px] text-text">{amountLabel}</Text>
+              <Text className="font-pp-bold text-[16px] text-text">{totalLabel}</Text>
             </View>
 
             <View className="gap-[8px]">

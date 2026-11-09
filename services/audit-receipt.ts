@@ -203,11 +203,11 @@ export function buildSentPaymentKey(d: SentNoteDisclosure, memo?: string): Parti
 
 export function buildVerifyUrl(encoded: string): string {
   const payUrlBase = getPayUrlBase();
-  if (payUrlBase) return `${payUrlBase}/verify/${encoded}`;
+  if (payUrlBase) return `${payUrlBase}/verify#${encoded}`;
   if (typeof window !== 'undefined' && window.location?.origin) {
-    return `${window.location.origin}/verify/${encoded}`;
+    return `${window.location.origin}/verify#${encoded}`;
   }
-  return `/verify/${encoded}`;
+  return `/verify#${encoded}`;
 }
 
 // --- verification ---
