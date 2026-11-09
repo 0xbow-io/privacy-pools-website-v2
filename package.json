@@ -86,7 +86,6 @@
     "react-native": "0.85.3",
     "react-native-gesture-handler": "2.31.2",
     "react-native-get-random-values": "1.11.0",
-    "react-native-jelly-tabs": "0.0.9",
     "react-native-passkey": "3.6.2",
     "react-native-qrcode-svg": "6.3.21",
     "react-native-reanimated": "4.3.1",
