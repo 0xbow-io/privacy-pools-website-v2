@@ -172,7 +172,7 @@ class StellarAccount {
   // Unlocked accounts the user switched away from, by address. Memory only.
   private readonly unlockedSessions = new Map<
     string,
-    { sessionPromise: Promise<StellarPoolSession>; rpc: IndexedStellarRpcInteractor | null; nullifyingKey: string | null }
+    { sessionPromise: Promise<StellarPoolSession>; rpc: IndexedStellarRpcInteractor | null; nullifyingKey: string | null; noteOrigins: StellarNoteOrigins | null }
   >();
   // The relayer, set only while a relayed withdrawal or transfer runs (see buildSession).
   private activeRelayer: IRelayerInteractor<StellarAddress> | null = null;
@@ -215,7 +215,7 @@ class StellarAccount {
     // Switching away from an unlocked account keeps its session in memory under
     // its own address; signing out (null) clears every one. Never persisted.
     if (previous && this.sessionPromise && this.snapshot.unlocked) {
-      this.unlockedSessions.set(previous, { sessionPromise: this.sessionPromise, rpc: this.rpc, nullifyingKey: this.nullifyingKey });
+      this.unlockedSessions.set(previous, { sessionPromise: this.sessionPromise, rpc: this.rpc, nullifyingKey: this.nullifyingKey, noteOrigins: this.snapshot.noteOrigins });
     }
     if (!address) this.unlockedSessions.clear();
     const restored = address ? this.unlockedSessions.get(address) : undefined;
@@ -233,7 +233,7 @@ class StellarAccount {
       address,
       notes: address ? readCachedNotes(address) : [],
       paymentRequests: address ? readCachedRequests(address) : [],
-      ...(restored ? { unlocked: true, status: 'ready' as const } : {}),
+      ...(restored ? { unlocked: true, status: 'ready' as const, noteOrigins: restored.noteOrigins } : {}),
     };
     for (const listener of this.listeners) listener();
   }

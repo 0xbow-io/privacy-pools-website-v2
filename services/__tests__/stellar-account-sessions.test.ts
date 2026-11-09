@@ -18,6 +18,7 @@ type Internals = {
   buildSession: (address: string) => Promise<unknown>;
   sessionPromise: Promise<unknown> | null;
   unlockedSessions: Map<string, unknown>;
+  snapshot: Record<string, unknown>;
 };
 const internals = stellarAccount as unknown as Internals;
 
@@ -88,6 +89,20 @@ describe('Stellar account sessions across a wallet account switch', () => {
     expect(stellarAccount.getSnapshot().unlocked).toBe(false);
     await stellarAccount.ensureSession();
     expect(signatures).toEqual([A, B, A]);
+  });
+
+  test('switching back keeps the account note origins, B never sees them', async () => {
+    const origins = { complete: true, byCommitment: { c1: {} } };
+    stellarAccount.bind(A, signer);
+    await stellarAccount.ensureSession();
+    internals.snapshot = { ...internals.snapshot, noteOrigins: origins };
+
+    stellarAccount.bind(B, signer);
+    expect(stellarAccount.getSnapshot().noteOrigins).toBeNull();
+
+    stellarAccount.bind(A, signer);
+    expect(stellarAccount.getSnapshot().noteOrigins as unknown).toBe(origins);
+    expect(signatures).toEqual([A]);
   });
 
   test('an address change during an unlock never attaches that session to the new account', async () => {

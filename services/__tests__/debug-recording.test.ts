@@ -59,10 +59,12 @@ describe('state snapshots', () => {
     const { registerDebugSnapshot, collectDebugSnapshots } = await import('../debug-snapshots');
     const offA = registerDebugSnapshot('a', () => ({ n: 5n }));
     const offB = registerDebugSnapshot('b', () => { throw new Error('locked'); });
-    expect(collectDebugSnapshots()).toEqual({ a: { n: '5' }, b: { snapshotError: 'locked' } });
+    // Other test files in this process load modules that register their own snapshots.
+    const own = (all: Record<string, unknown>) => Object.fromEntries(Object.entries(all).filter(([k]) => k === 'a' || k === 'b'));
+    expect(own(collectDebugSnapshots())).toEqual({ a: { n: '5' }, b: { snapshotError: 'locked' } });
     offA();
     offB();
-    expect(collectDebugSnapshots()).toEqual({});
+    expect(own(collectDebugSnapshots())).toEqual({});
   });
 
   test('a recording carries both snapshots and says it holds secrets', () => {
