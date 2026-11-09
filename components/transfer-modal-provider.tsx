@@ -7,6 +7,8 @@ import { useShareAmountField } from '@/hooks/use-share-amount-field';
 // only in the (i) hint, in fields labelled with the share symbol, or while the
 // rate is unknown. Never print a share count under the underlying symbol.
 import { useShareFreeBalanceDisplay } from '@/hooks/use-balance-display';
+import { useShareRates } from '@/hooks/use-share-rates';
+import { sharesForUnderlyingCeil, underlyingForSharesFloor } from '@/services/underlying-amount-entry';
 import { BalanceAmount } from '@/components/pools/balance-amount';
 import { crossFlowsEnabled } from '@/config/intent-lockdown';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
@@ -33,7 +35,7 @@ import { useAccount, usePublicClient, useSendTransaction } from 'wagmi';
 import { formatUnits, isAddress, parseUnits } from 'viem';
 import type { Hex } from 'viem';
 import { NoteStatus } from '@/services/sdk-types';
-import { netAfterReserve, splitRelayFee } from '@/services/relay-fee-split';
+import { ceilFeeToDisplayGrain, netAfterReserve, splitRelayFee } from '@/services/relay-fee-split';
 import type { Note, Hash, Address as SdkAddress } from '@/services/sdk-types';
 import { plainTransferRelayError, relayerTransferQuotes, relayTransferParams, relayWithReprove, requestTransferQuote, transferRelayExpectation, transferRelayFee, TRANSFER_QUOTE_EXPIRED_MESSAGE } from '@/services/relayed-transfer';
 import { expectTransferRelay } from '@/services/transfer-relay-outputs';
@@ -253,6 +255,14 @@ function SendIcon({ color = '#000000' }: { color?: string }) {
 export type TransferPrefill = {
   recipient?: string;
   amount?: string;
+  /**
+   * What `amount` is in. Omitted: the pool's own units (a yield pool's units are
+   * vault shares). 'underlying': an amount of the COIN, which the modal converts
+   * to the pool's units at the live rate once the pool token and its rate are
+   * known (rounded up, so the recipient never gets less). While it waits the
+   * form shows no figure; it never reads the number as a share count (DEV-622).
+   */
+  amountUnits?: 'underlying';
   // Any registry symbol — the modal registry-validates per chain (cBTC etc).
   tokenSymbol?: string;
   /**
@@ -260,8 +270,11 @@ export type TransferPrefill = {
    * the user can edit token/amount/recipient (or the chain can move) while
    * the modal is open, so callers binding the callback to an external row
    * (payroll) must verify the details match before marking anything paid.
+   * `amount` is the typed figure in the pool's units; `underlyingAmount` is
+   * what the RECIPIENT's note is worth in the coin (null when the rate was
+   * unknown), the figure to compare against an amount of the coin.
    */
-  onSent?: (txHash: string, details?: { chainId: number; tokenSymbol: string; amount: string; recipient: string }) => void;
+  onSent?: (txHash: string, details?: { chainId: number; tokenSymbol: string; amount: string; recipient: string; underlyingAmount: string | null }) => void;
   /** Hub opener: draw inside the inline host instead of the overlay. */
   inline?: boolean;
   /**
@@ -410,6 +423,9 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   // chain against itself and could never fire.
   const chainId = useActiveEvmChain().id;
   const balanceDisplay = useShareFreeBalanceDisplay(chainId);
+  // Rates off the fixed feed grid (no request): converts a coin amount handed in
+  // by a caller (payroll) and reads a sent amount back as the coin.
+  const { rateFor: shareRateFor } = useShareRates();
   const withOpLock = useOpLock();
   const queryClient = useQueryClient();
   // Sui/EVM branch follows the app-wide chain SELECTION (the single routing
@@ -759,7 +775,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   }, [isOpen, sheetAnim]);
   // Optional callback fired with the txHash after a successful transfer (used
   // by Payroll to mark a salary line paid).
-  const transferOnSentRef = useRef<((txHash: string, details?: { chainId: number; tokenSymbol: string; amount: string; recipient: string }) => void) | null>(null);
+  const transferOnSentRef = useRef<TransferPrefill['onSent'] | null>(null);
   // Operation epoch (codex P1-5): bumped on every open/close. A run that
   // outlived its modal session must ABORT before broadcasting (nothing sent,
   // no UI writes) — without this, closing mid-proof and opening a new
@@ -784,6 +800,51 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     : (getTokenMetadataBySymbol(selectedToken, activeEvmChainId)?.decimals
       ?? getTokenDecimals(selectedTokenId));
   const selectedSymbol = isSui ? altSymbol : selectedToken;
+
+  // DEV-622: an amount handed in as the COIN (payroll) waits here until the pool
+  // token it will be spent from is settled and its rate is known, then crosses
+  // into the pool's units ONCE (rounded up: the recipient never gets less). The
+  // form stays empty meanwhile; a figure is never read as a share count.
+  const [pendingUnderlying, setPendingUnderlying] = useState<{ text: string; coin: string } | null>(null);
+  useEffect(() => {
+    if (!pendingUnderlying) return;
+    if (isSui) { setPendingUnderlying(null); return; }
+    // The user typed first: their figure wins.
+    if (amount !== '') { setPendingUnderlying(null); return; }
+    // Holdings decide which pool token the form settles on (the snap effect above).
+    if (!sourceHoldings.ready) return;
+    const coinOf = (symbol: string) => displayTokenSymbol(symbol).toUpperCase();
+    const held = (symbol: string) => sourceHoldings.symbols.has(symbol.toUpperCase());
+    if (coinOf(selectedToken) !== pendingUnderlying.coin || !held(selectedToken)) {
+      const match = sourceTokens.find((t) => coinOf(t.symbol) === pendingUnderlying.coin && held(t.symbol));
+      if (match) { if (match.symbol !== selectedToken) setSelectedToken(match.symbol); return; }
+      setPendingUnderlying(null);
+      reportTransferError(`You have no ${pendingUnderlying.coin} in your private balance on this network to pay this from.`);
+      return;
+    }
+    const meta = getTokenMetadataBySymbol(selectedToken, activeEvmChainId);
+    if (!meta) { setPendingUnderlying(null); return; }
+    if (isShareSymbol(selectedToken)) {
+      const rate = shareRateFor(activeEvmChainId, meta.address);
+      if (!rate) return; // the rate has not landed: wait, never guess
+      const shares = sharesForUnderlyingCeil(pendingUnderlying.text, rate);
+      setPendingUnderlying(null);
+      if (shares) setAmount(shares);
+      else reportTransferError(`${pendingUnderlying.text} ${pendingUnderlying.coin} is not an amount this pool can send.`);
+      return;
+    }
+    setPendingUnderlying(null);
+    setAmount(sanitizeAmountInput(pendingUnderlying.text, meta.decimals));
+  }, [pendingUnderlying, isSui, amount, sourceHoldings, sourceTokens, selectedToken, activeEvmChainId, shareRateFor, reportTransferError]);
+  // What a sent amount (the pool's units) is worth in the coin, for the opener's
+  // paid-row check. Null while a share's rate is unknown. A ref, so the confirm
+  // callback reads the current rate without a new dependency.
+  const underlyingOfSentRef = useRef<(units: string) => string | null>(() => null);
+  underlyingOfSentRef.current = (units: string) => {
+    if (isSui || !isShareSymbol(selectedSymbol)) return units;
+    const rate = shareRateFor(activeEvmChainId, getTokenMetadataBySymbol(selectedSymbol, activeEvmChainId)?.address);
+    return rate ? underlyingForSharesFloor(units, rate) : null;
+  };
   // The note being sent, for sdkErrorText: a transfer's figures (fees, the
   // value the selected notes hold) are all in it. A ref, so the confirm
   // callback reads the current units without a new dependency.
@@ -1324,7 +1385,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   // (the suggestion always clears the pre-relay guard).
   const feeDisplayGrain = selectedDecimals > 6 ? 10n ** BigInt(selectedDecimals - 6) : 1n;
   const relayFeeCeiled = relayFeeEstimate != null
-    ? ((relayFeeEstimate + feeDisplayGrain - 1n) / feeDisplayGrain) * feeDisplayGrain
+    ? ceilFeeToDisplayGrain(relayFeeEstimate, selectedDecimals)
     : null;
   const relayTotalWithFee = relayFeeCeiled != null ? enteredAmountWei + relayFeeCeiled : null;
   // Send-exact only exists on the relayed EVM path: the disclosed path pays
@@ -1380,6 +1441,20 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   const relayFeeReserveWei = feeSplit.reserveWei;
   /** What the recipient actually receives (send-exact nets the fee out of it). */
   const recipientAmountWei = feeSplit.recipientWei;
+  // DEV-622: ONE fee figure on the form caption, the review and the total, so
+  // recipient + fee = total from balance. Fee on top: the quoted fee. Send-exact:
+  // everything withheld from the typed amount (the fee plus its re-quote headroom),
+  // so the only difference between the two figures is the labeled fee.
+  const shownFeeWei = relayFeeCeiled == null
+    ? null
+    : sendExactActive ? feeSplit.totalDebitWei - feeSplit.recipientWei : relayFeeCeiled;
+  /** A pool-unit amount as the bare figure in the coin ("1,018.40"), or the loading mark. */
+  const coinFigure = (units: bigint): string => {
+    const view = balanceDisplay(formatUnits(units, selectedDecimals), selectedSymbol, chainId);
+    return view.text.endsWith(view.symbol) ? view.text.slice(0, view.text.length - view.symbol.length).trim() : view.text;
+  };
+  /** The same amount as text with its coin ("1,018.40 USDT"). */
+  const coinText = (units: bigint): string => balanceDisplay(formatUnits(units, selectedDecimals), selectedSymbol, chainId).text;
   /** The fee would swallow the whole transfer: the one send-exact failure mode. */
   const sendExactBelowFee = feeSplit.belowFee;
   // Fee-on-top overflow. Not a condition in send-exact mode: there the typed
@@ -1736,7 +1811,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         }
         log('info', 'Transfer', `Stellar transfer submitted: ${result.txHash}`);
         if (live()) setStep('success');
-        try { onSent?.(result.txHash, { chainId: STELLAR_TESTNET_ID, tokenSymbol: 'XLM', amount, recipient: recipientAddress }); } finally { if (transferOnSentRef.current === onSent) transferOnSentRef.current = null; }
+        try { onSent?.(result.txHash, { chainId: STELLAR_TESTNET_ID, tokenSymbol: 'XLM', amount, recipient: recipientAddress, underlyingAmount: amount }); } finally { if (transferOnSentRef.current === onSent) transferOnSentRef.current = null; }
       } catch (err) {
         const raw = err instanceof Error ? err.message : String(err);
         log('error', 'Transfer', `Stellar transfer failed: ${raw}`, err);
@@ -1886,7 +1961,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         }, null, 2));
         log('info', 'Transfer', `Sui transfer submitted: ${result.txDigest}`);
         if (live()) setStep('success');
-        try { onSent?.(result.txDigest, { chainId: SUI_TESTNET_ID, tokenSymbol: 'SUI', amount, recipient: recipientAddress }); } finally { if (transferOnSentRef.current === onSent) transferOnSentRef.current = null; }
+        try { onSent?.(result.txDigest, { chainId: SUI_TESTNET_ID, tokenSymbol: 'SUI', amount, recipient: recipientAddress, underlyingAmount: amount }); } finally { if (transferOnSentRef.current === onSent) transferOnSentRef.current = null; }
       } catch (err) {
         // Disarm ONLY for pre-broadcast failures — transferOrWithdraw signs
         // and executes in one call, so a throw after it started may follow a
@@ -2942,7 +3017,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
       if (live()) setStep('success');
       // Notify any opener (e.g. Payroll) only once the transfer is confirmed —
       // with what was ACTUALLY sent, so the caller can verify it matches its row.
-      try { onSent?.(hash, { chainId, tokenSymbol: selectedSymbol, amount, recipient: recipientAddress }); } finally { if (transferOnSentRef.current === onSent) transferOnSentRef.current = null; }
+      try { onSent?.(hash, { chainId, tokenSymbol: selectedSymbol, amount, recipient: recipientAddress, underlyingAmount: underlyingOfSentRef.current(formatUnits(sendAmountWei, selectedDecimals)) }); } finally { if (transferOnSentRef.current === onSent) transferOnSentRef.current = null; }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log('error', 'Transfer', 'Transfer failed', { err: message });
@@ -3059,7 +3134,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           try { await exportAccount(); } catch { /* the next discovery pass persists it */ }
         }
         refetchNotes();
-        try { onSent?.(landedHash, { chainId, tokenSymbol: selectedSymbol, amount, recipient: recipientAddress }); } finally { if (transferOnSentRef.current === onSent) transferOnSentRef.current = null; }
+        try { onSent?.(landedHash, { chainId, tokenSymbol: selectedSymbol, amount, recipient: recipientAddress, underlyingAmount: underlyingOfSentRef.current(formatUnits(BigInt(run.amountHex), selectedDecimals)) }); } finally { if (transferOnSentRef.current === onSent) transferOnSentRef.current = null; }
       };
       if (!broadcastAttempted || knownRejection || confirmedRevert || relayerRefused || relayerOutOfGas || pendingBlocked || relayerInFlight) {
         setReceiptLifecycle('none');
@@ -3381,7 +3456,11 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
       ? { chainId, owner: connectedAddress.toLowerCase(), tokenId: consolidationToken.address.toLowerCase(), fromAssetList: prefill?.fromAssetList } : null);
     setForcedInputs(forcedFromPrefill);
     setConsolidateSeed(forcedFromPrefill && !prefill?.amount ? 'total' : 'done');
-    setAmount(prefill?.amount ?? '');
+    // An amount of the coin is converted by the effect above, never stored raw.
+    const coinPrefill = prefill?.amountUnits === 'underlying' && prefill.amount && prefill.tokenSymbol && !isSui
+      ? { text: prefill.amount, coin: displayTokenSymbol(prefill.tokenSymbol).toUpperCase() } : null;
+    setPendingUnderlying(coinPrefill);
+    setAmount(prefill?.amountUnits === 'underlying' ? '' : prefill?.amount ?? '');
     // Back from a private swap-send that did not settle: the form returns as it
     // was handed off, recipient and "receive as" included. Never a fresh form
     // that reads as a plain same-asset send (Mike, #219 QA).
@@ -3422,6 +3501,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         // The amount was typed in THAT token's units; leaving it under the
         // previous token's pill would show a figure in the wrong asset.
         setAmount('');
+        setPendingUnderlying(null);
       }
     }
     transferOnSentRef.current = prefill?.onSent ?? null;
@@ -3461,6 +3541,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     // A picker left open would otherwise survive the flow it belongs to.
     opEpochRef.current += 1;
     setReceiveSelectorOpen(false);
+    setPendingUnderlying(null);
     setIsOpen(false);
     setInlinePreferred(false);
     // Secured receipt → drop the sensitive payload from memory. An UNSECURED
@@ -3814,7 +3895,10 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                     figure={isSwapSend && receiveAsset
                       ? (swapSendPreviewText ?? '—')
                       : (parseFloat(amount) || 0) > 0
-                        ? (sendExactActive ? (relayFeeCeiled != null ? `~${formatUnits(recipientAmountWei, selectedDecimals)}` : '—') : amount)
+                        ? (sendExactActive
+                          ? (relayFeeCeiled != null ? `~${isShareSymbol(selectedSymbol) ? coinFigure(recipientAmountWei) : formatUnits(recipientAmountWei, selectedDecimals)}` : '—')
+                          // A pool unit is not the coin: the card shows what the recipient's amount is worth (DEV-622).
+                          : isShareSymbol(selectedSymbol) ? coinFigure(enteredAmountWei) : amount)
                         : '0'}
                     figureMuted={(isSwapSend && !!receiveAsset) || (parseFloat(amount) || 0) <= 0}
                     captionTone="secondary"
@@ -3920,7 +4004,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                       </Pressable>
                       <Text className="text-[12px] leading-[16px] text-text-secondary font-pp-regular">
                         {(() => {
-                          const fee = relayFeeCeiled != null && enteredAmountWei > 0n ? ` (~${balanceDisplay(formatUnits(relayFeeCeiled, selectedDecimals), selectedSymbol, chainId).text})` : '';
+                          const fee = shownFeeWei != null && enteredAmountWei > 0n ? ` (~${coinText(shownFeeWei)})` : '';
                           return receiveExact
                             ? `The relayer fee${fee} is added on top of the amount you entered.`
                             : `Sends exactly what you entered: the relayer fee${fee} comes out of it, so the recipient receives ${relayFeeCeiled != null && enteredAmountWei > 0n ? `~${balanceDisplay(formatUnits(recipientAmountWei, selectedDecimals), selectedSymbol, chainId).text}` : 'a little less'}.`;
@@ -4199,11 +4283,20 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                       {chainDisplayName}
                     </Text>
                   </Text>
-                  {relayFeeCeiled != null && (
+                  {shownFeeWei != null && (
                     <Text className="text-[14px] leading-[24px]">
                       <Text className="text-[14px] text-[#737373] font-pp-bold">Relayer fee: </Text>
-                      <Text className="text-[14px] text-[#737373] font-pp-regular">
-                        ~<ShareFigure view={balanceDisplay(formatUnits(relayFeeCeiled, selectedDecimals), selectedSymbol, chainId)} />
+                      <Text className="text-[14px] text-[#737373] font-pp-regular" testID="transfer-review-fee">
+                        ~<ShareFigure view={balanceDisplay(formatUnits(shownFeeWei, selectedDecimals), selectedSymbol, chainId)} />
+                      </Text>
+                    </Text>
+                  )}
+                  {/* Recipient amount + the labeled fee, nothing else (DEV-622). */}
+                  {shownFeeWei != null && (
+                    <Text className="text-[14px] leading-[24px]">
+                      <Text className="text-[14px] text-[#737373] font-pp-bold">Total from your balance: </Text>
+                      <Text className="text-[14px] text-[#737373] font-pp-regular" testID="transfer-review-total">
+                        ~<ShareFigure view={balanceDisplay(formatUnits(feeSplit.totalDebitWei, selectedDecimals), selectedSymbol, chainId)} />
                       </Text>
                     </Text>
                   )}

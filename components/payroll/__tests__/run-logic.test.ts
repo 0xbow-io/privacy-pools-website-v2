@@ -1,6 +1,10 @@
 import { describe, test, expect } from 'bun:test';
 
-import { buildRunItems, resolvePayrollTransferParams, applyMarkPaid, buildRunsCsv } from '@/components/payroll/io';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { buildRunItems, resolvePayrollTransferParams, applyMarkPaid, buildRunsCsv, payrollSentMatchesRow } from '@/components/payroll/io';
+import { sharesForUnderlyingCeil, underlyingForSharesFloor } from '@/services/underlying-amount-entry';
 import type { Employee, PayrollRun, PayrollRunItem } from '@/services/payroll-store';
 
 function employee(over: Partial<Employee> = {}): Employee {
@@ -195,5 +199,69 @@ describe('buildRunsCsv', () => {
 
   test('is just the header when there are no runs', () => {
     expect(buildRunsCsv([])).toBe('Period,Date,Payee,Wallet,Network,Amount,Currency,Status,Tx Hash');
+  });
+});
+
+// DEV-622: a payroll amount is a salary in the COIN. The Send form holds pool
+// units (vault shares for a yield pool), so the handoff must say what unit the
+// amount is in, and a paid row is judged on the value delivered in the coin.
+describe('payroll to Send unit handoff (DEV-622)', () => {
+  const deps = {
+    resolveChainId: (network: string) => (network === 'Ethereum' ? 1 : undefined),
+    getToken: (symbol: string, chainId: number) => (chainId === 1 && ['ETH', 'USDC', 'USDT'].includes(symbol) ? { decimals: symbol === 'ETH' ? 18 : 6 } : undefined),
+  };
+  const RATE = {
+    chainId: 1, share: '0xshare', underlying: '0xusdt', shareSymbol: 'ppUSDT', shareDecimals: 18,
+    assetsPerShare: 1_005_420n, underlyingSymbol: 'USDT', underlyingDecimals: 6,
+  };
+  const resolved = () => {
+    const r = resolvePayrollTransferParams(item({ currency: 'USDT', amount: 1018.4 }), deps);
+    if ('refusal' in r) throw new Error(r.refusal);
+    return r;
+  };
+
+  test('the handoff names the amount as underlying and carries the coin decimals', () => {
+    const p = resolved();
+    expect(p.amount).toBe('1018.4');
+    expect(p.amountUnits).toBe('underlying');
+    expect(p.decimals).toBe(6);
+  });
+
+  test('regression: run.tsx never hands a salary to Send without its unit', () => {
+    const here = new URL('.', import.meta.url).pathname;
+    const src = readFileSync(join(here, '..', 'run.tsx'), 'utf8');
+    expect(src).toMatch(/amountUnits:\s*params\.amountUnits/);
+    // The transfer modal converts a coin amount before it is stored as the amount.
+    const modal = readFileSync(join(here, '..', '..', 'transfer-modal-provider.tsx'), 'utf8');
+    expect(modal).toMatch(/setAmount\(prefill\?\.amountUnits === 'underlying' \? '' : prefill\?\.amount \?\? ''\)/);
+    expect(modal).toMatch(/sharesForUnderlyingCeil\(pendingUnderlying\.text, rate\)/);
+  });
+
+  test('the converted send delivers exactly the salary, and the row is marked paid', () => {
+    const p = resolved();
+    const shares = sharesForUnderlyingCeil(p.amount, RATE)!;
+    const details = { chainId: 1, tokenSymbol: 'ppUSDT', recipient: p.recipient, underlyingAmount: underlyingForSharesFloor(shares, RATE) };
+    expect(details.underlyingAmount).toBe('1018.4');
+    expect(payrollSentMatchesRow({ details, recipient: p.recipient, amount: p.amount, tokenSymbol: p.tokenSymbol, decimals: p.decimals, expectedChainId: 1 })).toBe(true);
+  });
+
+  test('a share count sent as if it were the coin does NOT mark the row paid (the incident)', () => {
+    const p = resolved();
+    // 1,018.4 shares were sent: worth 1023.919728 USDT.
+    const details = { chainId: 1, tokenSymbol: 'ppUSDT', recipient: p.recipient, underlyingAmount: underlyingForSharesFloor('1018.4', RATE) };
+    expect(details.underlyingAmount).toBe('1023.919728');
+    expect(payrollSentMatchesRow({ details, recipient: p.recipient, amount: p.amount, tokenSymbol: p.tokenSymbol, decimals: p.decimals })).toBe(false);
+  });
+
+  test('an unknown rate, another coin, another recipient or chain keeps the row unpaid', () => {
+    const p = resolved();
+    const base = { chainId: 1, tokenSymbol: 'ppUSDT', recipient: p.recipient, underlyingAmount: '1018.4' };
+    const check = (details: typeof base | (Omit<typeof base, 'underlyingAmount'> & { underlyingAmount: string | null }), expectedChainId?: number) =>
+      payrollSentMatchesRow({ details, recipient: p.recipient, amount: p.amount, tokenSymbol: p.tokenSymbol, decimals: p.decimals, expectedChainId });
+    expect(check(base, 1)).toBe(true);
+    expect(check({ ...base, underlyingAmount: null })).toBe(false);
+    expect(check({ ...base, tokenSymbol: 'ppUSDC' })).toBe(false);
+    expect(check({ ...base, recipient: '0x2222222222222222222222222222222222222222' })).toBe(false);
+    expect(check(base, 56)).toBe(false);
   });
 });

@@ -5,6 +5,8 @@
 // web.
 
 import type { Employee, PayrollRun, PayrollRunItem } from '@/services/payroll-store';
+import { displayTokenSymbol } from '@/services/share-display';
+import { deliveredMatchesExpected } from '@/services/underlying-amount-entry';
 
 // Chain/token resolution is INJECTED (type-only imports above keep this
 // module bun-testable — a runtime import of payroll-store pulls
@@ -82,8 +84,18 @@ export function buildRunItems(employees: Employee[], resolveChainId?: PayrollCha
  */
 export function resolvePayrollTransferParams(item: PayrollRunItem, deps: PayrollChainDeps): {
   recipient: string;
+  /** The salary, in the COIN (never a pool-unit count). */
   amount: string;
   tokenSymbol: string;
+  /**
+   * Always 'underlying' (DEV-622): the Send form holds its amount in the pool's
+   * units, which for a yield pool are vault shares worth more than one coin each.
+   * A payroll amount is a salary in the coin, so the form converts it at send
+   * time instead of reading it as a share count.
+   */
+  amountUnits: 'underlying';
+  /** The coin's decimals, for the paid-row check. */
+  decimals: number;
 } | { refusal: string } {
   const chainId = item.chainId ?? deps.resolveChainId(item.network);
   if (chainId === undefined) {
@@ -104,7 +116,38 @@ export function resolvePayrollTransferParams(item: PayrollRunItem, deps: Payroll
   if (frac.length > token.decimals) {
     return { refusal: `${item.currency} supports ${token.decimals} decimal places. Edit the salary (${amount} has ${frac.length}).` };
   }
-  return { recipient: item.walletAddress, amount, tokenSymbol: item.currency };
+  return { recipient: item.walletAddress, amount, tokenSymbol: item.currency, amountUnits: 'underlying', decimals: token.decimals };
+}
+
+/** What the transfer modal reports once a send is confirmed (TransferPrefill.onSent). */
+export type PayrollSentDetails = {
+  chainId: number;
+  tokenSymbol: string;
+  recipient: string;
+  /** What the recipient's note is worth in the COIN; null when the rate was unknown. */
+  underlyingAmount: string | null;
+};
+
+/**
+ * Does what was actually sent match this payroll row? A row is marked paid ONLY
+ * when it does. The amount is compared in the COIN, as value delivered to the
+ * recipient (never the pool-unit count: a vault share is worth more than one
+ * coin), and the pool token is compared by the coin it is denominated in
+ * (a share of USDT pays out USDT).
+ */
+export function payrollSentMatchesRow(args: {
+  details: PayrollSentDetails;
+  recipient: string;
+  amount: string;
+  tokenSymbol: string;
+  decimals: number;
+  expectedChainId?: number;
+}): boolean {
+  const { details, expectedChainId } = args;
+  return (expectedChainId === undefined || details.chainId === expectedChainId)
+    && displayTokenSymbol(details.tokenSymbol).toUpperCase() === displayTokenSymbol(args.tokenSymbol).toUpperCase()
+    && deliveredMatchesExpected({ delivered: details.underlyingAmount, expected: args.amount, decimals: args.decimals })
+    && details.recipient.toLowerCase() === args.recipient.toLowerCase();
 }
 
 /**

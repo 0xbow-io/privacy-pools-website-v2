@@ -12,9 +12,15 @@ import {
   type PayrollRun, type PayrollRunItem,
 } from '@/services/payroll-store';
 import { PCard, PBadge, PButton, CardTitle, CardEmptyState, shortAddr, fmtToken, cx } from '@/components/payroll/ui';
-import { buildRunItems, resolvePayrollTransferParams, applyMarkPaid } from '@/components/payroll/io';
+import { buildRunItems, resolvePayrollTransferParams, applyMarkPaid, payrollSentMatchesRow } from '@/components/payroll/io';
 import { networkChainId } from '@/services/payroll-store';
 import { useActiveEvmChain } from '@/hooks/use-active-evm-chain';
+import { useTransferFeeEstimate } from '@/hooks/use-transfer-fee-estimate';
+import { useShareFreeBalanceDisplay } from '@/hooks/use-balance-display';
+import { getKnownTokenMetadata } from '@/config/tokens';
+import { getConfiguredYieldDeploymentForAsset } from '@/config/yield';
+import { ceilFeeToDisplayGrain } from '@/services/relay-fee-split';
+import { formatUnits } from 'viem';
 
 const usdRate = (cur: string, eth: number) => (cur.toUpperCase() === 'ETH' ? eth : isStablecoin(cur) ? 1 : 0);
 
@@ -41,7 +47,18 @@ export function PayrollRunView() {
     for (const e of active) m.set(e.currency, (m.get(e.currency) ?? 0) + e.salary);
     return Array.from(m.entries());
   }, [active]);
-  const perTransferFee = 0.35; // rough relayer-fee preview per transfer; exact fee shown when you pay
+  // Relayer fee preview per transfer: the SAME estimate and rounding the Send form
+  // and its review show (DEV-622), read off the feed grid (no request). Per coin,
+  // for the pool token a payment of that coin is spent from.
+  const feeFor = useTransferFeeEstimate(activeEvmChainId);
+  const feeDisplay = useShareFreeBalanceDisplay(activeEvmChainId);
+  const feePreview = byCurrency.map(([cur]) => {
+    const meta = getTokenMetadataBySymbol(cur, activeEvmChainId);
+    if (!meta) return null;
+    const pool = getKnownTokenMetadata(getConfiguredYieldDeploymentForAsset(activeEvmChainId, meta.address)?.ppUSDC ?? meta.address, activeEvmChainId) ?? meta;
+    const fee = feeFor(pool.address);
+    return fee == null ? null : feeDisplay(formatUnits(ceilFeeToDisplayGrain(fee, pool.decimals), pool.decimals), pool.symbol, activeEvmChainId, pool.address).text;
+  }).filter((t): t is string => !!t).join('  ·  ');
 
   const startRun = () => {
     // Guard against a double-click creating two pending runs before the
@@ -98,17 +115,23 @@ export function PayrollRunView() {
     openTransferModal({
       recipient: params.recipient,
       amount: params.amount,
+      // The salary is in the coin; the modal converts it to the pool's units at
+      // the live rate (DEV-622). Never a share count passed as if it were the coin.
+      amountUnits: params.amountUnits,
       tokenSymbol: params.tokenSymbol,
       // Mark the row paid ONLY when what was actually sent matches the row
       // (codex): the modal's fields stay editable and the chain can move
       // while it is open, so a different transfer must not close this row.
+      // The amount is compared as value delivered in the coin.
       onSent: (txHash, details) => {
-        const matches = !details || (
-          (expectedChainId === undefined || details.chainId === expectedChainId)
-          && details.tokenSymbol.toUpperCase() === params.tokenSymbol.toUpperCase()
-          && details.amount === params.amount
-          && details.recipient.toLowerCase() === params.recipient.toLowerCase()
-        );
+        const matches = !details || payrollSentMatchesRow({
+          details,
+          recipient: params.recipient,
+          amount: params.amount,
+          tokenSymbol: params.tokenSymbol,
+          decimals: params.decimals,
+          expectedChainId,
+        });
         if (!matches) {
           setNoticeState({ runId: run.id, text: 'A transfer was sent, but it differs from this payroll row (token, amount, recipient or network changed in the modal). The row stays unpaid.' });
           return;
@@ -158,7 +181,7 @@ export function PayrollRunView() {
           </View>
 
           <Text className="font-pp-sans text-[12px] leading-[18px] text-text-secondary">
-            Each payment is a private transfer you sign from your Privacy Pools balance. Relayer fee ~{formatFull(perTransferFee)} per transfer, exact shown when you pay.
+            Each payment is a private transfer you sign from your Privacy Pools balance, and each pays the full salary amount.{feePreview ? ` Relayer fee ~${feePreview} per transfer, on top of the salary.` : ' The relayer fee is shown when you pay, on top of the salary.'}
           </Text>
         </PCard>
 
