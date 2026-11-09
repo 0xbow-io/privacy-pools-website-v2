@@ -1603,7 +1603,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     return () => { clearTimeout(timer); controller.abort(); };
   }, [isOpen, step, isSwapExit, receiveAsset, receiveChainId, chainId, selectedTokenAddress, enteredAmountWei, relayerQuote, swapExitEstimateFromAddress]);
   const swapExitEstimateText = swapExitEstimate.status === 'ok' && swapExitEstimate.toAmount !== undefined && receiveAsset
-    ? `~${formatSwapExitEstimate(swapExitEstimate.toAmount, receiveAsset.decimals)}`
+    ? `~${formatSwapExitEstimate(swapExitEstimate.toAmount, receiveAsset.decimals, receiveAsset.symbol)}`
     : null;
   // Full-balance intent (explicit Max/100% or a to-the-wei match): the
   // relayer fee comes OUT of the final amount — "receive exact" cannot add a
