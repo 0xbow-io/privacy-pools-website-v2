@@ -87,6 +87,8 @@ export type StellarActivityContext = {
   ownAddress: string;
   /** Payee this device recorded for one of its sends, if any (local store). */
   sentRecipient?: (txHash: string) => string | null;
+  /** Blind deposits this account made FOR someone (DEV-499), from its saved claims. */
+  sentDeposits?: readonly { txHash: string | null; recipient: string; amount: string; tokenId: string; createdAt: number }[];
 };
 
 export type StellarActivity = {
@@ -400,6 +402,24 @@ export function deriveStellarActivity(
       type: isTransfer ? 'Transfer' : 'Withdrawal',
       direction: isTransfer ? 'out' : undefined,
       reviewStatus: 'approved',
+      status: 'completed',
+      label: null,
+    });
+  }
+
+  // --- blind deposits for someone else (DEV-499): no note of ours, so the
+  // saved claim is the row. Outgoing, so the row menu offers the claim link.
+  for (const d of ctx.sentDeposits ?? []) {
+    const raw = toBig(d.amount);
+    if (!d.txHash || raw === null) continue;
+    rows.push({
+      ...eventRow(d.txHash, d.tokenId, raw, Math.floor(d.createdAt / 1000), ctx),
+      address: shortAddress(d.recipient),
+      fullAddress: d.recipient,
+      id: `stellar-deposit-for-${d.txHash}`,
+      type: 'Deposit',
+      direction: 'out',
+      reviewStatus: '',
       status: 'completed',
       label: null,
     });

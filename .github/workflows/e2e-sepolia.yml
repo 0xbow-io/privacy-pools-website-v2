@@ -95,6 +95,25 @@ jobs:
           EXPO_PUBLIC_BATCH_WITHDRAWALS=true
           EOF
 
+      # public/artifacts holds the ceremony keys the production verifiers use. The
+      # Sepolia pool still verifies with the earlier, pre-ceremony keys, so a proof
+      # from the checked-out files reverts there (PoolVault_InvalidDepositProof).
+      # The script reads every Sepolia verifier and swaps the pinned pre-ceremony
+      # zkey + vkey (sha256-checked, from IPFS) into this checkout only for the
+      # circuits whose verifier holds them. It swaps nothing once Sepolia is
+      # redeployed with the ceremony keys. The app code never sees the fixture.
+      - name: Cache the Sepolia circuit keys
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/e2e-sepolia-circuits
+          key: e2e-sepolia-circuits-${{ hashFiles('scripts/e2e/fixtures/sepolia-circuits.json') }}
+
+      - name: Prove with the keys the Sepolia verifiers hold
+        env:
+          EXPO_PUBLIC_ALCHEMY_KEY: ${{ secrets.EXPO_PUBLIC_ALCHEMY_KEY }}
+          E2E_CIRCUITS_CACHE: ~/.cache/e2e-sepolia-circuits
+        run: bun scripts/e2e/sepolia-circuits.ts
+
       - name: Install the browser
         run: bunx playwright install --with-deps chrome
 

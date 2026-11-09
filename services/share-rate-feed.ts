@@ -27,7 +27,7 @@ export function listShareDeployments(): ShareDeploymentRef[] {
         chainId,
         share: d.ppUSDC.toLowerCase(),
         underlying: d.underlying.toLowerCase(),
-        shareSymbol: getKnownTokenMetadata(d.ppUSDC, chainId)?.symbol ?? `pp${d.underlyingSymbol.toUpperCase()}`,
+        shareSymbol: getKnownTokenMetadata(d.ppUSDC, chainId)?.symbol ?? `pp${d.underlyingSymbol.toUpperCase()}`, // not-rendered: lookup data
         shareDecimals: d.ppUSDCDecimals,
         underlyingSymbol: d.underlyingSymbol.toUpperCase(),
         underlyingDecimals: d.underlyingDecimals,

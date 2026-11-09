@@ -5,6 +5,7 @@ import { countMyDeposits } from '@/services/my-activity';
 import { buildOutgoingDepositTxHashSet } from '@/services/outgoing-deposits-store';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { countStellarDeposits } from '@/services/stellar-activity';
+import { FigureText } from '@/components/ui/share-figure';
 
 export function compactUsd(raw: string | undefined): string {
   const n = parseFloat(raw ?? '0') || 0;
@@ -64,7 +65,7 @@ export function StatBand() {
         <View key={stat.label} className="flex-row items-center">
           {i > 0 && !stacked && <View className="w-[1px] self-stretch my-[6px] bg-border" />}
           <View className="items-center px-[28px] gap-[4px]">
-            <Text className="text-[26px] leading-[32px] tracking-[-0.5px] text-text font-pp-sans-bold">{stat.value}</Text>
+            <Text className="text-[26px] leading-[32px] tracking-[-0.5px] text-text font-pp-sans-bold"><FigureText text={stat.value} /></Text>
             <Text className="text-[12px] tracking-[0.2px] text-text-muted font-pp-sans-medium">{stat.label}</Text>
           </View>
         </View>

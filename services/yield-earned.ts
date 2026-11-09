@@ -25,6 +25,7 @@ import type {
   YieldDepositFact as SdkYieldDepositFact,
   YieldEarned,
   YieldEarnedEvents,
+  YieldEarnedNote,
   YieldRateObservation,
   YieldRateSeries,
 } from '@privacy-pools-v2/sdk';
@@ -54,7 +55,16 @@ export type YieldEarnedEntry =
       maxUnderstatement: bigint;
       /** Decimals of the underlying the two figures are in. */
       assetDecimals: number;
+      /**
+       * Shares the compute found the wallet still holding, raw share units.
+       * Zero against a row that holds shares means the compute ran before the
+       * notes reached it: that 0 is "not yet", not a figure (yieldEarnedRow).
+       */
+      heldShares: bigint;
     }
+  /** An input has not arrived yet (snapshot, a grid feed, the keys). Shimmer, then a figure. */
+  | { status: 'loading'; reason: string }
+  /** No figure will come from these inputs. "—", no animation. */
   | { status: 'unavailable'; reason: string };
 
 export type YieldEarnedByShare = ReadonlyMap<string, YieldEarnedEntry>;
@@ -256,6 +266,7 @@ export function toYieldEarnedEntry(result: YieldEarned, assetDecimals: number): 
     earnedTotal: result.earnedTotal,
     maxUnderstatement: result.maxUnderstatement,
     assetDecimals,
+    heldShares: result.heldShares,
   };
 }
 
@@ -278,26 +289,41 @@ export function understatementRoundsToZero(
 }
 
 export type YieldEarnedDisplay = {
-  /** e.g. "+1.23 USDC", "<0.01 USDC", "0.00 USDC". */
+  /** e.g. "+1.23 USDC", "<0.01 USDC", "0 USDC", or "+1.23+ USDC" for a lower bound. */
   text: string;
-  /** The figure in underlying units, for a USD total. */
+  /** The figure in underlying units, for a USD total. A lower bound when `lowerBound`. */
   amount: number;
+  /** The SDK's understatement bound shows at display precision: `amount` is the floor of the range. */
+  lowerBound?: boolean;
 };
 
 /**
  * The row's earned text in the underlying (`symbol` is the display symbol:
- * USDC, USDT, ETH), or null for "—".
+ * USDC, USDT, ETH), or null for "—" when the SDK gave no figure.
  *
- * Null when the SDK gave no figure, and when its understatement bound does not
- * round to zero at display precision: the figure is then a lower bound whose
- * gap is visible, and the table has no way to say "at least". A negative
- * figure is only possible within the bound (the SDK answers `inconsistent`
- * beyond it), so it prints as zero.
+ * The SDK's figure can understate by up to `maxUnderstatement`. When that
+ * rounds to zero at display precision the figure prints as is. When it does
+ * not, the figure is printed as a lower bound: rounded DOWN to display
+ * precision and marked with a trailing "+", as the tile marks its own. It used
+ * to print "—" instead, and that hid every large position: a flow valued off
+ * the hourly rate history carries one hour of rate drift as its bound, about
+ * 4e-6 of the flow, which on 1762 USDC is 0.007 USDC, over the half cent
+ * USDC is shown to (QA of #67, the Ethereum USDC row on "—" while the small
+ * USDT rows had figures). A negative figure is only possible within the
+ * bound (the SDK answers `inconsistent` beyond it), so it prints as zero.
  */
 export function yieldEarnedDisplay(entry: YieldEarnedEntry | undefined, symbol: string): YieldEarnedDisplay | null {
   if (!entry || entry.status !== 'ok') return null;
-  if (!understatementRoundsToZero(entry.maxUnderstatement, entry.assetDecimals, symbol)) return null;
   const value = entry.earnedTotal > 0n ? entry.earnedTotal : 0n;
+  if (!understatementRoundsToZero(entry.maxUnderstatement, entry.assetDecimals, symbol)) {
+    // Floored, never rounded up: a lower bound must not overstate.
+    const hidden = entry.assetDecimals - displayFractionDigits(symbol);
+    const step = hidden > 0 ? 10n ** BigInt(hidden) : 1n;
+    const floored = value - (value % step);
+    const amount = Number(formatUnits(floored, entry.assetDecimals));
+    const formatted = formatTokenBalance(amount, symbol);
+    return { text: `${floored > 0n ? '+' : ''}${formatted}+ ${symbol}`, amount, lowerBound: true };
+  }
   const amount = Number(formatUnits(value, entry.assetDecimals));
   const formatted = formatTokenBalance(amount, symbol);
   if (value === 0n) return { text: `${formatted} ${symbol}`, amount: 0 };
@@ -306,19 +332,167 @@ export function yieldEarnedDisplay(entry: YieldEarnedEntry | undefined, symbol: 
 }
 
 /**
- * The page's total, in USD, or null for "—". Every real yield row must have a
- * figure and a price: a sum that silently skips a position understates it.
+ * A stored note as the account export persists it (the SDK's `Note`), only the
+ * fields the earned compute reads.
+ */
+export type StoredYieldNote = {
+  commitment: string;
+  value: string | number | bigint;
+  tokenId: unknown;
+  status: YieldEarnedNote['status'];
+  createdAtBlock?: unknown;
+  isOwned?: boolean;
+  depositSecret?: unknown;
+};
+
+/**
+ * The wallet's notes of one share as the SDK's `YieldEarnedNote[]`: the same
+ * reduction `PoolSessionYieldEarned` does over its live note manager, run over
+ * a chain's STORED account export. That is how a share on a chain other than
+ * the session's gets its figure: the live manager only holds the session
+ * chain's notes. Pure: the nullifier hash and the timestamp parse are injected.
+ */
+export function yieldEarnedNotesForShare(
+  notes: readonly StoredYieldNote[],
+  share: string,
+  nullifierOf: (commitment: Hex) => Hex,
+  timestampOf: (createdAtBlock: Hex) => number | null,
+): YieldEarnedNote[] {
+  const shareKey = share.toLowerCase();
+  return notes
+    .filter((note) => note.isOwned === true && String(note.tokenId).toLowerCase() === shareKey)
+    .map((note) => ({
+      commitment: note.commitment as Hex,
+      nullifier: nullifierOf(note.commitment as Hex),
+      shares: BigInt(note.value),
+      status: note.status,
+      createdAt: timestampOf(String(note.createdAtBlock ?? '') as Hex),
+      originatedHere: note.depositSecret !== undefined,
+    }));
+}
+
+/**
+ * One yield row's earned state. Three different things, never folded together:
+ *   - `loading`: no figure YET. A shimmer, never "0";
+ *   - `unavailable`: no figure from these inputs. "—", no animation;
+ *   - `ok`: a computed figure, which may honestly be 0 (a deposit minutes old).
+ */
+export type YieldEarnedRow =
+  | { state: 'loading' }
+  | { state: 'unavailable' }
+  | { state: 'ok'; display: YieldEarnedDisplay };
+
+/**
+ * The row's state from its entry. `rowHoldsShares` is whether the portfolio
+ * row itself holds shares (active or pending).
+ *
+ * Loading covers three cases: no entry yet (the first compute has not
+ * finished), an input the hook is still waiting on, and a compute that came
+ * back "ok, 0 shares held" for a row that holds shares. That last one is how
+ * "0 USDC" and "$0.00" reached the page while loading (Nathaniel, QA #67): the
+ * SDK computes over the notes it has, and before the account's notes reach the
+ * note manager (or the chain's stored export) that is none, so it answers a
+ * confident 0. A position the wallet holds cannot have been computed over no
+ * notes, so that 0 is "not yet".
+ */
+export function yieldEarnedRow(
+  entry: YieldEarnedEntry | undefined,
+  symbol: string,
+  rowHoldsShares: boolean,
+): YieldEarnedRow {
+  if (!entry || entry.status === 'loading') return { state: 'loading' };
+  if (entry.status === 'unavailable') return { state: 'unavailable' };
+  if (rowHoldsShares && entry.heldShares === 0n) return { state: 'loading' };
+  const display = yieldEarnedDisplay(entry, symbol);
+  return display ? { state: 'ok', display } : { state: 'unavailable' };
+}
+
+/**
+ * The page's total, in USD.
+ *   - `loading`: no row has a figure yet and at least one is still computing;
+ *   - `unavailable`: no row has a figure and none is coming ("—");
+ *   - `ok`: the priced figures summed. `partial` when a row has no figure, no
+ *     price, or only a lower bound (the tile adds "+"). `loading` when a row
+ *     is still computing, so the tile keeps a "syncing" badge beside the sum.
+ */
+export type YieldEarnedTotal =
+  | { state: 'loading' }
+  | { state: 'unavailable' }
+  | { state: 'ok'; usd: number; partial: boolean; loading: boolean };
+
+/**
+ * A row without a figure is left out and the total is flagged `partial`, so
+ * the tile shows what is known as a lower bound instead of waiting on a row
+ * that may never resolve, without passing a sum of some rows off as the whole.
+ * A row still loading is never counted as 0: with nothing else known the tile
+ * is `loading`, not "$0.00".
  */
 export function totalYieldEarnedUsd(
-  rows: readonly { earned: YieldEarnedDisplay | null; underlyingPriceUsd: number }[],
-): number | null {
-  if (rows.length === 0) return null;
+  rows: readonly { earned: YieldEarnedRow; underlyingPriceUsd: number }[],
+): YieldEarnedTotal {
   let total = 0;
+  let counted = 0;
+  let partial = false;
+  let loading = false;
   for (const row of rows) {
-    if (!row.earned) return null;
-    if (row.earned.amount === 0) continue;
-    if (!(row.underlyingPriceUsd > 0)) return null;
-    total += row.earned.amount * row.underlyingPriceUsd;
+    if (row.earned.state === 'loading') { loading = true; partial = true; continue; }
+    if (row.earned.state === 'unavailable') { partial = true; continue; }
+    const earned = row.earned.display;
+    if (earned.lowerBound) partial = true;
+    if (earned.amount === 0) { counted += 1; continue; }
+    if (!(row.underlyingPriceUsd > 0)) { partial = true; continue; }
+    total += earned.amount * row.underlyingPriceUsd;
+    counted += 1;
   }
-  return total;
+  if (counted === 0) return loading ? { state: 'loading' } : { state: 'unavailable' };
+  return { state: 'ok', usd: total, partial, loading };
+}
+
+/**
+ * A header figure. `text` null with `loading`: nothing known yet, the page
+ * draws a shimmer block in its place, never "0". `text` with `loading`: the
+ * known part, not final yet (a "syncing" badge beside it).
+ */
+export type FigureDisplay = { text: string | null; loading: boolean };
+
+/** Nothing known yet: a shimmer block, never a figure. */
+export const FIGURE_LOADING: FigureDisplay = { text: null, loading: true };
+
+/** The "Yield earned" tile. Null renders "—". */
+export function yieldEarnedTileDisplay(
+  total: YieldEarnedTotal,
+  formatUsd: (usd: number) => string,
+): FigureDisplay | null {
+  if (total.state === 'loading') return FIGURE_LOADING;
+  if (total.state === 'unavailable') return null;
+  return { text: `${formatUsd(total.usd)}${total.partial ? '+' : ''}`, loading: total.loading };
+}
+
+/**
+ * The "Pending" figure. It sums the account's pending notes, so while the
+ * account is still syncing a 0 there only means "none found yet", and a yield
+ * row's pending shares have no value until the share rate arrives. Neither is
+ * a figure: a shimmer block. A figure above 0 found mid-sync shows, with the
+ * "syncing" badge, since more may land. A rate that failed (not loading)
+ * stays "Value unavailable".
+ */
+export function pendingValueDisplay(params: {
+  /** Pools or prices not loaded: nothing on the page is known yet. */
+  pageLoading: boolean;
+  /** The account's notes are still syncing. */
+  accountSyncing: boolean;
+  /** Share rates still loading. */
+  ratesLoading: boolean;
+  value: number;
+  /** Some pending shares could not be valued (no rate or no price). */
+  valueUnavailable: boolean;
+  formatUsd: (usd: number) => string;
+}): FigureDisplay {
+  const { pageLoading, accountSyncing, ratesLoading, value, valueUnavailable, formatUsd } = params;
+  if (pageLoading) return FIGURE_LOADING;
+  if (valueUnavailable) {
+    return ratesLoading ? FIGURE_LOADING : { text: 'Value unavailable', loading: false };
+  }
+  if (accountSyncing) return value > 0 ? { text: formatUsd(value), loading: true } : FIGURE_LOADING;
+  return { text: formatUsd(value), loading: false };
 }

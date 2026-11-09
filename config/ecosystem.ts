@@ -1,4 +1,3 @@
-export type PartnerStatus = 'live' | 'building' | 'announced';
 export type PartnerCategory =
   | 'wallet'
   | 'defi'
@@ -15,15 +14,8 @@ export interface EcosystemPartner {
   url: string;
   description: string;
   logoText: string;
-  logoColor: string;
   categories: PartnerCategory[];
-  chains: string[];
-  status: PartnerStatus;
-  // Optional ecosystem-integration metadata (from the integrations sheet).
-  assets?: string;
-  launchDate?: string;
-  integration?: string;
-  // Highlight as a featured partnership (rendered prominently, first).
+  // Use the featured layout in the unfiltered directory.
   featured?: boolean;
 }
 
@@ -35,14 +27,26 @@ export const ECOSYSTEM_PARTNERS: EcosystemPartner[] = [
     description:
       "The Ethereum Foundation's open-source privacy toolkit. Lets any wallet add native Privacy Pools support without rebuilding its stack. The SDK embeds shielded-pool protocols directly into wallet flows.",
     logoText: 'K',
-    logoColor: '#5C6BC0',
     categories: ['sdk', 'privacy'],
-    chains: ['Ethereum'],
-    status: 'live',
-    assets: 'All supported assets',
-    launchDate: '2025–2026',
-    integration: 'Official Ethereum Foundation SDK',
     featured: true,
+  },
+  {
+    name: 'Casberi',
+    slug: 'casberi',
+    url: 'https://casberi.app',
+    description:
+      'An inbox and wallet for your accounts on iPhone, iPad, and Mac, with support for Privacy Pools v2.',
+    logoText: 'C',
+    categories: ['wallet', 'privacy'],
+  },
+  {
+    name: 'Nymis',
+    slug: 'nymis',
+    url: 'https://nymis.io',
+    description:
+      'Scan an address to understand its onchain privacy exposure, or explore how two wallet addresses are linked.',
+    logoText: 'N',
+    categories: ['tools', 'analytics'],
   },
   {
     name: 'Brevis ZK',
@@ -51,13 +55,7 @@ export const ECOSYSTEM_PARTNERS: EcosystemPartner[] = [
     description:
       'ZK proving partner behind the Privacy Pools deployment on BNB Chain. Supplies the zero-knowledge proof infrastructure for the BNB pools.',
     logoText: 'B',
-    logoColor: '#2E6DB4',
     categories: ['infrastructure', 'privacy'],
-    chains: ['BNB Chain'],
-    status: 'live',
-    assets: 'USDT on BNB',
-    launchDate: 'Early 2025',
-    integration: 'BNB Chain ZK deployment',
   },
   {
     name: 'Ambire Wallet',
@@ -66,13 +64,7 @@ export const ECOSYSTEM_PARTNERS: EcosystemPartner[] = [
     description:
       'Native private transfers powered by the Kohaku SDK. Send through Privacy Pools directly from the Ambire smart-account wallet, no separate app required.',
     logoText: 'A',
-    logoColor: '#6246EA',
     categories: ['wallet'],
-    chains: ['Ethereum'],
-    status: 'building',
-    assets: 'All supported assets',
-    launchDate: 'June 2026',
-    integration: 'Via Kohaku SDK',
   },
   {
     name: 'Cloaked',
@@ -81,13 +73,7 @@ export const ECOSYSTEM_PARTNERS: EcosystemPartner[] = [
     description:
       'Self-custodial wallet with stealth addresses, compliant Privacy Pools integration, and one-click private transfers via "Incognito mode".',
     logoText: 'C',
-    logoColor: '#1a1a2e',
     categories: ['wallet', 'privacy'],
-    chains: ['Ethereum'],
-    status: 'live',
-    assets: 'All supported assets',
-    launchDate: 'May 2026',
-    integration: 'Direct Privacy Pools integration',
   },
   {
     name: 'Veil Cash',
@@ -96,10 +82,7 @@ export const ECOSYSTEM_PARTNERS: EcosystemPartner[] = [
     description:
       'Shielded ETH and USDC pools on Base with compliant deposit screening, gasless relayed transfers, and staking.',
     logoText: 'V',
-    logoColor: '#1F6F5C',
     categories: ['privacy'],
-    chains: ['Base'],
-    status: 'live',
   },
   {
     name: 'zFi',
@@ -107,10 +90,7 @@ export const ECOSYSTEM_PARTNERS: EcosystemPartner[] = [
     url: 'https://zfi.wei.is/',
     description: 'Swap tokens on zFi. The most secure-by-default exchange.',
     logoText: 'Z',
-    logoColor: '#0891B2',
     categories: ['defi'],
-    chains: ['Ethereum'],
-    status: 'live',
   },
   {
     name: 'Shielded ETH',
@@ -119,10 +99,7 @@ export const ECOSYSTEM_PARTNERS: EcosystemPartner[] = [
     description:
       'TVL tracker for Ethereum privacy protocols including Privacy Pools, Railgun, Aztec, and Tornado Cash. Hourly updates in ETH and USD.',
     logoText: 'S',
-    logoColor: '#4D4D4D',
     categories: ['analytics', 'privacy'],
-    chains: ['Ethereum'],
-    status: 'live',
   },
   {
     name: 'WenWithdraw',
@@ -131,10 +108,7 @@ export const ECOSYSTEM_PARTNERS: EcosystemPartner[] = [
     description:
       'Withdrawal-timing tool for Privacy Pools. Analyzes deposit patterns and pool activity to surface optimal anonymity-set windows before you withdraw.',
     logoText: 'W',
-    logoColor: '#006877',
     categories: ['tools', 'privacy'],
-    chains: ['Ethereum'],
-    status: 'live',
   },
   {
     name: 'DefiLlama: Privacy',
@@ -143,17 +117,11 @@ export const ECOSYSTEM_PARTNERS: EcosystemPartner[] = [
     description:
       'Privacy Pools tracked in the DefiLlama privacy category alongside Railgun, Aztec, and Tornado Cash. TVL, chain breakdown, and historical charts.',
     logoText: 'L',
-    logoColor: '#9B59B6',
     categories: ['analytics', 'defi'],
-    chains: ['Ethereum'],
-    status: 'live',
   },
 ];
 
-/**
- * Display order and labels for every category the directory KNOWS about. This
- * is not the chip list: see PARTNER_CATEGORIES below.
- */
+// Category display order and labels.
 const CATEGORY_LABELS: { value: PartnerCategory; label: string }[] = [
   { value: 'wallet', label: 'Wallet' },
   { value: 'defi', label: 'DeFi' },
@@ -165,17 +133,7 @@ const CATEGORY_LABELS: { value: PartnerCategory; label: string }[] = [
   { value: 'infrastructure', label: 'Infra' },
 ];
 
-/**
- * The chips the Ecosystem page offers, derived from the categories partners
- * ACTUALLY carry.
- *
- * QA N-f: selecting "Payments" showed no projects. Nothing was broken about the
- * filter, and no partner was miscategorised: the chip was simply offered for a
- * category no partner has, so it could only ever return nothing. Deriving the
- * list rather than hand-maintaining it means adding a category to CATEGORY_LABELS
- * ahead of its first partner, or removing the last partner in a category, can no
- * longer strand a dead-end chip.
- */
+// Only offer categories with projects, so every filter has results.
 export const PARTNER_CATEGORIES: { value: PartnerCategory | 'all'; label: string }[] = [
   { value: 'all', label: 'All' },
   ...CATEGORY_LABELS.filter((c) => ECOSYSTEM_PARTNERS.some((p) => p.categories.includes(c.value))),

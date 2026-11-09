@@ -11,15 +11,17 @@ describe('detailAmountDigits', () => {
 
   test('digits past the floor are never cut', () => {
     expect(detailAmountDigits('0.000600', 'ETH')).toBe('0.0006');
-    expect(detailAmountDigits('32.476116', 'USDC')).toBe('32.476116');
     expect(detailAmountDigits('0.00001', 'cBTC')).toBe('0.00001');
   });
 
-  test('a stablecoin reads like money', () => {
-    expect(detailAmountDigits('1250.000000', 'USDC')).toBe('1250');
+  test('a stablecoin reads like money: exactly two decimals, cut down (DEV-621)', () => {
+    expect(detailAmountDigits('32.476116', 'USDC')).toBe('32.47');
+    expect(detailAmountDigits('4.918123', 'USDT')).toBe('4.91');
+    expect(detailAmountDigits('1250.000000', 'USDC')).toBe('1250.00');
     expect(detailAmountDigits('1250.500000', 'USDC')).toBe('1250.50');
     expect(detailAmountDigits('1250.5', 'ppUSDC')).toBe('1250.50');
-    expect(detailAmountDigits('0', 'USDT')).toBe('0');
+    expect(detailAmountDigits('0', 'USDT')).toBe('0.00');
+    expect(detailAmountDigits('0.0054', 'USDC')).toBe('<0.01');
   });
 
   test('a negative amount keeps its sign', () => {

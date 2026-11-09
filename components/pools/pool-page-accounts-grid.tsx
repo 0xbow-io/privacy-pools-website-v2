@@ -4,6 +4,7 @@ import { View, Text, Pressable, useWindowDimensions } from 'react-native';
 import { DROPDOWN_SHADOW } from '@/components/ui/web-style-shims';
 import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
+import { FigureText } from '@/components/ui/share-figure';
 import {
   ArrowRightIcon,
   OverflowMenuIcon,
@@ -91,23 +92,23 @@ export function PoolPageAccountsGrid({ poolAccounts, onDeposit, onWithdraw }: Pr
                 <Text className="text-[12px] leading-[12px] text-text-secondary font-pp-regular">My balance</Text>
                 <View className="flex-row items-center gap-[8px]">
                   <Text className="text-[24px] text-text font-pp-bold">
-                    {acct.balance}
+                    <FigureText text={acct.balance} />
                   </Text>
                   {/* One Text node: as two siblings inside a gapped row the
                       amount and its suffix rendered with a stray space between
                       them (DEV-397, "25. 0.40" style artefacts). */}
                   <Text className="text-[12px] leading-[12px] text-text-muted font-pp-regular">
-                    <Text className="font-pp-bold">{acct.pendingValue}</Text> pending
+                    <Text className="font-pp-bold"><FigureText text={acct.pendingValue} /></Text> pending
                   </Text>
                 </View>
                 <Text className="text-[12px] leading-[12px] text-text-secondary font-pp-regular">
-                  {acct.ethBalance}
+                  <FigureText text={acct.ethBalance} />
                 </Text>
               </View>
               <View className="items-end justify-end self-stretch">
                 <View className="flex-row items-center gap-[4px]">
                   <Text className="text-[12px] leading-[12px] text-text-secondary font-pp-regular">Total:</Text>
-                  <Text className="text-[12px] leading-[12px] text-text-secondary font-pp-regular">{acct.total}</Text>
+                  <Text className="text-[12px] leading-[12px] text-text-secondary font-pp-regular"><FigureText text={acct.total} /></Text>
                 </View>
               </View>
             </View>

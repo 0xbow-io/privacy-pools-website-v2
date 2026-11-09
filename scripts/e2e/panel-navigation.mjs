@@ -150,20 +150,25 @@ try {
   assert.equal(await page.getByTestId('home-action-column').count(), 1, 'Top navigation keeps one mounted workspace');
   assert.equal(await visible('home-action-column').getAttribute('data-navigation-probe'), 'original', 'Returning reuses the original form DOM');
   // The same route identity must survive desktop -> mobile -> desktop use.
-  // Jelly tabs expose pointer-disabled accessibility labels over one gesture
-  // surface; tap their coordinates so the real shared gesture receives input.
+  // Bottom bar: Shield / Portfolio / Explore / More, each its own Pressable.
+  // Balances and activity live on Portfolio now, Explore is a bar tab.
   await page.setViewportSize({ width: 390, height: 900 });
-  console.log('mobile → balances');
-  await page.getByTestId('explore-tab-mine').tap({ force: true });
-  await page.waitForURL(url => url.pathname === '/explore/balances');
+  console.log('mobile → Portfolio');
+  await page.getByTestId('explore-tab-portfolio').tap();
+  await page.waitForURL(url => url.pathname === '/portfolio');
   console.log('mobile → Shield');
-  await page.getByTestId('explore-tab-shield').tap({ force: true });
+  await page.getByTestId('explore-tab-shield').tap();
   await page.waitForURL(url => url.pathname === '/');
-  console.log('mobile → More / Explore');
-  await page.getByTestId('explore-tab-more').tap({ force: true });
-  await page.getByTestId('more-nav-Explore').tap();
-  await page.getByTestId('more-drawer').waitFor({ state: 'hidden' });
+  console.log('mobile → Explore');
+  await page.getByTestId('explore-tab-stats').tap();
   await page.waitForURL(url => url.pathname === '/explore');
+  console.log('mobile → More / Ecosystem');
+  await page.getByTestId('explore-tab-more').tap();
+  await page.getByTestId('more-drawer').waitFor({ state: 'visible' });
+  assert.equal(await page.getByTestId('more-nav-Explore').count(), 0, 'Explore is a bar tab, not a More row');
+  await page.getByTestId('more-nav-Ecosystem').tap();
+  await page.getByTestId('more-drawer').waitFor({ state: 'hidden' });
+  await page.waitForURL(url => url.pathname === '/ecosystem');
   console.log('mobile → Shield');
   await page.getByTestId('explore-tab-shield').tap({ force: true });
   await page.waitForURL(url => url.pathname === '/');

@@ -145,12 +145,14 @@ try {
     await page.getByTestId('notification-bell').waitFor({ state: 'visible' });
     await story.waitFor({ state: 'detached' });
     if (width < 930) {
-      await page.getByTestId('explore-tab-mine').waitFor({ state: 'visible' });
-      assert.equal(await page.getByTestId('explore-tab-stats').count(), 0);
+      // Same bar signed in or out: Shield / Portfolio / Explore / More.
+      await page.getByTestId('explore-tab-portfolio').waitFor({ state: 'visible' });
+      await page.getByTestId('explore-tab-stats').waitFor({ state: 'visible' });
+      assert.equal(await page.getByTestId('explore-tab-mine').count(), 0);
       const more = await page.getByTestId('explore-tab-more').boundingBox();
       assert.ok(more);
       await page.mouse.click(more.x + more.width / 2, more.y + more.height / 2);
-      await page.getByTestId('more-drawer').getByText('Explore', { exact: true }).waitFor({ state: 'visible' });
+      await page.getByTestId('more-drawer').getByText('Ecosystem', { exact: true }).waitFor({ state: 'visible' });
     }
     console.log(`PASS ${width}px ${reducedMotion}: CTA cancel/back/connect, restored session, disconnect, header reconnect`);
     await context.close();
