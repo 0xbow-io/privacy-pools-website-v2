@@ -241,8 +241,12 @@ export async function textUntil(page: Page, settled: (text: string) => boolean, 
 
 /** Open a prod-world URL and wait for the app to have rendered. */
 export async function open(page: Page, path: string): Promise<string> {
-  const sep = path.includes('?') ? '&' : '?';
-  await page.goto(`${BASE}${path}${sep}env=prod`, { waitUntil: 'domcontentloaded' });
+  // The query goes before a #fragment: a pay link carries its payload there.
+  const hashAt = path.indexOf('#');
+  const route = hashAt < 0 ? path : path.slice(0, hashAt);
+  const hash = hashAt < 0 ? '' : path.slice(hashAt);
+  const sep = route.includes('?') ? '&' : '?';
+  await page.goto(`${BASE}${route}${sep}env=prod${hash}`, { waitUntil: 'domcontentloaded' });
   return textUntil(page, (t) => /Ethereum|BNB|Citrea|Shield|Portfolio/i.test(t) && t.length > 200, 240_000);
 }
 
