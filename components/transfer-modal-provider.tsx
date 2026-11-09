@@ -1367,7 +1367,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     fromAddress: getSwapProcessorAddress(chainId) ?? connectedAddress ?? null,
   });
   const swapSendPreviewText = swapSendPreview.status === 'ok' && receiveAsset
-    ? `~${formatSwapExitEstimate(swapSendPreview.toAmount, receiveAsset.decimals)}`
+    ? `~${formatSwapExitEstimate(swapSendPreview.toAmount, receiveAsset.decimals, receiveAsset.symbol)}`
     : null;
   // The net/gross rule itself lives in services/relay-fee-split.ts so it is
   // unit-tested rather than only exercised by driving the UI.
