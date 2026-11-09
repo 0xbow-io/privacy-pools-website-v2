@@ -13,8 +13,8 @@
 //
 // Run one: PROBE_URL=http://localhost:8081 bun scripts/e2e/smoke/<name>.smoke.ts
 // Run all: bun scripts/e2e/smoke/run-all.ts
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
-import { existsSync } from 'node:fs';
+import type { Browser, BrowserContext, Page } from 'playwright';
+import { launchChrome } from '../../lib/chrome.mjs';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { installShareNameGuard, type ShareNameGuard } from '../share-name-guard.ts';
 
@@ -83,18 +83,8 @@ export async function launch(tag: string, opts: {
    */
   guardScope?: string;
 } = {}): Promise<Smoke> {
-  // Locally a system Chromium (E2E_CHROMIUM=/usr/bin/chromium) or the pinned
-  // build; in CI `playwright install` puts it where playwright looks.
-  const candidates = [
-    process.env.E2E_CHROMIUM,
-    `${ROOT}/.pw-browsers/chromium-1228/chrome-linux64/chrome`,
-  ].filter(Boolean) as string[];
-  const exe = candidates.find((p) => existsSync(p));
-  const browser = await chromium.launch({
-    headless: true,
-    ...(exe ? { executablePath: exe } : {}),
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  });
+  // Google Chrome stable, sandbox on, version-checked: see scripts/lib/chrome.mjs.
+  const browser = await launchChrome({ headless: true });
   const context = await browser.newContext({
     viewport: opts.viewport ?? { width: 1440, height: 1100 },
     reducedMotion: 'reduce',
