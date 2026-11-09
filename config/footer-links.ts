@@ -15,7 +15,9 @@ export const footerLinks: FooterLink[] = [
   { label: 'Docs', href: DOCS_URL },
   { label: 'X', href: 'https://x.com/0xbowio' },
   { label: 'Telegram', href: SUPPORT_TELEGRAM_URL },
-  { label: 'Support', href: 'https://docs.privacypools.com/support' },
+  // docs.privacypools.com/support is a 404 (user report, 2026-11-03): support
+  // is the public Telegram group, the same place the header and modals send.
+  { label: 'Support', href: SUPPORT_TELEGRAM_URL },
   { label: 'Github', href: 'https://github.com/0xbow-io' },
   { label: 'Terms', href: TERMS_ROUTE },
   { label: 'Privacy', href: PRIVACY_ROUTE },

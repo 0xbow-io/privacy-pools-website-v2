@@ -96,7 +96,7 @@ import {
 } from '@/services/session-payment-requests';
 import { bumpPaymentRequestRevision } from '@/services/payment-request-revision';
 import { registerDebugSnapshot } from '@/services/debug-snapshots';
-import { toImportableNote, type StellarClaimNote } from '@/services/stellar/stellar-claim';
+import { blindClaimNote, blindNoteAddressHash, isUnregisteredRecipientError, toImportableNote, type StellarClaimNote } from '@/services/stellar/stellar-claim';
 import { findSentClaim, readSentClaims, saveSentClaim, SENT_CLAIMS_BASE_KEY, setSentClaimTx } from '@/services/stellar/stellar-sent-claims';
 import { isStellarAccountAddress, requestStates, type StellarRequestState } from '@/services/stellar/stellar-request';
 import type { StellarSdkPaymentRequest } from '@/services/payment-request-codec';
@@ -475,7 +475,11 @@ class StellarAccount {
     ]);
     // A one-time claim whose send was never seen to confirm (the tab died
     // mid-send) gets its tx hash from the outputs, so its row can rebuild the link.
-    healSentClaims(this.snapshot.address, transacts);
+    healSentClaims(this.snapshot.address, [
+      ...transacts,
+      // A blind deposit (DEV-499) has one output: its claim note.
+      ...deposits.map((d) => ({ txHash: d.txHash, outputCommitments: [d.outputCommitment] })),
+    ]);
     // Sends and withdrawals, matched by nullifier against the notes in hand.
     // Local only: the key never leaves memory and nothing new is requested.
     const nullifyingKey = this.nullifyingKey;
@@ -599,9 +603,19 @@ class StellarAccount {
    * `recipient` (a registered Stellar account) makes this a deposit FOR that
    * account: the SDK reads its viewing key from the keystore, encrypts the
    * note to it, and the recipient discovers it on their own sync. An
-   * unregistered recipient is refused before anything is signed.
+   * unregistered recipient gets a blind deposit instead (the SDK's
+   * noteAddressHash-only form, as on EVM): the note secret goes to them in a
+   * one-time claim link, saved for the sender (stellar-sent-claims.ts)
+   * before anything is signed.
    */
-  deposit(params: { amount: bigint; recipient?: string; onStage?: StageListener; shouldContinue?: () => boolean }) {
+  deposit(params: {
+    amount: bigint;
+    recipient?: string;
+    onStage?: StageListener;
+    shouldContinue?: () => boolean;
+    /** Blind deposit only: the link's notes once saved, before signing. */
+    onClaimReady?: (notes: StellarClaimNote[]) => void;
+  }) {
     return this.enqueue(async () => {
       const { onStage } = params;
       // Pinned at the start: an account switch mid-flow must not move the
@@ -617,22 +631,60 @@ class StellarAccount {
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       onStage?.('proving');
       const base = { tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId, value: toHex(params.amount) };
-      const prepared = params.recipient
-        // The field name is EVM-flavoured; the Stellar SDK resolves the
-        // recipient's viewing key from the Stellar keystore by this G-address.
-        ? await session.prepareDepositFor({ ...base, discoveryData: { evmAddress: params.recipient as StellarAddress } })
-        : await session.prepareDeposit(base);
+      let prepared: Awaited<ReturnType<StellarPoolSession['prepareDeposit']>>;
+      let claim: { id: string; notes: StellarClaimNote[] } | null = null;
+      if (!params.recipient) {
+        prepared = await session.prepareDeposit(base);
+      } else {
+        try {
+          // The field name is EVM-flavoured; the Stellar SDK resolves the
+          // recipient's viewing key from the Stellar keystore by this G-address.
+          prepared = await session.prepareDepositFor({ ...base, discoveryData: { evmAddress: params.recipient as StellarAddress } });
+        } catch (error) {
+          if (!isUnregisteredRecipientError(error)) throw error;
+          // No viewing key: a blind deposit. The SDK made that same lookup
+          // already, so going blind sends nothing new.
+          const sdk = await loadStellarSdk();
+          const noteSecret = new sdk.StellarCryptoService().generateSecret() as Hex;
+          const hash = await (this.poseidon ??= sdk.PoseidonHashService.create());
+          const noteAddressHash = blindNoteAddressHash(
+            hash,
+            new sdk.StellarAddressFieldConverter().toField(params.recipient as StellarAddress) as Hex,
+            noteSecret,
+          );
+          prepared = await session.prepareDepositFor({ ...base, noteAddressHash });
+          const notes = [blindClaimNote(prepared.pendingNote, { noteAddressHash, noteSecret, recipient: params.recipient })];
+          claim = { id: `${Date.now().toString(36)}-${notes[0].commitment.slice(-8)}`, notes };
+        }
+      }
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       this.assertStillBound(generation);
+      if (claim && params.recipient) {
+        // Saved before signing: the link is the recipient's only way to the
+        // money. If this save throws, nothing is sent.
+        saveSentClaim(sentClaimsStorage(), SENT_CLAIMS_KEY, {
+          id: claim.id,
+          kind: 'deposit',
+          sender: address,
+          recipient: params.recipient,
+          amount: params.amount.toString(),
+          notes: claim.notes,
+          txHash: null,
+          createdAt: Date.now(),
+        });
+        params.onClaimReady?.(claim.notes);
+      }
       onStage?.('signing');
       // One transaction (`deposit_with_label`): the ASP label cannot fail on its own.
       const receipt = await session.executeDeposit(prepared);
       if (!receipt.status) throw new Error('The deposit transaction failed on-chain.');
       const txHash = receipt.txHash as string;
+      if (claim) setSentClaimTx(sentClaimsStorage(), SENT_CLAIMS_KEY, claim.id, txHash);
       onStage?.('syncing');
       await this.refreshLocal(session, address);
       return {
         txHash,
+        claimNotes: claim ? claim.notes.map((n) => ({ ...n, txHash })) : null,
         commitment: prepared.pendingNote.commitment,
         label: prepared.pendingNote.label,
         labelRegistered: true,
@@ -1280,6 +1332,12 @@ function sentClaimsStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
 /** This account's saved claim for one of its sends, if it made one (for the activity row). */
 export function findStellarSentClaim(sender: string, txHash: string) {
   return findSentClaim(readSentClaims(sentClaimsStorage(), SENT_CLAIMS_KEY), sender, { txHash });
+}
+
+/** This account's confirmed blind deposits for others (DEV-499), for their activity rows. */
+export function listStellarSentDeposits(sender: string) {
+  return readSentClaims(sentClaimsStorage(), SENT_CLAIMS_KEY)
+    .filter((c) => c.kind === 'deposit' && c.sender === sender && !!c.txHash);
 }
 
 function healSentClaims(sender: string | null, transacts: readonly { txHash: unknown; outputCommitments: readonly unknown[] }[]) {

@@ -20,6 +20,7 @@ import { Footer } from '@/components/ui/footer';
 import { HeroHeading } from '@/components/home/hero-heading';
 import { LandingEntranceStyles } from '@/components/home/landing-entrance';
 import { ActionHub } from '@/components/home/action-hub';
+import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 import { LatestActivity } from '@/components/home/latest-activity';
 import { HomePools } from '@/components/home/home-pools';
 import { StatBand } from '@/components/home/stat-band';
@@ -765,15 +766,17 @@ export function HomeScreen() {
                     ],
                   } : undefined}
                 >
-                  <ActionHub
-                    landing={!hasAccount}
-                    onEngage={() => {
-                      if (introForced) dismissIntro();
-                    }}
-                    onInputFocus={onHubInputFocus}
-                    onInputBlur={onHubInputBlur}
-                    onTargetHeight={hubFitEnabled ? onHubTargetHeight : undefined}
-                  />
+                  <HubErrorBoundary>
+                    <ActionHub
+                      landing={!hasAccount}
+                      onEngage={() => {
+                        if (introForced) dismissIntro();
+                      }}
+                      onInputFocus={onHubInputFocus}
+                      onInputBlur={onHubInputBlur}
+                      onTargetHeight={hubFitEnabled ? onHubTargetHeight : undefined}
+                    />
+                  </HubErrorBoundary>
                 </View>
               </View>
               {doorsRow}

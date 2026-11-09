@@ -16,8 +16,8 @@ test('share spendable labels use the underlying display boundary', () => {
 });
 test('Available, Balance, exceeds and single-proof ceilings use the spendable formatter', () => {
   const withdraw = read('components/withdraw-modal-provider.tsx');
-  expect(withdraw).toContain('Available: ${spendableLabel(');
-  expect(withdraw).toContain("Balance: {spendabilityBlocked ? '—' : spendableLabel(");
+  expect(withdraw).toContain('Available: ${groupThousands(spendableLabel(');
+  expect(withdraw).toContain("Balance: {spendabilityBlocked ? '—' : groupThousands(spendableLabel(");
   expect(withdraw).toContain('Amount exceeds your shielded balance (${spendableLabel(');
   expect(withdraw).toContain('One withdrawal can spend ${spendableLabel(');
   expect(read('components/home/action-hub.tsx')).toContain('spendableBalanceLabel(withdrawSpendableExact');
@@ -30,5 +30,7 @@ test('plain ceiling and Send shortfall fallbacks preserve their previous exact/f
   }
   const send = read('components/transfer-modal-provider.tsx');
   expect(send).toContain(': tokenAmountLabel(formatShortfallAmount(v, selectedDecimals, up, selectedSymbol), selectedSymbol)');
-  expect(send).toContain(': tokenAmountLabel(capText(maxSpendableWei, enteredAmountWei, selectedDecimals), selectedSymbol)');
+  // The floored cap goes through noteFigure (capText inside), at the live rate for a share.
+  expect(send).toContain('capText(v, cap.enteredWei, d)');
+  expect(send).toContain('noteFigure(maxSpendableWei, { enteredWei: enteredAmountWei })');
 });

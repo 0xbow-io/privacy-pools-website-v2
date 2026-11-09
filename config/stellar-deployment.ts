@@ -1,3 +1,5 @@
+import { ARTIFACTS_BASE } from '@/config/artifacts';
+
 /**
  * Stellar testnet deployment - single source of truth for deployed contract IDs.
  *
@@ -104,7 +106,7 @@ export const STELLAR_XLM = {
  */
 export const STELLAR_ARTIFACT_BASE_URL = env(
   process.env.EXPO_PUBLIC_STELLAR_ARTIFACT_BASE_URL,
-  '/artifacts',
+  ARTIFACTS_BASE,
 );
 
 /**

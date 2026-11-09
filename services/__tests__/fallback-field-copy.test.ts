@@ -35,16 +35,16 @@ describe('the fallback copy and its field are gated together', () => {
     expect(source).not.toContain('point it somewhere unlinked');
   });
 
-  test('nothing points at an address that may not be rendered', () => {
-    // The old copy said "the address below is where that would land" whether or
-    // not anything was below it. The phrase may still exist, but only inside a
-    // branch on whether the field is there.
-    const phrase = 'the address below is where that would land';
-    expect(source).toContain(phrase);
-    const at = source.indexOf(phrase);
-    const gate = source.lastIndexOf('showRecipientField ?', at);
-    expect(gate).toBeGreaterThan(-1);
-    expect(at - gate).toBeLessThan(200);
+  test('the summary never points at a field that may be absent', () => {
+    // The compact summary does not refer to spatial layout; the exact public
+    // fallback address is shown at Review, before confirming the route.
+    const start = source.indexOf('const note = crossChainReshield');
+    const end = source.indexOf('return tight ?', start);
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    const summary = source.slice(start, end);
+    expect(summary).not.toMatch(/address (below|above)/);
+    expect(summary).toContain('public fallback wallet');
   });
 
   test('the field itself is not gated on anything else', () => {

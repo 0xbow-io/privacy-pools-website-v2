@@ -67,6 +67,7 @@ import {
   settlePendingRelayByReceipt,
 } from '@/services/pending-relays-store';
 import { alignLogScanStart } from '@/services/log-scan-alignment';
+import { correctKeystoreInteractor, getKeystoreCorrection } from '@/services/keystore-root-guard';
 import { getChainConfig } from '@/config/chains';
 import { ASP_PUBLIC_KEY, ASP_URL, LEGACY_CONFIG } from '@/config/env';
 import { getRelayerSignerAddress, getTransferProcessorAddress } from '@/config/relayer';
@@ -83,6 +84,8 @@ import { resolveConfiguredEntrypoint } from '@/services/pool-entrypoint';
 import { emitTransactProofGenerated } from '@/services/proof-progress';
 import { recordAspBlockTimestamps } from '@/services/asp-block-timestamps';
 import { FetchHTTPClient } from '@/services/egress-http-client';
+import { ARTIFACTS_VERSION } from '@/config/artifacts';
+import { isStaleAssetResponse, reportStaleAssets, STALE_ASSETS_ERROR } from '@/services/stale-assets';
 
 // ---------------------------------------------------------------------------
 // Primitive / stateless services
@@ -415,6 +418,11 @@ class RemoteCircuitArtifacts implements ICircuitArtifacts {
   private async fetchBinary(url: string): Promise<Uint8Array> {
     const response = await fetch(url);
     if (!response.ok) {
+      // A versioned URL that 404s is a tab older than the deployed circuits: say so.
+      if (isStaleAssetResponse({ versioned: ARTIFACTS_VERSION !== '', status: response.status })) {
+        reportStaleAssets();
+        throw new Error(`${STALE_ASSETS_ERROR} (${response.status})`);
+      }
       throw new Error(`Failed to fetch circuit artifact: ${response.status} ${url}`);
     }
     const buffer = await response.arrayBuffer();
@@ -633,10 +641,16 @@ function createASPRegistryInteractorFor(
   if (!registryAddress) {
     throw new Error(`Missing ASP registry address for chain ${chainId}`);
   }
-  return new ASPRegistryInteractor({
+  const live = new ASPRegistryInteractor({
     rpcInteractor: createRPCInteractor(chainId),
     contractAddress: registryAddress,
   });
+  // The root read goes through the leaf cache so a root-mismatch re-sync can
+  // answer it from the read the first attempt made (services/bulk-label-cache.ts).
+  return {
+    getLatestASPRoot: () => approvedLabelCache.chainRoot(chainId, () => live.getLatestASPRoot()),
+    getLatestAssociationSetData: () => live.getLatestAssociationSetData(),
+  };
 }
 
 export async function createASPClient(
@@ -971,6 +985,11 @@ class ChunkedRPCInteractor implements IRPCInteractor {
     this.rangeWindow = rangeWindowForChain(chainId, maxBlockRange);
   }
 
+  /** The chain this interactor reads. Keys the held keystore correction (the keystore address alone is shared across chains). */
+  getChainId(): number {
+    return this.chainId;
+  }
+
   // PRIVACY choke point. The vendored SDK still issues per-note reads from
   // inside note discovery (resolveCommitmentTimestamp for every decrypted note),
   // addNotes on the reshield path, and recoverRejectedNotes (spentNullifiers per
@@ -1126,6 +1145,28 @@ class ChunkedRPCInteractor implements IRPCInteractor {
     toBlock: bigint,
   ): Promise<{ logs: GetLogsResult; lastBlock: bigint } | null> {
     try {
+      // The keystore leaves the grid REBUILT from the chain win over the ASP's
+      // copy (services/keystore-root-guard.ts): they reproduce the keystore's
+      // current root, and the ASP's copy did not. Their coverage is the head
+      // they were verified at, so the sweep above them is only the blocks since.
+      if (kind === 'keystore-leaves') {
+        const correction = getKeystoreCorrection(this.chainId, this.keystoreAddress);
+        if (correction) {
+          const logs: GetLogsResult = [];
+          for (const event of correction.events) {
+            if (event.blockNumber > toBlock || event.blockNumber < fromBlock) continue;
+            logs.push({
+              eventName: event.kind === 'inserted' ? 'LeafInserted' : 'LeafUpdated',
+              args: { _newLeaf: event.leaf, _root: event.root, _leafIndex: event.leafIndex },
+              blockNumber: ('0x' + event.blockNumber.toString(16)) as Hex,
+              transactionHash: '0x' as Hex,
+            } as DecodedLog);
+          }
+          const covered = correction.head;
+          const lastBlock = covered < fromBlock ? fromBlock - 1n : covered < toBlock ? covered : toBlock;
+          return { logs, lastBlock };
+        }
+      }
       const entrypoint = await resolveConfiguredEntrypoint(this.chainId);
       if (!entrypoint) return null;
       const held = await loadPoolLeaves(this.chainId, { entrypoint });
@@ -1357,10 +1398,14 @@ export function createKeystoreInteractor(
   keystoreAddress: Address,
   fromBlock?: bigint,
 ): IKeystoreInteractor {
-  return createEvmKeystoreInteractor({
+  const interactor = createEvmKeystoreInteractor({
     rpcInteractor: withDefaultFromBlock(rpc, fromBlock),
     contractAddress: keystoreAddress,
   });
+  // The correction is keyed by chain and address. An rpc that cannot name its
+  // chain gets no correction rather than a guess.
+  const chainId = (rpc as { getChainId?: () => number }).getChainId?.();
+  return chainId === undefined ? interactor : correctKeystoreInteractor(interactor, chainId, keystoreAddress);
 }
 
 // SDK workaround: reconcile the NoteManager state against the on-chain

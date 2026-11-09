@@ -1,3 +1,4 @@
+import { paymentRequestRecipientLabel } from '@/services/payment-request-disclosure';
 import { payRelayUnknownMessage } from '@/services/pay-relay-guard';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -483,13 +484,7 @@ function EvmPayRequestScreen() {
               </View>
               <View className="flex-row items-center justify-between gap-[12px]">
                 <Text className="font-pp-medium text-[12px] text-text-muted">Recipient</Text>
-                {/* True again as of 2026-08-31: the share link no longer carries
-                    recipientAddress. It cannot be recovered from what remains
-                    either, since the address is bound inside
-                    noteAddressHash = Poseidon(ownerAddress, noteSecret) and the
-                    secrets ship zeroed. A SIGNED request is the exception and
-                    names its signer in the rows below, by the seller's choice. */}
-                <Text className="font-pp-medium text-[12px] text-right text-text-secondary">hidden (double-blind)</Text>
+                <Text className="font-pp-medium text-[12px] text-right text-text-secondary">{paymentRequestRecipientLabel(request)}</Text>
               </View>
               <View className="flex-row items-center justify-between gap-[12px]">
                 <Text className="font-pp-medium text-[12px] text-text-muted">Status</Text>
@@ -535,7 +530,7 @@ function EvmPayRequestScreen() {
                   ? 'Request expired'
                   : signatureStatus === 'valid'
                   ? `Signed by ${formatRequestCode(isSignablePaymentRequest(request) ? request.signature?.signer : null)}`
-                  : signatureStatus === 'invalid' ? 'Signature failed' : 'Double-blind payment'}
+                  : signatureStatus === 'invalid' ? 'Signature failed' : 'Private payment request'}
               </Text>
               <Text className="font-pp-regular text-[12px] leading-[18px] text-text-secondary">{signatureNotice}</Text>
             </View>

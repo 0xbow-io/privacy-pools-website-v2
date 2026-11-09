@@ -174,7 +174,7 @@ function TorSection({
                 color={torEnabled ? colors.buttonPrimary : colors.textMuted}
               />
               <Text className="flex-1 font-pp-regular text-[12px] leading-[17px] text-text">
-                Send RPC calls through anon-rpc
+                Use anon-rpc
               </Text>
             </Pressable>
 
@@ -323,15 +323,11 @@ export function CustomRpcModalProvider({ children }: { children: React.ReactNode
   // before this option existed.
   const [persist, setPersist] = useState(ACTIVE_CUSTOM_RPC_PERSISTENCE === 'local');
   const [formError, setFormError] = useState<string | null>(null);
-  // Whether the per-chain endpoint section is shown. False only when the form
-  // was opened as "Connect with Tor" and nothing is configured, so that entry
-  // point is about one setting rather than a form with one relevant row.
-  const [showEndpoints, setShowEndpoints] = useState(true);
-  // Opened from "Connect with Tor": Tor leads and the endpoint fields follow
-  // it. Ordering matters more than it looks, because the endpoint section is
-  // long enough to push Tor off the bottom of a short window, which is how the
-  // one setting the user came for ends up below the one they did not.
-  const [torFirst, setTorFirst] = useState(false);
+  // Empty custom endpoints are advanced settings. Once revealed they stay
+  // visible, so a draft or warning can never be hidden while it still saves.
+  const [showEndpoints, setShowEndpoints] = useState(false);
+  // Routing leads in the shared form; custom endpoints follow only when needed.
+  const [torFirst, setTorFirst] = useState(true);
 
   // Tor. Seeded from what is in force this page load, like the rows above.
   const [torEnabled, setTorEnabled] = useState(ACTIVE_TOR_SETTINGS.enabled);
@@ -417,13 +413,11 @@ export function CustomRpcModalProvider({ children }: { children: React.ReactNode
   const openCustomRpcModal = useCallback((options?: { torOnly?: boolean }) => {
     torProbeAbort.current?.abort();
     torProbeAbort.current = null;
-    // Opened from "Connect with Tor", the endpoint rows start hidden. Anyone
-    // who already has an endpoint saved sees them anyway: hiding a setting
-    // that is in force would misrepresent what the app is doing.
-    // A device has no custom endpoint setting (it is web-only localStorage),
-    // so the form there is the anon-rpc section alone.
-    setTorFirst(TOR_ON_DEVICE || !!options?.torOnly);
-    setShowEndpoints(!TOR_ON_DEVICE && (!options?.torOnly || editableChains().some(({ chainId }) => !!activeCustomRpcUrl(chainId))));
+    // Reveal existing custom settings; native has only the routing controls.
+    setTorFirst(true);
+    // Include saved overrides outside this build's editable chain list, too:
+    // they still affect the account scan and must keep the reset reachable.
+    setShowEndpoints(!TOR_ON_DEVICE && Object.keys(previewCustomRpcMany({})).length > 0);
     const next: Record<number, RowState> = {};
     for (const { chainId } of editableChains()) {
       const saved = activeCustomRpcUrl(chainId);
@@ -844,10 +838,8 @@ export function CustomRpcModalProvider({ children }: { children: React.ReactNode
               into the bug it replaced.
             */}
             <View className="shrink-0 flex-row items-center justify-between px-[20px] pb-[14px] pt-[20px]">
-              {/* Named after the door the user came through. Calling it
-                  Custom RPC after they pressed "Connect with Tor" reads as
-                  the wrong dialog. */}
-              <Text className="font-pp-bold text-[18px] text-text">{torFirst ? 'Connect with anon-rpc' : 'Custom RPC'}</Text>
+              {/* One form for routing and optional custom endpoints. */}
+              <Text className="font-pp-bold text-[18px] text-text">Connection settings</Text>
               <Pressable onPress={closeCustomRpcModal} hitSlop={8} testID="custom-rpc-close">
                 {/* nw-keep(data-color): close glyph color is the text-secondary theme token into the vector-icon sink */}
                 <Ionicons name="close" size={22} color={colors.textSecondary} />
@@ -867,7 +859,7 @@ export function CustomRpcModalProvider({ children }: { children: React.ReactNode
             >
               {torFirst && (
                 <Text className="font-pp-regular text-[13px] leading-[18px] text-text-muted">
-                  Send this app&apos;s calls through anon-rpc. This works with our endpoints, so there is nothing else to set up.
+                  Choose how this app connects. Your wallet uses its own connection.
                 </Text>
               )}
 
@@ -885,7 +877,7 @@ export function CustomRpcModalProvider({ children }: { children: React.ReactNode
 
               {showEndpoints && (
               <Text className="font-pp-regular text-[13px] leading-[18px] text-text-muted">
-                Send this app&apos;s calls to your own nodes instead of ours. One endpoint per network. Once you set one, networks left empty are excluded from the account scan. Clear every endpoint to use ours again.
+                Custom RPCs change where app reads go. Set one per network; empty networks are excluded. Clear all to use our RPCs.
               </Text>
               )}
 
@@ -903,7 +895,7 @@ export function CustomRpcModalProvider({ children }: { children: React.ReactNode
                 {/* nw-keep(data-color): hint glyph color is the text-muted theme token into the vector-icon sink */}
                 <Ionicons name="time-outline" size={14} color={colors.textMuted} />
                 <Text className="flex-1 font-pp-regular text-[12px] leading-[17px] text-text-muted" testID="custom-rpc-speed-notice">
-                  We recommend using your own RPC. On a free public endpoint, expect your account to take around 20 minutes to load.
+                  Free public RPCs can make account loading much slower.
                 </Text>
               </View>
 
@@ -1020,22 +1012,19 @@ export function CustomRpcModalProvider({ children }: { children: React.ReactNode
               )}
               </>)}
 
-              {/* The way back to the endpoint fields from the Tor-only view.
-                  One way only: once they are showing, hiding them again would
-                  put a draft the user has typed out of sight while it still
-                  saves. */}
+              {/* One-way disclosure: a draft stays visible once editing starts. */}
               {!showEndpoints && !TOR_ON_DEVICE && (
                 <Pressable
                   className="flex-row items-center gap-[10px]"
                   onPress={() => setShowEndpoints(true)}
                   testID="custom-rpc-show-endpoints"
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: false }}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: false }}
                 >
                   {/* nw-keep(data-color): checkbox glyph color is a theme token into the vector-icon sink */}
-                  <Ionicons name="square-outline" size={18} color={colors.textMuted} />
+                  <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
                   <Text className="flex-1 font-pp-regular text-[12px] leading-[17px] text-text">
-                    Also send to my own endpoints instead of ours
+                    Custom RPCs · advanced
                   </Text>
                 </Pressable>
               )}
@@ -1053,7 +1042,7 @@ export function CustomRpcModalProvider({ children }: { children: React.ReactNode
                 {/* nw-keep(data-color): warning glyph color is the text-muted theme token into the vector-icon sink */}
                 <Ionicons name="eye-outline" size={14} color={colors.textMuted} />
                 <Text className="flex-1 font-pp-regular text-[12px] leading-[17px] text-text-muted">
-                  Whoever runs an endpoint sees the requests this app makes from your browser.
+                  RPC operators see app requests. anon-rpc changes the route, not the endpoint.
                 </Text>
               </View>
               )}
