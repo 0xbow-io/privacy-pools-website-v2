@@ -10,8 +10,8 @@
 import { createPublicClient, fallback, parseAbi } from 'viem';
 import { getChainConfig } from '@/config/chains';
 import { policedHttp } from '@/services/egress-transport';
-import { alignLogScanStart } from '@/services/log-scan-alignment';
-import { createRangeWindow, sweepLogRange } from '@/services/rpc-log-chunking';
+
+
 import { resolveConfiguredEntrypoint } from '@/services/pool-entrypoint';
 import { loadPoolLeaves } from '@/services/snapshot-source';
 import {
@@ -45,9 +45,10 @@ export async function refreshKeystoreRoot(chainId: number): Promise<string> {
   if (!chain || !keystore) return 'no keystore';
   const fromBlock = chain.contracts?.keystoreFromBlock ?? chain.contracts?.fromBlock ?? 0n;
   const client = createPublicClient({
-    transport: fallback((chain.rpcUrls ?? [chain.rpcUrl]).map((url) => policedHttp(url))),
+    transport: fallback((chain.rpcUrls ?? [chain.rpcUrl]).map((url) => policedHttp(url, { retryCount: 0 }))),
   });
-  const window = createRangeWindow(chain.logsMaxBlockRange);
+  // The chain's own cap where it has one (Citrea: 1000), else a wide window that the guard narrows once or twice on a rejection.
+  const window = chain.logsMaxBlockRange ?? 100_000n;
 
   const verdict: KeystoreRootVerdict = await checkKeystoreRoot({
     chainId,
@@ -66,13 +67,11 @@ export async function refreshKeystoreRoot(chainId: number): Promise<string> {
         return null;
       }
     },
+    windowBlocks: window,
+    // One call per window; the guard owns chunking, the budget and the stop
+    // on a rejection or a rate limit.
     getEvents: async (from, to) => {
-      const logs = await sweepLogRange({
-        from: alignLogScanStart(from, fromBlock),
-        to,
-        window,
-        fetch: (start, end) => client.getLogs({ address: keystore, events: EVENTS, fromBlock: start, toBlock: end }),
-      });
+      const logs = await client.getLogs({ address: keystore, events: EVENTS, fromBlock: from, toBlock: to });
       const events: KeystoreEvent[] = [];
       for (const log of logs) {
         const args = log.args as { _newLeaf?: bigint; _root?: bigint; _leafIndex?: bigint };

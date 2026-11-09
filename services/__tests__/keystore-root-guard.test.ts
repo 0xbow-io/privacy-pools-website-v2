@@ -174,6 +174,100 @@ describe('keystore root health check', () => {
     expect((await checkKeystoreRoot(d)).status).toBe('repaired');
   });
 
+  test('(4) a held repair that still matches is served again for a fresh snapshot with the same lag: no log read, no rebuild', async () => {
+    const first = deps({ rows: staleRows() });
+    await checkKeystoreRoot(first.deps);
+    for (let i = 0; i < 5; i += 1) {
+      const again = deps({ rows: staleRows() });
+      expect(await checkKeystoreRoot(again.deps)).toEqual({ status: 'repaired', tier: 'held' });
+      expect(again.counters).toEqual({ head: 1, root: 1, events: 0 });
+    }
+  });
+
+  test('(2) one repair attempt per chain per 10 minutes covers both tiers and failures', async () => {
+    let clock = 1_000_000;
+    const lossy = (from: bigint, to: bigint) => chainEvents
+      .filter((e) => e.blockNumber >= from && e.blockNumber <= to && e.leafIndex !== 362n);
+    const run = deps({ rows: staleRows(), logs: lossy });
+    run.deps.now = () => clock;
+    expect((await checkKeystoreRoot(run.deps)).status).toBe('unrepaired');
+    const spent = run.counters.events;
+    expect(spent).toBeGreaterThan(0);
+    // Grid instants every 2 minutes for the next 9: no further log call at all.
+    for (let i = 0; i < 4; i += 1) {
+      clock += 2 * 60_000;
+      expect(await checkKeystoreRoot(run.deps)).toEqual({ status: 'unrepaired', reason: 'repair is backing off' });
+    }
+    expect(run.counters.events).toBe(spent);
+  });
+
+  test('(2) failed repairs back off: 20 min after the first, 40 after the second, capped at an hour', async () => {
+    let clock = 5_000_000;
+    const lossy = (from: bigint, to: bigint) => chainEvents
+      .filter((e) => e.blockNumber >= from && e.blockNumber <= to && e.leafIndex !== 362n);
+    const run = deps({ rows: staleRows(), logs: lossy });
+    run.deps.now = () => clock;
+    const attempt = async (afterMs: number) => {
+      clock += afterMs;
+      const before = run.counters.events;
+      await checkKeystoreRoot(run.deps);
+      return run.counters.events - before;
+    };
+    expect(await attempt(0)).toBeGreaterThan(0);
+    expect(await attempt(19 * 60_000)).toBe(0);
+    expect(await attempt(2 * 60_000)).toBeGreaterThan(0);
+    expect(await attempt(39 * 60_000)).toBe(0);
+    expect(await attempt(2 * 60_000)).toBeGreaterThan(0);
+    expect(await attempt(59 * 60_000)).toBe(0);
+    expect(await attempt(2 * 60_000)).toBeGreaterThan(0);
+  });
+
+  test('(3) a chain with a 1000-block log cap and a multi-million block history is refused before any request', async () => {
+    const { deps: d, counters } = deps({ rows: null });
+    d.heldRows = async () => chainEvents.slice(0, 100).map(toRow);
+    d.windowBlocks = 1_000n;
+    d.fromBlock = 1_000_000n;
+    d.readHead = async () => 4_100_000n;
+    const verdict = await checkKeystoreRoot(d);
+    expect(verdict.status).toBe('unrepaired');
+    // The tail alone would need ~3000 windows: nothing is sent.
+    expect(counters.events).toBe(0);
+  });
+
+  test('(3) a repair never sends more log calls than its budget, even when every call succeeds empty', async () => {
+    let calls = 0;
+    const { deps: d } = deps({ rows: staleRows() });
+    d.getEvents = async () => { calls += 1; return []; };
+    d.windowBlocks = 10_000n;
+    d.maxRequestsPerRepair = 7;
+    d.fromBlock = 25_000_000n;
+    d.readHead = async () => 25_050_000n;
+    await checkKeystoreRoot(d);
+    expect(calls).toBeLessThanOrEqual(7);
+  });
+
+  test('(3) a rate limit stops the repair after that one call and backs off', async () => {
+    let calls = 0;
+    const { deps: d } = deps({ rows: staleRows() });
+    d.getEvents = async () => { calls += 1; throw Object.assign(new Error('HTTP 429 too many requests'), { status: 429 }); };
+    const verdict = await checkKeystoreRoot(d);
+    expect(verdict.status).toBe('unrepaired');
+    expect(calls).toBe(1);
+  });
+
+  test('(3) a range cap error is learned once and the walk goes on within the budget', async () => {
+    let calls = 0;
+    const { deps: d } = deps({ rows: staleRows() });
+    d.windowBlocks = 100_000n;
+    d.getEvents = async (from, to) => {
+      calls += 1;
+      if (to - from + 1n > 20_000n) throw new Error('query exceeds max block range 20000');
+      return chainEvents.filter((e) => e.blockNumber >= from && e.blockNumber <= to);
+    };
+    expect((await checkKeystoreRoot(d)).status).toBe('repaired');
+    expect(calls).toBeLessThanOrEqual(8);
+  });
+
   test('with no snapshot held the check changes nothing', async () => {
     const { deps: d, counters } = deps({ rows: null });
     expect((await checkKeystoreRoot(d)).status).toBe('unchecked');

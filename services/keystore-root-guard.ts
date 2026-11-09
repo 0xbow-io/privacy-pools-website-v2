@@ -34,6 +34,7 @@
  */
 
 import { alignLogScanStart } from '@/services/log-scan-alignment';
+import { classifyLimitError, isRateLimitError, parseBlockRangeCap } from '@/services/rpc-log-chunking';
 
 export type KeystoreEvent = {
   kind: 'inserted' | 'updated';
@@ -212,13 +213,21 @@ export type KeystoreRootDeps = {
   readRoot: (block: bigint) => Promise<bigint>;
   /** The keystore leaf rows the feed grid holds, or null when none are held. Never a request. */
   heldRows: () => Promise<readonly KeystoreLeafRowLike[] | null>;
-  /** LeafInserted / LeafUpdated events over [from, to], inclusive, from the chain. */
+  /**
+   * ONE eth_getLogs call for LeafInserted / LeafUpdated over [from, to],
+   * inclusive. No retry, no chunking: the guard owns both, and counts every
+   * call against the repair's budget.
+   */
   getEvents: (from: bigint, to: bigint) => Promise<KeystoreEvent[]>;
+  /** The widest window one getEvents call may span. The chain's own cap where it has one. */
+  windowBlocks?: bigint;
+  /** Hard cap on getEvents calls for one repair, both tiers together. Default 60. */
+  maxRequestsPerRepair?: number;
   /** The Merkle root of the leaves, as the proof builds it. */
   computeRoot: (leaves: readonly `0x${string}`[]) => Promise<bigint>;
   now?: () => number;
-  /** Minimum gap between whole-history rebuilds. Default 10 minutes. */
-  fullRebuildCooldownMs?: number;
+  /** Minimum gap between repair attempts on a chain, success or not. Default 10 minutes. */
+  repairCooldownMs?: number;
   onDecision?: (line: string) => void;
 };
 
@@ -228,12 +237,81 @@ export type KeystoreRootVerdict =
   | { status: 'unrepaired'; reason: string }
   | { status: 'unchecked'; reason: string };
 
-const DEFAULT_FULL_COOLDOWN_MS = 10 * 60_000;
-const lastFullAttempt = new Map<number, number>();
+const DEFAULT_REPAIR_COOLDOWN_MS = 10 * 60_000;
+const MAX_BACKOFF_MS = 60 * 60_000;
+const DEFAULT_MAX_REQUESTS = 60;
+const DEFAULT_WINDOW_BLOCKS = 100_000n;
+
+type ChainRepairState = {
+  /** No repair attempt, of either tier, before this instant. */
+  nextAttemptAt: number;
+  /** Consecutive failed repairs: each doubles the wait, up to an hour. */
+  failures: number;
+  /** A window the chain's RPC proved it accepts, kept across repairs. */
+  windowBlocks?: bigint;
+};
+
+// On globalThis like the correction store: the web bundle can evaluate this
+// module more than once, and a second instance with its own empty map is a
+// second chance to hit the provider.
+const STATE_FLAG = '__ppv2KeystoreRepairState';
+
+function repairStates(): Map<number, ChainRepairState> {
+  const holder = globalThis as Record<string, unknown>;
+  const existing = holder[STATE_FLAG] as Map<number, ChainRepairState> | undefined;
+  if (existing) return existing;
+  const created = new Map<number, ChainRepairState>();
+  holder[STATE_FLAG] = created;
+  return created;
+}
 
 export function resetKeystoreRootGuardState(): void {
-  lastFullAttempt.clear();
+  repairStates().clear();
   resetKeystoreCorrections();
+}
+
+class RepairBudgetError extends Error {}
+
+/**
+ * Walks [from, to] in windows through `readWindow`, one call at a time. Every call
+ * counts against `budget`; a repair that cannot fit is refused BEFORE its
+ * first request. A range cap is learned once (from the message, else halved)
+ * and the walk goes on at the new size; a rate limit or any other failure
+ * stops the walk and propagates. Nothing here retries.
+ */
+async function boundedSweep(
+  readWindow: (from: bigint, to: bigint) => Promise<KeystoreEvent[]>,
+  from: bigint,
+  to: bigint,
+  state: ChainRepairState,
+  budget: { left: number },
+  windowDefault: bigint,
+): Promise<KeystoreEvent[]> {
+  const out: KeystoreEvent[] = [];
+  if (from > to) return out;
+  let window = state.windowBlocks ?? windowDefault;
+  let shrinks = 0;
+  let cursor = from;
+  const planned = () => Number((to - cursor) / window) + 1;
+  if (planned() > budget.left) throw new RepairBudgetError(`needs ${planned()} log calls, budget is ${budget.left}`);
+  while (cursor <= to) {
+    if (budget.left <= 0) throw new RepairBudgetError('log call budget spent');
+    const end = cursor + window - 1n < to ? cursor + window - 1n : to;
+    budget.left -= 1;
+    try {
+      for (const event of await readWindow(cursor, end)) out.push(event);
+      cursor = end + 1n;
+    } catch (error) {
+      if (isRateLimitError(error) || classifyLimitError(error) !== 'range' || end <= cursor || shrinks >= 3) throw error;
+      const cap = parseBlockRangeCap(error);
+      window = cap !== null && cap < window ? cap : window / 2n;
+      if (window < 1n) throw error;
+      shrinks += 1;
+      state.windowBlocks = window;
+      if (planned() > budget.left) throw new RepairBudgetError(`needs ${planned()} log calls, budget is ${budget.left}`);
+    }
+  }
+  return out;
 }
 
 async function verified(
@@ -278,10 +356,37 @@ export async function checkKeystoreRoot(deps: KeystoreRootDeps): Promise<Keystor
     return { status: 'unchecked', reason: 'no keystore leaves held' };
   }
 
-  log('held leaves do not reproduce the chain root; rebuilding from the chain');
-  const accept = (candidate: KeystoreCorrection): void => {
-    setKeystoreCorrection(deps.keystoreAddress, { ...candidate, head });
+  // ONE repair attempt per chain per cooldown, whatever happens in it: the
+  // tail and the whole-history tiers share it, and so do failures, which push
+  // the next attempt out further (x2 each, up to an hour). A provider that
+  // rejects or rate-limits us is therefore asked about once, then left alone.
+  const states = repairStates();
+  const state: ChainRepairState = states.get(deps.chainId) ?? { nextAttemptAt: 0, failures: 0 };
+  states.set(deps.chainId, state);
+  const cooldown = deps.repairCooldownMs ?? DEFAULT_REPAIR_COOLDOWN_MS;
+  if (now() < state.nextAttemptAt) {
+    return { status: 'unrepaired', reason: 'repair is backing off' };
+  }
+  const attemptedAt = now();
+  state.nextAttemptAt = attemptedAt + cooldown;
+  const fail = (reason: string): KeystoreRootVerdict => {
+    state.failures += 1;
+    state.nextAttemptAt = attemptedAt + Math.min(cooldown * 2 ** state.failures, MAX_BACKOFF_MS);
+    log(`repair failed (${reason}); next attempt in ${Math.round((state.nextAttemptAt - attemptedAt) / 60_000)} min`);
+    return { status: 'unrepaired', reason };
   };
+  const succeed = (tier: 'tail' | 'full', candidate: KeystoreCorrection): KeystoreRootVerdict => {
+    state.failures = 0;
+    setKeystoreCorrection(deps.keystoreAddress, { ...candidate, head });
+    log(`repaired from the ${tier === 'tail' ? 'tail' : 'full history'}`);
+    return { status: 'repaired', tier };
+  };
+
+  log('held leaves do not reproduce the chain root; rebuilding from the chain');
+  const budget = { left: deps.maxRequestsPerRepair ?? DEFAULT_MAX_REQUESTS };
+  const windowDefault = deps.windowBlocks ?? DEFAULT_WINDOW_BLOCKS;
+  const sweep = (from: bigint, to: bigint) => boundedSweep(deps.getEvents, from, to, state, budget, windowDefault);
+  let reason = 'rebuilt leaves do not reproduce the chain root';
 
   // Tier 1: the tail above the newest event already held. The held set is
   // never trusted: the result must reproduce currentRoot.
@@ -289,39 +394,25 @@ export async function checkKeystoreRoot(deps: KeystoreRootDeps): Promise<Keystor
   const newest = base.reduce<bigint>((n, e) => (e.blockNumber > n ? e.blockNumber : n), deps.fromBlock);
   const tailFrom = alignLogScanStart(newest, deps.fromBlock);
   try {
-    const tail = await deps.getEvents(tailFrom, head);
-    const merged = [...base.filter((e) => e.blockNumber < tailFrom), ...tail];
-    const ok = await verified(deps, merged, chainRoot);
-    if (ok) {
-      accept(ok);
-      log('repaired from the tail');
-      return { status: 'repaired', tier: 'tail' };
-    }
+    const tail = await sweep(tailFrom, head);
+    const ok = await verified(deps, [...base.filter((e) => e.blockNumber < tailFrom), ...tail], chainRoot);
+    if (ok) return succeed('tail', ok);
   } catch (error) {
-    log(`tail read failed: ${error instanceof Error ? error.message : String(error)}`);
+    reason = `tail read failed: ${error instanceof Error ? error.message : String(error)}`;
+    // A provider that refused or rate-limited the tail is not asked again for the history.
+    if (!(error instanceof RepairBudgetError)) return fail(reason);
   }
 
-  // Tier 2: the whole history, at most once per cooldown. Two attempts: a
-  // lossy provider can return different logs for the same range.
-  const cooldown = deps.fullRebuildCooldownMs ?? DEFAULT_FULL_COOLDOWN_MS;
-  const last = lastFullAttempt.get(deps.chainId);
-  if (last !== undefined && now() - last < cooldown) {
-    return { status: 'unrepaired', reason: 'full rebuild is cooling down' };
-  }
-  lastFullAttempt.set(deps.chainId, now());
-  let reason = 'rebuilt leaves do not reproduce the chain root';
+  // Tier 2: the whole history, same budget. Two reads: a lossy provider can
+  // return different logs for the same range.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const events = await deps.getEvents(deps.fromBlock, head);
-      const ok = await verified(deps, events, chainRoot);
-      if (ok) {
-        accept(ok);
-        log('repaired from the full history');
-        return { status: 'repaired', tier: 'full' };
-      }
+      const ok = await verified(deps, await sweep(deps.fromBlock, head), chainRoot);
+      if (ok) return succeed('full', ok);
     } catch (error) {
       reason = `full read failed: ${error instanceof Error ? error.message : String(error)}`;
+      return fail(reason);
     }
   }
-  return { status: 'unrepaired', reason };
+  return fail(reason);
 }
