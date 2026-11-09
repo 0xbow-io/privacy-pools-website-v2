@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { formatShareAsUnderlying, shareExactAsUnderlyingDecimal, type ShareRate } from '../../../services/share-rates.ts';
-import { amountLines, expectedUnderlyingLabel } from '../smoke/harness.ts';
+import { formatShareAsUnderlying, shareExactAsUnderlyingDecimal, type ShareRate } from '../../../services/share-rates';
+import { amountLines, expectedUnderlyingLabel } from '../smoke/harness';
 
 // The smoke computes the figure it expects in its own integers. This keeps that
 // helper and the app's conversion saying the same thing, so a drift in either
