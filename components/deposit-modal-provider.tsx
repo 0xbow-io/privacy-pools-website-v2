@@ -1643,7 +1643,9 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       setStep('loading');
       reportDepositError(null);
       depositErrorReportRef.current.phase = 'wallet-connect';
-      setLoadingMessage(describeStellarStage('unlocking'));
+      // Neutral until the session says otherwise: 'unlocking' (which names
+      // Freighter) arrives through onStage only when the account is really locked.
+      setLoadingMessage('Preparing your deposit...');
       try {
         const { buildStellarClaimUrl } = await import('@/services/stellar/stellar-claim-url');
         if (!live()) return;

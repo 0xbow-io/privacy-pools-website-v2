@@ -178,6 +178,8 @@ class StellarAccount {
   // Bumped whenever the bound address changes: a flow started for one account
   // refuses to submit anything after another account binds.
   private generation = 0;
+  // The generation whose registration was confirmed on chain (-1: none yet).
+  private registeredGeneration = -1;
   // Memory only, like the session's own keys: matches this account's spends
   // in the pool's Transacted events (services/stellar-activity.ts).
   private nullifyingKey: string | null = null;
@@ -576,8 +578,15 @@ class StellarAccount {
     // prepareRegisterKeystore checks both legs and builds only the missing one. isKeystoreRegistered()
     // checks just the auth policy, so an account whose set_viewing_key never landed read as
     // registered forever and could not be sent to (RecipientViewingKeyUnregistered).
+    // A confirmed registration holds for the bound account (a new account bumps
+    // the generation), so later flows skip both reads. The SDK still checks it
+    // inside the transaction itself.
+    if (this.registeredGeneration === generation) return;
     const registration = await session.prepareRegisterKeystore();
-    if (registration.alreadyRegistered) return;
+    if (registration.alreadyRegistered) {
+      if (generation === this.generation) this.registeredGeneration = generation;
+      return;
+    }
     this.assertStillBound(generation);
     onStage?.('registering');
     await session.executeRegisterKeystore(registration);
@@ -596,6 +605,7 @@ class StellarAccount {
     if (!confirmed) {
       throw new Error('Your account registration has not shown up on chain yet. Try again in a minute.');
     }
+    if (generation === this.generation) this.registeredGeneration = generation;
     this.set({ registered: true });
   }
 
