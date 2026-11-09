@@ -67,7 +67,7 @@ export function approvalErrorAllowsZeroReset(error: unknown): boolean {
  * holding reads as the coin it earns on.
  */
 export function yieldExitDisclosure(underlyingSymbol: string): string {
-  return `You will hold ${underlyingSymbol} in the yield pool. Withdrawing pays out ${underlyingSymbol} plus the yield earned, redeemed at the vault.`;
+  return `You will hold ${underlyingSymbol} in the yield pool. Withdrawing pays out ${underlyingSymbol} plus the yield earned.`;
 }
 
 /**
