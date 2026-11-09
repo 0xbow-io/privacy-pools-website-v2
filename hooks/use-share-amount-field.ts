@@ -22,7 +22,7 @@ export function useShareAmountField(args: { amount: string; symbol: string; chai
   // No stablecoin fallback: dollar ENTRY requires a real price from the grid.
   const price = rate ? prices[rate.underlying.toLowerCase()] ?? prices[rate.underlyingSymbol] ?? prices[displayTokenSymbol(rate.underlyingSymbol)] : undefined;
   const priceExact = typeof price === 'number' && Number.isFinite(price) && price > 0
-    ? price.toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 100 }) : undefined;
+    ? price.toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 20 }) : undefined;
   const usdAvailable = shareUsdDisplayExact('0', rate, priceExact) !== null;
   const rateKey = shareRateSnapshotKey(rate);
   const fieldKey = `${chainId}:${symbol}:${underlyingEntry}`;

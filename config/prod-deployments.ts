@@ -33,6 +33,7 @@
 
 import { readAddress, type ChainDeployment } from './chain-deployment';
 import { alchemyHostFor, buildRpcOrder } from './rpc-order';
+import { TOR_IN_FORCE } from './tor';
 import type { YieldDeployment } from '@/services/sdk-types';
 
 /** Prod ASP. Must be https: the app is served over https and a plain-http API is mixed content. */
@@ -41,8 +42,19 @@ export const PROD_ASP_URL_DEFAULT = 'https://api-v2.0xbow.io';
 // The prod relayer (Artem, 2026-09-02). ONE multi-chain service: /v1/details
 // lists chains 1, 4114 and 56 with the contracts pinned below; transfer quotes
 // answer 201 on all three; CORS allows the Vercel preview origins.
-export const PROD_RELAYER_URL =
-  process.env.EXPO_PUBLIC_PROD_RELAYER_URL?.trim() || 'https://relayer-v2-prod-149184580131.us-east1.run.app';
+// It has two front ends. v2.fastrelay.xyz is Google's, which answers most Tor
+// exits with its own 403 page; v2-tor.fastrelay.xyz is Cloudflare's, which
+// accepts them (2026-11-02). Under anon-rpc every relayer request leaves from
+// an exit, so it goes to the Tor front end.
+const PROD_DIRECT_RELAYER_URL = process.env.EXPO_PUBLIC_PROD_RELAYER_URL?.trim() || 'https://v2.fastrelay.xyz';
+const PROD_TOR_RELAYER_URL = process.env.EXPO_PUBLIC_PROD_TOR_RELAYER_URL?.trim() || 'https://v2-tor.fastrelay.xyz';
+
+/** The prod relayer's front end: the Tor one while anon-rpc is in force. */
+export function prodRelayerUrl(torInForce: boolean): string {
+  return torInForce ? PROD_TOR_RELAYER_URL : PROD_DIRECT_RELAYER_URL;
+}
+
+export const PROD_RELAYER_URL = prodRelayerUrl(TOR_IN_FORCE);
 
 // Same address set on every chain (deterministic deploy).
 const PROD_ENTRYPOINT = '0xca1e072236D231130059eeA6Bfceb7F4e9a1F0C3';
@@ -110,17 +122,18 @@ const BSC_PROD_RPCS = buildRpcOrder(
 );
 const BSC_PROD_ON_ALCHEMY = /\.g\.alchemy\.com\//.test(BSC_PROD_RPCS[0]);
 
-// The 2026-10-14 chains. Public fallbacks are the chains' own endpoints. Their
-// eth_getLogs windows were probed the same day: mainnet.optimism.io rejects
-// 50k ("Block range is too large", staging measured 3000 passing), the public
-// Base endpoint rate-limits (staging uses 2000), while Alchemy on all four and
-// the public Arbitrum and Robinhood endpoints answer a 50k window.
+// The 2026-10-14 chains. Public fallbacks are the chains' own endpoints, except
+// Optimism's: mainnet.optimism.io answers 403 to Tor exits, so its fallback is
+// publicnode, which answered every exit tried and a 10k eth_getLogs window but
+// not 50k (2026-10-31). The public Base endpoint rate-limits (staging uses
+// 2000), while Alchemy on all four and the public Arbitrum and Robinhood
+// endpoints answer a 50k window.
 const OPTIMISM_PROD_RPCS = buildRpcOrder(
   ALCHEMY_KEY,
   alchemyHostFor(10),
   process.env.EXPO_PUBLIC_PROD_OPTIMISM_RPC_URL,
   undefined,
-  'https://mainnet.optimism.io',
+  'https://optimism-rpc.publicnode.com',
 );
 const BASE_PROD_RPCS = buildRpcOrder(
   ALCHEMY_KEY,

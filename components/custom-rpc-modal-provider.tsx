@@ -174,7 +174,7 @@ function TorSection({
                 color={torEnabled ? colors.buttonPrimary : colors.textMuted}
               />
               <Text className="flex-1 font-pp-regular text-[12px] leading-[17px] text-text">
-                Send RPC calls through anon-rpc
+                Use anon-rpc
               </Text>
             </Pressable>
 
