@@ -221,7 +221,8 @@ function PortfolioBody() {
           ) : (
           <>
           <PortfolioStats
-            netValue={portfolioLoading ? '—' : totalValueFormatted}
+            netValue={totalValueFormatted}
+            netValueLoading={portfolioLoading}
             pending={pendingDisplay.text}
             pendingLoading={pendingDisplay.loading}
             assetsCount={positions.length}
@@ -237,6 +238,7 @@ function PortfolioBody() {
           <AllPositions
             positionsCount={mappedPositions.length}
             netValue={totalValueFormatted}
+            netValueLoading={portfolioLoading}
             isConnected={isConnected}
             hasPositions={hasPositions || mappedPositions.length > 0}
             onDeposit={() => openDepositModal()}

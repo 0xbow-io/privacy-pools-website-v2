@@ -8,7 +8,7 @@ import { Skeleton, SyncingBadge } from '@/components/ui/skeleton';
  * figure, never "$0.00" or a placeholder that reads as one (Nathaniel, QA of
  * #67). About the width of "$0,000.00" at the figure's size.
  */
-function FigureSkeleton({ size, label }: { size: number; label: string }) {
+export function FigureSkeleton({ size, label }: { size: number; label: string }) {
   return (
     <Skeleton
       width={Math.round(size * 3.6)}
@@ -42,6 +42,8 @@ type Asset = {
 
 type PortfolioStatsProps = {
   netValue?: string;
+  /** The net value is not known yet: a shimmer, never "$0.00" or a dash. */
+  netValueLoading?: boolean;
   /** Null with `pendingLoading`: nothing known yet, a shimmer block. */
   pending?: string | null;
   assetsCount?: number;
@@ -88,6 +90,7 @@ function AssetSegment({ asset, seam = false }: { asset: Asset; seam?: boolean })
 
 export function PortfolioStats({
   netValue = '$0.00',
+  netValueLoading = false,
   pending = '0%',
   assetsCount = 0,
   assetsLabel = 'No Assets here',
@@ -123,9 +126,13 @@ export function PortfolioStats({
               <Text className="font-pp-regular text-[12px] leading-[12px] text-text-secondary">
                 Net Value
               </Text>
-              <Text className="font-pp-bold text-[18px] leading-[18px] text-text">
-                {netValue}
-              </Text>
+              {netValueLoading ? (
+                <FigureSkeleton size={18} label="Net value loading" />
+              ) : (
+                <Text className="font-pp-bold text-[18px] leading-[18px] text-text">
+                  {netValue}
+                </Text>
+              )}
             </View>
             <View className="my-[10px] w-[1px] self-stretch bg-border" />
             <View className="flex-1 gap-[6px] p-[16px]">
@@ -216,13 +223,17 @@ export function PortfolioStats({
               <Text className="font-pp-regular text-[12px] leading-[12px] text-text-secondary">
                 Net Value
               </Text>
-              <Text
-                className="font-pp-bold text-text"
-                // nw-keep(measured-or-inset): headline size follows the width-driven responsive scale
-                style={{ fontSize: responsiveFontSize, lineHeight: responsiveFontSize }}
-              >
-                {netValue}
-              </Text>
+              {netValueLoading ? (
+                <FigureSkeleton size={responsiveFontSize} label="Net value loading" />
+              ) : (
+                <Text
+                  className="font-pp-bold text-text"
+                  // nw-keep(measured-or-inset): headline size follows the width-driven responsive scale
+                  style={{ fontSize: responsiveFontSize, lineHeight: responsiveFontSize }}
+                >
+                  {netValue}
+                </Text>
+              )}
             </View>
             <View className="gap-[6px]">
               <Text className="font-pp-regular text-[12px] leading-[12px] text-right text-text-secondary">

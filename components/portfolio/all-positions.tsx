@@ -21,6 +21,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import Svg, { Path, Circle, Line, Polyline } from 'react-native-svg';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { FigureSkeleton } from '@/components/portfolio/portfolio-stats';
 import { DashedEllipse } from '@/components/ui/dashed-ellipse';
 import { PrivacyScore } from '@/components/ui/privacy-score';
 import { Colors } from '@/constants/theme';
@@ -220,6 +221,8 @@ type Position = {
 type AllPositionsProps = {
   positionsCount?: number;
   netValue?: string;
+  /** The net value is not known yet: the same shimmer as the header figures. */
+  netValueLoading?: boolean;
   isConnected?: boolean;
   hasPositions?: boolean;
   onDeposit?: () => void;
@@ -255,6 +258,7 @@ function MenuDotsIcon({ color = '#4D4D4D' }: { color?: string }) {
 export function AllPositions({
   positionsCount = 0,
   netValue = '$0.00',
+  netValueLoading = false,
   isConnected = false,
   hasPositions = false,
   onDeposit,
@@ -332,9 +336,13 @@ export function AllPositions({
             <Text className="font-pp-regular text-[12px] leading-[12px] text-text-light">
               Net value:
             </Text>
-            <Text className="font-pp-semi-bold text-[12px] leading-[12px] text-text">
-              {netValue}
-            </Text>
+            {netValueLoading ? (
+              <FigureSkeleton size={12} label="Net value loading" />
+            ) : (
+              <Text className="font-pp-semi-bold text-[12px] leading-[12px] text-text">
+                {netValue}
+              </Text>
+            )}
             {/* Only when there are rows past the cap to show. */}
             {positions.length > 5 && (
               <Pressable
