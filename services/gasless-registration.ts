@@ -172,7 +172,7 @@ export type GaslessRegistrationEligibility =
    * the note groups worth pricing — best first. NOT a promise that the fee
    * fits: that question belongs to the quoting stage.
    */
-  | { kind: 'eligible'; mode: GaslessRegistrationMode; candidates: FeeNoteCandidate[] }
+  | { kind: 'eligible'; mode: GaslessRegistrationMode; candidates: FeeNoteCandidate[]; balanceLow?: boolean }
   | {
     kind: 'ineligible';
     blocker: GaslessRegistrationBlocker;
@@ -186,6 +186,8 @@ export type GaslessRegistrationEligibility =
      * differently to a funded wallet than to an empty one.
      */
     walletCanPay: boolean | null;
+    /** The wallet holds some gas token, just below what registration needs. */
+    balanceLow?: boolean;
   };
 
 /** Parse a note's hex value; `null` for anything unparseable. */
@@ -330,6 +332,11 @@ export function narrowFeeNotes(
   return null;
 }
 
+/** A wallet with some gas token, below the registration requirement (not "none"). */
+function lowBalanceMessage(nativeSymbol: string): string {
+  return `Your ${nativeSymbol} balance is below the amount needed for registration. Send a little ${nativeSymbol} here, then try again.`;
+}
+
 /**
  * User-facing sentence for a wallet that CANNOT pay its own registration gas
  * and cannot be carried either — the honest dead end, rather than a button that
@@ -344,6 +351,7 @@ export function describeGaslessRegistrationBlocker(
 ): string | null {
   if (eligibility.kind === 'eligible') return null;
   if (eligibility.walletCanPay !== false) return null;
+  if (eligibility.balanceLow && eligibility.blocker !== 'probe-failed') return lowBalanceMessage(nativeSymbol);
   switch (eligibility.blocker) {
     case 'no-notes':
       return `This wallet has no ${nativeSymbol} for gas and nothing in its shielded balance to pay a relayer with. Send a little ${nativeSymbol} here, then register.`;
@@ -379,6 +387,7 @@ export function describeUnpayableWallet(
   if (!eligibility) return null;
   if (eligibility.kind === 'eligible') {
     if (options.gaslessAllowed) return null;
+    if (eligibility.balanceLow) return lowBalanceMessage(nativeSymbol);
     return `This wallet has no ${nativeSymbol} for gas, and this step needs the wallet to pay for itself. Send a little ${nativeSymbol} here, then try again.`;
   }
   return describeGaslessRegistrationBlocker(eligibility, nativeSymbol);

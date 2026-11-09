@@ -5,6 +5,7 @@
 // EIP-1193 provider shaped like a legacy-only mobile wallet whose node has its
 // own minimum gas price, and checks what reaches the wallet.
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { createWalletClient, custom, type Address, type Hex } from 'viem';
 import { bsc, mainnet } from 'viem/chains';
 
@@ -169,5 +170,29 @@ describe('BNB Chain wallet tx shape against a mobile legacy-only wallet (DEV-589
     const rpc: FeeReadClient = { ...appRpc(), getBlock: async () => ({ baseFeePerGas: 100_000_000n }), estimateMaxPriorityFeePerGas: async () => 1n };
     const plan = await priceWalletTx(rpc, { account: OWNER, to: KEYSTORE, data: DATA, value: 0n }, null, 1);
     expect(walletTxFields(plan)).toMatchObject({ maxFeePerGas: 300_000_000n, maxPriorityFeePerGas: 100_000_000n });
+  });
+});
+
+describe('the viewing-key publish send keeps the wallet refusal (DEV-589 review)', () => {
+  const read = (path: string) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
+
+  test('publishViewingKey sends through sendWalletTransaction, not a bare wagmi send', () => {
+    const hook = read('hooks/use-publish-viewing-key.ts');
+    expect(hook).toContain("from '@/services/wallet-send-refusal'");
+    expect(hook).toMatch(/sendWalletTransaction\(wagmiConfig, \{/);
+    expect(hook).not.toContain('sendTransactionAsync');
+    expect(hook).not.toContain('useSendTransaction');
+  });
+
+  test('the publish leg (gas + fee fields, as the hook sends it) says why on -32000 then 4200, and stays cancelled on 4001', async () => {
+    const plan = await priceWalletTx(appRpc(), { account: OWNER, to: KEYSTORE, data: DATA, value: 0n }, 80_000n, 56);
+    const fields = walletTxFields(plan);
+    const line = (e: unknown) => describeRegistrationError((e as Error).message, false, 'BNB Chain', { detail: collectErrorText(e), nativeSymbol: 'BNB' });
+    for (const code of [4200, -32601]) {
+      const kept = await sendKeeping(bsc, refusingWallet('insufficient funds for gas * price + value', code), fields).catch((e: unknown) => e);
+      expect(line(kept)).toBe('You need BNB on BNB Chain to pay the network fee. Add some, then register again.');
+    }
+    const cancelled = await sendKeeping(bsc, refusingWallet('insufficient funds for gas * price + value', 4001), fields).catch((e: unknown) => e);
+    expect(line(cancelled)).toBe('Transaction cancelled in your wallet.');
   });
 });

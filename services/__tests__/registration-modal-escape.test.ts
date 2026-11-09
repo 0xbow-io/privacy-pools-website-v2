@@ -177,3 +177,26 @@ describe('an insufficient-funds rejection becomes something actionable', () => {
     expect(describeInsufficientGas('Keystore registration reverted on-chain.', 'ETH', 'Ethereum')).toBeNull();
   });
 });
+
+describe('low balance is not worded as no balance (DEV-589 review)', () => {
+  const stuck = (blocker: 'no-notes' | 'chain-unsupported' | 'other-chain', balanceLow?: boolean): GaslessRegistrationEligibility =>
+    ({ kind: 'ineligible', blocker, walletCanPay: false, balanceLow });
+
+  test('zero balance keeps the no-gas line, a low balance gets the below-requirement line', () => {
+    for (const blocker of ['no-notes', 'chain-unsupported', 'other-chain'] as const) {
+      expect(describeUnpayableWallet(stuck(blocker), 'BNB', { gaslessAllowed: true })).toContain('has no BNB for gas');
+      const low = describeUnpayableWallet(stuck(blocker, true), 'BNB', { gaslessAllowed: true });
+      expect(low).toContain('Your BNB balance is below the amount needed for registration.');
+      expect(low).not.toMatch(/has no BNB/);
+      expect(low).not.toContain('—');
+    }
+    const eligible: GaslessRegistrationEligibility = { kind: 'eligible', mode: 'register', candidates: [], balanceLow: true };
+    expect(describeUnpayableWallet(eligible, 'ETH', { gaslessAllowed: false })).toContain('Your ETH balance is below');
+    expect(describeUnpayableWallet({ ...eligible, balanceLow: false }, 'ETH', { gaslessAllowed: false })).toContain('has no ETH');
+  });
+
+  test('the probe marks only an insufficient (non-zero) balance as low', () => {
+    const probe = read('hooks/use-gasless-registration.ts');
+    expect(probe).toContain("const balanceLow = decision.reason === 'insufficient-balance';");
+  });
+});
