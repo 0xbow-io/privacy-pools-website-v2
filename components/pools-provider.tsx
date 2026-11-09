@@ -42,6 +42,7 @@ import { readClaimedInputMap } from '@/services/claim-records-store';
 import type { NoteCounts } from '@/services/self-transfer-row';
 import { findOwnActionIn, noteTimeMs, ownDepositBridgeAllowed } from '@/services/own-actions-core';
 import { deriveStellarActivity, stellarSentRecipientLookup, type StellarActivityNote } from '@/services/stellar-activity';
+import { listStellarSentDeposits } from '@/services/stellar/stellar-account';
 import { buildOwnHistoryEvents, ownDepositReviewStatus, type ActivityEvent } from '@/services/own-history-rows';
 import { useLabelDecisionsByChain } from '@/hooks/use-label-decisions-by-chain';
 import {
@@ -88,6 +89,7 @@ import { useStellarBalance } from '@/hooks/use-stellar-balance';
 import { fetchSuiApprovedSet } from '@/services/sui-witness/asp-labels';
 import { calculateLabelHash } from '@/services/sui-witness/crypto';
 import { getKnownTokenMetadata, getTokenMetadata, resolveTokenMetadata, formatTokenBalance, NATIVE_ASSET_ADDRESS, isStablecoin } from '@/config/tokens';
+import { formatCompactTokenAmount } from '@/services/explore-pools';
 import { useDebug } from '@/components/debug-provider';
 import { formatUsd } from '@/services/format-fiat';
 import { useTxActivity } from '@/components/tx-activity-provider';
@@ -408,11 +410,8 @@ const TOKEN_COLORS: Record<string, string> = {
 // here so the stats cards and pool pages keep their existing import path.
 export { formatUsd };
 
-function formatTokenAmount(value: number, symbol: string): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M ${symbol}`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(2)}K ${symbol}`;
-  return `${formatTokenBalance(value, symbol)} ${symbol}`;
-}
+// Same pool-size shape as Explore (services/explore-pools.ts).
+const formatTokenAmount = formatCompactTokenAmount;
 
 function computeChange24h(stats: GlobalStatistics | undefined): string {
   if (!stats) return '+0.0%';
@@ -1940,6 +1939,11 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
           priceUsd: priceMap['XLM'] || priceMap['xlm'] || 0,
           ownAddress: stellarWallet.isConnected ? stellarWallet.address ?? '' : '',
           sentRecipient: stellarSentRecipientLookup(readAllSentTransfers(), STELLAR_TESTNET_ID),
+          sentDeposits: stellarWallet.isConnected && stellarWallet.address
+            ? listStellarSentDeposits(stellarWallet.address).map((c) => ({
+              txHash: c.txHash, recipient: c.recipient, amount: c.amount, tokenId: c.notes[0]?.tokenId ?? '', createdAt: c.createdAt,
+            }))
+            : [],
         })
       : null;
     {
@@ -3045,6 +3049,8 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
     session: poolSession,
     chainId: sessionTarget?.chainId ?? null,
     snapshot: eventSnapshot,
+    identity: sessionAddress ?? myAddress ?? null,
+    keystoreManager,
   });
 
   return (

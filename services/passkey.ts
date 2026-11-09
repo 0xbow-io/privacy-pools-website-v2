@@ -47,6 +47,8 @@ export type PrfResult = {
   prf: { first: `0x${string}`; second?: `0x${string}` };
   /** Backup/UV flags read from the authenticator data of this assertion. */
   flags: BackupFlags;
+  /** The credential's user handle (the user.id set at create), when the authenticator returns it. */
+  userHandle?: Uint8Array | null;
 };
 
 export type CreateResult = {
@@ -231,7 +233,8 @@ export async function getPasskeyPrf(opts: {
     );
   }
 
-  return { credentialId: toBase64Url(new Uint8Array(cred.rawId)), prf, flags };
+  const userHandle = assertion.userHandle ? new Uint8Array(assertion.userHandle) : null;
+  return { credentialId: toBase64Url(new Uint8Array(cred.rawId)), prf, flags, userHandle };
 }
 
 // --- Auth-data flag parsing ------------------------------------------------

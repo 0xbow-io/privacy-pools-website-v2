@@ -640,10 +640,16 @@ function createASPRegistryInteractorFor(
   if (!registryAddress) {
     throw new Error(`Missing ASP registry address for chain ${chainId}`);
   }
-  return new ASPRegistryInteractor({
+  const live = new ASPRegistryInteractor({
     rpcInteractor: createRPCInteractor(chainId),
     contractAddress: registryAddress,
   });
+  // The root read goes through the leaf cache so a root-mismatch re-sync can
+  // answer it from the read the first attempt made (services/bulk-label-cache.ts).
+  return {
+    getLatestASPRoot: () => approvedLabelCache.chainRoot(chainId, () => live.getLatestASPRoot()),
+    getLatestAssociationSetData: () => live.getLatestAssociationSetData(),
+  };
 }
 
 export async function createASPClient(

@@ -373,6 +373,26 @@ describe('the vault deposit kill switch, executed with it ON under prod', () => 
     expect(out).toMatch(/ 0 fail/);
     expect(run.status).toBe(0);
   }, 60_000);
+
+  // Scoped to Ethereum: 4 = the prod body; the skip branch is one test.
+  test('services/__tests__/yield-deposits-paused-chain-prod.test.ts passes with EXPO_PUBLIC_YIELD_DEPOSITS_PAUSED=1', () => {
+    const ROOT = join(new URL('.', import.meta.url).pathname, '..', '..');
+    const run = spawnSync(process.execPath, ['test', 'services/__tests__/yield-deposits-paused-chain-prod.test.ts'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        EXPO_PUBLIC_APP_ENV: 'prod',
+        EXPO_PUBLIC_YIELD_DEPOSITS_PAUSED: '1',
+        EXPO_PUBLIC_YIELD_ENABLED: 'true',
+        EXPO_PUBLIC_YIELD_WITHDRAW_READY: 'true',
+      },
+    });
+    const out = `${run.stdout}\n${run.stderr}`;
+    expect(out).toMatch(/ 4 pass/);
+    expect(out).toMatch(/ 0 fail/);
+    expect(run.status).toBe(0);
+  }, 60_000);
 });
 
 describe('the mainnet ETH deposit flag, executed with it ON', () => {

@@ -1,5 +1,5 @@
 /**
- * Yield earned per share position, for the session's chain.
+ * Yield earned per share position, on every EVM chain with a yield share.
  *
  * Mounted once, in PoolsProvider (app-wide), not by the portfolio: opening the
  * Portfolio page, expanding a row or picking a chain there cannot start, stop
@@ -23,7 +23,13 @@ import { useEffect, useRef, useState } from 'react';
 
 import { feedData, publicFeeds } from '@/services/public-feed-scheduler';
 import type { PpUsdcRateHistoryResponse, YieldDepositsResponse } from '@/services/api-types';
-import type { PoolSession, PoolSessionYield } from '@/services/sdk-types';
+import type { Address, Hex } from '@privacy-pools-v2/sdk';
+import { loadStoredAccountExport } from '@/components/sdk-provider';
+import { getChainConfig, supportedChainIds } from '@/config/chains';
+import { getConfiguredYieldDeployments } from '@/config/yield';
+import type { PoolSession, PoolSessionYield, Secret } from '@/services/sdk-types';
+import { FEED_SHARE_RATES } from '@/services/share-rate-feed';
+import { shareRateKey, type ShareRate } from '@/services/share-rates';
 import { feedYieldDeposits, feedYieldRateHistory } from '@/services/yield-feed-grid';
 import type { YieldFeedResult } from '@/services/yield-feeds';
 import {
@@ -34,8 +40,10 @@ import {
   toYieldRateSeries,
   yieldEarnedEventsForChain,
   yieldEarnedKey,
+  yieldEarnedNotesForShare,
   type ChainTaggedSnapshot,
   type SnapshotEventsReducer,
+  type StoredYieldNote,
   type YieldEarnedByShare,
   type YieldEarnedEntry,
 } from '@/services/yield-earned';
@@ -60,8 +68,8 @@ function sameEntries(a: YieldEarnedByShare, b: YieldEarnedByShare): boolean {
     const y = b.get(key);
     if (!y || x.status !== y.status) return false;
     if (x.status === 'ok' && y.status === 'ok') {
-      if (x.earnedTotal !== y.earnedTotal || x.maxUnderstatement !== y.maxUnderstatement || x.assetDecimals !== y.assetDecimals) return false;
-    } else if (x.status === 'unavailable' && y.status === 'unavailable' && x.reason !== y.reason) {
+      if (x.earnedTotal !== y.earnedTotal || x.maxUnderstatement !== y.maxUnderstatement || x.assetDecimals !== y.assetDecimals || x.heldShares !== y.heldShares) return false;
+    } else if (x.status !== 'ok' && y.status !== 'ok' && x.reason !== y.reason) {
       return false;
     }
   }
@@ -74,6 +82,10 @@ export function useYieldEarned(params: {
   chainId: number | null;
   /** PoolsProvider's merged snapshot, chain-tagged; undefined until loaded. */
   snapshot: (ChainTaggedSnapshot & { loadedChainIds?: readonly number[] }) | undefined;
+  /** Identity the per-chain account exports are stored under (session address first). */
+  identity?: string | null;
+  /** The session's keys: the nullifying key matches stored notes of other chains to their spends. */
+  keystoreManager?: { getPrivateNullifyingKey: () => Secret } | null;
 }): YieldEarnedByShare {
   const { session, chainId } = params;
   // Pinned to the session it was computed for, so a new session reads empty
@@ -83,8 +95,12 @@ export function useYieldEarned(params: {
   );
 
   const snapshotRef = useRef(params.snapshot);
+  const identityRef = useRef(params.identity);
+  const keystoreRef = useRef(params.keystoreManager);
   useEffect(() => {
     snapshotRef.current = params.snapshot;
+    identityRef.current = params.identity;
+    keystoreRef.current = params.keystoreManager;
   });
   // The live tick of the current session effect, so a snapshot landing can run it.
   const tickRef = useRef<(() => void) | null>(null);
@@ -99,7 +115,20 @@ export function useYieldEarned(params: {
   useEffect(() => {
     if (!session || chainId == null) return undefined;
     const namespaces = earnedNamespaces(session);
-    if (namespaces.length === 0) return undefined;
+    // Every OTHER EVM chain with a configured yield share. The session's
+    // namespaces only cover its own chain, so a share held elsewhere (BSC
+    // ppUSDT while the session is on mainnet) never got a figure and its row,
+    // and with it the tile, stayed "—" (prod 2026-10-21). These go through the
+    // SDK's pure compute over inputs already held: the chain's STORED notes,
+    // the grid's feeds, and the share rate the grid already reads
+    // (`exchangeRate()` is `convertToAssets(10 ** decimals)`, the same figure
+    // as `assetsPerShare`). Nothing is fetched here.
+    const otherChains = supportedChainIds.filter(
+      (cid) => cid !== chainId && getChainConfig(cid)?.chainType === 'evm' && getConfiguredYieldDeployments(cid).length > 0,
+    );
+    // A session chain with no yield share (Citrea, Robinhood) still values the
+    // shares held on the chains that have one.
+    if (namespaces.length === 0 && otherChains.length === 0) return undefined;
 
     let cancelled = false;
     let running = false;
@@ -107,35 +136,44 @@ export function useYieldEarned(params: {
     // after it, instead of being dropped until the next 60s interval.
     let rerun = false;
 
-    // Every share "—" with one reason. Local state only, no request: an input
-    // that stopped being ready must not leave the last figures on screen as if
-    // they were current.
-    const allUnavailable = (reason: string) => {
-      if (cancelled) return;
-      const next = new Map<string, YieldEarnedEntry>();
-      for (const ns of namespaces) next.set(yieldEarnedKey(chainId, ns.deployment.ppUSDC), { status: 'unavailable', reason });
-      setState((prev) => (prev.session === session && prev.chainId === chainId && sameEntries(prev.results, next)
-        ? prev
-        : { session, chainId, results: next }));
+    // Every share of `cid` "—" with one reason. Local state only, no request:
+    // an input that stopped being ready must not leave the last figures on
+    // screen as if they were current.
+    const markUnavailable = (next: Map<string, YieldEarnedEntry>, shares: readonly string[], cid: number, reason: string) => {
+      for (const share of shares) next.set(yieldEarnedKey(cid, share), { status: 'unavailable', reason });
     };
+    // An input not here YET: the row shows a shimmer, never a "0" and never
+    // the dash, which says no figure is coming (QA of #67: "0 USDC" while loading).
+    const markLoading = (next: Map<string, YieldEarnedEntry>, shares: readonly string[], cid: number, reason: string) => {
+      for (const share of shares) next.set(yieldEarnedKey(cid, share), { status: 'loading', reason });
+    };
+    const sessionShares = namespaces.map((ns) => ns.deployment.ppUSDC);
 
-    const tick = async () => {
-      if (cancelled) return;
-      if (running) { rerun = true; return; }
-      running = true;
+    // The session chain, through each namespace's compute. Fails on its own:
+    // another chain's figures are unaffected.
+    const computeSessionChain = async (
+      next: Map<string, YieldEarnedEntry>,
+      snapshot: (ChainTaggedSnapshot & { loadedChainIds?: readonly number[] }) | undefined,
+    ) => {
+      if (namespaces.length === 0) return;
       try {
-        const snapshot = snapshotRef.current;
-        // Not loaded, or this chain's part of it failed: without its spends a
-        // note that left would be valued as still held.
-        if (!snapshot || (snapshot.loadedChainIds && !snapshot.loadedChainIds.includes(chainId))) {
-          allUnavailable('snapshot-not-ready');
+        // Not loaded yet, or this chain's part of it failed: without its spends
+        // a note that left would be valued as still held. The first is a wait,
+        // the second is no figure (the snapshot waits for every chain, so a
+        // chain missing from a loaded one failed).
+        if (!snapshot) {
+          markLoading(next, sessionShares, chainId, 'snapshot-not-ready');
+          return;
+        }
+        if (snapshot.loadedChainIds && !snapshot.loadedChainIds.includes(chainId)) {
+          markUnavailable(next, sessionShares, chainId, 'snapshot-chain-failed');
           return;
         }
         const depositsFeed = feedValue(feedData(
           publicFeeds.read<YieldFeedResult<YieldDepositsResponse>>(feedYieldDeposits(chainId)),
         ));
         if (depositsFeed === undefined) {
-          allUnavailable('deposits-feed-loading');
+          markLoading(next, sessionShares, chainId, 'deposits-feed-loading');
           return;
         }
 
@@ -146,7 +184,6 @@ export function useYieldEarned(params: {
           yieldEarnedEventsFromSnapshot as unknown as SnapshotEventsReducer,
         );
 
-        const next = new Map<string, YieldEarnedEntry>();
         for (const ns of namespaces) {
           const share = ns.deployment.ppUSDC;
           const rateFeed = feedValue(feedData(
@@ -160,7 +197,7 @@ export function useYieldEarned(params: {
           try {
             const result = await ns.earned.compute({ depositFacts, rateSeries, events });
             entry = rateFeed === undefined
-              ? { status: 'unavailable', reason: 'rate-history-loading' }
+              ? { status: 'loading', reason: 'rate-history-loading' }
               : toYieldEarnedEntry(result, rateSeries?.assetDecimals ?? 0);
           } catch {
             entry = { status: 'unavailable', reason: 'exchange-rate-read-failed' };
@@ -171,16 +208,112 @@ export function useYieldEarned(params: {
           }
           next.set(yieldEarnedKey(chainId, share), entry);
         }
+      } catch {
+        // A reducer or import that throws must not leave the last figures on
+        // screen as if current (review of cddbf592).
+        markUnavailable(next, sessionShares, chainId, 'compute-failed');
+      }
+    };
+
+    const computeOtherChains = async (
+      next: Map<string, YieldEarnedEntry>,
+      snapshot: (ChainTaggedSnapshot & { loadedChainIds?: readonly number[] }) | undefined,
+    ) => {
+      const sharesOf = (cid: number) => getConfiguredYieldDeployments(cid).map((d) => d.ppUSDC);
+      const identity = identityRef.current;
+      const keystore = keystoreRef.current;
+      if (!snapshot || !identity || !keystore) {
+        // The snapshot, or the keys the stored notes are matched with, not here yet.
+        for (const cid of otherChains) markLoading(next, sharesOf(cid), cid, 'snapshot-not-ready');
+        return;
+      }
+      let sdk: typeof import('@/services/sdk-runtime');
+      let hash: (commitment: Hex) => Hex;
+      try {
+        sdk = await import('@/services/sdk-runtime');
+        const hashService = await sdk.createHashService();
+        const nullifyingKey = keystore.getPrivateNullifyingKey();
+        hash = (c) => String(hashService.hash([nullifyingKey, c])) as Hex;
+      } catch {
+        for (const cid of otherChains) markUnavailable(next, sharesOf(cid), cid, 'compute-failed');
+        return;
+      }
+      const rates = feedData(publicFeeds.read<Record<string, ShareRate>>(FEED_SHARE_RATES));
+      for (const cid of otherChains) {
+        const shares = getConfiguredYieldDeployments(cid);
+        try {
+          if (snapshot.loadedChainIds && !snapshot.loadedChainIds.includes(cid)) {
+            markUnavailable(next, sharesOf(cid), cid, 'snapshot-chain-failed');
+            continue;
+          }
+          const depositsFeed = feedValue(feedData(
+            publicFeeds.read<YieldFeedResult<YieldDepositsResponse>>(feedYieldDeposits(cid)),
+          ));
+          if (depositsFeed === undefined) {
+            markLoading(next, sharesOf(cid), cid, 'deposits-feed-loading');
+            continue;
+          }
+          const notes = (loadStoredAccountExport(identity, cid)?.notes ?? []) as unknown as StoredYieldNote[];
+          const events = yieldEarnedEventsForChain(
+            snapshot,
+            cid,
+            sdk.yieldEarnedEventsFromSnapshot as unknown as SnapshotEventsReducer,
+          );
+          for (const d of shares) {
+            const key = yieldEarnedKey(cid, d.ppUSDC);
+            const rateFeed = feedValue(feedData(
+              publicFeeds.read<YieldFeedResult<PpUsdcRateHistoryResponse>>(feedYieldRateHistory(cid, d.ppUSDC)),
+            ));
+            const rate = rates?.[shareRateKey(cid, d.ppUSDC)];
+            if (rateFeed === undefined) { next.set(key, { status: 'loading', reason: 'rate-history-loading' }); continue; }
+            // No rates map yet is a wait. A map without this share is no figure.
+            if (!rates) { next.set(key, { status: 'loading', reason: 'exchange-rate-loading' }); continue; }
+            if (!rate) { next.set(key, { status: 'unavailable', reason: 'exchange-rate-read-failed' }); continue; }
+            const rateSeries = toYieldRateSeries(rateFeed, d.ppUSDC);
+            try {
+              const result = sdk.computeYieldEarned({
+                share: d.ppUSDC.toLowerCase() as Address,
+                shareDecimals: d.ppUSDCDecimals,
+                notes: yieldEarnedNotesForShare(notes, d.ppUSDC, hash, sdk.noteTimestamp),
+                depositFacts: toYieldDepositFacts(depositsFeed, d.ppUSDC),
+                rateSeries,
+                events,
+                exchangeRateNow: rate.assetsPerShare,
+                now: Math.floor(Date.now() / 1000),
+              });
+              next.set(key, toYieldEarnedEntry(result, rateSeries?.assetDecimals ?? 0));
+            } catch {
+              next.set(key, { status: 'unavailable', reason: 'compute-failed' });
+            }
+          }
+        } catch {
+          // One chain's failure blanks that chain only.
+          markUnavailable(next, sharesOf(cid), cid, 'compute-failed');
+        }
+      }
+    };
+
+    const tick = async () => {
+      if (cancelled) return;
+      if (running) { rerun = true; return; }
+      running = true;
+      try {
+        const snapshot = snapshotRef.current;
+        const next = new Map<string, YieldEarnedEntry>();
+        await computeSessionChain(next, snapshot);
+        await computeOtherChains(next, snapshot);
+        // A share configured on the session chain that no namespace computes
+        // would otherwise have no entry, and no entry reads as "still loading"
+        // forever. It gets no figure, said once.
+        for (const d of getConfiguredYieldDeployments(chainId)) {
+          const key = yieldEarnedKey(chainId, d.ppUSDC);
+          if (!next.has(key)) next.set(key, { status: 'unavailable', reason: 'no-earned-namespace' });
+        }
         if (!cancelled) {
           setState((prev) => (prev.session === session && prev.chainId === chainId && sameEntries(prev.results, next)
             ? prev
             : { session, chainId, results: next }));
         }
-      } catch {
-        // A reducer or import that throws must not leave the last figures on
-        // screen as if current: every share falls back to "—" until a later
-        // tick succeeds (review of cddbf592).
-        allUnavailable('compute-failed');
       } finally {
         running = false;
         if (rerun && !cancelled) { rerun = false; void tick(); }
@@ -192,8 +325,13 @@ export function useYieldEarned(params: {
     const interval = setInterval(() => { void tick(); }, YIELD_EARNED_INTERVAL_MS);
     // A grid feed landing is grid-timed, so computing on it is too.
     const unsubscribe = [
-      feedYieldDeposits(chainId),
+      ...(namespaces.length > 0 ? [feedYieldDeposits(chainId)] : []),
       ...namespaces.map((ns) => feedYieldRateHistory(chainId, ns.deployment.ppUSDC)),
+      ...otherChains.flatMap((cid) => [
+        feedYieldDeposits(cid),
+        ...getConfiguredYieldDeployments(cid).map((d) => feedYieldRateHistory(cid, d.ppUSDC)),
+      ]),
+      ...(otherChains.length > 0 ? [FEED_SHARE_RATES] : []),
     ].map((key) => publicFeeds.subscribe(key, () => { void tick(); }));
 
     return () => {

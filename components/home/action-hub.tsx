@@ -84,7 +84,7 @@ import { getUiParam, pushUiParamEntry, retireUiParamEntry, rebaseUiParamEntry, s
 import { useShareYield } from '@/hooks/use-share-yield';
 import { useYieldVaultProbeVersion } from '@/hooks/use-yield-vault-probe';
 import { displayTokenSymbol, isShareSymbol, shareRedemptionDisclosure, underlyingOnlyView } from '@/services/share-display';
-import { amountInputDisplay, formatCopyAmount, formatTokenBalance, groupThousands, isStablecoin, stripAmountSeparators } from '@/services/token-format';
+import { amountInputDisplay, compactAmountLabel, formatCopyAmount, formatTokenBalance, groupThousands, isStablecoin, stripAmountSeparators } from '@/services/token-format';
 import { conversionFundingToken, targetAcceptsConversion } from '@/config/intent-targets';
 import { getYieldShareToken } from '@/services/share-yield';
 import { compactPhoneLayout } from '@/services/header-nav';
@@ -843,7 +843,7 @@ export function ActionHub({
   // text + chain and the state is DERIVED from that key, so a stale answer
   // never paints and nothing is set synchronously inside the effect.
   // Not on Stellar: there the SDK's own keystore read inside the deposit is
-  // the check (an unregistered account is refused before signing), the same
+  // the check (an unregistered account gets a blind deposit and a claim link), the same
   // as a Stellar Send, so typing never makes a request naming the address.
   const shieldRecipientKey = shieldRecipientEnabled && !isStellar && isCheckableRecipient(shieldRecipient)
     ? `${chainId}:${shieldRecipient.trim().toLowerCase()}`
@@ -867,7 +867,7 @@ export function ActionHub({
   const shieldRecipientHint = !shieldRecipientEnabled
     ? null
     : isStellar
-      ? { text: 'They need a private account on Stellar already.', learnMore: false, tone: 'muted' as const }
+      ? { text: 'No private account yet? You get a claim link to send them.', learnMore: false, tone: 'muted' as const }
       : recipientRegistrationHint(shieldRecipientRegistration, getChainConfig(chainId)?.displayName);
   // Keep the root-level token sheet in sync with local state. Rendering it here
   // would trap its fixed-position scrim inside the hero's transform (see the
@@ -3252,7 +3252,7 @@ export function ActionHub({
           className={`items-center rounded-[6px] border px-[7px] py-[3px] ${activePreset ? 'border-tint' : 'border-border bg-card-background'} ${outOfReach ? 'opacity-40' : ''}`}
         >
           <Text className={`text-[11px] font-pp-regular ${activePreset ? 'text-tint' : outOfReach ? 'text-text-secondary' : 'text-text'}`}>
-            {zoneFiatEntry ? usdChipLabel(preset, fiatPrice) : groupThousands(a === 'withdraw' && isShareSymbol(tokenMeta.symbol) ? `${preset} ${amountField.symbol}` : preset)}
+            {zoneFiatEntry ? usdChipLabel(preset, fiatPrice) : a === 'withdraw' && isShareSymbol(tokenMeta.symbol) ? `${compactAmountLabel(preset)} ${amountField.symbol}` : compactAmountLabel(preset)}
           </Text>
         </Pressable>
       );
