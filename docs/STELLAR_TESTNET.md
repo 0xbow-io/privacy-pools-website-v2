@@ -31,6 +31,12 @@ max relay fee). The app keeps a 1 XLM deposit floor.
    bun install
    ```
 
+   The vendored build is `1449fe37-p30`: 1449fe37 plus the protocol-30 fix (testnet, 2026-11-06),
+   `@stellar/stellar-sdk` ^16.4.1 and `SorobanRPCInteractor.baseReserveOf` accepting the ledger header
+   stellar-sdk 16 already decodes. Until that lands on `stellar/audit-readiness`, build from 1449fe37
+   with it applied; an unpatched build can't read protocol-30 headers and every XLM deposit fails
+   ("carries no readable header").
+
 2. The app uses the environment's ASP (`EXPO_PUBLIC_ASP_URL`): asp-v2, which on the
    2026-10-29 deployment is the registry's postman and approves whitelisted depositors
    only. `EXPO_PUBLIC_STELLAR_RELAYER_URL` names the relayer (see `.env.production`);

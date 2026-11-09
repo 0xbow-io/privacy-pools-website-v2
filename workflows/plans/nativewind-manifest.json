@@ -805,6 +805,12 @@
       "ported": true
     },
     {
+      "path": "components/ui/share-figure.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
       "path": "components/ui/sui-connect-button.tsx",
       "phase": "P1",
       "slice": "shared-primitives",

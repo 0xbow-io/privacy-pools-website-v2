@@ -12,7 +12,7 @@ import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
-import { DOCS_URL, SUPPORT_FORM_URL, SUPPORT_TELEGRAM_URL } from '@/config/support';
+import { DOCS_URL, SUPPORT_TELEGRAM_URL } from '@/config/support';
 import { CheckCircleIcon, CloseIcon, SpinnerIcon } from '@/components/ui/modal-icons';
 import { WEB_FIXED_POSITION, WEB_BLUR_BACKDROP } from '@/components/ui/web-style-shims';
 import { useActiveEvmChain } from '@/hooks/use-active-evm-chain';
@@ -48,6 +48,8 @@ import { describeStellarStage, stellarErrorMessage } from '@/services/stellar/st
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { useSuiSession } from '@/hooks/use-sui-session';
 import type { Transaction } from '@/components/pools-provider';
+import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
+import { shareWeiText } from '@/services/share-rates';
 
 // react-native-web supports CSS properties (position:'fixed', backdropFilter, outlineStyle)
 // that are absent from React Native's ViewStyle type definitions.
@@ -60,6 +62,7 @@ import { getTokenMetadata } from '@/config/tokens';
 import { useBackHandler } from '@/hooks/use-back-handler';
 import { useNativeMockBlock } from '@/hooks/use-native-mock-block';
 import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
+import { isUnknownKeystoreRoot, keystoreRootRefreshingMessage } from '@/services/keystore-root-error';
 
 const NATIVE_ASSET_ADDRESS = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 
@@ -177,6 +180,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
   // chain against itself and could never fire.
   const chainId = useActiveEvmChain().id;
   const balanceDisplay = useBalanceDisplay(chainId);
+  const shareText = useShareNameText(chainId);
   const withOpLock = useOpLock();
   // Chain FROZEN at submission (codex round 3, P2).
   const [txChainId, setTxChainId] = useState<number | null>(null);
@@ -339,6 +343,18 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
       return known.symbol.startsWith('0X') ? getTokenMeta(note.tokenId) : known;
     },
     [isSui, isStellar, suiNative?.symbol, suiNative?.decimals, chainId],
+  );
+  // A share note reads as the underlying it is worth at the live rate (read off
+  // the feed grid, no request), and as its approximate count until the rate is in.
+  const { rateFor } = useShareRates();
+  const noteAmountText = useCallback(
+    (note: Note) => {
+      const meta = noteMeta(note);
+      let wei = 0n;
+      try { wei = BigInt(note.value); } catch { /* unreadable value shows as 0 */ }
+      return shareWeiText(wei, meta, isSui || isStellar ? undefined : rateFor(chainId, note.tokenId));
+    },
+    [noteMeta, rateFor, chainId, isSui, isStellar],
   );
   const formatNote = useCallback(
     (note: Note) => {
@@ -647,7 +663,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
         return;
       }
 
-      setErrorMessage(`Ragequit failed: ${message}`);
+      setErrorMessage(isUnknownKeystoreRoot(message) ? keystoreRootRefreshingMessage('exit') : `Ragequit failed: ${message}`);
       setStep('confirm');
     } finally {
       releaseTx();
@@ -805,7 +821,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
 
                 {(!isSui && !isInitialized) ? (
                   <Text className="font-pp-regular text-[14px] leading-[20px] text-center text-[#737373]">
-                    {errorMessage ?? (isInitializing ? 'Initializing SDK...' : 'Preparing SDK for ragequit...')}
+                    {shareText(errorMessage) ?? (isInitializing ? 'Initializing SDK...' : 'Preparing SDK for ragequit...')}
                   </Text>
                 ) : ragequittableNotes.length === 0 ? (
                   <Text className="font-pp-regular text-[14px] leading-[20px] text-center text-[#737373]">
@@ -814,7 +830,6 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
                 ) : (
                   <ScrollView className="w-full max-h-[240px]" contentContainerClassName="gap-[8px]">
                     {ragequittableNotes.map((note) => {
-                      const meta = noteMeta(note);
                       // Only reachable for a note whose exit the chain never
                       // confirmed, so say why it is still listed rather than
                       // letting it look like an ordinary spendable note.
@@ -828,9 +843,9 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
                         >
                           <View className="gap-[2px]">
                             <Text className="font-pp-medium text-[14px] text-text">
-                              {balanceDisplay(formatNote(note), meta.symbol, chainId).text}
+                              {noteAmountText(note)}
                             </Text>
-                            <ShareCountHint hint={balanceDisplay(formatNote(note), meta.symbol, chainId).hint} />
+                            <ShareCountHint hint={balanceDisplay(formatNote(note), noteMeta(note).symbol, chainId).hint} />
                             <Text className="font-pp-regular text-[11px] text-[#737373]">
                               {truncateHash(note.commitment)}
                             </Text>
@@ -887,7 +902,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
                     Exiting note
                   </Text>
                   <Text className="font-pp-medium text-[18px] text-text">
-                    {balanceDisplay(formatNote(selectedNote), noteMeta(selectedNote).symbol, chainId).text}
+                    {noteAmountText(selectedNote)}
                   </Text>
                   <Text className="font-pp-regular text-[11px] text-[#737373]">
                     {truncateHash(selectedNote.commitment)}
@@ -896,7 +911,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
 
                 {errorMessage && (
                   <Text className="font-pp-regular text-[13px] text-center text-[#DC2626]">
-                    {errorMessage}
+                    {shareText(errorMessage)}
                   </Text>
                 )}
 
@@ -936,7 +951,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
                     <SpinnerIcon color={colors.text} />
                   </Animated.View>
                   <Text className="font-pp-regular text-[14px] text-center text-[#737373]">
-                    {loadingMessage || 'Withdrawing all funds...'}
+                    {shareText(loadingMessage) || 'Withdrawing all funds...'}
                   </Text>
                 </View>
 
@@ -966,7 +981,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
                   </Text>
                   {selectedNote && (
                     <Text className="font-pp-regular text-[14px] text-center text-[#737373]">
-                      {exitResult ?? `${balanceDisplay(formatNote(selectedNote), noteMeta(selectedNote).symbol, chainId).text} returned to this wallet`}
+                      {shareText(exitResult) ?? `${noteAmountText(selectedNote)} returned to this wallet`}
                     </Text>
                   )}
                 </View>
@@ -998,12 +1013,6 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
               <Pressable onPress={() => Linking.openURL(DOCS_URL)}>
                 <Text className="font-pp-regular text-[12px] text-[#4D4D4D]">
                   FAQ
-                </Text>
-              </Pressable>
-              <View className="h-[12px] w-[1px] bg-[#4D4D4D]" />
-              <Pressable onPress={() => Linking.openURL(SUPPORT_FORM_URL)}>
-                <Text className="font-pp-regular text-[12px] text-[#4D4D4D]">
-                  Support
                 </Text>
               </Pressable>
               <View className="h-[12px] w-[1px] bg-[#4D4D4D]" />

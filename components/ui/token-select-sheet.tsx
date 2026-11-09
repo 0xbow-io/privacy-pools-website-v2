@@ -625,7 +625,7 @@ export function TokenSelectSheet({
       // Read with the ROW's chain (an all-chains list spans several).
       const rowChain = chainOf(token);
       const priv = privateByToken.get(`${rowChain}:${token.address.toLowerCase()}`)
-        ?? privateByToken.get(`${rowChain}:${token.symbol.toUpperCase()}`);
+        ?? privateByToken.get(`${rowChain}:${token.symbol.toUpperCase()}`); // not-rendered: map key
       return {
         key: `${custom ? 'custom' : 'pool'}:${rowChain}:${token.address.toLowerCase()}`,
         symbol: token.symbol,
