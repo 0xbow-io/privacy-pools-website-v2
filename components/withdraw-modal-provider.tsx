@@ -23,6 +23,7 @@ import { hubTokenCatalog, heldSymbolsFor, preferredHubToken, emptySpendToken } f
 import { poolDisplayLabel } from '@/config/pool-paths';
 import React, { createContext, useContext, useState, useCallback, useEffect, useLayoutEffect, useReducer, useRef, useMemo } from 'react';
 import { KeySourceChangedError } from '@/components/sdk-provider';
+import { PasskeyTapRequiredError } from '@/services/passkey-unlock-plan';
 import { normalizeHex, truncateAddress } from '@/services/hex-format';
 import { FlowProgress } from '@/components/ui/flow-progress';
 import { staleBundleMessage } from '@/services/stale-bundle';
@@ -1166,6 +1167,13 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       if (err instanceof KeySourceChangedError) {
         autoInitKeyRef.current = null;
         log('debug', 'Withdraw', `Session init superseded, retrying: ${message}`);
+        return;
+      }
+      // A passkey unlock waits for a tap in the unlock dialog, which the
+      // provider opens; opening Withdraw must not start WebAuthn itself (QA on
+      // PR #63). The guard stays set, so this does not loop.
+      if (err instanceof PasskeyTapRequiredError) {
+        log('debug', 'Withdraw', `Session init on open waits for the passkey tap: ${message}`);
         return;
       }
       log('error', 'Withdraw', `Session init on open failed: ${message}`, err);

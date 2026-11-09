@@ -45,7 +45,8 @@ import { usePools, formatUsd } from '@/components/pools-provider';
 import { formatUnits } from 'viem';
 import { approxUnderlyingText, comingSoonDepositMessage, displayTokenSymbol } from '@/services/share-display';
 import { useShareRates } from '@/hooks/use-share-rates';
-import { formatShareAsUnderlying, shareNumberAsUnderlying, underlyingPriceFor } from '@/services/share-rates';
+import { shareNumberAsUnderlying, underlyingPriceFor } from '@/services/share-rates';
+import { formatCompactTokenAmount } from '@/services/explore-pools';
 import { shareBalanceDisplay } from '@/services/share-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { useDepositModal } from '@/components/deposit-modal-provider';
@@ -308,11 +309,12 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
     const poolEntry = data.allPools.find((p) => sameSymbol(p.name, currentPoolToken) && p.chainId === poolChainId);
     const tvlUsd = poolEntry?.poolValue ?? '$0';
     // The share pool's TVL sub-line in the underlying it is worth, share count until the rate is read.
+    // Same rounding as Explore's pool size (formatCompactTokenAmount), display only (review of #35).
     const tvlRate = rateFor(poolChainId, getTokenMetadataBySymbol(currentPoolToken, poolChainId)?.address);
     const tvlShares = poolEntry?.poolValueTokenAmount ?? Number.NaN;
     const tvlToken = poolEntry
       ? (tvlRate && Number.isFinite(tvlShares)
-        ? formatShareAsUnderlying(shareNumberAsUnderlying(tvlShares, tvlRate), tvlRate)
+        ? formatCompactTokenAmount(shareNumberAsUnderlying(tvlShares, tvlRate), displayTokenSymbol(tvlRate.underlyingSymbol))
         // The ASP's compact figure carries the SHARE's symbol; rename it and
         // mark it approximate rather than printing ppUSDC (Pat, 2026-09-12).
         : approxUnderlyingText(poolEntry.poolValueToken, currentPoolToken))

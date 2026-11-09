@@ -88,6 +88,7 @@ import { detailAmountDigits, isStablecoin, LOADING_FIGURE } from '@/services/tok
 import { FigureText } from '@/components/ui/share-figure';
 import { encodePaymentReceiptPayloadForUrl, type PaymentReceiptPayload } from '@/services/payment-request-codec';
 import { PAY_URL_BASE } from '@/config/env';
+import { SUPPORT_TELEGRAM_URL } from '@/config/support';
 
 // Same base the payment-request modal uses for its share links: the brand
 // domain when configured, else this session's own origin.
@@ -1126,10 +1127,10 @@ export function TransactionDetailModal({ tx, onClose, onCloseForAction, actions 
         <View className="flex-row items-center justify-center gap-[10px] px-[16px] pb-[16px] pt-[2px]">
             <Pressable
               className="flex-row items-center gap-[6px] rounded-pill border border-border px-[16px] py-[8px] active:bg-background-secondary"
-              onPress={() => Linking.openURL('https://docs.google.com/forms/d/e/1FAIpQLSe0UKiTrZ4kD0apx75bEW0PWqJxpd6bCYh_IUKBrCkJOBzkpQ/viewform')}
+              onPress={() => Linking.openURL(SUPPORT_TELEGRAM_URL)}
             >
               {/* nw-keep(data-color): icon color is a theme token into the @expo/vector-icons sink (no className path) */}
-              <Ionicons name="mail-outline" size={14} color={colors.text} />
+              <Ionicons name="chatbubble-ellipses-outline" size={14} color={colors.text} />
               <Text className="font-pp-sans-medium text-[12.5px] text-text">
                 Contact
               </Text>
@@ -2518,7 +2519,7 @@ export function Transactions({
     if (stellarClaim) {
       items.push({
         key: 'stellar-claim-link',
-        label: 'Copy payment link',
+        label: tx.type === 'Deposit' ? 'Recover claim link' : 'Copy payment link',
         icon: <Ionicons name="link-outline" size={16} color={colors.text} />,
         onPress: () => {
           void (async () => {
@@ -2640,7 +2641,7 @@ export function Transactions({
         // One key per recipient note — a multi-lineage send disclosed several.
         onPress: () => launchFromDrawer(drawerHost, () => openAuditExport(sentAudits.map((d) => buildSentPaymentKey(d)))),
       });
-    } else if (isDepositRecoverable(tx) && tx.txHash) {
+    } else if (tx.chainId !== STELLAR_TESTNET_ID && isDepositRecoverable(tx) && tx.txHash) {
       // A deposit this wallet made for someone else, with NO local disclosure
       // for it - this browser never saw the send, or its storage is gone. The
       // sender's own on-chain backup (services/blind-deposit-backup.ts) is the

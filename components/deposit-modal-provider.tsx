@@ -19,7 +19,7 @@ import { reportErrorReport } from '@/services/error-reports';
 import { classifyFailure } from '@/services/error-reports-cause';
 import { stellarErrorReportStage, type ErrorReportStage } from '@/services/error-reports-failure';
 import { TEST_MODE } from '@/config/env';
-import { DEPOSIT_FAQ_URL, SUPPORT_FORM_URL, SUPPORT_TELEGRAM_URL } from '@/config/support';
+import { DEPOSIT_FAQ_URL, SUPPORT_TELEGRAM_URL } from '@/config/support';
 import { ENTRYPOINT_ASSETS_ABI, getMinimumDepositAmount, getVettingFeeBPS, type EntrypointAssetConfig } from '@/services/entrypoint-assets';
 import { sameSymbol } from '@/services/symbol-match';
 import { formatDepositMinimum, friendlyDepositError, PREVIEW_MINT_ABI, requiredUnderlyingForMinShares, scaleUnits } from '@/services/deposit-limits';
@@ -1657,14 +1657,20 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       depositErrorReportRef.current.phase = 'wallet-connect';
       setLoadingMessage(describeStellarStage('unlocking'));
       try {
+        const { buildStellarClaimUrl } = await import('@/services/stellar/stellar-claim-url');
+        if (!live()) return;
         const res = await stellarSession.deposit({
           amount: amountBase,
           recipient: depositRecipientRef.current ?? undefined,
           shouldContinue: live,
           onStage: (stage) => { if (!live()) return; depositErrorReportRef.current.phase = stellarErrorReportStage(stage); setLoadingMessage(describeStellarStage(stage)); },
+          // An unregistered recipient gets a blind deposit and a claim link,
+          // as on EVM (DEV-499). Saved for the sender before signing.
+          onClaimReady: (notes) => { if (live()) setClaimReceiptUrl(buildStellarClaimUrl(notes)); },
         });
         // A run the user closed must not paint its hash into a newer flow.
         if (!live()) return;
+        if (res.claimNotes) setClaimReceiptUrl(buildStellarClaimUrl(res.claimNotes));
         setTxHash(res.txHash);
         setTxChainId(STELLAR_TESTNET_ID);
         setStellarLabelPending(res.pendingLabel ? { owner: stellarOwner, item: res.pendingLabel } : null);
@@ -1673,6 +1679,9 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
         const message = err instanceof Error ? err.message : String(err);
         log('error', 'Deposit', `Stellar deposit failed: ${message}`, err);
         if (!live()) return;
+        // Not on the success card: drop the link. If the tx did land, sync
+        // attaches it to the saved claim and the row offers it again.
+        setClaimReceiptUrl(null);
         if (/Superseded/.test(message)) { setStep('deposit'); return; }
         if (/reject|denied|cancel|declined/i.test(message)) {
           setStep('deposit');
@@ -4811,12 +4820,6 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
               <Pressable onPress={() => Linking.openURL(DEPOSIT_FAQ_URL)}>
                 <Text className="text-[12px] text-[#4D4D4D] font-pp-regular">
                   FAQ
-                </Text>
-              </Pressable>
-              <View className="w-[1px] h-[12px] bg-[#4D4D4D]" />
-              <Pressable onPress={() => Linking.openURL(SUPPORT_FORM_URL)}>
-                <Text className="text-[12px] text-[#4D4D4D] font-pp-regular">
-                  Support
                 </Text>
               </Pressable>
               <View className="w-[1px] h-[12px] bg-[#4D4D4D]" />

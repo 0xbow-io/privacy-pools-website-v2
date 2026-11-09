@@ -86,7 +86,6 @@
     "react-native": "0.85.3",
     "react-native-gesture-handler": "2.31.2",
     "react-native-get-random-values": "1.11.0",
-    "react-native-jelly-tabs": "0.0.9",
     "react-native-passkey": "3.6.2",
     "react-native-qrcode-svg": "6.3.21",
     "react-native-reanimated": "4.3.1",
@@ -101,7 +100,7 @@
     "tweetnacl-util": "0.15.1",
     "viem": "2.45.3",
     "wagmi": "3.6.9",
-    "zod": "4.4.3",
+    "zod": "4.6.6",
     "poseidon-lite": "0.2.1"
   },
   "devDependencies": {
@@ -132,6 +131,7 @@
       "ws": "7.5.11"
     },
     "underscore": "1.13.8",
+    "axios": "1.20.0",
     "ethers": {
       "ws": "8.21.0"
     },

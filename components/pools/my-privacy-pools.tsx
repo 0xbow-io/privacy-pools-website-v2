@@ -42,6 +42,8 @@ import { SuiTokenMark } from '@/components/ui/sui-token-mark';
 import { FinishSetupBanner } from '@/components/home/finish-setup-banner';
 import { FigureText } from '@/components/ui/share-figure';
 import { LOADING_FIGURE } from '@/services/token-format';
+import { AccountUnlockNotice } from '@/components/account-unlock-help';
+import { getChainConfig } from '@/config/chains';
 
 // --- Token Icons ---
 // nw-keep(svg-or-canvas): the fill/stroke props on every icon below are artwork
@@ -167,7 +169,7 @@ export function MyPrivacyPools({
   const { isLoading: notesLoading, notes } = useNotes();
   // An active keystore sync is also a loading state for the figures: a just
   // signed-in account shows 0 for several seconds while discovery runs.
-  const { isSyncing, syncChainsLeft, isInitializing, isInitialized, keysReady, error: sessionError, sessionAddress } = usePoolSession();
+  const { isSyncing, syncChainsLeft, isInitializing, isInitialized, keysReady, error: sessionError, sessionAddress, keystoreIdentityStatus } = usePoolSession();
   const sessionChainId = useSessionChainId();
   // Same flow the receipt page runs; the notes are already in the local store, so
   // the link is not needed to anchor them, only to have got them here.
@@ -355,6 +357,9 @@ export function MyPrivacyPools({
     // only the asset list in a card. `className` still lets the pool page size
     // it (w-full / flex-1).
     <View testID="my-privacy-pools-card" className={`gap-[14px] overflow-visible z-[100] ${className}`}>
+      {!isSui && !isStellar && keysReady && keystoreIdentityStatus === 'incompatible' ? (
+        <AccountUnlockNotice network={getChainConfig(sessionChainId)?.displayName ?? 'this network'} />
+      ) : null}
       {/* Cached-balance refresh: the figure below is a frozen tab-cache
           snapshot; only the sign-in that rebuilds the keystore can actually
           re-sync it. Kept (the header that used to host it is gone). */}
@@ -583,7 +588,9 @@ export function MyPrivacyPools({
           <View className="items-center justify-center py-[32px]">
             {/* Locked: an empty list says nothing about the account yet. */}
             <Text className="font-pp-regular text-[13px] text-center text-text-secondary">
-              {requiresWalletUnlock
+              {!isSui && !isStellar && keysReady && keystoreIdentityStatus === 'incompatible'
+                ? 'Use your original unlock to see this account’s assets.'
+                : requiresWalletUnlock
                 ? 'Sign in to see your assets.'
                 : (data.hiddenEmptyPools ?? 0) > 0 ? 'No private balance right now.' : 'Your assets will show up here once you deposit.'}
             </Text>
@@ -654,7 +661,7 @@ export function MyPrivacyPools({
                   </View>
                   <View className="items-end gap-[3px]">
                     <View className="flex-row items-center gap-[4px]">
-                      <Text numberOfLines={1} className="font-pp-medium text-[14px] leading-[16px] text-text">
+                      <Text numberOfLines={1} className="shrink font-pp-medium text-[14px] leading-[16px] text-text">
                         <FigureText text={balanceText} />
                       </Text>
                       <ShareCountHint hint={balanceView?.hint ?? null} />
@@ -714,7 +721,7 @@ export function MyPrivacyPools({
                   <ShareApyChip chainId={pool.chainId} tokenAddress={pool.tokenAddress} testID={`my-pool-row-apy-${pool.id}`} />
                   <View className="flex-1 gap-[2px]">
                     <View className="flex-row items-center gap-[4px]">
-                      <Text numberOfLines={1} className="font-pp-regular text-[13px] leading-[15px] text-text-secondary">
+                      <Text numberOfLines={1} className="shrink font-pp-regular text-[13px] leading-[15px] text-text-secondary">
                         <FigureText text={balanceText} />
                       </Text>
                       <ShareCountHint hint={balanceView?.hint ?? null} />

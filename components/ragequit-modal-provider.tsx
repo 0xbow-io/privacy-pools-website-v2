@@ -12,7 +12,7 @@ import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
-import { DOCS_URL, SUPPORT_FORM_URL, SUPPORT_TELEGRAM_URL } from '@/config/support';
+import { DOCS_URL, SUPPORT_TELEGRAM_URL } from '@/config/support';
 import { CheckCircleIcon, CloseIcon, SpinnerIcon } from '@/components/ui/modal-icons';
 import { WEB_FIXED_POSITION, WEB_BLUR_BACKDROP } from '@/components/ui/web-style-shims';
 import { useActiveEvmChain } from '@/hooks/use-active-evm-chain';
@@ -1012,12 +1012,6 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
               <Pressable onPress={() => Linking.openURL(DOCS_URL)}>
                 <Text className="font-pp-regular text-[12px] text-[#4D4D4D]">
                   FAQ
-                </Text>
-              </Pressable>
-              <View className="h-[12px] w-[1px] bg-[#4D4D4D]" />
-              <Pressable onPress={() => Linking.openURL(SUPPORT_FORM_URL)}>
-                <Text className="font-pp-regular text-[12px] text-[#4D4D4D]">
-                  Support
                 </Text>
               </Pressable>
               <View className="h-[12px] w-[1px] bg-[#4D4D4D]" />

@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { parseRelayerAssetAddresses, relayerAssetSupport, relayerShareExitMessage } from '@/services/relayer-assets';
+import {
+  parseRelayerAssetAddresses,
+  recentRelayerAssets,
+  rememberRelayerAssets,
+  RelayerReadError,
+  relayerAssetSupport,
+  relayerRetryAfterMs,
+  relayerRetryDelayMs,
+  relayerShareExitMessage,
+} from '@/services/relayer-assets';
 
 // Shape of the prod relayer's /v1/details on 2026-09-04 (trimmed).
 const DETAILS = {
@@ -26,12 +35,33 @@ describe('relayer asset support', () => {
     expect(relayerAssetSupport(null, PPUSDC)).toBe('unknown');
     expect(relayerAssetSupport(one, undefined)).toBe('unknown');
   });
-  test('copy names the underlying, never the share', () => {
-    expect(relayerShareExitMessage('unsupported', 'USDC', 'ppUSDC')).toBe('USDC deposits open once the relayer supports withdrawing this pool. Not yet.');
-    // Ameen via Pat, 2026-09-12: the share name never reaches a sentence.
-    expect(relayerShareExitMessage('unsupported', 'USDC', 'ppUSDC')).not.toMatch(/\bpp(usdc|usdt)\b/i);
-    expect(relayerShareExitMessage('unknown', 'USDC', 'ppUSDC')).not.toMatch(/\bpp(usdc|usdt)\b/i);
-    // The in-flight first read gets no copy at all: only a refusal is worded.
-    expect(relayerShareExitMessage('unknown', 'USDC', 'ppUSDC')).toContain('Cannot confirm');
+  test('copy names the underlying, never the share, and never talks about withdrawing', () => {
+    expect(relayerShareExitMessage('unsupported', 'USDC', 'ppUSDC')).toBe('USDC deposits are not open on this network yet.');
+    expect(relayerShareExitMessage('unknown', 'USDC', 'ppUSDC')).toBe('Could not reach the relayer to check USDC deposits. Try again in a minute.');
+    for (const verdict of ['unsupported', 'unknown'] as const) {
+      // Ameen via Pat, 2026-09-12: the share name never reaches a sentence.
+      expect(relayerShareExitMessage(verdict, 'USDC', 'ppUSDC')).not.toMatch(/\bpp(usdc|usdt|eth)\b/i);
+      // Pat, 2026-11-02: a shield that says "withdrawing" reads as the wrong flow.
+      expect(relayerShareExitMessage(verdict, 'USDC', 'ppUSDC')).not.toMatch(/withdraw/i);
+    }
+  });
+  test('a throttled read asks for the wait the relayer sent, else backs off, capped at a minute', () => {
+    const headers = new Headers({ 'retry-after-relay': '54', 'x-ratelimit-reset-quote': '46' });
+    expect(relayerRetryAfterMs(headers)).toBe(54_000);
+    expect(relayerRetryAfterMs(new Headers({ 'Retry-After': '3', 'retry-after-relay': '20' }))).toBe(20_000);
+    expect(relayerRetryAfterMs(new Headers({ 'retry-after': 'Wed, 21 Oct 2026 07:28:00 GMT' }))).toBeNull();
+    expect(relayerRetryAfterMs(new Headers())).toBeNull();
+    expect(relayerRetryAfterMs(null)).toBeNull();
+    expect(relayerRetryDelayMs(0, new RelayerReadError(429, 54_000))).toBe(54_000);
+    expect(relayerRetryDelayMs(0, new RelayerReadError(429, 600_000))).toBe(60_000);
+    expect([0, 1, 2].map((n) => relayerRetryDelayMs(n, new RelayerReadError(429, null)))).toEqual([10_000, 20_000, 30_000]);
+    expect(relayerRetryDelayMs(1, new Error('other'))).toBe(20_000);
+  });
+  test('a recent good read stands in for a failed one, an old one does not', () => {
+    const one = parseRelayerAssetAddresses(DETAILS, 1);
+    rememberRelayerAssets(1, one, 1_000);
+    expect(recentRelayerAssets(1, 1_000 + 9 * 60_000)).toBe(one);
+    expect(recentRelayerAssets(1, 1_000 + 11 * 60_000)).toBeNull();
+    expect(recentRelayerAssets(56, 1_000)).toBeNull();
   });
 });
