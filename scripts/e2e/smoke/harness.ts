@@ -239,8 +239,13 @@ export async function textUntil(page: Page, settled: (text: string) => boolean, 
   }
 }
 
+// Which document of a page is current: bumped by every open(). hold() uses it to
+// tell a held request of the page on screen from one of a document already left.
+const documentOf = new WeakMap<Page, number>();
+
 /** Open a prod-world URL and wait for the app to have rendered. */
 export async function open(page: Page, path: string): Promise<string> {
+  documentOf.set(page, (documentOf.get(page) ?? 0) + 1);
   // The query goes before a #fragment: a pay link carries its payload there.
   const hashAt = path.indexOf('#');
   const route = hashAt < 0 ? path : path.slice(0, hashAt);
@@ -303,23 +308,50 @@ export async function hubTab(page: Page, key: 'shield' | 'withdraw' | 'send' | '
  * Hold every request whose body or URL matches until `release()`. Used to pin
  * the state BEFORE a feed has answered (the share rate, the yield inputs),
  * which on a fast machine otherwise lasts a few milliseconds.
+ *
+ * Only requests of the page's CURRENT document are let through on release. A
+ * smoke that opens several pages while holding (the payer step opens a pay link
+ * and two claim links before releasing) parks hundreds of rate reads from
+ * documents that are already gone (997 in the CI run of 2026-11-09). Letting
+ * those all fly at once on release queued the current page's own rate read behind
+ * a burst of stale ones, on a rate-limited public RPC, so the step after
+ * `release()` stalled. Their callers are gone, so they are aborted instead.
  */
 export async function hold(page: Page, matches: (url: string, body: string) => boolean): Promise<{ held: () => number; release: () => void }> {
   let released = false;
   let held = 0;
-  const waiting: (() => void)[] = [];
+  const waiting: { generation: number; go: (current: boolean) => void }[] = [];
   await page.route('**/*', async (route) => {
     const req = route.request();
     const body = req.method() === 'POST' ? req.postData() || '' : '';
     if (released || !matches(req.url(), body)) return route.fallback();
     held += 1;
-    await new Promise<void>((r) => waiting.push(r));
-    return route.fallback();
+    const generation = documentOf.get(page) ?? 0;
+    const current = await new Promise<boolean>((go) => waiting.push({ generation, go }));
+    // A route of a page that moved on or closed meanwhile may refuse to continue: nothing waits for it.
+    try { await (current ? route.fallback() : route.abort('aborted')); } catch { /* gone with its document */ }
   });
   return {
     held: () => held,
-    release: () => { released = true; waiting.splice(0).forEach((r) => r()); },
+    release: () => { released = true; waiting.splice(0).forEach((w) => w.go(w.generation === (documentOf.get(page) ?? 0))); },
   };
+}
+
+/**
+ * Run one smoke step with a hard deadline and a log line, so a step that stalls
+ * fails with ITS name instead of silently eating the runner's 15 minutes.
+ */
+export async function within<T>(label: string, ms: number, step: () => Promise<T>): Promise<T> {
+  console.log(`step: ${label}`);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      step(),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`step "${label}" took over ${Math.round(ms / 1000)}s`)), ms); }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /** A JSON-RPC body that reads an ERC-4626 share rate (convertToAssets). */

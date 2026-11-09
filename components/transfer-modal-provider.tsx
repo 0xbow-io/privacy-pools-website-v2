@@ -137,7 +137,7 @@ import { FeeWarning } from '@/components/fee-warning';
 import { relayedSpendBreakdown } from '@/services/fee-warning';
 import { SHIELDED_TRANSFER_GAS } from '@/services/transfer-fee-estimate';
 import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
-import { costShareText, feeShareText, shareWeiText, type ShareRate } from '@/services/share-rates';
+import { costShareText, relayFeeText, shareWeiText, type ShareRate } from '@/services/share-rates';
 import { formatTokenBalanceDown } from '@/services/token-format';
 
 // Web-only styles
@@ -1511,11 +1511,10 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   }, [noteFigure]);
   // A FEE never reads low: a share fee is converted rounding UP and written with
   // the cost formatter (formatShortfallAmount, up), not the field's rounded-down
-  // writer. A plain token keeps its exact figure, which is never low either.
+  // writer.
   const feeFigure = useCallback((wei: bigint) => (
-    isShareSymbol(selectedSymbol)
-      ? feeShareText(wei, { symbol: selectedSymbol, decimals: selectedDecimals }, selectedRate)
-      : noteFigureAbout(wei)
+    // A plain stablecoin fee is 2 decimals rounded up too (DEV-621); another plain token keeps its exact figure.
+    relayFeeText(wei, { symbol: selectedSymbol, decimals: selectedDecimals }, selectedRate, noteFigureAbout)
   ), [selectedSymbol, selectedDecimals, selectedRate, noteFigureAbout]);
 
   const amountError = useMemo(() => {
