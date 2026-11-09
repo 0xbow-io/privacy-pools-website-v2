@@ -37,6 +37,7 @@ import { NoteStatus } from '@/services/sdk-types';
 import type { Address as SdkAddress, Hash, Hex, Note, TxReceiptLike } from '@/services/sdk-types';
 import { recordOwnAction } from '@/services/own-actions-store';
 import { recordWithdrawFee } from '@/services/withdraw-fees-store';
+import { confirmedRegistration } from '@/services/keystore-registry-events';
 
 /**
  * In-app gasless keystore registration, for a wallet that has funds in the pool
@@ -1042,6 +1043,8 @@ export function useGaslessRegistration(options?: {
         : 'The registration was submitted but could not be confirmed. Check back in a moment before retrying — it may already have landed.');
     }
 
+    // registerAndRelay confirmed: the auth policy is on-chain (no viewing key). A top-up sets none.
+    if (!topUpOnly) confirmedRegistration(sessionAddress ?? owner, chainId, false);
     setReceiveSetup(sessionAddress ?? owner, chainId, 'partial', 'local');
 
     // Name this spend for what it was in the activity list (DEV-574) and keep

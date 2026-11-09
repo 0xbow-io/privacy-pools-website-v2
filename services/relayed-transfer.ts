@@ -285,9 +285,18 @@ export async function buildTransferRecipient(
 }
 
 /** The SDK's note math, the Keystore read and its error classes, for this chain. */
-export async function loadTransferRecipientDeps(chainId: number): Promise<TransferRecipientDeps> {
-  const [{ getChainConfig }, { LEGACY_CONFIG }, sdk] = await Promise.all([
+export async function loadTransferRecipientDeps(
+  chainId: number,
+  /**
+   * The signed-in account. A transfer to yourself (a consolidation, a claim's
+   * anchor) reads its OWN viewing key: that read is answered from the bulk
+   * registry, not the chain. Any other recipient is still read from the chain.
+   */
+  ownerAddress?: string,
+): Promise<TransferRecipientDeps> {
+  const [{ getChainConfig }, { LEGACY_CONFIG }, sdk, { routeOwnKeystoreReads }, { withChainFallback }] = await Promise.all([
     import('@/config/chains'), import('@/config/env'), import('@/services/sdk-runtime'),
+    import('@/services/keystore-registry-reads'), import('@/services/keystore-read-policy'),
   ]);
   const contracts = getChainConfig(chainId)?.contracts;
   if (!contracts) throw new Error(`Unsupported chain: ${chainId}`);
@@ -299,12 +308,16 @@ export async function loadTransferRecipientDeps(chainId: number): Promise<Transf
     (LEGACY_CONFIG?.keystore ?? contracts.keystoreAddress) as Address,
     contracts.keystoreFromBlock,
   );
+  if (ownerAddress) {
+    routeOwnKeystoreReads(keystore, { chainId, keystoreAddress: LEGACY_CONFIG?.keystore ?? contracts.keystoreAddress, ownerAddress });
+  }
   return {
     generateSecret: () => crypto.generateSecret() as Hex,
     // EVM's AddressFieldConverter is the identity for addresses and token ids.
     noteAddressHash: (evmAddress, secret) => noteComputation.computeNoteAddressHash(evmAddress, secret) as Hash,
     commitment: (note) => noteComputation.computeFullCommitment(note) as Hash,
-    getViewingKey: async (evmAddress) => (await keystore.getViewingKey(evmAddress)) as Hex,
+    // A transfer is a spend: it never waits on, or refuses for, the registries.
+    getViewingKey: async (evmAddress) => (await withChainFallback(() => keystore.getViewingKey(evmAddress))) as Hex,
     errors: {
       unregistered: (evmAddress) => new sdk.RecipientViewingKeyUnregistered(evmAddress),
       expired: (expiresAt, nowMs) => new sdk.PaymentRequestExpired(expiresAt, nowMs),

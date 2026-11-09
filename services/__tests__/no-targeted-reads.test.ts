@@ -354,11 +354,11 @@ const RECIPIENT_FALLBACK_CALLS: Record<string, RegExp[]> = {
   ],
   'services/relayed-transfer.ts': [
     /^const publicViewingKey = await deps\.getViewingKey\(spec\.evmAddress\);$/,
-    /^getViewingKey: async \(evmAddress\) => \(await keystore\.getViewingKey\(evmAddress\)\) as Hex,$/,
+    // The own account is routed to the registry before this runs (loadTransferRecipientDeps ownerAddress).
+    /^getViewingKey: async \(evmAddress\) => \(await withChainFallback\(\(\) => keystore\.getViewingKey\(evmAddress\)\)\) as Hex,$/,
   ],
   'components/transfer-modal-provider.tsx': [/^\{ getViewingKey: \(a\) => ks\.getViewingKey\(a\) \},$/],
   'components/deposit-modal-provider.tsx': [/^\{ getViewingKey: \(a\) => ks\.getViewingKey\(a\) \},$/],
-  'components/payment-request-modal-provider.tsx': [/^\{ getViewingKey: \(account\) => ks\.getViewingKey\(account\) \},$/],
 };
 
 describe('privacy: no per-account keystore reads for the session account', () => {

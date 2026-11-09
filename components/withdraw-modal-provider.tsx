@@ -1,3 +1,4 @@
+import { withChainFallback } from '@/services/keystore-read-policy';
 import { spendableBalanceLabel } from '@/services/spendable-balance-label';
 import { presetExceedsWithdrawMax } from '@/services/withdraw-preset-guard';
 import { useShareAmountField } from '@/hooks/use-share-amount-field';
@@ -212,6 +213,7 @@ import { useNativeMockBlock } from '@/hooks/use-native-mock-block';
 import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { FeeWarning } from '@/components/fee-warning';
 import { buildFeeBreakdown, gasCostUsd, quoteGas, splitRelayerFee, swapLossUsd, type FeeGasReading } from '@/services/fee-warning';
+import { confirmedRegistration } from '@/services/keystore-registry-events';
 import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
 import { shareNumberAsUnderlying } from '@/services/share-rates';
 
@@ -2335,7 +2337,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       const session = sdkReady && poolSession ? poolSession : await ensureInitialized();
       if (!isCurrent()) return;
       if (session) {
-        const isRegistered = await session.isKeystoreRegistered();
+        const isRegistered = await withChainFallback(() => session.isKeystoreRegistered());
         if (!isCurrent()) return;
         if (!isRegistered) {
           if (identityMode === 'key') {
@@ -4602,6 +4604,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         }
         markRegistered(connectedAddress, chainId);
         // registerAndRelay sets no viewing key, so the account is only partially set up.
+        confirmedRegistration(connectedAddress, chainId, false);
         setReceiveSetup(connectedAddress, chainId, 'partial', 'local');
       }
 

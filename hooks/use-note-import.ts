@@ -1,3 +1,4 @@
+import { withChainFallback } from '@/services/keystore-read-policy';
 import { useCallback, useRef, useState } from 'react';
 import { useActiveEvmChain } from '@/hooks/use-active-evm-chain';
 import { useSessionChainId } from '@/hooks/use-session-chain-id';
@@ -64,6 +65,7 @@ import {
 } from '@/services/relayed-transfer';
 import { expectTransferRelay } from '@/services/transfer-relay-outputs';
 import { ownRegistrationResultRefusal } from '@/services/keystore-scope';
+import { confirmedRegistration } from '@/services/keystore-registry-events';
 
 export type NoteImportStatus =
   | 'idle'
@@ -566,7 +568,7 @@ export function useNoteImport() {
     // claim, just without the registration leg.
     let authPolicyRegistered = false;
     try {
-      authPolicyRegistered = await session.isKeystoreRegistered();
+      authPolicyRegistered = await withChainFallback(() => session.isKeystoreRegistered());
     } catch (err) {
       // Fail closed: an unreadable registration state must not send a bundled
       // registration at an account that may already have one.
@@ -680,6 +682,7 @@ export function useNoteImport() {
       // SDK already has it; duplicate marker calls are harmless.
     }
     markRegistered(sessionAddress, chainId);
+    confirmedRegistration(sessionAddress, chainId, true);
     setReceiveSetup(sessionAddress, chainId, 'complete', 'onchain');
   }, [publicClient, sendTransactionAsync, chainId, keystoreManager, markRegistered, sessionAddress]);
 
@@ -1268,6 +1271,7 @@ export function useNoteImport() {
           if (relayed.mode === 'register-and-withdraw') {
             // The keystore leaf landed in the same transaction, but
             // registerAndRelay sets no viewing key.
+            confirmedRegistration(sessionAddress, chainId, false);
             setReceiveSetup(sessionAddress, chainId, 'partial', 'local');
           } else {
             // The viewing key may or may not be set: ask the chain.
@@ -1319,7 +1323,7 @@ export function useNoteImport() {
         }
 
         const transferQuotes = relayerTransferQuotes(chainId);
-        const recipientDeps = await loadTransferRecipientDeps(chainId);
+        const recipientDeps = await loadTransferRecipientDeps(chainId, sessionAddress ?? undefined);
         // Anchor each note as its own self-transfer so it emits a discoverable
         // event. Registration above happened once; only the transfers loop.
         // healedNotes, not notes: a recovered claim only carries its owner and

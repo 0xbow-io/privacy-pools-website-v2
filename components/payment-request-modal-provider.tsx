@@ -1,3 +1,4 @@
+import { withChainFallback } from '@/services/keystore-read-policy';
 import { paymentRequestRecipientLabel } from '@/services/payment-request-disclosure';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 // RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
@@ -75,8 +76,9 @@ import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
 
 import { useTheme } from '@/components/theme-provider';
 import { PAY_URL_BASE } from '@/config/env';
-import { ownRegistrationResultRefusal } from '@/services/keystore-scope';
-import { IsDefaultPoolActive } from '@/config/pool-profile';
+import { lookupOwnViewingKey, ownRegistrationResultRefusal } from '@/services/keystore-scope';
+import { REGISTRY_SYNCING_MESSAGE, REGISTRY_WAIT_MS } from '@/services/nullifying-key-hash-cache';
+import { confirmedRegistration } from '@/services/keystore-registry-events';
 import { resolveEnsName } from '@/services/ens';
 
 // Production deployments set EXPO_PUBLIC_PAY_URL_BASE so share links pin
@@ -1562,37 +1564,20 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
       // try/catch surfaces an actionable error to the user.
       const session = await ensureInitialized();
       let registeredViewingKey: Hex | null = null;
-      try {
-        const cfg = getChainConfig(chainId);
-        if (!cfg?.contracts) throw new Error(`Unsupported chain: ${chainId}`);
-        const [{ lookupViewingKey }, sdkSetup] = await Promise.all([
-          import('@/services/viewing-key-cache'),
-          import('@/services/sdk-runtime'),
-        ]);
-        const rpc = sdkSetup.createRPCInteractor(chainId, Number(cfg.contracts.fromBlock));
-        const ks = sdkSetup.createKeystoreInteractor(
-          rpc,
-          cfg.contracts.keystoreAddress as SdkAddress,
-          cfg.contracts.keystoreFromBlock,
-        );
-        const lookup = await lookupViewingKey(
-          chainId,
-          address.toLowerCase() as SdkAddress,
-          { getViewingKey: (account) => ks.getViewingKey(account) },
-          {
-            keystoreAddress: cfg.contracts.keystoreAddress,
-            useAspCache: IsDefaultPoolActive,
-          },
-        );
-        registeredViewingKey = lookup.viewingKey as Hex | null;
-        log('info', 'PaymentRequest', 'Seller viewing-key registration check', {
-          registered: !!registeredViewingKey,
-          source: lookup.source,
-          aspAvailable: lookup.aspAvailable,
-        });
-      } catch (registrationErr) {
-        log('warn', 'PaymentRequest', 'Could not check seller viewing-key registration; falling back to per-request discovery', registrationErr);
+      // The seller's OWN account: answered from the bulk viewing-key registry
+      // and this client's confirmed registrations, never from a per-account
+      // chain read. No current registry is "unknown", which is not
+      // "unregistered": say it is syncing instead of offering to register.
+      const ownKey = await lookupOwnViewingKey(chainId, address, REGISTRY_WAIT_MS);
+      if (ownKey.state === 'unknown') {
+        log('warn', 'PaymentRequest', 'Seller viewing-key registry is not current yet; not guessing');
+        throw new Error(REGISTRY_SYNCING_MESSAGE);
       }
+      if (ownKey.state === 'registered') registeredViewingKey = ownKey.viewingKey as Hex;
+      log('info', 'PaymentRequest', 'Seller viewing-key registration check', {
+        registered: !!registeredViewingKey,
+        source: 'registry',
+      });
 
       // Unregistered: the request will work, but only from THIS browser until
       // it is claimed, so offer the safer route before creating it rather than
@@ -1613,26 +1598,15 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           if (!registered) { setIsBusy(false); return; }
           // Re-read the published key so this request takes the registered
           // (seed-recoverable) path rather than the per-request one.
+          // The registration modal recorded its confirmed receipt locally
+          // (confirmedRegistration), so this reads it before the ASP indexes it.
           try {
-            const [{ lookupViewingKey }, sdkSetup] = await Promise.all([
-              import('@/services/viewing-key-cache'),
-              import('@/services/sdk-runtime'),
-            ]);
-            const cfg = getChainConfig(chainId);
-            if (cfg?.contracts) {
-              const rpc = sdkSetup.createRPCInteractor(chainId, Number(cfg.contracts.fromBlock));
-              const ks = sdkSetup.createKeystoreInteractor(
-                rpc,
-                cfg.contracts.keystoreAddress as SdkAddress,
-                cfg.contracts.keystoreFromBlock,
-              );
-              const after = await lookupViewingKey(
-                chainId,
-                address.toLowerCase() as SdkAddress,
-                { getViewingKey: (account) => ks.getViewingKey(account) },
-                { keystoreAddress: cfg.contracts.keystoreAddress, useAspCache: false },
-              );
-              registeredViewingKey = after.viewingKey as Hex | null;
+            // The local record is written a tick after the receipt event
+            // (hashing is async): a few local re-reads, no request.
+            for (let attempt = 0; attempt < 10 && !registeredViewingKey; attempt++) {
+              const after = await lookupOwnViewingKey(chainId, address);
+              if (after.state === 'registered') registeredViewingKey = after.viewingKey as Hex;
+              else await new Promise((resolve) => setTimeout(resolve, 200));
             }
           } catch (reReadErr) {
             // Registration landed but the read failed: fall through to the
@@ -2067,14 +2041,14 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
       // became unreachable. prepareRegisterKeystore() checks BOTH legs and
       // returns alreadyRegistered/null calldata accordingly — always ask it
       // for wallet sessions.
-      const isRegistered = await session.isKeystoreRegistered();
+      const isRegistered = await withChainFallback(() => session.isKeystoreRegistered());
       if (!isRegistered && identityMode === 'key') {
         log('info', 'PaymentRequest', 'Skipping keystore auto-registration for wallet-funded key session payment', {
           sessionAddress: address,
           payerAddress: walletAddress,
         });
       } else if (identityMode !== 'key') {
-        const registration = await session.prepareRegisterKeystore();
+        const registration = await withChainFallback(() => session.prepareRegisterKeystore());
         // Malformed adapter output must not authorize continuation (codex
         // round 3): not-registered with NEITHER leg present is an invariant
         // violation, not a green light.
@@ -2115,6 +2089,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           // requireOk lost the flag on exactly the failures that cost money.
           walletSpend = 'registration';
           requireOk(await rpcInteractor.waitForTransactionReceipt(regHash), 'Keystore registration');
+          if (!notOurs) confirmedRegistration(address, request.chainId, false);
         }
         if (!notOurs && !registration.alreadyRegistered && registration.viewingKeyCalldata) {
           if (!live()) { abortStale('before the viewing-key broadcast'); return; }
@@ -2126,6 +2101,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           });
           walletSpend = 'registration';
           requireOk(await rpcInteractor.waitForTransactionReceipt(vkHash), 'Viewing-key registration');
+          confirmedRegistration(address, request.chainId, true);
         }
         if (!notOurs) setReceiveSetup(address, request.chainId, 'complete', 'onchain');
       }
@@ -2971,7 +2947,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
       // the setViewingKey prompt could never succeed and came back on EVERY
       // press. A viewing key is registered where it is actually needed — the
       // registration modal's self-funded path still submits both legs.
-      const isRegistered = await session.isKeystoreRegistered();
+      const isRegistered = await withChainFallback(() => session.isKeystoreRegistered());
       if (!isRegistered) {
         if (identityMode === 'key') {
           throw new Error('This account key is not registered on-chain yet. Sign out of the account key and connect the owner wallet once to register, then retry from the account key.');
@@ -3116,7 +3092,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         : request.version === 2
           ? { kind: 'viewing-key', evmAddress: request.recipientAddress as SdkAddress, publicViewingKey: request.recipientViewingPubKey }
           : { kind: 'blind', noteAddressHash: request.noteAddressHash };
-      const recipientDeps = await loadTransferRecipientDeps(request.chainId);
+      const recipientDeps = await loadTransferRecipientDeps(request.chainId, address);
       const builtRecipient = await buildTransferRecipient(recipientSpec, inputCommitments.length, recipientDeps);
       const outputsFor = (fee: bigint) => planTransferOutputs({
         inputNotes: selectedNotes,

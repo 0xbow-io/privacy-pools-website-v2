@@ -221,73 +221,6 @@ export function resetNullifyingKeyHashCacheForTests(): void {
   lastSyncOk.clear();
   aspUnavailable.clear();
   ownRegistrations.clear();
-  onChainHashes.clear();
-}
-
-/**
- * Nonzero nullifying-key hashes the chain has already returned for an account,
- * taken from the SDK's OWN reads: its registration check
- * (`isKeystoreRegistered` / `prepareRegisterKeystore`) reads this value for the
- * session account before every register and deposit, and only reports whether
- * it is nonzero. Nothing here sends a request or changes when one is sent; the
- * observer only keeps the answer the SDK threw away. The hash is write-once, so
- * a nonzero answer stays true, and like a served entry it outranks our own
- * record of a registration.
- */
-const onChainHashes = new Map<string, string>();
-
-export function noteOnChainNullifyingKeyHash(chainId: number, account: string, keystoreAddress: string | undefined, value: unknown): void {
-  const hash = normalizeHash(value);
-  // A zero answer is "not yet", which can change: never kept.
-  if (!hash) return;
-  onChainHashes.set(ownKey(chainId, account, keystoreAddress), hash);
-}
-
-/** Wrap the session interactor's own read so its answer is kept. Adds no request. */
-export function observeNullifyingKeyHashReads<A extends string, H>(
-  chainId: number,
-  keystoreAddress: string | undefined,
-  read: (account: A) => Promise<H>,
-): (account: A) => Promise<H> {
-  return async (account) => {
-    const hash = await read(account);
-    try {
-      noteOnChainNullifyingKeyHash(chainId, account, keystoreAddress, hash);
-    } catch {
-      // Bookkeeping never breaks the SDK's read.
-    }
-    return hash;
-  };
-}
-
-export type AuthPolicyOwner = 'ours' | 'other' | 'unseen';
-
-/** Whose nullifying key the chain holds for this account, from answers already received. */
-export function authPolicyOwner(chainId: number, account: string, keystoreAddress: string | undefined, ourNullifyingKeyHash: unknown): AuthPolicyOwner {
-  const onChain = onChainHashes.get(ownKey(chainId, account, keystoreAddress));
-  if (!onChain) return 'unseen';
-  return onChain === normalizeHash(ourNullifyingKeyHash) ? 'ours' : 'other';
-}
-
-/**
- * SDK 1.0.2 `prepareRegisterKeystore()` answers `alreadyRegistered` (or plans
- * only the viewing-key leg) when ANY auth policy is set on the address, without
- * comparing it with this session's keys. Before such a result may mark the
- * chain registered, or send a viewing key onto that policy, the hash the SDK's
- * own check just read must be this session's. Returns the refusal text, or null
- * when the result is ours (or an auth leg is still to be sent, which the chain
- * itself guards).
- */
-export function alreadySetRegistrationRefusal(
-  chainId: number,
-  account: string,
-  keystoreAddress: string | undefined,
-  registration: { alreadyRegistered: boolean; keystoreCalldata: unknown; nullifyingKeyHash: unknown },
-): string | null {
-  if (!registration.alreadyRegistered && registration.keystoreCalldata) return null;
-  const owner = authPolicyOwner(chainId, account, keystoreAddress, registration.nullifyingKeyHash);
-  if (owner === 'ours') return null;
-  return owner === 'other' ? REGISTRATION_INCOMPATIBLE_MESSAGE : REGISTRATION_UNCONFIRMED_MESSAGE;
 }
 
 /**
@@ -297,8 +230,9 @@ export function alreadySetRegistrationRefusal(
  * would plan the registration again and revert. Built only from values this
  * client already holds (its own account and key hashes), never from a request.
  * It answers only a registry MISS (or fills the viewing key next to the same
- * hash): a served entry or a hash the chain returned always wins, so it can
- * never hide a registration under a different unlock.
+ * hash): a served entry always wins, so it can never hide a registration under
+ * a different unlock. Written only from a confirmed registration receipt
+ * (services/keystore-registry-events.ts, confirmedRegistration).
  */
 const OWN_REGISTRATION_TTL_MS = 30 * 60_000;
 const ownRegistrations = new Map<string, { nullifyingKeyHash: string; viewingKey: string | null; at: number }>();
@@ -317,10 +251,10 @@ export function recordOwnRegistration(
   const hash = normalizeHash(nullifyingKeyHash);
   if (!hash) return;
   const key = ownKey(chainId, account, keystoreAddress);
-  // The chain already answered with another unlock's hash: whatever marked
-  // this chain registered, it was not a registration of these keys.
-  const onChain = onChainHashes.get(key);
-  if (onChain && onChain !== hash) return;
+  // The registry already serves another unlock's hash: whatever marked this
+  // chain registered, it was not a registration of these keys.
+  const served = getCachedNullifyingKeyHash(chainId, account, keystoreAddress);
+  if (served && served !== hash) return;
   const previous = ownRegistrations.get(key);
   // Same identity only: a different hash means a different unlock, which the chain would refuse anyway.
   if (previous && previous.nullifyingKeyHash !== hash) return;
@@ -340,8 +274,6 @@ export function readRegistryView(chainId: number, account: string, keystoreAddre
     viewingFresh: isViewingKeyRegistryFresh(chainId, keystoreAddress, now),
   };
   const key = ownKey(chainId, account, keystoreAddress);
-  // A hash the chain returned is as good as a served entry (write-once).
-  if (view.nullifyingKeyHash == null) view.nullifyingKeyHash = onChainHashes.get(key) ?? null;
   const own = ownRegistrations.get(key);
   // Our record answers a miss, or fills the viewing key next to a hash that is
   // already ours. It never stands in for a different hash.
@@ -381,3 +313,31 @@ export function awaitKeystoreRegistries(chainId: number, keystoreAddress: string
 
 /** Error text for a write refused because the registries are not current yet. */
 export const REGISTRY_SYNCING_MESSAGE = 'Still syncing account registrations. Try again in a moment.';
+
+/** How long a strict read or a write waits for the background grid to bring the registries current. */
+export const REGISTRY_WAIT_MS = 15_000;
+
+/**
+ * SDK 1.0.2 `prepareRegisterKeystore()` answers `alreadyRegistered` (or plans
+ * only the viewing-key leg) when ANY auth policy is set on the address, without
+ * comparing it with this session's keys. Before such a result may mark the
+ * chain registered, or send a viewing key onto that policy, the registry's hash
+ * for the account must be this session's expected hash
+ * (`registration.nullifyingKeyHash`, computed from the session's own keys).
+ * Local compare only: the registry copy, our own confirmed record, never a
+ * captured chain answer. Returns the refusal text, or null when the result is
+ * ours (or an auth leg is still to be sent, which the chain itself guards).
+ * A registry with no hash for the account is "not confirmed", not "other".
+ */
+export function alreadySetRegistrationRefusal(
+  chainId: number,
+  account: string,
+  keystoreAddress: string | undefined,
+  registration: { alreadyRegistered: boolean; keystoreCalldata: unknown; nullifyingKeyHash: unknown },
+): string | null {
+  if (!registration.alreadyRegistered && registration.keystoreCalldata) return null;
+  const expected = normalizeHash(registration.nullifyingKeyHash);
+  const served = account ? normalizeHash(readRegistryView(chainId, account, keystoreAddress).nullifyingKeyHash) : null;
+  if (!expected || !served) return REGISTRATION_UNCONFIRMED_MESSAGE;
+  return served === expected ? null : REGISTRATION_INCOMPATIBLE_MESSAGE;
+}

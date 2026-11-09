@@ -187,74 +187,63 @@ describe('review fixes', () => {
   });
 });
 
-describe('an "already registered" answer is only ours when the chain says so (review of #34)', () => {
+describe('an "already registered" answer is only ours when the registry hash is this unlock (review of #34)', () => {
   // SDK 1.0.2 prepareRegisterKeystore() says alreadyRegistered for ANY auth
   // policy. The scenario: registered under P1 on the phone, signed in with P2
-  // on the laptop before its registry has P1, pressed Register.
+  // on the laptop, pressed Register. The guard compares the registry's hash
+  // with the session's own expected hash (registration.nullifyingKeyHash).
   const MINE = `0x${'11'.repeat(32)}`;
   const THEIRS = `0x${'22'.repeat(32)}`;
-  const ZERO = `0x${'0'.repeat(64)}`;
   const already = { alreadyRegistered: true, keystoreCalldata: null, viewingKeyCalldata: null, nullifyingKeyHash: MINE };
   const viewingKeyOnly = { alreadyRegistered: false, keystoreCalldata: null, viewingKeyCalldata: { to: '0x1', data: '0x', value: 0 }, nullifyingKeyHash: MINE };
-
-  beforeEach(async () => {
-    sent.length = 0;
+  const serve = async (entries: { account: string; hash: string }[]) => {
     cache.resetNullifyingKeyHashCacheForTests();
     try { localStorage.clear(); } catch { /* no DOM storage under bun */ }
-    // A current registry that has not caught up with ALICE yet.
-    respond = () => json({ entries: [], lastSyncedId: '1', hasMore: false });
+    respond = () => json({
+      entries: entries.map((e, i) => ({ id: String(i + 1), account: e.account, nullifyingKeyHash: e.hash, lastUpdatedBlock: '0x1' })),
+      lastSyncedId: String(entries.length || 1),
+      hasMore: false,
+    });
     await sync(1);
     sent.length = 0;
-  });
-
-  // The SDK's own check, as pool-session-service wires it.
-  const sdkReadsOnChain = async (hash: string) => {
-    let calls = 0;
-    const read = cache.observeNullifyingKeyHashReads(1, undefined, async (_account: string) => { calls += 1; return hash; });
-    expect(await read(ALICE)).toBe(hash);
-    expect(calls).toBe(1);
-    // Kept from the read the SDK made anyway: nothing else was sent.
-    expect(sent.length).toBe(0);
   };
 
-  test('another unlock: the result is refused and readRegistryView is left alone', async () => {
-    await sdkReadsOnChain(THEIRS);
+  test('another unlock: the registry hash differs from the session hash, refused', async () => {
+    await serve([{ account: ALICE, hash: THEIRS }]);
     expect(cache.alreadySetRegistrationRefusal(1, ALICE, undefined, already)).toBe(REGISTRATION_INCOMPATIBLE_MESSAGE);
     expect(cache.alreadySetRegistrationRefusal(1, ALICE, undefined, viewingKeyOnly)).toBe(REGISTRATION_INCOMPATIBLE_MESSAGE);
-    // Even if a flow still marked the chain complete, the receive-setup
-    // listener's mirror cannot turn the miss into 'compatible'.
+    // A confirmed-registration record cannot turn another unlock's hash into ours.
     cache.recordOwnRegistration(1, ALICE, undefined, MINE, VK);
     const view = cache.readRegistryView(1, ALICE);
-    expect(view.nullifyingKeyHash).toBe(THEIRS);
+    expect(view.nullifyingKeyHash).toBe(`0x${'22'.repeat(32)}`);
     expect(view.viewingKey).toBeNull();
-    // The deposit gate now names the wrong unlock instead of going ahead.
     const status = identityStatusFromRegistry(view, BigInt(MINE).toString(), VK);
     expect(status).toBe('incompatible');
     expect(ownRegistrationRefusal(status, true)).toBe(REGISTRATION_INCOMPATIBLE_MESSAGE);
+    expect(sent.length).toBe(0);
   });
 
-  test('before the fix the same mirror read compatible (the hole)', () => {
-    // No on-chain answer kept: the old path. Shown so the test above means something.
-    cache.recordOwnRegistration(1, ALICE, undefined, MINE, VK);
-    expect(identityStatusFromRegistry(cache.readRegistryView(1, ALICE), BigInt(MINE).toString(), VK)).toBe('compatible');
-  });
-
-  test('our own unlock: confirmed, and the mirror still answers the viewing key', async () => {
-    await sdkReadsOnChain(MINE);
+  test('our own unlock: the registry hash equals the session hash, confirmed', async () => {
+    await serve([{ account: ALICE, hash: MINE }]);
     expect(cache.alreadySetRegistrationRefusal(1, ALICE, undefined, already)).toBeNull();
     expect(cache.alreadySetRegistrationRefusal(1, ALICE, undefined, viewingKeyOnly)).toBeNull();
-    cache.recordOwnRegistration(1, ALICE, undefined, MINE, VK);
-    expect(identityStatusFromRegistry(cache.readRegistryView(1, ALICE), BigInt(MINE).toString(), VK)).toBe('compatible');
+    expect(sent.length).toBe(0);
   });
 
-  test('no on-chain answer seen: unconfirmed, never complete', () => {
+  test('no registry hash for the account: unconfirmed, never complete', async () => {
+    await serve([{ account: BOB, hash: THEIRS }]);
     expect(cache.alreadySetRegistrationRefusal(1, ALICE, undefined, already)).toBe(REGISTRATION_UNCONFIRMED_MESSAGE);
-    expect(cache.authPolicyOwner(1, BOB, undefined, MINE)).toBe('unseen');
+    expect(cache.alreadySetRegistrationRefusal(1, '', undefined, already)).toBe(REGISTRATION_UNCONFIRMED_MESSAGE);
   });
 
-  test('a zero answer is not kept, and a plan that still sends the auth leg needs no check', async () => {
-    await sdkReadsOnChain(ZERO);
-    expect(cache.authPolicyOwner(1, ALICE, undefined, MINE)).toBe('unseen');
+  test('a confirmed receipt record stands in until the ASP serves the entry', async () => {
+    await serve([{ account: BOB, hash: THEIRS }]);
+    cache.recordOwnRegistration(1, ALICE, undefined, MINE, null);
+    expect(cache.alreadySetRegistrationRefusal(1, ALICE, undefined, already)).toBeNull();
+  });
+
+  test('a plan that still sends the auth leg needs no check', async () => {
+    await serve([]);
     const fresh = { alreadyRegistered: false, keystoreCalldata: { to: '0x1', data: '0x', value: 0 }, nullifyingKeyHash: MINE };
     expect(cache.alreadySetRegistrationRefusal(1, ALICE, undefined, fresh)).toBeNull();
   });
@@ -273,7 +262,5 @@ describe('an "already registered" answer is only ours when the chain says so (re
     expect(pay).toContain('const notOurs = ownRegistrationResultRefusal(request.chainId, address, registration);');
     expect(pay).toContain("if (!notOurs) setReceiveSetup(address, request.chainId, 'complete', 'onchain');");
     expect(src('hooks/use-publish-viewing-key.ts')).toContain('ownRegistrationResultRefusal(chainId, sessionAddress ?? address, registration)');
-    // The observer wraps the session's own interactor: no new call site.
-    expect(src('services/pool-session-service.ts')).toMatch(/keystoreInteractor\.getNullifyingKeyHash = observeNullifyingKeyHashReads\(/);
   });
 });

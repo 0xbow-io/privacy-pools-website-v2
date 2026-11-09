@@ -65,6 +65,7 @@ import {
 } from '@/services/receive-setup';
 import { priceWalletTx, registrationOwnerUnchanged, walletTxFields, type FeeReadClient } from '@/services/wallet-tx-fees';
 import { ownRegistrationResultRefusal } from '@/services/keystore-scope';
+import { confirmedRegistration } from '@/services/keystore-registry-events';
 import { REGISTRATION_INCOMPATIBLE_MESSAGE } from '@/services/keystore-identity-status';
 import { sendWalletTransaction } from '@/services/wallet-send-refusal';
 import { clearRegistrationBatch, hasPendingRegistrationBatch, RegistrationBatchPendingError, submitRegistrationBatch } from '@/services/registration-batch';
@@ -1044,6 +1045,10 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
       } catch {
         // SDK already has it; duplicate marker calls are harmless.
       }
+      // Every leg above was confirmed by a successful receipt (or a successful
+      // batch): record it so a deposit resumed right after this does not wait
+      // for the ASP to index the registration.
+      confirmedRegistration(sessionAddress ?? address, chainId, true);
       setReceiveSetup(sessionAddress ?? address, chainId, 'complete', 'onchain');
       setStatus('registered');
       // Back on the app's chain before the caller resumes.

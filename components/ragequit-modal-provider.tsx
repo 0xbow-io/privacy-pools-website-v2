@@ -8,6 +8,7 @@
 // Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
 // MAX retains the original exact shares. USD edits use an exact decimal price
 // in that same boundary. No other operation converts display back.
+import { withChainFallback } from '@/services/keystore-read-policy';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from 'react';
@@ -458,7 +459,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
       // can't trust the registration modal to appear on top while
       // this one is still open. State is preserved on this provider;
       // onSuccess reopens before re-firing the handler.
-      const isRegistered = await session.isKeystoreRegistered();
+      const isRegistered = await withChainFallback(() => session.isKeystoreRegistered());
       if (!isRegistered) {
         // Stale check after the RPC (codex): a ragequit closed during this await
         // must not pop the registration modal and replay the canceled exit.

@@ -1,10 +1,12 @@
 import { getVerifiedPoolAssociationSetLeaves } from '@/services/public-association-set';
 import { setPendingRelayOwner } from '@/services/pending-relays-store';
 import { identityStatusFromRegistry } from '@/services/keystore-identity-status';
+import { onConfirmedRegistration } from '@/services/keystore-registry-events';
 import {
   awaitKeystoreRegistries,
   readRegistryView,
   recordOwnRegistration,
+  REGISTRY_WAIT_MS,
   REGISTRY_SYNCING_MESSAGE,
 } from '@/services/nullifying-key-hash-cache';
 import { canonicalizeExportTokenIds } from '@/services/canonical-token-id';
@@ -82,7 +84,7 @@ import { BaseAppCannotSignError } from '@/services/base-app-passkey-choice';
 import { isCoinbaseWalletIdentity, isWalletConnectConnector, requestWalletSignature, resolveWalletIdentity, walletProvider, type SignatureStage, type WalletConnector } from '@/services/wallet-signature-timeout';
 import { useTxActivity } from '@/components/tx-activity-provider';
 import { getChainConfig, isSupportedEvmChainId, queryableEvmChainIds, supportedChainIds } from '@/config/chains';
-import { clearReceiveSetupForAddress, getReceiveSetup, receiveSetupFromIdentity, setReceiveSetup, subscribeReceiveSetup } from '@/services/receive-setup';
+import { clearReceiveSetupForAddress, receiveSetupFromIdentity, setReceiveSetup } from '@/services/receive-setup';
 import { keysBelongTo, pickStatusIdentity, readStatusWithRetry } from '@/services/keystore-status-read';
 import { LEGACY_CONFIG } from '@/config/env';
 import { resolveEntrypointChainConfig } from '@/services/entrypoint-resolution';
@@ -696,8 +698,6 @@ const SDK_STATUS_TRANSITIONS: Record<string, ReadonlySet<string>> = {
   REJECTED: new Set(['REJECTED', 'ACTIVE', 'SPENT', 'EXIT_PENDING', 'EXITED']),
 };
 
-/** How long a write waits for the background grid to bring the keystore registries current. */
-const REGISTRY_WAIT_MS = 15_000;
 
 /** A write refused because the bulk keystore registries are not current yet. */
 export class RegistrySyncingError extends Error {
@@ -4256,36 +4256,25 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
   };
 
   // Our own registration lands on-chain minutes before the bulk registry
-  // serves it back. When a flow records it (receive-setup 'partial' or
-  // 'complete' for this session's account), mirror it into the registry view
-  // from keys this session already holds, so a reopened flow does not plan the
-  // registration again. No request: these are our own values.
-  useEffect(() => subscribeReceiveSetup(() => {
-    // The committed session's chain, plus the far chains a cross-chain flow
-    // registers on: those sessions are built from this same manager
-    // (buildSessionForChain), so it is the one that registered there. Without
-    // them a register-then-resume shield would read a registry miss next to a
-    // registered chain and be refused until the next sync. Sepolia is never a
-    // far chain here: its sign-in may pick legacy keys.
-    const committed = committedSessionRef.current;
-    if (!committed?.keystoreManager || !committed.address) return;
-    const identity = { keystoreManager: committed.keystoreManager, address: committed.address };
-    const candidates = [committed.chainId, ...queryableEvmChainIds().filter((id) => id !== committed.chainId && id !== SEPOLIA_CHAIN_ID)];
-    const chains = candidates.filter((id) => {
-      const state = getReceiveSetup(identity.address, id);
-      return state === 'partial' || state === 'complete';
-    });
-    if (chains.length === 0) return;
+  // serves it back. A flow that saw a registration receipt CONFIRMED
+  // (services/keystore-registry-events.ts, confirmedRegistration) lets us
+  // mirror it into the registry view from keys this session already holds, so
+  // register-then-deposit continues before the ASP has indexed it. Only a
+  // confirmed receipt gets here: a leg that was merely sent, or a registry-
+  // derived status, records nothing. The session's own keys, never a request.
+  useEffect(() => onConfirmedRegistration((event) => {
+    const identity = pickStatusIdentity(committedSessionRef.current, derivedIdentityRef.current);
+    if (!identity?.keystoreManager || !identity.address) return;
+    if (String(identity.address).toLowerCase() !== event.address.toLowerCase()) return;
+    // Sepolia's sign-in may pick legacy keys: only its own committed session knows which.
+    if (event.chainId === SEPOLIA_CHAIN_ID && committedSessionRef.current?.chainId !== SEPOLIA_CHAIN_ID) return;
+    const contracts = getChainConfig(event.chainId)?.contracts;
+    if (!contracts) return;
     void getSdkSetup().then(async (sdkSetup) => {
       const hashService = await sdkSetup.createHashService();
       const nullHash = String(hashService.hash([identity.keystoreManager.getPrivateNullifyingKey()]));
-      const viewPub = identity.keystoreManager.getViewingKeyPair().publicKey;
-      for (const id of chains) {
-        const contracts = getChainConfig(id)?.contracts;
-        if (!contracts) continue;
-        const complete = getReceiveSetup(identity.address, id) === 'complete';
-        recordOwnRegistration(id, String(identity.address), LEGACY_CONFIG?.keystore ?? contracts.keystoreAddress, nullHash, complete ? viewPub : null);
-      }
+      const viewPub = event.viewingKey ? identity.keystoreManager.getViewingKeyPair().publicKey : null;
+      recordOwnRegistration(event.chainId, String(identity.address), LEGACY_CONFIG?.keystore ?? contracts.keystoreAddress, nullHash, viewPub);
     }).catch(() => { /* the next registry sync answers */ });
   }), []);
 

@@ -9,6 +9,7 @@ import { isSupportedEvmChainId } from '@/config/chains';
 import { isSessionInitTimeout, withSessionInitTimeout } from '@/services/session-init-timeout';
 import { setReceiveSetup, viewingKeyTxPlan } from '@/services/receive-setup';
 import { ownRegistrationResultRefusal } from '@/services/keystore-scope';
+import { confirmedRegistration } from '@/services/keystore-registry-events';
 import { sendWalletTransaction } from '@/services/wallet-send-refusal';
 import { minPriorityFeeFor, readFeeMarket, walletPricedFeeFloorFor, walletTxAffordable, type FeeReadClient } from '@/services/wallet-tx-fees';
 
@@ -178,6 +179,7 @@ export function usePublishViewingKey(chainId: number) {
     if (receipt.status !== 'success') {
       throw new Error(`Publishing the viewing key reverted onchain (tx ${hash}).`);
     }
+    confirmedRegistration(sessionAddress ?? address, chainId, true);
     setReceiveSetup(sessionAddress ?? address, chainId, 'complete', 'onchain');
     log('info', 'PublishViewingKey', 'Viewing key published', { chainId, txHash: hash });
     return { kind: 'published', txHash: hash };
