@@ -243,3 +243,85 @@ describe('no share name reaches a render under another name', () => {
     expect(withoutShareNames(null)).toBeNull();
   });
 });
+
+/**
+ * QA on #72: the wallet unwrap row read "You have 1.5 <share name> in your
+ * wallet". Both guards above let it through: the name sat in a bare local
+ * (`const symbol = shareSymbol(deployment)`), which they read as a display name
+ * by convention, and the figure was a raw share count (formatShareAmount).
+ * A local filled from a share's own name, and a raw share count, never render.
+ * A balance in the wallet goes through the balance view and ShareFigure: the
+ * coin it redeems to, a shimmer until the rate is known.
+ */
+// A share's own name: the unwrap helper, or a `shareSymbol` field.
+const SHARE_NAME_SOURCE = /^\s*(?:shareSymbol\s*\(|[\w$.?]+\??\.shareSymbol\b(?!\s*\())/;
+// A share count formatted for display without converting it to the coin.
+const RAW_SHARE_COUNT = /\bformatShareAmount\s*\(/;
+
+function shareNameLocals(src: string): Set<string> {
+  const out = new Set<string>();
+  for (const m of src.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=([^;\n]*)/g)) {
+    if (SHARE_NAME_SOURCE.test(m[2])) out.add(m[1]);
+  }
+  return out;
+}
+
+function shareNameRenders(line: string, locals: Set<string>): string[] {
+  if (EXEMPT_LINE.test(line)) return [];
+  const hits: string[] = [];
+  for (const m of renderable(line).matchAll(RENDERED_EXPR)) {
+    const raw = m[1] ?? m[2] ?? '';
+    if (/^\s*\/\*/.test(raw)) continue;
+    if (RAW_SHARE_COUNT.test(raw)) hits.push('formatShareAmount(...)');
+    // Arguments to a call render what the call returns, not the argument.
+    let expr = raw.replace(/'[^']*'|"[^"]*"/g, "''");
+    let prev;
+    do { prev = expr; expr = expr.replace(/\((?:[^()]|\(\))+\)/g, '()'); } while (expr !== prev);
+    if (/(?:^|[^\w$.])shareSymbol\s*\(\)/.test(expr)) hits.push('shareSymbol(...)');
+    for (const c of expr.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)(?![\w$]|\s*\()/g)) {
+      if (locals.has(c[1])) hits.push(c[1]);
+    }
+  }
+  return hits;
+}
+
+describe('no share name or raw share count reaches a render through a local', () => {
+  test('a local holding a share name, or a raw share count, is never rendered', () => {
+    const offenders: string[] = [];
+    for (const dir of DIRS) {
+      for (const file of sources(join(ROOT, dir))) {
+        const rel = relative(ROOT, file);
+        if (RULE_FILES.has(rel)) continue;
+        const src = readFileSync(file, 'utf8');
+        const locals = shareNameLocals(src);
+        src.split('\n').forEach((line, i) => {
+          for (const m of shareNameRenders(line, locals)) offenders.push(`${rel}:${i + 1}: ${m}`);
+        });
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  test('the local guard catches the shapes it is for', () => {
+    const hits = (src: string) => {
+      const locals = shareNameLocals(src);
+      return src.split('\n').flatMap((line) => shareNameRenders(line, locals));
+    };
+    // The unwrap row as it shipped on #72.
+    expect(hits([
+      'const symbol = shareSymbol(deployment);',
+      '<Text>You have {formatShareAmount(shares, deployment.ppUSDCDecimals)} {symbol} in your wallet</Text>',
+    ].join('\n'))).toEqual(['formatShareAmount(...)', 'symbol']);
+    expect(hits('const name = p.shareSymbol;\nreturn `held as ${name}`;')).toEqual(['name']);
+    expect(hits('<Text>{shareSymbol(d)}</Text>')).toEqual(['shareSymbol(...)']);
+    // The fix: the name only feeds the balance view, the row renders the figure.
+    expect(hits([
+      'const symbol = shareSymbol(deployment);',
+      'const heldView = balanceDisplay(formatUnits(shares, deployment.ppUSDCDecimals), symbol, chainId, deployment.ppUSDC);',
+      '<Text>You have <ShareFigure view={heldView} /> in your wallet</Text>',
+    ].join('\n'))).toEqual([]);
+    // A display name in a bare local still passes, and so does a key.
+    expect(hits('const symbol = displayTokenSymbol(x);\n<Text>{symbol}</Text>')).toEqual([]);
+    expect(hits('const symbol = shareSymbol(d);\n<Row key={symbol} />')).toEqual([]);
+  });
+});

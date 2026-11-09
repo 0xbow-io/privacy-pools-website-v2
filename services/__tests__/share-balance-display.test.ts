@@ -109,3 +109,17 @@ test('ppUSDT uses its own decimals, with an approximate fallback before rates ar
   expect(shareBalanceDisplay({ ...args, rate: undefined }).text).toBe('≈ 38.10 USDT');
   expect(parseTokenAmount(args.sharesExact, 18)).toBe(38100000000000000001n);
 });
+
+test('wallet unwrap row: a shimmer while the rate loads, then the coin figure', () => {
+  // QA on #72: the row read the share count under the share's own name.
+  const loading = shareBalanceDisplay({ sharesExact: '1.5', shareSymbol: 'ppUSDC', rate: undefined, priceMap: undefined, fallbackPrice: 0 });
+  expect(loading.loading).toBe(true);
+  expect(loading.symbol).toBe('USDC');
+  const live = shareBalanceDisplay({ sharesExact: '1.5', shareSymbol: 'ppUSDC', rate: PP_USDC, priceMap: undefined, fallbackPrice: 0 });
+  expect(live.loading).toBe(false);
+  expect(live.symbol).toBe('USDC');
+  expect(live.text).toMatch(/^[\d.,]+ USDC$/);
+  // Nothing held and plain coins never shimmer.
+  expect(shareBalanceDisplay({ sharesExact: '0', shareSymbol: 'ppUSDC', rate: undefined, priceMap: undefined, fallbackPrice: 0 }).loading).toBe(false);
+  expect(shareBalanceDisplay({ sharesExact: '2', shareSymbol: 'USDC', rate: undefined, priceMap: undefined, fallbackPrice: 1 }).loading).toBe(false);
+});

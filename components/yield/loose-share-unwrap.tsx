@@ -2,13 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { useAccount, useConfig, usePublicClient, useSendTransaction } from 'wagmi';
 import { getAccount } from '@wagmi/core';
-import { encodeFunctionData, erc20Abi, type Hex } from 'viem';
+import { encodeFunctionData, erc20Abi, formatUnits, type Hex } from 'viem';
 import { usePools } from '@/components/pools-provider';
 import { useToast } from '@/components/toast-provider';
 import { useTxActivity } from '@/components/tx-activity-provider';
 import { getPinnedYieldDeployments } from '@/config/yield';
 import { useActiveEvmChain } from '@/hooks/use-active-evm-chain';
-import { detectLooseShares, formatShareAmount, needsApproval, planUnwrap, shareSymbol, unwrapTargetSymbol, type LooseShare } from '@/services/loose-share-unwrap';
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
+import { ShareFigure } from '@/components/ui/share-figure';
+import { detectLooseShares, needsApproval, planUnwrap, shareSymbol, unwrapTargetSymbol, type LooseShare } from '@/services/loose-share-unwrap';
 import { priceWalletTx, walletTxFields } from '@/services/wallet-tx-fees';
 
 /** Reads only the app-wide wallet poll. Opening Portfolio causes no requests. */
@@ -46,6 +48,10 @@ function UnwrapRow({ share: { deployment, shares }, chainId, owner, allowance }:
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const symbol = shareSymbol(deployment);
   const target = unwrapTargetSymbol(deployment);
+  // The wallet holds share tokens: shown as the coin they redeem to, a shimmer
+  // until the rate is known. Never the share's own name.
+  const balanceDisplay = useBalanceDisplay(chainId);
+  const heldView = balanceDisplay(formatUnits(shares, deployment.ppUSDCDecimals), symbol, chainId, deployment.ppUSDC);
 
   async function unwrap() {
     if (running.current || txPending || !publicClient || (deployment.zap && allowance === undefined)) return;
@@ -96,7 +102,7 @@ function UnwrapRow({ share: { deployment, shares }, chainId, owner, allowance }:
     <View className="gap-[8px] rounded-card border border-border-light px-[16px] py-[12px]">
       <View className="flex-row flex-wrap items-center justify-between gap-[12px]">
         <Text className="font-pp-regular text-[14px] text-text-primary">
-          You have {formatShareAmount(shares, deployment.ppUSDCDecimals)} {symbol} in your wallet
+          You have <ShareFigure view={heldView} /> in your wallet
         </Text>
         <Pressable accessibilityRole="button" accessibilityState={{ disabled }} disabled={disabled}
           className={`rounded-control bg-button-primary px-[16px] py-[8px] ${disabled ? 'opacity-50' : ''}`}

@@ -25,7 +25,7 @@
 import { formatUnits } from 'viem';
 import { parseTokenAmount } from '@/services/token-amount';
 import { formatTokenBalance } from '@/services/token-format';
-import { displayTokenSymbol, tokenAmountLabel } from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol, tokenAmountLabel } from '@/services/share-display';
 import { formatShareAsUnderlying, shareExactAsUnderlying, underlyingPriceFor, type ShareRate } from '@/services/share-rates';
 
 export type ShareBalanceDisplay = {
@@ -35,6 +35,8 @@ export type ShareBalanceDisplay = {
   symbol: string;
   /** "0.1 ETH", or "≈ 0.09989 ETH" for an unconverted share count. */
   text: string;
+  /** A share is held and its rate is not known yet: render a shimmer, not `text`. */
+  loading: boolean;
   /** USD for the figure; approximate when not converted. */
   usd: number;
   converted: boolean;
@@ -67,6 +69,7 @@ export function shareBalanceDisplay(args: {
       hint: shares > 0
         ? `Worth ${text} today. The value grows as yield accrues.`
         : null,
+      loading: false,
     };
   }
   // Nothing held reads as a plain zero; a holding is the share count under the
@@ -80,6 +83,7 @@ export function shareBalanceDisplay(args: {
     usd: shares * fallbackPrice,
     converted: false,
     hint: null,
+    loading: isShareSymbol(shareSymbol) && shares > 0,
   };
 }
 
