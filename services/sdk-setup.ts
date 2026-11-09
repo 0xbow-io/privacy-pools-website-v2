@@ -67,6 +67,7 @@ import {
   settlePendingRelayByReceipt,
 } from '@/services/pending-relays-store';
 import { alignLogScanStart } from '@/services/log-scan-alignment';
+import { correctKeystoreInteractor, getKeystoreCorrection } from '@/services/keystore-root-guard';
 import { getChainConfig } from '@/config/chains';
 import { ASP_PUBLIC_KEY, ASP_URL, LEGACY_CONFIG } from '@/config/env';
 import { getRelayerSignerAddress, getTransferProcessorAddress } from '@/config/relayer';
@@ -1139,6 +1140,28 @@ class ChunkedRPCInteractor implements IRPCInteractor {
     toBlock: bigint,
   ): Promise<{ logs: GetLogsResult; lastBlock: bigint } | null> {
     try {
+      // The keystore leaves the grid REBUILT from the chain win over the ASP's
+      // copy (services/keystore-root-guard.ts): they reproduce the keystore's
+      // current root, and the ASP's copy did not. Their coverage is the head
+      // they were verified at, so the sweep above them is only the blocks since.
+      if (kind === 'keystore-leaves') {
+        const correction = getKeystoreCorrection(this.keystoreAddress);
+        if (correction) {
+          const logs: GetLogsResult = [];
+          for (const event of correction.events) {
+            if (event.blockNumber > toBlock || event.blockNumber < fromBlock) continue;
+            logs.push({
+              eventName: event.kind === 'inserted' ? 'LeafInserted' : 'LeafUpdated',
+              args: { _newLeaf: event.leaf, _root: event.root, _leafIndex: event.leafIndex },
+              blockNumber: ('0x' + event.blockNumber.toString(16)) as Hex,
+              transactionHash: '0x' as Hex,
+            } as DecodedLog);
+          }
+          const covered = correction.head;
+          const lastBlock = covered < fromBlock ? fromBlock - 1n : covered < toBlock ? covered : toBlock;
+          return { logs, lastBlock };
+        }
+      }
       const entrypoint = await resolveConfiguredEntrypoint(this.chainId);
       if (!entrypoint) return null;
       const held = await loadPoolLeaves(this.chainId, { entrypoint });
@@ -1370,10 +1393,11 @@ export function createKeystoreInteractor(
   keystoreAddress: Address,
   fromBlock?: bigint,
 ): IKeystoreInteractor {
-  return createEvmKeystoreInteractor({
+  const interactor = createEvmKeystoreInteractor({
     rpcInteractor: withDefaultFromBlock(rpc, fromBlock),
     contractAddress: keystoreAddress,
   });
+  return correctKeystoreInteractor(interactor, keystoreAddress);
 }
 
 // SDK workaround: reconcile the NoteManager state against the on-chain
