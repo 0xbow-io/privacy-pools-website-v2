@@ -700,6 +700,7 @@ test('the discovery session builder never requests address-keyed keystore status
   let statusReads = 0;
   let identityStatus: 'incompatible' | 'unknown' = 'incompatible';
   const waits: unknown[] = [];
+  const fallbacks: unknown[] = [];
   class RegistrySyncingError extends Error {}
   const build = compile(`${providerDecl('buildSessionForChain')}; return buildSessionForChain;`, {
     useCallback: (fn: unknown) => fn, effectiveAddress: owner, log() {},
@@ -709,7 +710,7 @@ test('the discovery session builder never requests address-keyed keystore status
     resolveEntrypointChainConfig: () => ({ entrypoint: 'entrypoint' }), isAddress: () => true,
     getSdkSetup: async () => ({ createNoteManager: () => ({}), createCircuitArtifacts: () => ({}) }),
     REGISTRY_WAIT_MS: 15_000, RegistrySyncingError,
-    resolveKeystoreIdentityStatus: async (...args: unknown[]) => { statusReads++; waits.push(args[4]); return identityStatus; },
+    resolveKeystoreIdentityStatus: async (...args: unknown[]) => { statusReads++; waits.push(args[4]); fallbacks.push(args[5]); return identityStatus; },
     assertUnlockFor,
     getPoolSessionService: async () => ({ createPoolSession: async () => ({}) }),
     loadStoredAccountExport: () => null, CIRCUIT_ARTIFACTS_BASE_URL: '',
@@ -720,10 +721,11 @@ test('the discovery session builder never requests address-keyed keystore status
   await expect(build(10)).rejects.toThrow('different unlock');
   expect(statusReads).toBe(1);
   identityStatus = 'unknown';
-  // A write session waits for the grid and never proceeds on an unanswered identity.
+  // A write session asks the chain when the registries have no answer (no wait), and never proceeds on an unanswered identity.
   await expect(build(10)).rejects.toBeInstanceOf(RegistrySyncingError);
   expect(statusReads).toBe(2);
-  expect(waits).toEqual([15_000, 15_000]);
+  expect(waits).toEqual([0, 0]);
+  expect(fallbacks).toEqual([true, true]);
 });
 
 // One chain's failed identity read is unknown for THAT chain only: it blocks a

@@ -1,4 +1,3 @@
-import { withChainFallback } from '@/services/keystore-read-policy';
 import { useCallback, useRef, useState } from 'react';
 import { useActiveEvmChain } from '@/hooks/use-active-evm-chain';
 import { useSessionChainId } from '@/hooks/use-session-chain-id';
@@ -568,7 +567,7 @@ export function useNoteImport() {
     // claim, just without the registration leg.
     let authPolicyRegistered = false;
     try {
-      authPolicyRegistered = await withChainFallback(() => session.isKeystoreRegistered());
+      authPolicyRegistered = await session.isKeystoreRegistered();
     } catch (err) {
       // Fail closed: an unreadable registration state must not send a bundled
       // registration at an account that may already have one.

@@ -380,7 +380,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
     try {
       // Reads the named chain's keystore, not the active session's. Also the
       // only load-time viewing-key read the receive prompts rely on.
-      const identity = await keystoreStatusForChain(chainId);
+      const identity = await keystoreStatusForChain(chainId, { chainFallback: true });
       if (identity === 'unknown') throw new Error(`Registration on chain ${chainId} is still syncing. Try again in a moment.`);
       setReceiveSetup(sessionAddress ?? address, chainId, receiveSetupFromIdentity(identity), 'onchain');
       // 'partial' and 'incompatible' both have an auth policy.
@@ -768,7 +768,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
           // re-read rather than assume complete.
           setErrorMessage(null);
           try {
-            const identity = await keystoreStatusForChain(chainId);
+            const identity = await keystoreStatusForChain(chainId, { chainFallback: true });
             // The read follows the CURRENT identity: only store it under the
             // captured owner if that is still who it read.
             if (stillBound()) setReceiveSetup(owner, chainId, receiveSetupFromIdentity(identity), 'onchain');
@@ -1067,7 +1067,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
         // useReceiveSetup is left at a stale 'unknown'/'partial' while this
         // caller resumes as if setup finished.
         try {
-          const identity = await keystoreStatusForChain(chainId);
+          const identity = await keystoreStatusForChain(chainId, { chainFallback: true });
           setReceiveSetup(sessionAddress ?? address, chainId, receiveSetupFromIdentity(identity), 'onchain');
         } catch (readErr) {
           console.warn('[KeystoreRegistration] post-race identity re-read failed', readErr instanceof Error ? readErr.message : String(readErr));

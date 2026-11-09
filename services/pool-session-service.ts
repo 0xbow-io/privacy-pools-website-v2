@@ -36,7 +36,6 @@ import { getChainConfig } from '@/config/chains';
 import { recordingNoteEventReads } from '@/services/note-ciphertexts';
 import { routeOwnKeystoreReads } from '@/services/keystore-registry-reads';
 import { keystoreScopeAddress } from '@/services/keystore-scope';
-import { scopeSpendAndExitMethods } from '@/services/keystore-read-policy';
 import { createSdkConsoleLogger } from '@/services/sdk-logger';
 import { buildReshieldDestinationKeys } from '@/services/reshield-destination';
 import { createPublicClient, fallback } from 'viem';
@@ -450,7 +449,7 @@ export async function createPoolSession(params: CreatePoolSessionParams) {
   };
 
   // Forward the SDK's own warnings/errors to the console (see services/sdk-logger.ts).
-  // Spend and exit methods never wait on, or refuse for, the keystore
-  // registries (services/keystore-read-policy.ts).
-  return scopeSpendAndExitMethods(createEvmPoolSession(config, { logger: createSdkConsoleLogger() }));
+  // Own-account keystore reads ask the registries first, then the chain; never wait
+  // (services/keystore-registry-reads.ts).
+  return createEvmPoolSession(config, { logger: createSdkConsoleLogger() });
 }

@@ -355,10 +355,21 @@ const RECIPIENT_FALLBACK_CALLS: Record<string, RegExp[]> = {
   'services/relayed-transfer.ts': [
     /^const publicViewingKey = await deps\.getViewingKey\(spec\.evmAddress\);$/,
     // The own account is routed to the registry before this runs (loadTransferRecipientDeps ownerAddress).
-    /^getViewingKey: async \(evmAddress\) => \(await withChainFallback\(\(\) => keystore\.getViewingKey\(evmAddress\)\)\) as Hex,$/,
+    /^getViewingKey: async \(evmAddress\) => \(await keystore\.getViewingKey\(evmAddress\)\) as Hex,$/,
   ],
   'components/transfer-modal-provider.tsx': [/^\{ getViewingKey: \(a\) => ks\.getViewingKey\(a\) \},$/],
   'components/deposit-modal-provider.tsx': [/^\{ getViewingKey: \(a\) => ks\.getViewingKey\(a\) \},$/],
+};
+
+// The own-account CHAIN FALLBACK, for this release (until the registry feed is
+// proven): the registry is asked first and these run only when it has no
+// current data. Exactly these call shapes, per file, for either method.
+const OWN_ACCOUNT_CHAIN_FALLBACK_CALLS: Record<string, RegExp[]> = {
+  'services/keystore-scope.ts': [/^return \(await ks\.getViewingKey\(account as never\)\) as string \| null \| undefined;$/],
+  'components/sdk-provider.tsx': [
+    /^readNullifyingKeyHash: async \(\) => \(await ks\.getNullifyingKeyHash\(addr\)\) as string \| null,$/,
+    /^readViewingKey: async \(\) => \(await ks\.getViewingKey\(addr\)\) as string \| null,$/,
+  ],
 };
 
 describe('privacy: no per-account keystore reads for the session account', () => {
@@ -375,6 +386,7 @@ describe('privacy: no per-account keystore reads for the session account', () =>
           const m = KEYSTORE_ACCOUNT_READS.exec(line);
           if (!m) return;
           if (m[1] === 'getViewingKey' && (RECIPIENT_FALLBACK_CALLS[rel] ?? []).some((re) => re.test(trimmed))) return;
+          if ((OWN_ACCOUNT_CHAIN_FALLBACK_CALLS[rel] ?? []).some((re) => re.test(trimmed))) return;
           offenders.push(`${rel}:${i + 1}: ${trimmed}`);
         });
       }

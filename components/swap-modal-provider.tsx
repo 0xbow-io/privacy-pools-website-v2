@@ -1,4 +1,3 @@
-import { withChainFallback } from '@/services/keystore-read-policy';
 import { formatUnits } from 'viem';
 import { ownRegistrationRefusal } from '@/services/keystore-identity-status';
 // RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
@@ -1578,7 +1577,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
 
     // Keystore-registration gate BEFORE fetching a short-lived quote —
     // registering after would guarantee a stale commitment.
-    const registered = await withChainFallback(() => session.isKeystoreRegistered());
+    const registered = await session.isKeystoreRegistered();
     if (!args.isCurrent()) return 'handled';
     if (!registered) {
       if (!args.isCurrent()) return 'handled';
@@ -1659,7 +1658,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       // nonzero check. The reshield mints the far note under this session's
       // keys, so the bulk registry must confirm they are the registered ones
       // (local read, waits for the grid, never fetches).
-      const refusal = ownRegistrationRefusal(await keystoreStatusForChain(destinationChainId), true);
+      const refusal = ownRegistrationRefusal(await keystoreStatusForChain(destinationChainId, { chainFallback: true }), true);
       if (!args.isCurrent()) return 'handled';
       if (refusal) {
         setSwapError(refusal);

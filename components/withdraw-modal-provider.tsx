@@ -1,4 +1,3 @@
-import { withChainFallback } from '@/services/keystore-read-policy';
 import { spendableBalanceLabel } from '@/services/spendable-balance-label';
 import { presetExceedsWithdrawMax } from '@/services/withdraw-preset-guard';
 import { useShareAmountField } from '@/hooks/use-share-amount-field';
@@ -2337,7 +2336,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       const session = sdkReady && poolSession ? poolSession : await ensureInitialized();
       if (!isCurrent()) return;
       if (session) {
-        const isRegistered = await withChainFallback(() => session.isKeystoreRegistered());
+        const isRegistered = await session.isKeystoreRegistered();
         if (!isCurrent()) return;
         if (!isRegistered) {
           if (identityMode === 'key') {

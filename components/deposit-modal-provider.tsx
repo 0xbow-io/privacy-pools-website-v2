@@ -1955,7 +1955,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       // has not caught up with, and depositing would strand the note. Local
       // read only (it waits for the grid, never fetches).
       if (!recipientMode) {
-        const ownIdentity = await keystoreStatusForChain(depositChainId);
+        const ownIdentity = await keystoreStatusForChain(depositChainId, { chainFallback: true });
         if (!live()) { releaseTx(); log('warn', 'Deposit', 'Stale run aborted after the identity check'); return; }
         const refusal = ownRegistrationRefusal(ownIdentity, isRegistered);
         if (refusal) {
