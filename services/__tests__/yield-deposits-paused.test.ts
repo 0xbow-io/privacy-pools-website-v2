@@ -12,6 +12,8 @@
  * yield-deposits-paused-prod.test.ts, spawned by environments.test.ts.
  */
 import { describe, expect, test } from 'bun:test';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { ENVIRONMENTS, NATIVE_ASSET_ADDRESS, pauseVaultDeposits, type TokenMetadata } from '@/config/environments';
 import { PROD_YIELD_DEPLOYMENTS } from '@/config/prod-deployments';
@@ -22,17 +24,12 @@ import {
   resolveYieldDepositDeploymentForUnderlying,
   YIELD_DEPOSITS_PAUSED,
 } from '@/config/yield';
+import * as pauseConfig from '@/config/yield-deposits-paused';
 import {
-  DEFAULT_YIELD_PAUSE_BANNER_TEXT,
   parseYieldDepositsPaused,
   pauseActive,
   pauseCoversChain,
-  resolveYieldPauseBannerText,
-  resolveYieldPauseBannerLinkUrl,
-  splitBannerAtAave,
-  DEFAULT_YIELD_PAUSE_BANNER_LINK_URL,
   VAULT_DEPOSITS_PAUSED_MESSAGE,
-  YIELD_PAUSE_BANNER_TEXT,
 } from '@/config/yield-deposits-paused';
 import { conversionTargetRefusal, entrypointOnlyTargetBlocked } from '@/services/entrypoint-only-route';
 import { NO_HOLDINGS, selectHubTokens } from '@/services/hub-token-catalog-rule';
@@ -189,12 +186,10 @@ describe('per chain scope (Pat, 2026-10-29: Aave froze its Ethereum reserves onl
     expect(parseYieldDepositsPaused('56,TRUE')).toEqual({ all: true, chainIds: [] });
   });
 
-  test('an unset env pauses nothing: the vault assets stay open and only the banner shows (Pat, 2026-10-29)', () => {
+  test('an unset env pauses nothing: the vault assets stay open', () => {
     const unset = parseYieldDepositsPaused(undefined);
     expect(pauseActive(unset)).toBe(false);
     expect(pauseCoversChain(unset, 1)).toBe(false);
-    expect(resolveYieldPauseBannerText(unset, undefined))
-      .toBe('Deposits are paused for yield assets on Ethereum and Base because of Aave.');
   });
 
   test('true covers every chain, a list covers only its chains, off covers none', () => {
@@ -243,60 +238,40 @@ describe('per chain scope (Pat, 2026-10-29: Aave froze its Ethereum reserves onl
   });
 });
 
-describe('the pause banner text', () => {
-  const on = parseYieldDepositsPaused('1');
-  const off = parseYieldDepositsPaused(undefined);
+describe('no pause banner (QA, 2026-11-09)', () => {
+  const ROOT = join(new URL('.', import.meta.url).pathname, '..', '..');
+  const LAYOUT = readFileSync(join(ROOT, 'app/_layout.tsx'), 'utf8');
 
-  test('unset text with a pause on shows Pat\'s default', () => {
-    expect(resolveYieldPauseBannerText(on, undefined)).toBe(DEFAULT_YIELD_PAUSE_BANNER_TEXT);
-    // The default names Ethereum, so any other scope needs its own text.
-    expect(resolveYieldPauseBannerText(parseYieldDepositsPaused('true'), undefined)).toBeNull();
-    expect(resolveYieldPauseBannerText(parseYieldDepositsPaused('56'), undefined)).toBeNull();
-    expect(resolveYieldPauseBannerText(parseYieldDepositsPaused('1,56'), undefined)).toBeNull();
-    // Ethereum and Base, both Aave chains (Pat, 2026-10-29).
-    expect(resolveYieldPauseBannerText(parseYieldDepositsPaused('1,8453'), undefined))
-      .toBe('Deposits are paused for yield assets on Ethereum and Base because of Aave.');
-    expect(resolveYieldPauseBannerText(parseYieldDepositsPaused('8453'), undefined))
-      .toBe('Deposits are paused for yield assets on Base because of Aave.');
-    expect(resolveYieldPauseBannerText(parseYieldDepositsPaused('1,10,8453'), undefined))
-      .toBe('Deposits are paused for yield assets on Ethereum, Optimism and Base because of Aave.');
-    expect(resolveYieldPauseBannerText(parseYieldDepositsPaused('true'), 'Deposits are paused.')).toBe('Deposits are paused.');
-    expect(DEFAULT_YIELD_PAUSE_BANNER_TEXT).toBe('Deposits are paused for yield assets on Ethereum because of Aave.');
+  test('the app layout renders no pause banner and keeps the normal top inset', () => {
+    expect(existsSync(join(ROOT, 'components/yield-pause-banner.tsx'))).toBe(false);
+    for (const gone of ['YieldPauseBanner', 'yield-pause-banner', 'YIELD_PAUSE_BANNER']) {
+      expect(LAYOUT).not.toContain(gone);
+    }
+    expect(LAYOUT).toContain('const topInset = useNativeTopInset();');
+    // No banner text, link or default ships in the config either.
+    for (const key of Object.keys(pauseConfig)) expect(key).not.toMatch(/BANNER/i);
   });
 
-  test('custom text is shown trimmed, an empty string hides the banner', () => {
-    expect(resolveYieldPauseBannerText(on, '  Deposits are paused on Ethereum.  ')).toBe('Deposits are paused on Ethereum.');
-    expect(resolveYieldPauseBannerText(on, '')).toBeNull();
-    expect(resolveYieldPauseBannerText(on, '   ')).toBeNull();
-  });
-
-  test('the banner is independent of the pause: on by default, custom text shows, empty hides', () => {
-    expect(resolveYieldPauseBannerText(off, undefined))
-      .toBe('Deposits are paused for yield assets on Ethereum and Base because of Aave.');
-    expect(resolveYieldPauseBannerText(off, 'Something')).toBe('Something');
-    for (const raw of ['', '   ']) expect(resolveYieldPauseBannerText(off, raw)).toBeNull();
-    // This unit suite runs with the env unset, so the served constant is the default.
-    expect(YIELD_PAUSE_BANNER_TEXT).toBe('Deposits are paused for yield assets on Ethereum and Base because of Aave.');
-  });
-});
-
-describe('the Aave link in the banner (Pat, 2026-10-29)', () => {
-  test('defaults to the Aave announcement, https only, empty means no link', () => {
-    expect(resolveYieldPauseBannerLinkUrl(undefined)).toBe('https://x.com/aave/status/2115937863162339637');
-    expect(DEFAULT_YIELD_PAUSE_BANNER_LINK_URL).toBe('https://x.com/aave/status/2115937863162339637');
-    expect(resolveYieldPauseBannerLinkUrl('')).toBeNull();
-    expect(resolveYieldPauseBannerLinkUrl('   ')).toBeNull();
-    expect(resolveYieldPauseBannerLinkUrl('http://example.com')).toBeNull();
-    expect(resolveYieldPauseBannerLinkUrl('javascript:alert(1)')).toBeNull();
-    expect(resolveYieldPauseBannerLinkUrl('not a url')).toBeNull();
-    expect(resolveYieldPauseBannerLinkUrl('https://governance.aave.com/t/x')).toBe('https://governance.aave.com/t/x');
-  });
-
-  test('the first "Aave" is the link label, no url or no Aave means no link', () => {
-    const url = 'https://x.com/aave/status/2115937863162339637';
-    expect(splitBannerAtAave('Deposits are paused for yield assets on Ethereum because of Aave.', url))
-      .toEqual({ before: 'Deposits are paused for yield assets on Ethereum because of ', label: 'Aave', after: '.' });
-    expect(splitBannerAtAave('Deposits are paused for yield assets on Ethereum because of Aave.', null)).toBeNull();
-    expect(splitBannerAtAave('Deposits are paused.', url)).toBeNull();
+  test('the deposit pause flag still refuses deposits when set', () => {
+    const on = parseYieldDepositsPaused('true');
+    const flags = (chainId: number) => ({ ...ON, depositsPaused: pauseCoversChain(on, chainId) });
+    let checked = 0;
+    for (const chainId of chains) {
+      for (const d of PROD_YIELD_DEPLOYMENTS[chainId]) {
+        const got = d.nativeMode
+          ? resolveNativeYieldDepositDeployment(chainId, flags(chainId), PROD_YIELD_DEPLOYMENTS, usable)
+          : resolveYieldDepositDeploymentForUnderlying(chainId, d.underlying, flags(chainId), PROD_YIELD_DEPLOYMENTS, usable);
+        expect(got).toBeUndefined();
+        checked += 1;
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+    const refused = Object.values(pauseVaultDeposits(prodTokens, PROD_YIELD_DEPLOYMENTS, (id) => pauseCoversChain(on, id)))
+      .flatMap((tokens) => Object.values(tokens).filter((t) => t.depositPaused));
+    expect(refused.length).toBeGreaterThan(0);
+    for (const t of refused) {
+      expect(conversionTargetRefusal(t, { chainId: 1, shareRouteConfigured: true })).toBe(VAULT_DEPOSITS_PAUSED_MESSAGE);
+    }
+    expect(pauseConfig.DEPOSITS_PAUSED_SUBTITLE).toBe('Deposits paused');
   });
 });

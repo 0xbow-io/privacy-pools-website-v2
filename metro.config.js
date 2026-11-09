@@ -206,7 +206,7 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
 //
 // babel-preset-expo inlines process.env.EXPO_PUBLIC_* at TRANSFORM time and the
 // cache key does not include those values, so a warm cache would keep an old
-// EXPO_PUBLIC_YIELD_PAUSE_BANNER_TEXT after someone edits it in Vercel. The
+// EXPO_PUBLIC_YIELD_DEPOSITS_PAUSED after someone edits it in Vercel. The
 // cache folder is therefore named after a hash of every value that changes the
 // transformed output: an env change starts a cold cache, anything else stays warm.
 // If Expo moves its internal store class this falls back to the default cache.

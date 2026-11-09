@@ -36,12 +36,11 @@ for (const chainId of chains) {
 }
 
 describePaused('vault deposits paused on Ethereum only', () => {
-  test('only chain 1 is paused, and the default banner is up', () => {
+  test('only chain 1 is paused', () => {
     expect(pauseConfig.YIELD_DEPOSITS_PAUSE).toEqual({ all: false, chainIds: [1] });
     expect(yieldConfig.yieldDepositsPaused()).toBe(true);
     expect(yieldConfig.yieldDepositsPausedOnChain(1)).toBe(true);
     for (const chainId of chains.filter((id) => id !== 1)) expect(yieldConfig.yieldDepositsPausedOnChain(chainId)).toBe(false);
-    expect(pauseConfig.YIELD_PAUSE_BANNER_TEXT).toBe(pauseConfig.DEFAULT_YIELD_PAUSE_BANNER_TEXT);
   });
 
   test('the deposit money gates refuse Ethereum and still route every other vault', () => {

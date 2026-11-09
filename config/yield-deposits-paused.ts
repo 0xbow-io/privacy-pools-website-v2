@@ -33,8 +33,7 @@ export const NO_YIELD_DEPOSITS_PAUSE: YieldDepositsPause = { all: false, chainId
 export function parseYieldDepositsPaused(raw: string | undefined): YieldDepositsPause {
   const value = raw?.trim() ?? '';
   if (!value) return NO_YIELD_DEPOSITS_PAUSE;
-  // The explicit "off" spellings, quiet: `false` is how a build opens deposits
-  // again now that an unset env means paused.
+  // The explicit "off" spellings, quiet. They behave like unset: no pause.
   if (['false', 'off', 'none', '0'].includes(value.toLowerCase())) return NO_YIELD_DEPOSITS_PAUSE;
   const parts = value.split(',').map((part) => part.trim()).filter(Boolean);
   // `true` anywhere in the list means every chain: a kill switch must never
@@ -83,85 +82,3 @@ export const DEPOSITS_PAUSED_SUBTITLE = 'Deposits paused';
 
 /** The one-line reason a refused vault deposit gives. */
 export const VAULT_DEPOSITS_PAUSED_MESSAGE = 'Vault deposits are paused. Withdraw and send still work.';
-
-/**
- * Chains whose yield vaults sit on Aave, so "because of Aave" is true for them.
- * The default banner names only these; any other scope sets its own text.
- */
-const AAVE_CHAIN_NAMES: Readonly<Record<number, string>> = { 1: 'Ethereum', 8453: 'Base', 10: 'Optimism', 42161: 'Arbitrum' };
-
-/**
- * Default banner text for a pause naming specific chains (Pat, 2026-10-29,
- * Ethereum; 8453 Base added the same day), or null when the pause is "every
- * chain" or names a chain that is not an Aave chain.
- */
-export function defaultYieldPauseBannerText(pause: YieldDepositsPause): string | null {
-  if (pause.all || pause.chainIds.length === 0) return null;
-  const names = pause.chainIds.map((id) => AAVE_CHAIN_NAMES[id]);
-  if (names.some((name) => !name)) return null;
-  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-  return `Deposits are paused for yield assets on ${list} because of Aave.`;
-}
-
-/** The chains the default banner names when no pause is configured: Aave froze Ethereum and Base. */
-const DEFAULT_YIELD_BANNER_SCOPE: YieldDepositsPause = { all: false, chainIds: [1, 8453] };
-
-/** The Ethereum-only default, kept for the prod test. */
-export const DEFAULT_YIELD_PAUSE_BANNER_TEXT = 'Deposits are paused for yield assets on Ethereum because of Aave.';
-
-/**
- * Pure (unit-tested): the top-of-app notice, or null for none. No pause, no
- * banner. Unset text gives the default; text set to an empty (or blank) string
- * hides the banner; any other text is shown as plain text, trimmed.
- */
-export function resolveYieldPauseBannerText(pause: YieldDepositsPause, raw: string | undefined): string | null {
-  // The banner is independent of the pause itself (Pat, 2026-10-29: "only the
-  // banner on, not hiding the vault assets"): it shows by default, naming the
-  // Aave chains, and an explicit text shows whatever the pause says.
-  // The default names its chains and Aave, so it only fits Aave chains. A
-  // pause on any other scope must set its own text, never show a wrong chain.
-  if (raw === undefined) return defaultYieldPauseBannerText(pauseActive(pause) ? pause : DEFAULT_YIELD_BANNER_SCOPE);
-  const text = raw.trim();
-  return text.length > 0 ? text : null;
-}
-
-/** The banner this build shows, or null. Static member read, see above. */
-export const YIELD_PAUSE_BANNER_TEXT: string | null = resolveYieldPauseBannerText(
-  YIELD_DEPOSITS_PAUSE,
-  process.env.EXPO_PUBLIC_YIELD_PAUSE_BANNER_TEXT,
-);
-
-/**
- * Where the word "Aave" in the banner points (Pat, 2026-10-29): Aave's own
- * announcement of the freeze. Build configuration, https only, and an explicit
- * empty string means no link. Static `process.env.EXPO_PUBLIC_*` read.
- */
-export const DEFAULT_YIELD_PAUSE_BANNER_LINK_URL = 'https://x.com/aave/status/2115937863162339637';
-
-/** Pure (unit-tested): the link URL to use, or null for none. Only https URLs are accepted. */
-export function resolveYieldPauseBannerLinkUrl(raw: string | undefined): string | null {
-  if (raw === undefined) return DEFAULT_YIELD_PAUSE_BANNER_LINK_URL;
-  const url = raw.trim();
-  if (!url) return null;
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === 'https:' ? parsed.toString() : null;
-  } catch {
-    return null;
-  }
-}
-
-export const YIELD_PAUSE_BANNER_LINK_URL: string | null = resolveYieldPauseBannerLinkUrl(
-  process.env.EXPO_PUBLIC_YIELD_PAUSE_BANNER_LINK_URL,
-);
-
-/**
- * Pure (unit-tested): split the banner text around the first "Aave" so that
- * word can be rendered as the link. No url or no "Aave" in the text means no link.
- */
-export function splitBannerAtAave(text: string, url: string | null): { before: string; label: string; after: string } | null {
-  if (!url) return null;
-  const at = text.indexOf('Aave');
-  if (at < 0) return null;
-  return { before: text.slice(0, at), label: 'Aave', after: text.slice(at + 4) };
-}
