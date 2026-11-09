@@ -206,7 +206,7 @@ import { feeWithinReviewed, relayerFeeJitterAllowance } from '@/services/relayer
 import { quoteMatchesSignedCommitment } from '@/services/relayer-quote-integrity';
 import { decodeGasTopUpWei, formatGasTopUp } from '@/services/gas-top-up';
 import { setReceiveSetup } from '@/services/receive-setup';
-import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, netSharesWei, presetChipLabel, previewReceiveFigure, shareRedemptionDisclosure, shareReviewHeadline, swapRateText } from '@/services/share-display';
+import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, netSharesWei, presetChipLabel, previewReceiveFigure, shareReviewHeadline, swapRateText } from '@/services/share-display';
 import { sdkErrorText, type ErrorUnits } from '@/services/sdk-error-amounts';
 import { RelayFeeIncreasedError, relayWithdrawalWithFreshQuote } from '@/services/relayed-withdrawal';
 import { PREVIEW_REDEEM_ABI } from '@/services/deposit-limits';
