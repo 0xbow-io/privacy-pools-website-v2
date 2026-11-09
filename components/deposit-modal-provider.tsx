@@ -76,6 +76,7 @@ import { recordShieldSwap } from '@/services/swap-bookkeeping';
 import { recordSwap } from '@/services/swap-records-store';
 import { pendingDepositRow, swapDepositPendingAsset } from '@/services/feed-reconciliation';
 import { addPendingOwnRow, removePendingOwnRow } from '@/services/pending-own-rows-store';
+import { useShareNameText } from '@/hooks/use-share-rates';
 
 /** Refusal when the recipient has no viewing key on this chain (depositFor). */
 const RECIPIENT_UNREGISTERED_MESSAGE =
@@ -148,7 +149,8 @@ import { useChainRouter } from '@/hooks/use-chain-router';
 import { useActiveEvmChain } from '@/hooks/use-active-evm-chain';
 import { useOpLock } from '@/hooks/use-op-lock';
 import { getDepositableTokens, getDepositComingSoonTokens, getKnownTokenMetadata, getTokenMetadataBySymbol, type TokenMetadata } from '@/config/tokens';
-import { comingSoonDepositMessage, displayTokenSymbol } from '@/services/share-display';
+import { comingSoonDepositMessage, displayTokenSymbol, tokenAmountLabel } from '@/services/share-display';
+import { formatTokenBalanceDown } from '@/services/token-format';
 import { useSuiSession } from '@/hooks/use-sui-session';
 import { SUI_SUPPORTED_TOKENS } from '@/config/sui-tokens';
 import { useSuiClientQuery } from '@mysten/dapp-kit';
@@ -388,8 +390,8 @@ function cannotShieldMessage(options: { tokenSymbol?: string; tokenAddress?: str
     return comingSoonDepositMessage(symbol, getChainConfig(chainId)?.displayName);
   }
   return meta?.withdrawOnly
-    ? `Deposits of ${symbol} are closed on this network. Withdraw or send your shielded ${symbol} instead.`
-    : `${symbol} can't be shielded on this network.`;
+    ? `Deposits of ${displayTokenSymbol(symbol)} are closed on this network. Withdraw or send your shielded ${displayTokenSymbol(symbol)} instead.`
+    : `${displayTokenSymbol(symbol)} can't be shielded on this network.`;
 }
 
 /**
@@ -649,6 +651,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
   // chainId` switch guard below meaningful: it used to compare the wallet's
   // chain against itself and could never fire.
   const chainId = useActiveEvmChain().id;
+  const shareText = useShareNameText(chainId);
   const withOpLock = useOpLock();
   // Chain FROZEN at submission — explorer links must not follow a later
   // app-chain switch (codex round 3, P2).
@@ -896,7 +899,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       console.log(
         `[perf] · deposit-token resolve isSui=${isSui} chain=${crossChainPoolId ?? activeEvmChainId}`
         + ` want=${selectedToken.symbol}/${selectedToken.address}`
-        + ` via=${byAddress ? 'address' : bySymbol ? 'symbol' : 'FALLBACK[0]'}`
+        + ` via=${byAddress ? 'address' : bySymbol ? 'symbol' : 'FALLBACK[0]'}` // not-rendered: perf log
         + ` got=${configured.symbol}/${configured.address}`
         + ` available=[${depositTokens.map((t) => t.symbol).join(',')}]`,
       );
@@ -1234,7 +1237,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     : selectedToken.isNative
       ? nativeBalance == null
       : erc20BalanceRaw == null;
-  const walletBalanceFormatted = walletBalanceLoading ? '—' : `${walletBalance.toFixed(4)} ${displaySymbol}`;
+  const walletBalanceFormatted = walletBalanceLoading ? '—' : tokenAmountLabel(walletBalance.toFixed(4), displaySymbol);
 
   // --- Gas reserve (native deposits) ---
 
@@ -1426,7 +1429,15 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     // wagmi-specific.
     if (isSui) {
       if (enteredAmount > walletBalance) {
-        return `Insufficient balance (${walletBalance.toFixed(4)} ${displaySymbol} available)`;
+        // The exact balance, rounded DOWN: a figure rounded up would be one the
+        // user types and is refused again. The deposit catalog holds no shares
+        // (getDepositableTokens(...).filter(!yieldShare)), so this figure is the
+        // coin itself and never needs a rate.
+        // isSui also covers Stellar, whose budget is the spendable XLM, not a Sui balance.
+        const exact = isStellar
+          ? (stellarBalanceData ? formatUnits(stellarBalanceData.spendable, STELLAR_XLM.decimals) : '0')
+          : (suiBalanceData ? formatUnits(BigInt(suiBalanceData.totalBalance), suiDecimals) : '0');
+        return `Insufficient balance (${tokenAmountLabel(formatTokenBalanceDown(exact, displaySymbol), displaySymbol)} available)`;
       }
       return null;
     }
@@ -1437,7 +1448,8 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       return null; // partially-typed amount (e.g. "0."); let the input settle
     }
     if (enteredWei > walletBalanceWei) {
-      return `Insufficient balance (${walletBalance.toFixed(4)} ${displayTokenSymbol(selectedToken.symbol)} available)`;
+      // Rounded down from the exact balance, for the same reason as the Sui branch.
+      return `Insufficient balance (${tokenAmountLabel(formatTokenBalanceDown(formatUnits(walletBalanceWei, selectedToken.decimals), selectedToken.symbol), selectedToken.symbol)} available)`;
     }
     // Enough balance, but not enough left over for the vetting fee (and gas,
     // when the deposit asset is the native token).
@@ -1460,7 +1472,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       return formatDepositMinimum(depositMinPayWei, selectedToken.decimals, selectedToken.symbol);
     }
     return null;
-  }, [amount, enteredAmount, walletBalanceWei, spendableBalanceWei, spendableBalanceFormatted, walletBalance, selectedToken.decimals, selectedToken.symbol, isSui, displaySymbol, swapDepositActive, depositMinPayWei, minPending, tokenPrice, priceLoading, yieldExitBlocked, depositCapUsd]);
+  }, [amount, enteredAmount, walletBalanceWei, spendableBalanceWei, spendableBalanceFormatted, walletBalance, selectedToken.decimals, selectedToken.symbol, isSui, isStellar, stellarBalanceData, suiBalanceData, suiDecimals, displaySymbol, swapDepositActive, depositMinPayWei, minPending, tokenPrice, priceLoading, yieldExitBlocked, depositCapUsd]);
 
   // True while the cap cannot be judged yet because the price is still
   // loading: shown quietly (not as a red error) and the inline auto-confirm
@@ -3392,7 +3404,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
         : selectedToken.address;
       const optimisticAssetSymbol = yieldPrep && liveDeployment
         ? getKnownTokenMetadata(liveDeployment.ppUSDC, depositChainId)?.symbol
-          ?? `pp${liveDeployment.underlyingSymbol.toUpperCase()}`
+          ?? `pp${liveDeployment.underlyingSymbol.toUpperCase()}` // not-rendered: pending row data, shown through displayTokenSymbol
         : selectedToken.symbol;
       // A depositFor is the RECIPIENT's deposit: no pending row for the payer
       // (it would read as the payer's own pending balance).
@@ -4485,7 +4497,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
                     })}
                   </View>
                   <Text className={`text-[12px] font-pp-regular ${validationError ? (softPending ? 'text-text-muted' : 'text-[#E53935]') : 'text-transparent'}`}>
-                    {validationError || ' '}
+                    {shareText(validationError) || ' '}
                   </Text>
                 </View>
 
@@ -4611,7 +4623,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
                     derived from the real status message (Prepare → Prove →
                     Submit → Confirm), so the row always says where the flow
                     actually is. */}
-                <FlowProgress message={loadingMessage} />
+                <FlowProgress message={loadingMessage} chainId={chainId} />
 
                 {/* Route cost, once the quote exists: the wallet is about to ask
                     for an amount of the pay token the user never typed. */}
@@ -4646,7 +4658,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
                     <Text className="text-[12px] leading-[16px] text-text-secondary font-pp-regular">
                       The exact amount spent depends on the route and can move within slippage.
                       {swapConfirm.display.needsApproval
-                        ? ` Two transactions: a ${payToken?.symbol ?? 'token'} approval first, then the swap.`
+                        ? ` Two transactions: a ${payToken ? displayTokenSymbol(payToken.symbol) : 'token'} approval first, then the swap.`
                         : ' One transaction.'}
                     </Text>
                     <Text className="text-[12px] leading-[16px] text-text-secondary font-pp-regular">

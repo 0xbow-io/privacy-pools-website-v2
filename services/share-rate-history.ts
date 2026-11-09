@@ -104,12 +104,12 @@ export function shareConversionAt(series: ShareRateSeries, at: TxPosition | null
   };
 }
 
-/** "10.95 USDT (at transaction time)", or "≈ 10.96 USDT" when today's rate stood in. */
+/** "10.95 USDT (at transaction time)", or "~10.96 USDT" when today's rate stood in. */
 export function shareValueLabel(c: ShareConversion, sharesWei: bigint): string {
   const { symbol } = c;
   const amount = Number(formatUnits(convertShares(c, sharesWei), c.decimals));
   const text = `${formatTokenBalance(amount, symbol)} ${symbol}`;
-  return c.atTx ? `${text} (at transaction time)` : `≈ ${text}`;
+  return c.atTx ? `${text} (at transaction time)` : `~${text}`;
 }
 
 type MulticallResult = { status: 'success'; result: unknown } | { status: 'failure'; error: unknown };
