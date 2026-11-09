@@ -169,6 +169,11 @@ class StellarAccount {
   private readonly listeners = new Set<() => void>();
   private signer: StellarWalletProvider | null = null;
   private sessionPromise: Promise<StellarPoolSession> | null = null;
+  // Unlocked accounts the user switched away from, by address. Memory only.
+  private readonly unlockedSessions = new Map<
+    string,
+    { sessionPromise: Promise<StellarPoolSession>; rpc: IndexedStellarRpcInteractor | null; nullifyingKey: string | null }
+  >();
   // The relayer, set only while a relayed withdrawal or transfer runs (see buildSession).
   private activeRelayer: IRelayerInteractor<StellarAddress> | null = null;
   private rpc: IndexedStellarRpcInteractor | null = null;
@@ -207,14 +212,29 @@ class StellarAccount {
     if (previous) purgeBackedUpStellarRequests(STELLAR_TESTNET_ID, previous);
     this.signer = signer;
     this.generation++;
-    this.sessionPromise = null;
-    this.nullifyingKey = null;
+    // Switching away from an unlocked account keeps its session in memory under
+    // its own address; signing out (null) clears every one. Never persisted.
+    if (previous && this.sessionPromise && this.snapshot.unlocked) {
+      this.unlockedSessions.set(previous, { sessionPromise: this.sessionPromise, rpc: this.rpc, nullifyingKey: this.nullifyingKey });
+    }
+    if (!address) this.unlockedSessions.clear();
+    const restored = address ? this.unlockedSessions.get(address) : undefined;
+    if (address) this.unlockedSessions.delete(address);
+    this.sessionPromise = restored?.sessionPromise ?? null;
+    this.rpc = restored?.rpc ?? null;
+    this.nullifyingKey = restored?.nullifyingKey ?? null;
     this.syncPromise = null;
     // Show the last synced notes straight away (read-only): keys are memory
     // only, so without this every reload reads a zero balance until the user
     // signs again. Spending still unlocks first.
     if (address && restoreStoredRows(address)) bumpPaymentRequestRevision();
-    this.snapshot = { ...EMPTY, address, notes: address ? readCachedNotes(address) : [], paymentRequests: address ? readCachedRequests(address) : [] };
+    this.snapshot = {
+      ...EMPTY,
+      address,
+      notes: address ? readCachedNotes(address) : [],
+      paymentRequests: address ? readCachedRequests(address) : [],
+      ...(restored ? { unlocked: true, status: 'ready' as const } : {}),
+    };
     for (const listener of this.listeners) listener();
   }
 
@@ -340,7 +360,10 @@ class StellarAccount {
 
   private async buildSession(address: string, signer: StellarWalletProvider): Promise<StellarPoolSession> {
     const sdk = await loadStellarSdk();
-    this.rpc = createIndexedRpcInteractor(sdk, ASP_URL);
+    const rpc = createIndexedRpcInteractor(sdk, ASP_URL);
+    // Only the bound account may own the live rpc: a build for an account the
+    // user switched away from must not replace the current one's.
+    if (this.snapshot.address === address) this.rpc = rpc;
     const protocolKeys = await deriveProtocolKeys(sdk, address, signer);
     if (this.snapshot.address === address) this.nullifyingKey = String(protocolKeys.privateNullifyingKey);
     const session = await sdk.StellarPoolSessionBuilder.create({
@@ -350,7 +373,7 @@ class StellarAccount {
       // Event history from the testnet indexer (every event since the
       // deployment); everything else is plain Soroban RPC. A relayed
       // transfer's receipt is confirmed from pool events, never by its hash.
-      rpcInteractor: this.confirmingRpc(this.rpc),
+      rpcInteractor: this.confirmingRpc(rpc),
       networkPassphrase: STELLAR_TESTNET_NETWORK.networkPassphrase,
       poolContractId: STELLAR_TESTNET_CONTRACTS.poolContractId,
       deploymentLedger: STELLAR_TESTNET_DEPLOYMENT_LEDGER,
