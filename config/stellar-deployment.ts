@@ -164,9 +164,12 @@ export function maxStellarWithdrawForInputs(inputs: bigint): bigint {
  */
 export const STELLAR_TRANSFER_RELAY_FEE_ESTIMATE = 750_000n;
 
-/** The relayer fee a Stellar transfer pays on top of its amount: none for a self-submitted one-time link. */
-export function stellarTransferRelayFee(params: { oneTime?: boolean } = {}): bigint {
-  return params.oneTime ? 0n : STELLAR_TRANSFER_RELAY_FEE_ESTIMATE;
+/**
+ * The relayer fee a Stellar transfer pays on top of its amount. One-time links are relayed
+ * too (the sender's account must not appear on any send), so they pay the same fee.
+ */
+export function stellarTransferRelayFee(_params: { oneTime?: boolean } = {}): bigint {
+  return STELLAR_TRANSFER_RELAY_FEE_ESTIMATE;
 }
 
 /** The most a transfer can send when `coverable` is what its inputs hold: the fee comes off. */

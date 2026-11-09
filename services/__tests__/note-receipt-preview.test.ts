@@ -73,4 +73,16 @@ describe('previewNoteReceiptUrl', () => {
     expect(candidate).toBe('…');
     expect(() => JSON.parse(Buffer.from(candidate, 'base64url').toString())).toThrow();
   });
+
+  test('shows a Stellar link up to its fragment (routing params only), none of the payload', () => {
+    const stellar = `https://testnet.privacypools.com/import-note?stellar=true&env=prod#${PAYLOAD}`;
+    expect(previewNoteReceiptUrl(stellar)).toBe('https://testnet.privacypools.com/import-note?stellar=true&env=prod#…');
+    expect(previewNoteReceiptUrl(stellar)).not.toContain(PAYLOAD);
+  });
+
+  test('fails CLOSED on a query it does not recognise or one with no fragment', () => {
+    expect(previewNoteReceiptUrl(`https://privacypools.com/import-note?note=${PAYLOAD}#x`)).toBe('…');
+    expect(previewNoteReceiptUrl(`https://privacypools.com/import-note?stellar=${PAYLOAD}#x`)).toBe('…');
+    expect(previewNoteReceiptUrl(`https://privacypools.com/import-note?stellar=true&env=prod`)).toBe('…');
+  });
 });

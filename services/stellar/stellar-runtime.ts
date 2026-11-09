@@ -201,7 +201,13 @@ export function createIndexedRpcInteractor(sdk: StellarSdk, aspUrl: string): Ind
       }
     }
   }
-  return new IndexedSorobanRPCInteractor({ rpcUrl: STELLAR_TESTNET_RPC_URL, networkPassphrase: STELLAR_TESTNET_NETWORK.networkPassphrase });
+  return new IndexedSorobanRPCInteractor({
+    rpcUrl: STELLAR_TESTNET_RPC_URL,
+    networkPassphrase: STELLAR_TESTNET_NETWORK.networkPassphrase,
+    // The user's own transactions (deposits, registration) are confirmed by hash on RPC. A ledger
+    // closes about every 5s; the SDK's 2s default added up to 2s after the close for nothing.
+    receiptPollIntervalMs: 1_000,
+  });
 }
 
 // ------------------------------------------------------------------ ASP

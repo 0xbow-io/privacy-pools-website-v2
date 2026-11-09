@@ -178,6 +178,14 @@ class StellarAccount {
   // Bumped whenever the bound address changes: a flow started for one account
   // refuses to submit anything after another account binds.
   private generation = 0;
+  // Accounts switched away from in Freighter while unlocked, by address (see bind).
+  private readonly unlockedAccounts = new Map<string, {
+    session: Promise<StellarPoolSession>;
+    rpc: IndexedStellarRpcInteractor | null;
+    nullifyingKey: string | null;
+  }>();
+  // The generation whose registration was confirmed on chain (see ensureRegistered).
+  private registrationConfirmed = -1;
   // Memory only, like the session's own keys: matches this account's spends
   // in the pool's Transacted events (services/stellar-activity.ts).
   private nullifyingKey: string | null = null;
@@ -205,17 +213,35 @@ class StellarAccount {
     // a backup of leave this browser with the account. Any other stays.
     const previous = this.snapshot.address;
     if (previous) purgeBackedUpStellarRequests(STELLAR_TESTNET_ID, previous);
+    // Switching accounts in Freighter keeps the one switched away from unlocked
+    // (memory only, like its keys already were), so switching back needs no new
+    // signature. Signing out (no address) drops every kept account.
+    if (previous && address && this.sessionPromise && this.snapshot.unlocked) {
+      this.unlockedAccounts.set(previous, { session: this.sessionPromise, rpc: this.rpc, nullifyingKey: this.nullifyingKey });
+    }
+    if (!address) this.unlockedAccounts.clear();
+    const kept = address ? this.unlockedAccounts.get(address) : undefined;
+    if (address) this.unlockedAccounts.delete(address);
     this.signer = signer;
     this.generation++;
-    this.sessionPromise = null;
-    this.nullifyingKey = null;
+    this.sessionPromise = kept?.session ?? null;
+    this.rpc = kept ? kept.rpc : this.rpc;
+    this.nullifyingKey = kept?.nullifyingKey ?? null;
     this.syncPromise = null;
     // Show the last synced notes straight away (read-only): keys are memory
     // only, so without this every reload reads a zero balance until the user
     // signs again. Spending still unlocks first.
     if (address && restoreStoredRows(address)) bumpPaymentRequestRevision();
-    this.snapshot = { ...EMPTY, address, notes: address ? readCachedNotes(address) : [], paymentRequests: address ? readCachedRequests(address) : [] };
+    this.snapshot = {
+      ...EMPTY,
+      address,
+      notes: address ? readCachedNotes(address) : [],
+      paymentRequests: address ? readCachedRequests(address) : [],
+      ...(kept ? { unlocked: true, status: 'ready' as const } : {}),
+    };
     for (const listener of this.listeners) listener();
+    // A kept account catches up on the next grid tick (use-stellar-session.ts),
+    // not now: an off-grid sync would time-stamp the switch.
   }
 
   private requireSigner(): { address: string; signer: StellarWalletProvider; generation: number } {
@@ -573,11 +599,19 @@ class StellarAccount {
   }
 
   private async ensureRegistered(session: StellarPoolSession, generation: number, onStage?: StageListener) {
+    // Confirmed once per bound account: every flow used to re-read both
+    // registration legs first (several seconds of RPC before the proof). The
+    // keystore registration is write-once on chain, so a confirmed account stays
+    // registered for as long as it is bound.
+    if (this.registrationConfirmed === generation) return;
     // prepareRegisterKeystore checks both legs and builds only the missing one. isKeystoreRegistered()
     // checks just the auth policy, so an account whose set_viewing_key never landed read as
     // registered forever and could not be sent to (RecipientViewingKeyUnregistered).
     const registration = await session.prepareRegisterKeystore();
-    if (registration.alreadyRegistered) return;
+    if (registration.alreadyRegistered) {
+      if (generation === this.generation) this.registrationConfirmed = generation;
+      return;
+    }
     this.assertStillBound(generation);
     onStage?.('registering');
     await session.executeRegisterKeystore(registration);
@@ -596,6 +630,7 @@ class StellarAccount {
     if (!confirmed) {
       throw new Error('Your account registration has not shown up on chain yet. Try again in a minute.');
     }
+    if (generation === this.generation) this.registrationConfirmed = generation;
     this.set({ registered: true });
   }
 
@@ -822,57 +857,63 @@ class StellarAccount {
       if (!isStellarAccountAddress(params.recipient)) throw new Error('Not a Stellar account address.');
       if (params.recipient === address) throw new Error('That is your own address. Pick someone else to send to.');
       const session = await this.ensureSession(onStage);
+      // Relayed like every other send: the sender's account never appears on the
+      // transfer. The relayer is read before registration, so an unreachable one
+      // fails before the wallet is asked to sign anything.
+      const relayer = await this.connectRelayer(await loadStellarSdk());
       await this.ensureRegistered(session, generation, onStage);
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       this.assertStillBound(generation);
       onStage?.('proving');
-      const prepared = await session.prepareColdStartTransfer({
-        tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
-        amount: toHex(params.amount),
-        inputCommitments: params.inputCommitments,
-        recipientEvmAddress: params.recipient as StellarAddress,
+      return this.withTransferRelayer(relayer, async () => {
+        const prepared = await session.prepareColdStartTransfer({
+          tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
+          amount: toHex(params.amount),
+          inputCommitments: params.inputCommitments,
+          recipientEvmAddress: params.recipient as StellarAddress,
+        });
+        const opts = prepared.executeOptions;
+        const secrets = opts.recipient.noteSecretsMap;
+        if (!secrets) throw new Error('The transfer could not be prepared for a one-time link.');
+        const notes: StellarClaimNote[] = opts.recipientPendingNotes.map((n) => ({
+          commitment: String(n.commitment),
+          noteAddressHash: `0x${BigInt(n.noteAddressHash).toString(16).padStart(64, '0')}`,
+          noteSecret: String(secrets.get(n.noteAddressHash) ?? ''),
+          value: String(n.value),
+          tokenId: String(n.tokenId),
+          label: String(n.label),
+          ownerAddress: params.recipient,
+          txHash: '0x0',
+        }));
+        if (notes.length === 0 || notes.some((n) => !n.noteSecret)) {
+          throw new Error('The transfer could not be prepared for a one-time link.');
+        }
+        const id = `${Date.now().toString(36)}-${notes[0].commitment.slice(-8)}`;
+        saveSentClaim(sentClaimsStorage(), SENT_CLAIMS_KEY, {
+          id,
+          sender: address,
+          recipient: params.recipient,
+          amount: params.amount.toString(),
+          notes,
+          txHash: null,
+          createdAt: Date.now(),
+        });
+        params.onClaimReady?.(notes);
+        if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
+        this.assertStillBound(generation);
+        onStage?.('relaying');
+        // The relayer re-proves with its fee added. The recipient's notes do not
+        // change: each label's share of `amount` is fixed before the fee is taken
+        // (the fee only shrinks the sender's change), so the link saved above
+        // names exactly the commitments this transaction creates.
+        const result = await this.relayPreparedTransfer(session, prepared);
+        if (!result.txReceipt.status) throw new Error('The transfer transaction failed on-chain.');
+        const txHash = String(result.txReceipt.txHash);
+        setSentClaimTx(sentClaimsStorage(), SENT_CLAIMS_KEY, id, txHash);
+        onStage?.('syncing');
+        await this.refreshLocal(session, address);
+        return { txHash, notes: notes.map((n) => ({ ...n, txHash })) };
       });
-      const opts = prepared.executeOptions;
-      const secrets = opts.recipient.noteSecretsMap;
-      if (!secrets) throw new Error('The transfer could not be prepared for a one-time link.');
-      const notes: StellarClaimNote[] = opts.recipientPendingNotes.map((n) => ({
-        commitment: String(n.commitment),
-        noteAddressHash: `0x${BigInt(n.noteAddressHash).toString(16).padStart(64, '0')}`,
-        noteSecret: String(secrets.get(n.noteAddressHash) ?? ''),
-        value: String(n.value),
-        tokenId: String(n.tokenId),
-        label: String(n.label),
-        ownerAddress: params.recipient,
-        txHash: '0x0',
-      }));
-      if (notes.length === 0 || notes.some((n) => !n.noteSecret)) {
-        throw new Error('The transfer could not be prepared for a one-time link.');
-      }
-      const id = `${Date.now().toString(36)}-${notes[0].commitment.slice(-8)}`;
-      saveSentClaim(sentClaimsStorage(), SENT_CLAIMS_KEY, {
-        id,
-        sender: address,
-        recipient: params.recipient,
-        amount: params.amount.toString(),
-        notes,
-        txHash: null,
-        createdAt: Date.now(),
-      });
-      params.onClaimReady?.(notes);
-      if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
-      this.assertStillBound(generation);
-      onStage?.('signing');
-      // The claim notes are already built above, so the SDK's own rebuild of
-      // them (one commitment-keyed timestamp read per note, after the
-      // transfer) is skipped: without the secrets map it returns the receipt
-      // only. The change notes are persisted exactly as on any transfer.
-      const result = await session.executeTransfer({ ...opts, recipient: { ...opts.recipient, noteSecretsMap: undefined } });
-      if (!result.txReceipt.status) throw new Error('The transfer transaction failed on-chain.');
-      const txHash = String(result.txReceipt.txHash);
-      setSentClaimTx(sentClaimsStorage(), SENT_CLAIMS_KEY, id, txHash);
-      onStage?.('syncing');
-      await this.refreshLocal(session, address);
-      return { txHash, notes: notes.map((n) => ({ ...n, txHash })) };
     });
   }
 

@@ -28,8 +28,25 @@ export function previewNoteReceiptUrl(url: string): string {
   // FIRST occurrence, deliberately: a later marker inside a query or fragment
   // must not be allowed to preserve the real payload ahead of it.
   const at = url.indexOf(marker);
+  if (at === -1) return '…';
   // `/import-note#<payload>`, or `/import-note/<payload>` in older links.
   const separator = url[at + marker.length];
-  if (at === -1 || (separator !== '#' && separator !== '/')) return '…';
-  return `${url.slice(0, at + marker.length + 1)}…`;
+  if (separator === '#' || separator === '/') return `${url.slice(0, at + marker.length + 1)}…`;
+  // Stellar links carry routing params before the fragment:
+  // `/import-note?stellar=true&env=prod#<payload>`. Shown only when every
+  // param is one of those known, non-secret keys; anything else fails closed.
+  if (separator !== '?') return '…';
+  const hash = url.indexOf('#', at);
+  if (hash === -1) return '…';
+  const query = url.slice(at + marker.length + 1, hash);
+  const pairs = query.split('&');
+  const known = pairs.every((pair) => {
+    const [key, value = ''] = pair.split('=');
+    return SHOWABLE_PARAMS.has(key) && /^[A-Za-z0-9_-]{1,32}$/.test(value);
+  });
+  if (!known) return '…';
+  return `${url.slice(0, hash + 1)}…`;
 }
+
+/** Query params a receipt link may carry that say where it opens, never what it holds. */
+const SHOWABLE_PARAMS = new Set(['stellar', 'env']);

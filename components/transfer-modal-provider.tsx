@@ -1217,14 +1217,14 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     () => (isStellar ? (stellarSession.spendableNotes as unknown as StellarUiNote[]) : []),
     [isStellar, stellarSession.spendableNotes],
   );
-  // The user confirmed a one-time link for exactly this recipient (self-submitted, so no relayer fee).
+  // The user confirmed a one-time link for exactly this recipient (relayed like every Stellar send).
   // Case-insensitive: the shared check may hold a lowercased copy (a G address is uppercase only).
   const stellarOneTime = isStellar
     && recipientRegistrationCheck?.registered === false
     && recipientRegistrationCheck.chainId === STELLAR_TESTNET_ID
     && recipientRegistrationCheck.recipientAddress.toUpperCase() === recipientAddress.trim().toUpperCase();
   // A relayed Stellar send pays the relayer fee from the same notes.
-  const stellarSendFee = isStellar ? stellarTransferRelayFee({ oneTime: stellarOneTime }) : 0n;
+  const stellarSendFee = isStellar ? stellarTransferRelayFee() : 0n;
   const suiActiveTotal = useMemo(
     () => (isStellar
       ? maxStellarTransferForInputs(stellarActiveNotes.reduce((a, n) => a + BigInt(n.value), 0n), stellarSendFee)
@@ -4194,20 +4194,13 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                   {relayFeeCeiled != null && (
                     <FeeWarning breakdown={relayedFeeBreakdown(enteredAmountWei, relayFeeEstimate)} testID="transfer-fee-warning" />
                   )}
-                  {/* Stellar: the relayer's fee comes on top of the amount (none on a self-submitted one-time link). */}
+                  {/* Stellar: the relayer's fee comes on top of the amount, one-time links included (all relayed). */}
                   {isStellar && stellarSendFee > 0n && (
                     <Text className="text-[14px] leading-[24px]">
                       <Text className="text-[14px] text-[#737373] font-pp-bold">Relayer fee: </Text>
                       <Text className="text-[14px] text-[#737373] font-pp-regular" testID="stellar-transfer-fee">
                         up to {formatUnits(stellarSendFee, altDecimals)} {altSymbol}, added on top
                       </Text>
-                    </Text>
-                  )}
-                  {/* Stellar sends are relayed, but one-time links are self-signed,
-                      so the chain shows this account as sender. */}
-                  {stellarOneTime && (
-                    <Text className="text-[12px] leading-[18px] text-[#B45309] font-pp-regular" testID="stellar-transfer-linkable">
-                      Sent from your Freighter account, so this send is publicly linked to it.
                     </Text>
                   )}
                   {/* DEV-368: the "Notes: 1 input note" line lived here. Dropped
