@@ -61,7 +61,8 @@ function baseType(type: string): string {
 }
 
 // The display boundary can supply a rate-aware label; raw transaction amounts
-// and transition memory remain in shares. Without it, keep the share symbol.
+// and transition memory keep the pool's own units. Without it, tokenAmountLabel
+// names the coin, and a figure it cannot convert is left out (DEV-621).
 export type TransitionAmountDisplay = (tx: TransitionTx) => string;
 
 /**
