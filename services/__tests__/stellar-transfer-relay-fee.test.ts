@@ -13,10 +13,8 @@ const note = (value: bigint, label: string, i: number) =>
   ({ commitment: `0x${i.toString(16)}`, value: value.toString(), label, status: 'ACTIVE' }) as unknown as Note;
 
 describe('Stellar transfer relay fee (DEV-498)', () => {
-  test('the fee comes off; a one-time link stays self-submitted', () => {
+  test('the fee comes off every send, a one-time link included', () => {
     expect(stellarTransferRelayFee()).toBe(STELLAR_TRANSFER_RELAY_FEE_ESTIMATE);
-    expect(stellarTransferRelayFee({ oneTime: true })).toBe(0n);
-    expect(maxStellarTransferForInputs(10n * XLM, stellarTransferRelayFee({ oneTime: true }))).toBe(10n * XLM);
     expect(maxStellarTransferForInputs(STELLAR_TRANSFER_RELAY_FEE_ESTIMATE, STELLAR_TRANSFER_RELAY_FEE_ESTIMATE)).toBe(0n);
     expect(maxStellarTransferForInputs(1n, STELLAR_TRANSFER_RELAY_FEE_ESTIMATE)).toBe(0n);
   });
