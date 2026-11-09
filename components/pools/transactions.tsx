@@ -2499,7 +2499,7 @@ export function Transactions({
     if (stellarClaim) {
       items.push({
         key: 'stellar-claim-link',
-        label: 'Copy payment link',
+        label: tx.type === 'Deposit' ? 'Recover claim link' : 'Copy payment link',
         icon: <Ionicons name="link-outline" size={16} color={colors.text} />,
         onPress: () => {
           void (async () => {
@@ -2621,7 +2621,7 @@ export function Transactions({
         // One key per recipient note — a multi-lineage send disclosed several.
         onPress: () => launchFromDrawer(drawerHost, () => openAuditExport(sentAudits.map((d) => buildSentPaymentKey(d)))),
       });
-    } else if (isDepositRecoverable(tx) && tx.txHash) {
+    } else if (tx.chainId !== STELLAR_TESTNET_ID && isDepositRecoverable(tx) && tx.txHash) {
       // A deposit this wallet made for someone else, with NO local disclosure
       // for it - this browser never saw the send, or its storage is gone. The
       // sender's own on-chain backup (services/blind-deposit-backup.ts) is the
