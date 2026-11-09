@@ -30,6 +30,23 @@ async function chips(): Promise<{ from: string; to: string }> {
   return { from: await read('hub-withdraw-pool'), to: await read('hub-swap-out-token') };
 }
 
+/**
+ * DEV-621 on the Swap tab: every dollar figure on the page has two decimals and
+ * no count stands under a coin label ("≈ 4.94 USDT"), while the rate loads and
+ * after. The pool header against the home pool row needs a held position, which
+ * this wallet does not have: services/__tests__/dev621-no-count.test.ts pins it.
+ */
+async function figures(where: string) {
+  const text = (await page.locator(SWAP).first().innerText().catch(() => '')) ?? '';
+  const found = text.match(/(?<![\w.])\$\d[\d,]*(?:\.\d+)?[kKmMbB]?/g) ?? [];
+  const bad = [...new Set(found.filter((f) => !/^\$\d[\d,]*\.\d{2}$|^\$\d[\d,]*(?:\.\d{1,2})?[kKmMbB]$/.test(f)))];
+  check(bad.length === 0, `${where}: every dollar figure on the Swap tab has two decimals`, bad.slice(0, 4).join(' '));
+  const count = /≈\s*\d[\d,]*(?:\.\d+)?\s+(ETH|USDC|USDT)\b/.exec(text);
+  check(!count, `${where}: no count under a coin label on the Swap tab`, count?.[0] ?? '');
+  const stable = /(?<![\d.])\d[\d,]*\.\d{3,}\s+(USDC|USDT)\b/.exec(text);
+  check(!stable, `${where}: stablecoin figures on the Swap tab have two decimals`, stable?.[0] ?? '');
+}
+
 async function watchApproval(ms: number) {
   for (const end = Date.now() + ms; Date.now() < end;) {
     const text = (await page.locator(SWAP).first().innerText().catch(() => '')) ?? '';
@@ -57,6 +74,7 @@ try {
   await field.fill('0.5').catch(() => {});
   await sleep(2000);
   await s.guardStep('swap, rate loading, amount typed');
+  await figures('rate loading');
 
   rate.release();
   await sleep(6000);
@@ -65,6 +83,7 @@ try {
   check(loaded.from === 'USDC', 'rate loaded: the "You swap" chip still reads USDC', JSON.stringify(loaded.from));
   check(COIN.test(loaded.to), 'rate loaded: the receive chip names the coin', JSON.stringify(loaded.to));
   await s.guardStep('swap, rate loaded, amount typed');
+  await figures('rate loaded');
 
   const reverse = page.locator(`${SWAP} [data-testid="hub-swap-reverse"]`).first();
   if (await reverse.isVisible().catch(() => false)) {
