@@ -320,17 +320,23 @@ class StellarAccount {
     return true;
   }
 
-  /** Relays the first quoted option; refuses a receipt that did not spend this transfer's notes. */
-  private async relayPreparedTransfer(
-    session: StellarPoolSession,
-    prepared: Awaited<ReturnType<StellarPoolSession['prepareTransfer']>>,
-  ): Promise<TransferResult<StellarAddress, StellarLog>> {
+  /** The first quoted option; refused when it asks more than the fee the UI reserved. */
+  private quotedRelayOption(prepared: Awaited<ReturnType<StellarPoolSession['prepareTransfer']>>) {
     const option = prepared.relayOptions[0];
     if (!option) throw new Error('The relayer did not return a quote.');
     // Note selection and the UI reserve the estimate; a higher signed fee would come out of the slack.
     if (BigInt(option.selectedQuote.quote.feeCommitment.feeAmount) > STELLAR_TRANSFER_RELAY_FEE_ESTIMATE) {
       throw new Error('The relayer asks for more than the fee shown. Try again later.');
     }
+    return option;
+  }
+
+  /** Relays the first quoted option; refuses a receipt that did not spend this transfer's notes. */
+  private async relayPreparedTransfer(
+    session: StellarPoolSession,
+    prepared: Awaited<ReturnType<StellarPoolSession['prepareTransfer']>>,
+  ): Promise<TransferResult<StellarAddress, StellarLog>> {
+    const option = this.quotedRelayOption(prepared);
     // The recipient's noteSecretsMap must stay: relayTransfer builds the note data itself, and without
     // the map it encodes blind (secretless) notes the recipient can neither discover nor spend.
     const result = await session.relayTransfer(option);
@@ -805,7 +811,8 @@ class StellarAccount {
    * announces the note, so its secret goes to the recipient in a one-time link
    * (services/stellar/stellar-claim.ts). The notes are saved for the sender
    * (stellar-sent-claims.ts) BEFORE the transfer is submitted; if that save
-   * fails nothing is sent.
+   * fails nothing is sent. Relayed like any send, so Freighter only signs
+   * the registration, if any.
    */
   sendOneTime(params: {
     amount: bigint;
@@ -822,53 +829,62 @@ class StellarAccount {
       if (!isStellarAccountAddress(params.recipient)) throw new Error('Not a Stellar account address.');
       if (params.recipient === address) throw new Error('That is your own address. Pick someone else to send to.');
       const session = await this.ensureSession(onStage);
+      // The relayer is read before registration, so an unreachable one fails before the wallet signs.
+      const relayer = await this.connectRelayer(await loadStellarSdk());
       await this.ensureRegistered(session, generation, onStage);
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       this.assertStillBound(generation);
       onStage?.('proving');
-      const prepared = await session.prepareColdStartTransfer({
-        tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
-        amount: toHex(params.amount),
-        inputCommitments: params.inputCommitments,
-        recipientEvmAddress: params.recipient as StellarAddress,
+      const { relayed, id, notes } = await this.withTransferRelayer(relayer, async () => {
+        const prepared = await session.prepareColdStartTransfer({
+          tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
+          amount: toHex(params.amount),
+          inputCommitments: params.inputCommitments,
+          recipientEvmAddress: params.recipient as StellarAddress,
+        });
+        // Checked before the link is saved: a refused quote sends nothing.
+        const option = this.quotedRelayOption(prepared);
+        const opts = prepared.executeOptions;
+        const secrets = opts.recipient.noteSecretsMap;
+        if (!secrets) throw new Error('The transfer could not be prepared for a one-time link.');
+        const notes: StellarClaimNote[] = opts.recipientPendingNotes.map((n) => ({
+          commitment: String(n.commitment),
+          noteAddressHash: `0x${BigInt(n.noteAddressHash).toString(16).padStart(64, '0')}`,
+          noteSecret: String(secrets.get(n.noteAddressHash) ?? ''),
+          value: String(n.value),
+          tokenId: String(n.tokenId),
+          label: String(n.label),
+          ownerAddress: params.recipient,
+          txHash: '0x0',
+        }));
+        if (notes.length === 0 || notes.some((n) => !n.noteSecret)) {
+          throw new Error('The transfer could not be prepared for a one-time link.');
+        }
+        const id = `${Date.now().toString(36)}-${notes[0].commitment.slice(-8)}`;
+        saveSentClaim(sentClaimsStorage(), SENT_CLAIMS_KEY, {
+          id,
+          sender: address,
+          recipient: params.recipient,
+          amount: params.amount.toString(),
+          notes,
+          txHash: null,
+          createdAt: Date.now(),
+        });
+        params.onClaimReady?.(notes);
+        if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
+        this.assertStillBound(generation);
+        onStage?.('relaying');
+        // The relay re-proves with the same recipient hashes, so its recipient
+        // commitments are the link's. Without the secrets map no recipient note
+        // data is published, and the SDK skips its rebuild of the claim notes
+        // (one commitment-keyed timestamp read per note); change notes persist
+        // as on any transfer.
+        const relayed = await session.relayTransfer({ ...option, recipient: { ...option.recipient, noteSecretsMap: undefined } });
+        if (relayed.spentNullifiersConfirmed === false) throw new Error('The relayer reported a transaction that is not this transfer.');
+        return { relayed, id, notes };
       });
-      const opts = prepared.executeOptions;
-      const secrets = opts.recipient.noteSecretsMap;
-      if (!secrets) throw new Error('The transfer could not be prepared for a one-time link.');
-      const notes: StellarClaimNote[] = opts.recipientPendingNotes.map((n) => ({
-        commitment: String(n.commitment),
-        noteAddressHash: `0x${BigInt(n.noteAddressHash).toString(16).padStart(64, '0')}`,
-        noteSecret: String(secrets.get(n.noteAddressHash) ?? ''),
-        value: String(n.value),
-        tokenId: String(n.tokenId),
-        label: String(n.label),
-        ownerAddress: params.recipient,
-        txHash: '0x0',
-      }));
-      if (notes.length === 0 || notes.some((n) => !n.noteSecret)) {
-        throw new Error('The transfer could not be prepared for a one-time link.');
-      }
-      const id = `${Date.now().toString(36)}-${notes[0].commitment.slice(-8)}`;
-      saveSentClaim(sentClaimsStorage(), SENT_CLAIMS_KEY, {
-        id,
-        sender: address,
-        recipient: params.recipient,
-        amount: params.amount.toString(),
-        notes,
-        txHash: null,
-        createdAt: Date.now(),
-      });
-      params.onClaimReady?.(notes);
-      if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
-      this.assertStillBound(generation);
-      onStage?.('signing');
-      // The claim notes are already built above, so the SDK's own rebuild of
-      // them (one commitment-keyed timestamp read per note, after the
-      // transfer) is skipped: without the secrets map it returns the receipt
-      // only. The change notes are persisted exactly as on any transfer.
-      const result = await session.executeTransfer({ ...opts, recipient: { ...opts.recipient, noteSecretsMap: undefined } });
-      if (!result.txReceipt.status) throw new Error('The transfer transaction failed on-chain.');
-      const txHash = String(result.txReceipt.txHash);
+      if (!relayed.txReceipt.status) throw new Error('The transfer transaction failed on-chain.');
+      const txHash = String(relayed.txReceipt.txHash);
       setSentClaimTx(sentClaimsStorage(), SENT_CLAIMS_KEY, id, txHash);
       onStage?.('syncing');
       await this.refreshLocal(session, address);

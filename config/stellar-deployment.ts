@@ -152,10 +152,10 @@ export function maxStellarWithdrawForInputs(inputs: bigint): bigint {
 }
 
 /**
- * Private transfers (Send, /pay "Pools Payment", keeping a claimed link) are
- * relayed: the v2 relayer submits the pool's own `transact` as the gated
- * processor, so the user's Freighter account never appears on the transfer and
- * only the relayer's fee leaves the pool. One-time links stay self-submitted.
+ * Private transfers (Send, one-time links, /pay "Pools Payment", keeping a
+ * claimed link) are relayed: the v2 relayer submits the pool's own `transact`
+ * as the gated processor, so the user's Freighter account never appears on the
+ * transfer and only the relayer's fee leaves the pool.
  *
  * The relayer charges its flat 0.02 XLM plus the transaction's cost for the proof shape
  * (0.032-0.048 XLM in total, measured 2026-10-29). This bound, with headroom for fee-setting
@@ -164,9 +164,9 @@ export function maxStellarWithdrawForInputs(inputs: bigint): bigint {
  */
 export const STELLAR_TRANSFER_RELAY_FEE_ESTIMATE = 750_000n;
 
-/** The relayer fee a Stellar transfer pays on top of its amount: none for a self-submitted one-time link. */
-export function stellarTransferRelayFee(params: { oneTime?: boolean } = {}): bigint {
-  return params.oneTime ? 0n : STELLAR_TRANSFER_RELAY_FEE_ESTIMATE;
+/** The relayer fee a Stellar transfer pays on top of its amount. */
+export function stellarTransferRelayFee(): bigint {
+  return STELLAR_TRANSFER_RELAY_FEE_ESTIMATE;
 }
 
 /** The most a transfer can send when `coverable` is what its inputs hold: the fee comes off. */
