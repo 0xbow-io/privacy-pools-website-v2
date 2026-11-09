@@ -98,7 +98,7 @@ describe('what the Swap tab renders never names a share', () => {
 
     test(`${share.symbol}: the DEV-590 message names the coin`, () => {
       const text = noteShortfallMessage(noteShortfall({ totalWei: wei, approvedWei: 0n, selectableWei: 0n }), share);
-      expect(text).toBe(`None of your ${displayTokenSymbol(share.symbol)} notes are approved yet. ≈ 0.00999 ${displayTokenSymbol(share.symbol)} is waiting.`);
+      expect(text).toBe(`None of your ${displayTokenSymbol(share.symbol)} notes are approved yet. … ${displayTokenSymbol(share.symbol)} is waiting.`);
     });
 
     test(`${share.symbol}: a swap error with amounts`, () => {
@@ -130,8 +130,8 @@ describe('what the Swap tab renders never names a share', () => {
       expect(view.hint).toBeNull();
     });
 
-    test(`${share.symbol}: a count without a rate, in plain text`, () => {
-      expect(tokenAmountLabel('1.5', share.symbol)).toBe(`≈ 1.5 ${displayTokenSymbol(share.symbol)}`);
+    test(`${share.symbol}: a count without a rate, in plain text, is the loading figure (DEV-621)`, () => {
+      expect(tokenAmountLabel('1.5', share.symbol)).toBe(`… ${displayTokenSymbol(share.symbol)}`);
     });
   }
 
@@ -281,13 +281,13 @@ describe('the word "shares" never reaches a screen', () => {
 
   for (const share of SHARE_SYMBOLS) {
     const coin = displayTokenSymbol(share);
-    test(`${share}: labels are the plain coin, amounts never a share count label`, () => {
+    test(`${share}: labels are the plain coin, a count never reaches the screen (DEV-621)`, () => {
       expect(coin).toMatch(/^(?:USDC|USDT|ETH)$/);
-      expect(tokenAmountLabel('0.1', share)).toBe(`≈ 0.1 ${coin}`);
-      expect(approxUnderlyingText(`0.1 ${share}`, share)).toBe(`≈ 0.1 ${coin}`);
+      expect(tokenAmountLabel('0.1', share)).toBe(`… ${coin}`);
+      expect(approxUnderlyingText(`0.1 ${share}`, share)).toBe(`… ${coin}`);
       const format = (n: number) => String(n);
-      expect(shareAmountText({ amount: 0.1, assetSymbol: share, underlyingAmount: null, format })).toBe(`≈ 0.1 ${coin}`);
-      expect(shareReviewHeadline({ isShare: true, shares: 0.1, shareSymbol: share, underlyingSymbol: coin, underlying: null, pending: false, format })).toBe(`≈ 0.1 ${coin}`);
+      expect(shareAmountText({ amount: 0.1, assetSymbol: share, underlyingAmount: null, format })).toBe(`… ${coin}`);
+      expect(shareReviewHeadline({ isShare: true, shares: 0.1, shareSymbol: share, underlyingSymbol: coin, underlying: null, pending: false, format })).toBe(`… ${coin}`);
       for (const text of [tokenAmountLabel('0.1', share), approxUnderlyingText(`0.1 ${share}`, share)]) clean(text);
     });
 

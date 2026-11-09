@@ -11,8 +11,9 @@ describe('formatTokenBalance', () => {
     expect(formatTokenBalance(0.000004, 'cBTC')).toBe('0.000004');
     expect(formatTokenBalance(0.0000041234, 'cBTC')).toBe('0.0000041');
     expect(formatTokenBalance(1e-9, 'ETH')).toBe('0.000000001');
-    expect(formatTokenBalance(0.004, 'USDT')).toBe('0.004');
-    expect(formatTokenBalance(0.00412, 'USDC')).toBe('0.0041');
+    // A stablecoin always has two decimals (DEV-621): under a cent it says so.
+    expect(formatTokenBalance(0.004, 'USDT')).toBe('<0.01');
+    expect(formatTokenBalance(0.00412, 'USDC')).toBe('<0.01');
   });
 
   test('a test-sized amount keeps every digit it has', () => {
@@ -32,17 +33,19 @@ describe('formatTokenBalance', () => {
     expect(formatTokenBalance(12.3456, 'ETH')).toBe('12.3456');
   });
 
-  test('a stablecoin reads like money', () => {
-    expect(formatTokenBalance(1250, 'USDC')).toBe('1250');
+  test('a stablecoin reads like money: exactly two decimals, rounded down (DEV-621)', () => {
+    expect(formatTokenBalance(1250, 'USDC')).toBe('1250.00');
     expect(formatTokenBalance(1250.5, 'USDC')).toBe('1250.50');
-    expect(formatTokenBalance(23.295, 'USDC')).toBe('23.30');
+    expect(formatTokenBalance(23.295, 'USDC')).toBe('23.29');
     expect(formatTokenBalance(0.01, 'USDC')).toBe('0.01');
-    expect(formatTokenBalance(0.999, 'ppUSDC')).toBe('1');
+    expect(formatTokenBalance(4.918123, 'USDT')).toBe('4.91');
+    expect(formatTokenBalance(5.03, 'USDT')).toBe('5.03');
+    expect(formatTokenBalance(0.999, 'ppUSDC')).toBe('0.99');
   });
 
   test('a genuine zero still reads as zero', () => {
     expect(formatTokenBalance(0, 'cBTC')).toBe('0.00');
-    expect(formatTokenBalance(0, 'USDC')).toBe('0');
+    expect(formatTokenBalance(0, 'USDC')).toBe('0.00');
   });
 
   test('a negative amount keeps its sign', () => {
@@ -68,7 +71,7 @@ describe('formatTokenBalanceDown', () => {
   });
   test('zero and whole stable amounts keep the usual shape', () => {
     expect(formatTokenBalanceDown(0, 'ETH')).toBe(formatTokenBalance(0, 'ETH'));
-    expect(formatTokenBalanceDown(1250, 'USDC')).toBe('1250');
+    expect(formatTokenBalanceDown(1250, 'USDC')).toBe('1250.00');
   });
 });
 

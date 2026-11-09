@@ -64,7 +64,7 @@ describe('medianDepositUsd', () => {
   test('a present "0.00" WITH deposits is a genuine (dust) zero', () => {
     expect(medianDepositUsd({ medianDepositSizeUsd: '0.00', totalDepositsCount: 3 })).toBe(0);
     // ...and the display layer renders it as a figure, not an omission.
-    expect(medianDepositUsdText({ medianDepositSizeUsd: '0.00', totalDepositsCount: 3 })).toBe('$0');
+    expect(medianDepositUsdText({ medianDepositSizeUsd: '0.00', totalDepositsCount: 3 })).toBe('$0.00');
   });
 
   test('strict parsing: junk, partial numbers, negatives and separators are REJECTED', () => {
@@ -96,7 +96,7 @@ describe('medianDepositUsdText', () => {
   });
 
   test('formats through the canonical USD formatter', () => {
-    expect(medianDepositUsdText(PR92_ALL_TIME)).toBe('$1,800');
+    expect(medianDepositUsdText(PR92_ALL_TIME)).toBe('$1,800.00');
     expect(medianDepositUsdText({ medianDepositSizeUsd: '12345.67' })).toBe('$12.35k');
   });
 });

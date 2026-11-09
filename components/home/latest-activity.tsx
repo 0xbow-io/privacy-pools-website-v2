@@ -16,7 +16,7 @@ import { withPublicSwapRows } from '@/services/swap-route-evidence';
 import { swapHeadline, type SwapLeg } from '@/services/swap-rows';
 import { consolidationHeadline } from '@/services/self-transfer-row';
 import { Pressable, Text, View, useWindowDimensions } from 'react-native';
-import { ShareFigure } from '@/components/ui/share-figure';
+import { FigureText, ShareFigure } from '@/components/ui/share-figure';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Colors, TokenHues } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
@@ -65,6 +65,8 @@ export function ActivityRow({ tx, colors }: { tx: Transaction; colors: typeof Co
   const balanceDisplay = useBalanceDisplay(tx.chainId);
   const amountView = balanceDisplay(tx.tokenAmount, tx.asset, tx.chainId, tx.tokenAddress);
   const swapAmount = (leg: SwapLeg) => balanceDisplay(leg.tokenAmount, leg.asset, leg.chainId, leg.tokenAddress).text;
+  // A two-leg headline is text: a leg still loading becomes the shimmer (FigureText).
+  const headline = consolidationHeadline(tx) ?? swapHeadline(tx, swapAmount);
   const scheme = colors === Colors.dark ? 'dark' : 'light';
   const hue = TokenHues[scheme][tx.asset.toUpperCase()] ?? TokenHues[scheme].ETH;
   const pending = tx.status === 'pending';
@@ -79,7 +81,7 @@ export function ActivityRow({ tx, colors }: { tx: Transaction; colors: typeof Co
       </View>
       <View className="flex-1 gap-[1px]">
         <Text className="font-pp-sans-medium text-[13px] text-text" numberOfLines={1}>
-          {rowTypeLabel(tx)} · <Text className="font-pp-mono">{consolidationHeadline(tx) ?? swapHeadline(tx, swapAmount) ?? <ShareFigure view={amountView} />}</Text>
+          {rowTypeLabel(tx)} · <Text className="font-pp-mono">{headline != null ? <FigureText text={headline} /> : <ShareFigure view={amountView} />}</Text>
         </Text>
         <Text className="font-pp-sans text-[11.5px] text-text-muted" numberOfLines={1}>
           {timeAgo(tx.timestamp, now)} · {tx.chain}

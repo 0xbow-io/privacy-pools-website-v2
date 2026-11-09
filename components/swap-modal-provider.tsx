@@ -18,7 +18,7 @@ import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
 import { AlertCircleIcon, CaretDownIcon, CheckCircleIcon, CloseIcon } from '@/components/ui/modal-icons';
 import { WEB_NO_OUTLINE } from '@/components/ui/web-style-shims';
 import { View, Text, Pressable, Platform, useWindowDimensions, TextInput, Animated, ScrollView, Linking } from 'react-native';
-import { ShareFigure } from '@/components/ui/share-figure';
+import { FigureText, ShareFigure } from '@/components/ui/share-figure';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Svg, { Circle } from 'react-native-svg';
 import { useAccount } from 'wagmi';
@@ -95,7 +95,7 @@ import { isCustomSlippage, parseCustomSlippage, slippageLabel } from '@/services
 import { isLegacyPlainToken } from '@/config/pool-paths';
 import { getKnownTokenMetadata, getTokenMetadata } from '@/config/tokens';
 import { visibleSwapSources } from '@/services/pool-slug';
-import { displayTokenSymbol, isShareSymbol, underlyingOnlyView } from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol, swapRateText, underlyingOnlyView } from '@/services/share-display';
 import { handoffRefused, resolveHandoffToken } from '@/services/swap-token-handoff';
 import { friendlySwapError, relaySwapRefusalText } from '@/services/swap-error-copy';
 import { sameSymbol } from '@/services/symbol-match';
@@ -2800,7 +2800,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                 )}
                 {swapError && !swapUnavailable && (
                   <View className="w-full rounded-legacy-8 border border-danger bg-danger-bg px-[12px] py-[10px]">
-                    <Text className="text-[12px] leading-[17px] text-danger font-pp-medium" testID="swap-error">{swapError}</Text>
+                    <Text className="text-[12px] leading-[17px] text-danger font-pp-medium" testID="swap-error"><FigureText text={swapError} /></Text>
                   </View>
                 )}
 
@@ -3174,7 +3174,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
 
                 {swapError && (
                   <View className="w-full rounded-legacy-8 border border-danger bg-danger-bg px-[12px] py-[10px]">
-                    <Text className="text-[12px] leading-[17px] text-danger font-pp-medium" testID="swap-error">{swapError}</Text>
+                    <Text className="text-[12px] leading-[17px] text-danger font-pp-medium" testID="swap-error"><FigureText text={swapError} /></Text>
                   </View>
                 )}
 
@@ -3345,7 +3345,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
 
                 {swapError && (
                   <View className="w-full rounded-legacy-8 border border-danger bg-danger-bg px-[12px] py-[10px]">
-                    <Text className="text-[12px] leading-[17px] text-danger font-pp-medium" testID="swap-error">{swapError}</Text>
+                    <Text className="text-[12px] leading-[17px] text-danger font-pp-medium" testID="swap-error"><FigureText text={swapError} /></Text>
                   </View>
                 )}
 
@@ -3382,7 +3382,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                     && (!isShareSymbol(snapshot.outputToken.symbol) || swapView('1', snapshot.outputToken.symbol, snapshot.destinationChainId).converted) && (
                     <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                       <Text className="text-[13px] text-text-muted font-pp-medium">Rate</Text>
-                      <Text className="text-[13px] text-text font-pp-regular">1 {swapView('1', snapshot.fromToken.symbol, chainId).symbol} ≈ {Number(snapshot.display.rate) * swapView('1', snapshot.outputToken.symbol, snapshot.destinationChainId).amount / swapView('1', snapshot.fromToken.symbol, chainId).amount} {swapView('1', snapshot.outputToken.symbol, snapshot.destinationChainId).symbol}</Text>
+                      <Text className="text-[13px] text-text font-pp-regular"><FigureText text={swapRateText(Number(snapshot.display.rate), swapView('1', snapshot.fromToken.symbol, chainId), swapView('1', snapshot.outputToken.symbol, snapshot.destinationChainId))} /></Text>
                     </View>
                   )}
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
@@ -3514,7 +3514,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                     address instead, repeating it is the false success QA hit. */}
                 {!(delivery?.status === 'recovered' || delivery?.status === 'failed') && (
                   <Text className="w-full text-center text-[12px] text-text-muted font-pp-regular">
-                    {reshieldSnapshot.destinationChainId !== chainId && reshieldSnapshot.recipient && delivery?.status === 'done'
+                    <FigureText text={reshieldSnapshot.destinationChainId !== chainId && reshieldSnapshot.recipient && delivery?.status === 'done'
                       ? `At least ${swapView(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} was deposited as a new shielded note for ${reshieldSnapshot.recipient.slice(0, 6)}…${reshieldSnapshot.recipient.slice(-4)} on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`}. They will see it after their next sync.`
                       : reshieldSnapshot.destinationChainId !== chainId && reshieldSnapshot.recipient
                       ? `At least ${swapView(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} is being deposited as a new shielded note for ${reshieldSnapshot.recipient.slice(0, 6)}…${reshieldSnapshot.recipient.slice(-4)} on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`}. The deposit follows this transaction and can take a few minutes.`
@@ -3522,7 +3522,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                       ? `At least ${swapView(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} as a new shielded note on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`}. The transaction above is this chain's leg; the deposit over there follows and can take a few minutes, and it becomes spendable once that pool's association set includes it.`
                       : reshieldSnapshot.recipient
                         ? `At least ${swapView(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} was deposited as a new shielded note for ${reshieldSnapshot.recipient.slice(0, 6)}…${reshieldSnapshot.recipient.slice(-4)}. They will see it after their next sync, and it becomes spendable once the pool's association set includes it.`
-                        : `At least ${swapView(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} as a new shielded note. It becomes spendable once the pool's association set includes it.`}
+                        : `At least ${swapView(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} as a new shielded note. It becomes spendable once the pool's association set includes it.`} />
                   </Text>
                 )}
                 {/* Live status of the far leg, same tracker flow 1 uses. Without
@@ -3612,7 +3612,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                 )}
                 {snapshot.crossChain && (
                   <Text className={`w-full text-center text-[12px] font-pp-regular ${delivery?.status === 'failed' || delivery?.status === 'recovered' ? 'text-danger' : 'text-text-muted'}`}>
-                    {delivery?.status === 'recovered' && delivery.refunded
+                    <FigureText text={delivery?.status === 'recovered' && delivery.refunded
                       ? `The swap on ${snapshot.destinationName} did not run, so ${recoveredWhere(true, sourceChainName, snapshot.destinationName)}.`
                       : delivery?.status === 'done'
                       ? `Delivered on ${snapshot.destinationName} (min ${swapView(snapshot.display.minReceived, snapshot.outputToken.symbol, snapshot.destinationChainId).text}).`
@@ -3620,7 +3620,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                       ? `The swap on ${snapshot.destinationName} did not run, so the bridge paid your address there in the token it carried rather than ${displayTokenSymbol(snapshot.outputToken.symbol)}.`
                       : delivery?.status === 'failed'
                         ? `Bridge delivery failed${delivery.detail ? `: ${delivery.detail}` : ''}. Destination-swap failures refund to your address on ${snapshot.destinationName}; certain bridge failures refund to the source-chain RelaySwaps contract and need relayer assistance to recover.`
-                        : `${deliveryProgress ?? 'Tracking the bridge…'} Delivery pending on ${snapshot.destinationName}.`}
+                        : `${deliveryProgress ?? 'Tracking the bridge…'} Delivery pending on ${snapshot.destinationName}.`} />
                   </Text>
                 )}
                 {explorerUrl && (

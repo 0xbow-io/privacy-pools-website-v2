@@ -107,6 +107,8 @@ test('the field label never names the share, with or without a rate', () => {
   const noRate = fieldHarness('0.1', null).render();
   expect(noRate.symbol).toBe('ETH');
   expect(noRate.underlyingAvailable).toBe(false);
-  // Display only: without a rate the amount stays the exact share count.
-  expect(noRate.value).toBe('0.1');
+  // Without a rate the field shows no figure, never the count (DEV-621); the
+  // amount itself stays the exact share state.
+  expect(noRate.value).toBe('');
+  expect(noRate.loading).toBe(true);
 });

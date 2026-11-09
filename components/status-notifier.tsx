@@ -103,7 +103,7 @@ export function StatusNotifier(): null {
       // Toast copy only: the grid-backed rate converts the displayed quantity,
       // never the activity row or any operational amount.
       const view = balanceDisplay(tx.tokenAmount, tx.asset, tx.chainId, tx.tokenAddress);
-      return `${view.converted ? '≈ ' : ''}${view.text}`;
+      return `${view.converted ? '~' : ''}${view.text}`;
     });
     prevStatuses.current = next;
     saveSeenStatuses(identityKey, next);

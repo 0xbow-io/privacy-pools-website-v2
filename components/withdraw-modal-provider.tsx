@@ -198,7 +198,8 @@ import { feeWithinReviewed, relayerFeeJitterAllowance } from '@/services/relayer
 import { quoteMatchesSignedCommitment } from '@/services/relayer-quote-integrity';
 import { decodeGasTopUpWei, formatGasTopUp } from '@/services/gas-top-up';
 import { setReceiveSetup } from '@/services/receive-setup';
-import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, netSharesWei, previewReceiveFigure, shareRedemptionDisclosure, shareReviewHeadline } from '@/services/share-display';
+import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, netSharesWei, previewReceiveFigure, shareRedemptionDisclosure, shareReviewHeadline, swapRateText } from '@/services/share-display';
+import { FigureText } from '@/components/ui/share-figure';
 import { sdkErrorText, type ErrorUnits } from '@/services/sdk-error-amounts';
 import { RelayFeeIncreasedError, relayWithdrawalWithFreshQuote } from '@/services/relayed-withdrawal';
 import { PREVIEW_REDEEM_ABI } from '@/services/deposit-limits';
@@ -1871,7 +1872,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // Success headline: the router quote captured at submit, which is what was
   // actually paid out (the disclosure under it names the guaranteed minimum).
   const successNetLabel = yieldRedemption
-    ? `≈ ${sharedFormatTokenBalance(Number(formatUnits(yieldRedemption.quotedOut, yieldRedemption.underlyingDecimals)), displayTokenSymbol(yieldRedemption.underlyingSymbol))} ${displayTokenSymbol(yieldRedemption.underlyingSymbol).toUpperCase()}`
+    ? `~${sharedFormatTokenBalance(Number(formatUnits(yieldRedemption.quotedOut, yieldRedemption.underlyingDecimals)), displayTokenSymbol(yieldRedemption.underlyingSymbol))} ${displayTokenSymbol(yieldRedemption.underlyingSymbol).toUpperCase()}`
     : reviewNetLabel;
   // Swap-exit Review/Success figures come SOLELY from the immutable quote
   // snapshot (codex P1) — never live selectedToken/amount, which the user
@@ -5910,7 +5911,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                         <View className="flex-row items-center justify-between gap-[4px]">
                           <Text className="text-[13px] leading-[24px] text-[#737373] font-pp-regular">Rate</Text>
                           <Text className="text-[13px] leading-[24px] text-right text-text font-pp-regular">
-                            1 {balanceDisplay('1', swapReviewInputSymbol, swapSnapshot.poolChainId).symbol} ≈ {Number(swapSnapshot.display.rate) * balanceDisplay('1', swapSnapshot.outputToken.symbol, swapSnapshot.destinationChainId).amount / balanceDisplay('1', swapReviewInputSymbol, swapSnapshot.poolChainId).amount} {balanceDisplay('1', swapSnapshot.outputToken.symbol, swapSnapshot.destinationChainId).symbol}
+                            <FigureText text={swapRateText(Number(swapSnapshot.display.rate), balanceDisplay('1', swapReviewInputSymbol, swapSnapshot.poolChainId), balanceDisplay('1', swapSnapshot.outputToken.symbol, swapSnapshot.destinationChainId))} />
                           </Text>
                         </View>
                       )}

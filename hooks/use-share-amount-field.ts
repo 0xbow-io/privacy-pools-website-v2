@@ -10,7 +10,9 @@ import { parseTokenAmount, sanitizeAmountInput } from '@/services/token-amount';
 import { shareAmountFromUnderlying } from '@/services/share-amount-entry';
 
 // RULE (Pat 2026-10-21): displayed underlying never replaces exact share state.
-// Headlines use underlying, with shares in the hint or while the rate is unknown.
+// Headlines use underlying. While the rate is unknown the field shows no figure
+// (DEV-621: never a count in the coin's place); a draft typed meanwhile is
+// kept and converted once the rate arrives.
 // Only explicit Withdraw/Send edits cross the tested entry boundary, including
 // USD edits using an exact decimal price snapshot. Untouched MAX stays shares.
 export function useShareAmountField(args: { amount: string; symbol: string; chainId: number; maxSharesExact: string; capKnown: boolean; onAmountResolved: (shares: string) => void; underlyingEntry?: boolean }) {
@@ -24,6 +26,8 @@ export function useShareAmountField(args: { amount: string; symbol: string; chai
   const priceExact = typeof price === 'number' && Number.isFinite(price) && price > 0
     ? price.toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 100 }) : undefined;
   const usdAvailable = shareUsdDisplayExact('0', rate, priceExact) !== null;
+  // A share field with no rate yet: the exact amount is known, its worth is not.
+  const waitingRate = !rate && underlyingEntry && isShareSymbol(symbol);
   const rateKey = shareRateSnapshotKey(rate);
   const fieldKey = `${chainId}:${symbol}:${underlyingEntry}`;
   const [edit, setEdit] = useState<{ shares: string; text: string; rateKey: string; priceExact?: string; denomination: 'underlying' | 'usd'; tooSmall: boolean; fieldKey: string; maxSharesExact: string; capKnown: boolean; pending: boolean } | null>(null);
@@ -41,6 +45,12 @@ export function useShareAmountField(args: { amount: string; symbol: string; chai
   const pendingEdit = edit?.pending && edit.shares === amount && edit.fieldKey === fieldKey;
   const toShares = (text: string, denomination: 'underlying' | 'usd' = 'underlying') => {
     if (denomination === 'usd' && !usdAvailable) return amount;
+    if (waitingRate) {
+      // Kept as typed and converted by the effect below once the rate lands.
+      setEdit({ shares: amount, text: sanitizeAmountInput(text, 18), rateKey, priceExact, denomination: 'underlying', tooSmall: false,
+        fieldKey, maxSharesExact, capKnown, pending: true });
+      return amount;
+    }
     if (!rate) return text;
     const cleaned = sanitizeAmountInput(text, denomination === 'usd' ? 18 : rate.underlyingDecimals);
     // Unknown is not zero. Keep the draft separately, leaving exact shares
@@ -65,9 +75,10 @@ export function useShareAmountField(args: { amount: string; symbol: string; chai
   }, [pendingEdit, capKnown, maxSharesExact, rateKey, priceExact, edit, amount, onAmountResolved]);
   const draft = pendingEdit || sameEdit ? edit : null;
   return {
-    value: draft?.denomination === 'underlying' ? draft.text : rate && amount ? numericDisplay(amount) : amount,
-    // Never the share's own name, even before the rate is known: the coin it
-    // holds (Pat, DEV-591 QA: "ppUSDC" on the chip and the preset chips).
+    value: draft?.denomination === 'underlying' ? draft.text : rate && amount ? numericDisplay(amount) : waitingRate ? '' : amount,
+    /** The rate this field converts with is still loading: the caller shows the shimmer. */
+    loading: waitingRate,
+    // Always the coin ("USDC"), with or without a rate: never the share's own name.
     symbol: rate ? displayTokenSymbol(rate.underlyingSymbol) : displayTokenSymbol(symbol),
     usdAvailable,
     underlyingAvailable: !!rate,

@@ -6,21 +6,22 @@
  * toLocaleString/toFixed options.
  *
  * Two dialects, matching the two kinds of surfaces the app has:
- *  - `formatUsd`        — compact stat figure ("$4,674", "$10.82k", "$1.5M")
- *                         for cards and columns where space matters.
- *  - `formatUsdPrecise` — exact figure with cents ("$1,234.56") for estimate
+ *  - `formatUsd`        : stat figure ("$4.97", "$4,674.10", "$10.82k",
+ *                         "$1.5M"), cents up to the cutover.
+ *  - `formatUsdBalance` : a balance, never abbreviated ("$12,345.67").
+ *  - `formatUsdPrecise` : exact figure with cents ("$1,234.56") for estimate
  *                         ("~$…") and detail rows where the exact number
  *                         matters more than compactness.
  */
 
 /**
- * Compact USD with a `$9,999`/`$10k` cutover. Under the cutover values get an
- * integer with thousands separators (no decimals, so "$4,674.1" can't wrap
- * mid-number in narrow columns); over it values abbreviate to k/M/B with up
- * to two decimals and trailing zeros stripped (e.g. "$10k", "$10.82k",
- * "$1.5M"). Sub-dollar amounts (e.g. small SUI balances on testnet) would
- * otherwise round to "$0" and read as empty, so cents show under $1 and a
- * positive amount below a cent surfaces as "<$0.01".
+ * USD with a `$9,999.99`/`$10k` cutover. Under the cutover a figure always
+ * has exactly two decimals and thousands separators, rounded DOWN like the
+ * token figure beside it ("$4.97", not "$5": DEV-621), so a balance header,
+ * a pool row and a shielded balance holding the same amount print the same
+ * cents. Over it values abbreviate to k/M/B with up to two decimals and
+ * trailing zeros stripped (e.g. "$10k", "$10.82k", "$1.5M"). A positive amount
+ * below a cent surfaces as "<$0.01" so it never reads as empty.
  */
 export function formatUsd(value: number): string {
   if (value >= 1_000_000_000) {
@@ -32,10 +33,19 @@ export function formatUsd(value: number): string {
   if (value >= 10_000) {
     return `$${(value / 1_000).toLocaleString('en-US', { maximumFractionDigits: 2 })}k`;
   }
-  if (value > 0 && value < 1) {
-    return value < 0.005 ? '<$0.01' : `$${value.toFixed(2)}`;
-  }
-  return `$${value.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+  return formatUsdBalance(value);
+}
+
+/**
+ * A balance in USD, never abbreviated: exactly two decimals, thousands
+ * separators, rounded DOWN like the token figure beside it ("$4.97",
+ * "$12,345.67"). A positive amount below a cent reads "<$0.01" (DEV-621).
+ */
+export function formatUsdBalance(value: number): string {
+  if (!Number.isFinite(value)) return '$0.00';
+  if (value > 0 && value < 0.01) return '<$0.01';
+  const cents = Math.floor(Math.abs(value) * 100 * (1 + 1e-12)) / 100;
+  return `${value < 0 && cents > 0 ? '-' : ''}$${cents.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 /**

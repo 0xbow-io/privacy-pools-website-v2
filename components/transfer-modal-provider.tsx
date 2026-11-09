@@ -26,7 +26,7 @@ import { ProgressStages, progressStageIndex } from '@/components/ui/progress-sta
 import { CheckCircleIcon, CloseIcon, SpinnerIcon } from '@/components/ui/modal-icons';
 import { DROPDOWN_SHADOW, WEB_FIXED_POSITION, WEB_BLUR_BACKDROP, WEB_NO_OUTLINE } from '@/components/ui/web-style-shims';
 import { View, Text, Pressable, Platform, useWindowDimensions, TextInput, Animated, Easing, Linking, ScrollView } from 'react-native';
-import { ShareFigure } from '@/components/ui/share-figure';
+import { FigureText, ShareFigure } from '@/components/ui/share-figure';
 import type { TextStyle } from 'react-native';
 import Svg, { Path, Circle, Rect } from 'react-native-svg';
 import { useAccount, usePublicClient, useSendTransaction } from 'wagmi';
@@ -3739,7 +3739,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                   {amountField.error ? <Text className="text-[12px] text-danger">{amountField.error}</Text> : null}
                   {amountError && (
                     <Text className="text-[12px] text-[#E53935] font-pp-regular">
-                      {displayAmountError}
+                      <FigureText text={displayAmountError} />
                     </Text>
                   )}
                   {/* The fee rides on top, so an amount just under the cap (a
@@ -4142,7 +4142,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                 {new Set(consolidationSelection?.map((note) => note.label.toLowerCase())).size > 1 && (
                   <Text className="font-pp-regular text-[12px] leading-[18px] text-text-secondary">Each deposit stays separate, but the selected groups share one on-chain transaction.</Text>
                 )}
-                {(transferError || consolidationError) && <Text accessibilityRole="alert" className="text-[13px] text-warning font-pp-regular">{transferError ?? consolidationError}</Text>}
+                {(transferError || consolidationError) && <Text accessibilityRole="alert" className="text-[13px] text-warning font-pp-regular"><FigureText text={transferError ?? consolidationError} /></Text>}
                 <View className="flex-row gap-[10px]">
                   <Pressable accessibilityRole="button" className="h-[46px] px-[18px] border border-border rounded-control items-center justify-center" onPress={backToConsolidationNotes}>
                     <Text className="font-pp-medium text-[14px] text-text">Back</Text>

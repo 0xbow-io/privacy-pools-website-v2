@@ -61,8 +61,7 @@ describe('the review renders no raw share symbol', () => {
   }
 
   test('the rate row names the underlying on both sides, and only between converted figures', () => {
-    expect(SOURCE).toContain("swapView('1', snapshot.fromToken.symbol, chainId).symbol");
-    expect(SOURCE).toContain("swapView('1', snapshot.outputToken.symbol, snapshot.destinationChainId).symbol");
+    expect(SOURCE).toContain("swapRateText(Number(snapshot.display.rate), swapView('1', snapshot.fromToken.symbol, chainId), swapView('1', snapshot.outputToken.symbol, snapshot.destinationChainId))");
     expect(SOURCE).toContain("swapView('1', snapshot.fromToken.symbol, chainId).converted");
     expect(SOURCE).toContain("swapView('1', snapshot.outputToken.symbol, snapshot.destinationChainId).converted");
   });
@@ -79,9 +78,9 @@ describe('the rename is honest about what a share count is', () => {
     test(`${share} reads as ${underlying}, never as itself`, () => {
       expect(isShareSymbol(share)).toBe(true);
       expect(displayTokenSymbol(share)).toBe(underlying);
-      // Without a rate, plain text reads the count under the coin, approximate.
+      // Without a rate, plain text holds the loading figure, never the count (DEV-621).
       const text = tokenAmountLabel('5', share);
-      expect(text).toBe(`≈ 5 ${underlying}`);
+      expect(text).toBe(`… ${underlying}`);
       expect(text).not.toMatch(/\bshares\b/i);
       expect(text).not.toContain(share);
     });
