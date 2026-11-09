@@ -9,7 +9,7 @@
  *   full              nothing (the spend-grade file)
  *   no-spending-keys  account key, wallet signatures, note / deposit /
  *                     precommitment secrets, root / app secrets, every private
- *                     key except the viewing key          (default)
+ *                     key except the viewing key
  *   no-viewing-key    + the viewing key and anything else that decrypts notes
  *   no-tx-details     + amounts, values, hashes, commitments, labels,
  *                     nullifiers, block numbers, times of transactions and every
@@ -42,7 +42,7 @@ export type RedactionLevel = 'full' | 'no-spending-keys' | 'no-viewing-key' | 'n
 
 export const REDACTION_LEVELS: readonly RedactionLevel[] = ['full', 'no-spending-keys', 'no-viewing-key', 'no-tx-details'];
 
-export const DEFAULT_REDACTION_LEVEL: RedactionLevel = 'no-spending-keys';
+export const DEFAULT_REDACTION_LEVEL: RedactionLevel = 'no-tx-details';
 
 /** What the save dialog shows for each level, and what the file says it holds. */
 export const REDACTION_LEVEL_INFO: Record<RedactionLevel, { label: string; hint: string; keeps: string; statement: string }> = {
