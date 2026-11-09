@@ -58,6 +58,6 @@ describe('link amount for a share token', () => {
 
   test('a plain token is unaffected by a rate', () => {
     const usdc: LinkToken = { known: true, symbol: 'USDC', decimals: 6 };
-    expect(linkAmountText(3_000_000n, usdc, rate(1_050_000n))).toBe('3 USDC');
+    expect(linkAmountText(3_000_000n, usdc, rate(1_050_000n))).toBe('3.00 USDC');
   });
 });

@@ -1,6 +1,6 @@
 import { formatUnits } from 'viem';
 
-import { isShareSymbol, tokenAmountLabel } from '@/services/share-display';
+import { isShareSymbol, plainTokenFigure, tokenAmountLabel } from '@/services/share-display';
 import { formatShareAsUnderlying, shareExactAsUnderlyingDecimal, type ShareRate } from '@/services/share-rates';
 
 // The token a claim or payment link names, resolved for DISPLAY (DEV-484).
@@ -67,5 +67,5 @@ export function linkAmountText(rawAmount: bigint, token: LinkToken, rate?: Share
     const underlying = shareExactAsUnderlyingDecimal(shares, rate);
     if (underlying != null) return formatShareAsUnderlying(underlying, rate);
   }
-  return tokenAmountLabel(shares, token.symbol);
+  return tokenAmountLabel(plainTokenFigure(shares, token.symbol), token.symbol);
 }
