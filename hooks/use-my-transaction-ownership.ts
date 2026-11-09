@@ -14,7 +14,7 @@ import { useNotes } from '@/hooks/use-notes';
 import { getChainConfig, supportedChainIds } from '@/config/chains';
 import { loadStoredAccountExport } from '@/components/sdk-provider';
 import { usePools, type PoolsData, type Transaction } from '@/components/pools-provider';
-import { noteIdentitySets, depositMatchesMyNotes, normalizeCommitment } from '@/services/deposit-ownership';
+import { noteIdentitySets, depositMatchesMyNotes, depositMineByAddress, normalizeCommitment } from '@/services/deposit-ownership';
 import { mergeNotesByCommitment } from '@/services/note-sets';
 import { useLiveNotesChainId } from '@/hooks/use-live-notes-chain-id';
 import {
@@ -130,12 +130,13 @@ export function useMyTransactionOwnership() {
       // Claimed by one of my notes (tx hash OR label, any chain): this is
       // what makes a LiFi-executed cross-chain shield mine.
       if (depositMatchesMyNotes({ txHash: tx.txHash ?? null, label: tx.label ?? null, commitment: tx.ownCommitment, tokenAddress: tx.tokenAddress }, ownedIdentity)) return true;
-      const hash = tx.txHash?.toLowerCase();
-      if (hash && outgoingDepositTxHashes.has(hash)) return false;
-      if (hash && (depositOwnership.notMine.has(hash) || depositOwnership.pending.has(hash))) return false;
-      return !!ownAddress
-        && !!tx.fullAddress
-        && tx.fullAddress.toLowerCase() === ownAddress.toLowerCase();
+      // A deposit made for someone else (depositFor, or stamped outgoing) is the
+      // recipient's money: never mine by the depositor address.
+      return depositMineByAddress(tx, ownAddress, {
+        outgoing: outgoingDepositTxHashes,
+        notMine: depositOwnership.notMine,
+        pending: depositOwnership.pending,
+      });
     },
     [ownAddress, ownedIdentity, outgoingDepositTxHashes, depositOwnership],
   );

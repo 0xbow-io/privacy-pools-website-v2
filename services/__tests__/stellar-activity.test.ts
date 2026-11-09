@@ -4,6 +4,7 @@ import {
   buildStellarNoteOrigins,
   canonicalCommitment,
   countStellarDeposits,
+  dedupeRowsById,
   deriveStellarActivity,
   stellarDepositReview,
   type StellarActivityNote,
@@ -357,5 +358,26 @@ describe('DEV-501: before the first index read', () => {
     expect(a.rows).toHaveLength(1);
     expect(a.rows[0]).toMatchObject({ type: 'Transfer', direction: 'in', status: 'pending' });
     expect(a).toMatchObject({ depositCount: 0, receivedCount: 0, sentCount: 0, withdrawalCount: 0 });
+  });
+});
+
+describe('dedupeRowsById: one row per id whichever source lands first', () => {
+  const row = (extra: Record<string, unknown>) => ({ id: 'stellar-deposit-for-0x2a', type: 'Deposit', timestamp: 1, ...extra }) as unknown as Parameters<typeof dedupeRowsById>[0][number];
+
+  test('a deposit-for described twice (device record and saved claim) is one row', () => {
+    const out = dedupeRowsById([row({ fullAddress: 'GRECIPIENT', direction: 'out' }), row({ fullAddress: 'GME', depositFor: true })]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ fullAddress: 'GRECIPIENT', depositFor: true });
+  });
+
+  test('the depositFor flag survives in the other order too', () => {
+    const out = dedupeRowsById([row({ fullAddress: 'GME', depositFor: true }), row({ fullAddress: 'GRECIPIENT', direction: 'out' })]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ fullAddress: 'GME', depositFor: true });
+  });
+
+  test('distinct ids are all kept, in order', () => {
+    const out = dedupeRowsById([row({ id: 'a' }), row({ id: 'b' }), row({ id: 'a' })]);
+    expect(out.map((r) => r.id)).toEqual(['a', 'b']);
   });
 });

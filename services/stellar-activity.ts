@@ -521,8 +521,9 @@ export function deriveStellarActivity(
   }
 
   // Newest first by chain time; stable, so rows with no time keep their order.
-  rows.sort((a, b) => b.timestamp - a.timestamp);
-  return { rows, depositCount, receivedCount, sentCount, withdrawalCount };
+  const unique = dedupeRowsById(rows);
+  unique.sort((a, b) => b.timestamp - a.timestamp);
+  return { rows: unique, depositCount, receivedCount, sentCount, withdrawalCount };
 }
 
 /** A row for an event this account caused (a spend or an exit): no counterparty is shown. */
@@ -614,4 +615,21 @@ export function stellarReceivedNotes(
     out.push({ commitment: n.commitment, tokenId: n.tokenId, value: n.value, createdAtBlock: `0x${origin.time.toString(16)}`, txHash: origin.txHash });
   }
   return out;
+}
+
+/**
+ * One row per id, the first one kept. Two sources can describe the same tx:
+ * a deposit made for someone else is rebuilt both from this device's deposit
+ * record and from its saved claim (stellar-deposit-for-<tx>). A `depositFor`
+ * flag on either copy stays on the kept row, so the payer never reads as the
+ * owner of the recipient's money whichever source came first.
+ */
+export function dedupeRowsById(rows: Transaction[]): Transaction[] {
+  const byId = new Map<string, Transaction>();
+  for (const row of rows) {
+    const kept = byId.get(row.id);
+    if (!kept) byId.set(row.id, row);
+    else if (row.depositFor && !kept.depositFor) byId.set(row.id, { ...kept, depositFor: true });
+  }
+  return [...byId.values()];
 }
