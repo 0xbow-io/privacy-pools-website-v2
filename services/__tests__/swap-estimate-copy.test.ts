@@ -23,9 +23,10 @@ test('the Swap form estimate says it is before relayer fees, and where the minim
 test('the headline prefers the refused press\'s net figure, from the provider, with no fetch of its own', () => {
   const at = hub.indexOf('const swapPreviewText = !swapOutUnits');
   const headline = hub.slice(at, hub.indexOf(';', at));
-  expect(headline.indexOf('swapQuotedNet !== null')).toBeGreaterThan(0);
-  expect(headline.indexOf('swapQuotedNet !== null')).toBeLessThan(headline.indexOf('swapPreview.status'));
-  expect(headline).toContain('depositValueText(swapQuotedNet, swapOutToken.decimals)');
+  expect(headline.indexOf('swapQuotedFigure')).toBeGreaterThan(0);
+  expect(headline.indexOf('swapQuotedFigure')).toBeLessThan(headline.indexOf('swapPreview.status'));
+  // The figure is converted at the scheduled rate (services/swap-quoted-net.ts), never printed as a raw share count.
+  expect(hub).toContain('quotedNetFigure(swapQuotedNet, swapOutToken, shareRateFor(swapDestChainId, swapOutToken.address))');
   // Matched to the form it priced: amount, pair and destination.
   const gate = hub.slice(hub.indexOf('const swapQuotedNet ='), at);
   for (const k of ['grossWei === swapAmountWei', 'inputToken', 'outputToken', 'destinationChainId === swapDestChainId']) expect(gate).toContain(k);

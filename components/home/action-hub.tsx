@@ -4,7 +4,7 @@ import { DEPOSIT_FAQ_URL } from '@/config/support';
 import { spendableBalanceLabel } from '@/services/spendable-balance-label';
 import { pendingPoolReopenStep, type PendingPoolReopen } from '@/services/pool-pick-reopen';
 import { useShareAmountField } from '@/hooks/use-share-amount-field';
-import { depositValueText } from '@/services/sdk-error-amounts';
+import { quotedNetFigure } from '@/services/swap-quoted-net';
 import { formatUsdBalance } from '@/services/format-fiat';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
@@ -85,7 +85,7 @@ import { getUiParam, pushUiParamEntry, retireUiParamEntry, rebaseUiParamEntry, s
 import { useShareYield } from '@/hooks/use-share-yield';
 import { useYieldVaultProbeVersion } from '@/hooks/use-yield-vault-probe';
 import { displayTokenSymbol, isShareSymbol, presetChipLabel, shareRedemptionDisclosure, tokenAmountLabel } from '@/services/share-display';
-import { amountInputDisplay, compactAmountLabel, formatCopyAmount, formatTokenBalance, groupThousands, isStablecoin, stripAmountSeparators } from '@/services/token-format';
+import { amountInputDisplay, compactAmountLabel, formatCopyAmount, formatTokenBalance, groupThousands, isStablecoin, LOADING_FIGURE, stripAmountSeparators } from '@/services/token-format';
 import { conversionFundingToken, targetAcceptsConversion } from '@/config/intent-targets';
 import { getYieldShareToken } from '@/services/share-yield';
 import { compactPhoneLayout } from '@/services/header-nav';
@@ -1061,12 +1061,15 @@ export function ActionHub({
     && swapQuotedNetRaw.destinationChainId === swapDestChainId
     ? swapQuotedNetRaw.wei
     : null;
+  // A share output is a share count: converted at the scheduled rate, shimmer until it lands.
+  const swapQuotedFigure = swapQuotedNet !== null && swapOutToken
+    ? quotedNetFigure(swapQuotedNet, swapOutToken, shareRateFor(swapDestChainId, swapOutToken.address))
+    : null;
+  const swapQuotedLoading = swapQuotedFigure?.status === 'loading';
   const swapPreviewText = !swapOutUnits
     ? null
-    : swapQuotedNet !== null && swapOutToken
-      ? `~${isStablecoin(swapOutToken.symbol)
-        ? formatSwapExitEstimate(swapQuotedNet, swapOutToken.decimals, swapOutToken.symbol)
-        : depositValueText(swapQuotedNet, swapOutToken.decimals)}`
+    : swapQuotedFigure
+      ? (swapQuotedFigure.status === 'loading' ? LOADING_FIGURE : swapQuotedFigure.text)
     : swapPreviewIdentity && swapPreviewInWei !== null && swapPreviewInWei > 0n
       ? `~${formatSwapExitEstimate(swapPreviewInWei, swapOutUnits.decimals, swapOutUnits.symbol)}`
       : swapPreview.status === 'ok'
@@ -2561,12 +2564,15 @@ export function ActionHub({
       setAmount(shares);
       if (withdrawInline) pushWithdrawAmount(shares);
       else if (transferInline) pushTransferAmount(shares);
-    }, underlyingEntry: action === 'withdraw' || action === 'send' });
-  // Swap keeps share entry on purpose: the field holds the exact share count
-  // the swap spends, and an underlying edit would clamp to the cap and hide the
-  // flow's own over-balance message. So the field never converts there, and
-  // the Swap chip names the coin itself (DEV-591, QA on #26).
-  // Display only: the amount and what the swap submits are unchanged.
+    }, underlyingEntry: action === 'withdraw' || action === 'send' || action === 'swap',
+    // Swap converts what was typed and never cuts it to the balance: the flow's own
+    // insufficient-balance message answers an amount above it.
+    clampToMax: action !== 'swap' });
+  // Swap reads the field in the coin it names (review on #26: "10 USDC" must not
+  // be spent as 10 shares). The typed coin amount is converted to exact shares at
+  // the scheduled rate (the same boundary as Withdraw) but never cut to the
+  // balance, so the flow's own insufficient-balance message answers an amount
+  // above it. An untouched MAX keeps its exact share string.
   const fillMax = () => {
     // Withdraw's max is the shielded balance, and while the association set is
     // still loading that figure is not yet provable — filling it would seed the
@@ -3686,7 +3692,7 @@ export function ActionHub({
               <Ionicons name="swap-vertical" size={12} color={colors.textMuted} />
             </Pressable>
           ) : null}
-          {a === action && (a === 'withdraw' || a === 'send') && amountField.error ? (
+          {a === action && (a === 'withdraw' || a === 'send' || a === 'swap') && amountField.error ? (
             <Text className="font-pp-sans text-[12px] text-danger">{shareText(amountField.error)}</Text>
           ) : null}
           {/* flex-NOwrap + min-w-0 on the right text: wrapping would grow the
@@ -4200,9 +4206,15 @@ export function ActionHub({
             <View className="flex-row items-center justify-between gap-[8px]">
               {/* A LiFi estimate on the typed amount, labelled as one; a dash
                   until it lands. The binding figure is Review's quote. */}
-              <Text className={`min-w-0 flex-1 py-[2px] font-pp-sans-bold ${outText} tracking-[-1px] text-text-muted`} numberOfLines={1} adjustsFontSizeToFit>
-                {swapPreviewText ?? '—'}
-              </Text>
+              {swapQuotedLoading ? (
+                <View testID="hub-swap-quoted-loading" className="min-w-0 flex-1 py-[6px]">
+                  <Skeleton width={120} height={tight ? 26 : 32} radius={8} />
+                </View>
+              ) : (
+                <Text className={`min-w-0 flex-1 py-[2px] font-pp-sans-bold ${outText} tracking-[-1px] text-text-muted`} numberOfLines={1} adjustsFontSizeToFit>
+                  {swapPreviewText ?? '—'}
+                </Text>
+              )}
               <Pressable
                 onPress={() => { if (swapDeliverableDestinations.length > 0) setSwapOutSheetOpen(true); }}
                 disabled={swapDeliverableDestinations.length === 0}

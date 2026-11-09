@@ -73,7 +73,7 @@ import {
 import { conversionFundingToken, intentTargetRefusal } from '@/config/intent-targets';
 import { getConfiguredYieldDeploymentForAsset } from '@/config/yield';
 import { conversionFundingUnits } from '@/services/shield-conversion-units';
-import { depositBelowMinimumValue, sdkErrorText } from '@/services/sdk-error-amounts';
+import { depositBelowMinimumValue, sdkErrorText, shareUnitsRate } from '@/services/sdk-error-amounts';
 import { isRelayerNullifierInFlight, isRelayWaitTimeout, relayInFlightMessage } from '@/services/transfer-outcome';
 import { isPendingRelayBlocked } from '@/services/pending-relays-core';
 import { assertNoPendingRelay } from '@/services/pending-relays-store';
@@ -735,6 +735,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
   const invalidateQuoteRequests = useCallback(() => {
     guardRef.current.invalidate();
     setIsQuoting(false);
+    // The net figure a refused press computed belongs to the quote that is now
+    // outdated (a new slippage, amount, pair or reopened form): never show it.
+    setQuotedNet(null);
   }, []);
 
   // Destination network list — the chains the relayer + LiFi both support
@@ -799,7 +802,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
    */
   const errorUnits = useMemo(
     () => ({
-      input: { decimals: fromToken.decimals, symbol: fromToken.symbol },
+      // A share's figures are share counts: converted at the scheduled rate, or
+      // loading while it is missing, never a count under the coin's name.
+      input: { decimals: fromToken.decimals, symbol: fromToken.symbol, rate: shareUnitsRate(fromToken.symbol, rateFor(chainId, fromToken.address)) },
       // LiFi's leg consumes the redeemed underlying when the note is a share,
       // so its figures are on a different scale from the note's.
       swapInput: swapInputUnits(chainId, fromToken.address, {
@@ -810,7 +815,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       // ITS units, and naming it after the input gave the right number under
       // the wrong name whenever both were 18 decimals.
       output: outputToken
-        ? { decimals: outputToken.token.decimals, symbol: outputToken.token.symbol }
+        ? { decimals: outputToken.token.decimals, symbol: outputToken.token.symbol, rate: shareUnitsRate(outputToken.token.symbol, rateFor(outputToken.chainId, outputToken.token.address)) }
         : null,
       // What the destination's router is FUNDED with. For a share target that
       // is its underlying, and a router quote or budget is in those units, not
@@ -823,7 +828,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         })
         : null,
     }),
-    [fromToken.decimals, fromToken.symbol, fromToken.address, chainId, outputToken, destinationChainId],
+    [fromToken.decimals, fromToken.symbol, fromToken.address, chainId, outputToken, destinationChainId, rateFor],
   );
   const swapErrorText = useCallback(
     (err: unknown, fallback: string) => {
@@ -1152,6 +1157,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     opEpochRef.current += 1;
     submittedRef.current = false;
     guardRef.current.invalidate();
+    setQuotedNet(null);
     setStep('input');
     // THE SWAP SURFACE IS ALWAYS PRIVATE TO PRIVATE. Never a public payout.
     //
