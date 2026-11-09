@@ -58,3 +58,21 @@ export function deliveredMatchesExpected(args: { delivered: string | null | unde
   const want = parseTokenAmount(expected, decimals);
   return got >= want && got <= want + 1n;
 }
+
+/** The rate a coin amount was converted to shares at, kept with those shares. */
+export type ConvertedAtRate = { shares: string; rate: ShareRate };
+
+/**
+ * What a sent share amount is worth in the coin, for the payroll row check.
+ * The shares were fixed at the rate read when the form opened; the live rate
+ * only grows (the feed refreshes every 60 s), so reading them back at confirm
+ * time would overshoot the salary by more than one base unit after any tick.
+ * When the sent amount is exactly the converted shares, read it at the rate it
+ * was converted at. Any other amount (edited, or never converted) uses the
+ * live rate, so a wrong amount is still measured at today's value and fails.
+ */
+export function underlyingOfSentShares(args: { units: string; liveRate: ShareRate | null | undefined; converted: ConvertedAtRate | null }): string | null {
+  const { units, liveRate, converted } = args;
+  const rate = converted && converted.shares === units ? converted.rate : liveRate;
+  return rate ? underlyingForSharesFloor(units, rate) : null;
+}

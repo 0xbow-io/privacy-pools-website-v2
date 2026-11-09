@@ -7,7 +7,7 @@ import { useShareAmountField } from '@/hooks/use-share-amount-field';
 // only in the (i) hint, in fields labelled with the share symbol, or while the
 // rate is unknown. Never print a share count under the underlying symbol.
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
-import { sharesForUnderlyingCeil, underlyingForSharesFloor } from '@/services/underlying-amount-entry';
+import { sharesForUnderlyingCeil, underlyingOfSentShares, type ConvertedAtRate } from '@/services/underlying-amount-entry';
 import { BalanceAmount } from '@/components/pools/balance-amount';
 import { crossFlowsEnabled } from '@/config/intent-lockdown';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
@@ -804,6 +804,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   // into the pool's units ONCE (rounded up: the recipient never gets less). The
   // form stays empty meanwhile; a figure is never read as a share count.
   const [pendingUnderlying, setPendingUnderlying] = useState<{ text: string; coin: string } | null>(null);
+  const convertedAtRef = useRef<ConvertedAtRate | null>(null);
   useEffect(() => {
     if (!pendingUnderlying) return;
     if (isSui) { setPendingUnderlying(null); return; }
@@ -827,6 +828,8 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
       if (!rate) return; // the rate has not landed: wait, never guess
       const shares = sharesForUnderlyingCeil(pendingUnderlying.text, rate);
       setPendingUnderlying(null);
+      // Keep the rate the shares were fixed at: the paid-row check reads them back at it.
+      convertedAtRef.current = shares ? { shares, rate } : null;
       if (shares) setAmount(shares);
       else reportTransferError(`${pendingUnderlying.text} ${pendingUnderlying.coin} is not an amount this pool can send.`);
       return;
@@ -840,8 +843,8 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   const underlyingOfSentRef = useRef<(units: string) => string | null>(() => null);
   underlyingOfSentRef.current = (units: string) => {
     if (isSui || !isShareSymbol(selectedSymbol)) return units;
-    const rate = shareRateFor(activeEvmChainId, getTokenMetadataBySymbol(selectedSymbol, activeEvmChainId)?.address);
-    return rate ? underlyingForSharesFloor(units, rate) : null;
+    const liveRate = shareRateFor(activeEvmChainId, getTokenMetadataBySymbol(selectedSymbol, activeEvmChainId)?.address);
+    return underlyingOfSentShares({ units, liveRate, converted: convertedAtRef.current });
   };
   // The note being sent, for sdkErrorText: a transfer's figures (fees, the
   // value the selected notes hold) are all in it. A ref, so the confirm
