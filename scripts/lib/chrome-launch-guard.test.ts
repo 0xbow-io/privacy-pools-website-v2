@@ -1,8 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = join(import.meta.dir, '..', '..');
+const HERE = fileURLToPath(import.meta.url);
+
+const ROOT = join(dirname(HERE), '..', '..');
 const ALLOWED = 'scripts/lib/chrome.mjs';
 const SKIP_DIRS = new Set(['node_modules', '.next', '.git', '.expo', 'dist', 'build', 'ios', 'android', 'target']);
 const EXTENSIONS = /\.(ts|tsx|mjs|js|cjs|sh|yml|yaml)$/;
@@ -24,7 +27,7 @@ function* walk(dir: string): Generator<string> {
 
 describe('browser launch guard', () => {
   test('only scripts/lib/chrome.mjs launches Chromium or names a sandbox-off flag', () => {
-    const self = relative(ROOT, import.meta.path);
+    const self = relative(ROOT, HERE);
     const offenders: string[] = [];
     for (const file of walk(ROOT)) {
       const rel = relative(ROOT, file);
