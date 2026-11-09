@@ -1,5 +1,5 @@
 import { displayTokenSymbol, tokenAmountLabel } from '@/services/share-display';
-import { formatTokenBalance } from '@/services/token-format';
+import { formatTokenBalance, LOADING_FIGURE } from '@/services/token-format';
 // Pure pending→settled transition detection for the in-app status toasts.
 // No store/network/RN imports so it stays unit-testable under the bun runner;
 // the headless StatusNotifier component wires it to the live activity feed.
@@ -70,7 +70,10 @@ export type TransitionAmountDisplay = (tx: TransitionTx) => string;
  * "completes".
  */
 export function buildTransitionEvent(tx: TransitionTx, amountDisplay?: TransitionAmountDisplay): NotificationEvent {
-  const amount = amountDisplay ? amountDisplay(tx) : formatAmount(tx.tokenAmount, tx.asset);
+  const shown = amountDisplay ? amountDisplay(tx) : formatAmount(tx.tokenAmount, tx.asset);
+  // A toast is plain text and cannot hold the shimmer: with no rate yet the
+  // figure is left out rather than shown as a count (DEV-621).
+  const amount = shown.includes(LOADING_FIGURE) ? '' : shown;
   const failed = FAILURE_STATUSES.has(tx.status.toLowerCase());
   const base = baseType(tx.type);
 
@@ -93,15 +96,15 @@ export function buildTransitionEvent(tx: TransitionTx, amountDisplay?: Transitio
         break;
       case 'Withdrawal':
         title = 'Withdrawal complete';
-        description = `${amount} sent`;
+        description = amount ? `${amount} sent` : '';
         break;
       case 'Transfer':
         title = 'Transfer complete';
-        description = `${amount} sent`;
+        description = amount ? `${amount} sent` : '';
         break;
       case 'Exit':
         title = 'Exit complete';
-        description = `${amount} withdrawn`;
+        description = amount ? `${amount} withdrawn` : '';
         break;
       default:
         title = `${base} complete`;

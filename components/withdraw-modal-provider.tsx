@@ -11,6 +11,7 @@ import { useShareAmountField } from '@/hooks/use-share-amount-field';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { BalanceAmount } from '@/components/pools/balance-amount';
+import { FigureText } from '@/components/ui/share-figure';
 import { compactPhoneLayout } from '@/services/header-nav';
 import { HoverHint } from '@/components/ui/hover-hint';
 import { crossFlowsEnabled } from '@/config/intent-lockdown';
@@ -198,7 +199,7 @@ import { feeWithinReviewed, relayerFeeJitterAllowance } from '@/services/relayer
 import { quoteMatchesSignedCommitment } from '@/services/relayer-quote-integrity';
 import { decodeGasTopUpWei, formatGasTopUp } from '@/services/gas-top-up';
 import { setReceiveSetup } from '@/services/receive-setup';
-import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, netSharesWei, presetChipLabel, previewReceiveFigure, shareRedemptionDisclosure, shareReviewHeadline } from '@/services/share-display';
+import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, netSharesWei, presetChipLabel, previewReceiveFigure, shareRedemptionDisclosure, shareReviewHeadline, swapRateText } from '@/services/share-display';
 import { sdkErrorText, type ErrorUnits } from '@/services/sdk-error-amounts';
 import { RelayFeeIncreasedError, relayWithdrawalWithFreshQuote } from '@/services/relayed-withdrawal';
 import { PREVIEW_REDEEM_ABI } from '@/services/deposit-limits';
@@ -1866,7 +1867,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // Full-balance (gross) mode before the quote: the fee comes out of the
   // amount and is unknown until Withdraw fetches the quote, so the redeem read
   // above has no net to price and the figure was a bare dash at Max (QA on
-  // #72). Show the entered shares at the live feed rate, marked "≈" and
+  // #72). Show the entered amount at the live feed rate, marked "~" and
   // before the fee, as the plain-asset path does. Reads the feed grid only.
   const { rateFor: shareRateFor } = useShareRates();
   const previewShareRate = selectedIsShare ? shareRateFor(chainId, selectedTokenAddress) : undefined;
@@ -1884,7 +1885,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // Success headline: the router quote captured at submit, which is what was
   // actually paid out (the disclosure under it names the guaranteed minimum).
   const successNetLabel = yieldRedemption
-    ? `≈ ${sharedFormatTokenBalance(Number(formatUnits(yieldRedemption.quotedOut, yieldRedemption.underlyingDecimals)), displayTokenSymbol(yieldRedemption.underlyingSymbol))} ${displayTokenSymbol(yieldRedemption.underlyingSymbol).toUpperCase()}`
+    ? `~${sharedFormatTokenBalance(Number(formatUnits(yieldRedemption.quotedOut, yieldRedemption.underlyingDecimals)), displayTokenSymbol(yieldRedemption.underlyingSymbol))} ${displayTokenSymbol(yieldRedemption.underlyingSymbol).toUpperCase()}`
     : reviewNetLabel;
   // Swap-exit Review/Success figures come SOLELY from the immutable quote
   // snapshot (codex P1) — never live selectedToken/amount, which the user
@@ -5265,7 +5266,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                               {enteredAmount > 0
                                 ? (isSwapExit
                                   ? (swapExitEstimateText ?? '—')
-                                  : (previewNet != null ? groupThousands(formatTokenBalanceDown(previewNet, recvSymbol)) : previewNetEstimate != null ? `≈ ${groupThousands(formatTokenBalanceDown(previewNetEstimate, recvSymbol))}` : '—'))
+                                  : (previewNet != null ? groupThousands(formatTokenBalanceDown(previewNet, recvSymbol)) : previewNetEstimate != null ? `~${groupThousands(formatTokenBalanceDown(previewNetEstimate, recvSymbol))}` : '—'))
                                 : '0'}
                             </Text>
                             <Pressable
@@ -5923,7 +5924,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                         <View className="flex-row items-center justify-between gap-[4px]">
                           <Text className="text-[13px] leading-[24px] text-[#737373] font-pp-regular">Rate</Text>
                           <Text className="text-[13px] leading-[24px] text-right text-text font-pp-regular">
-                            1 {balanceDisplay('1', swapReviewInputSymbol, swapSnapshot.poolChainId).symbol} ≈ {Number(swapSnapshot.display.rate) * balanceDisplay('1', swapSnapshot.outputToken.symbol, swapSnapshot.destinationChainId).amount / balanceDisplay('1', swapReviewInputSymbol, swapSnapshot.poolChainId).amount} {balanceDisplay('1', swapSnapshot.outputToken.symbol, swapSnapshot.destinationChainId).symbol}
+                            <FigureText text={swapRateText(Number(swapSnapshot.display.rate), balanceDisplay('1', swapReviewInputSymbol, swapSnapshot.poolChainId), balanceDisplay('1', swapSnapshot.outputToken.symbol, swapSnapshot.destinationChainId))} />
                           </Text>
                         </View>
                       )}

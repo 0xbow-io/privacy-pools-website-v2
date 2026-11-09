@@ -44,8 +44,8 @@ describe('withoutShareNames converts a quoted share count at the live rate', () 
     expect(withoutShareNames('Need 100.00 ppUSDC, have 20.00 ppUSDC', mainnet)).toBe('Need 105.00 USDC, have 21.00 USDC');
     expect(withoutShareNames('Fee 1.23K ppUSDC.', mainnet)).toBe('Fee 1.30K USDC.'); // 1.2915K, a fee: up
     expect(withoutShareNames('1,000.5 ppETH left', mainnet)).toBe('1,500.75 ETH left');
-    // A marker the text already carried stays; none is added to a converted figure.
-    expect(withoutShareNames('≈ 2 ppUSDC', mainnet)).toBe('≈ 2.10 USDC');
+    // A marker the text already carried stays, as the estimate mark "~"; none is added to a converted figure.
+    expect(withoutShareNames('≈ 2 ppUSDC', mainnet)).toBe('~2.10 USDC');
     expect(withoutShareNames('Relayer fee 4 ppUSDC', mainnet)).toBe('Relayer fee 4.20 USDC');
   });
 
@@ -80,9 +80,9 @@ describe('withoutShareNames converts a quoted share count at the live rate', () 
     expect(figureRounding('')).toBe('down');
   });
 
-  test('without a rate: the share count, renamed and marked approximate', () => {
-    expect(withoutShareNames('Need 100.00 ppUSDC', () => undefined)).toBe('Need ≈ 100.00 USDC');
-    expect(withoutShareNames('Need 100.00 ppUSDC')).toBe('Need ≈ 100.00 USDC');
+  test('without a rate: renamed, the figure loading, never the count (DEV-621)', () => {
+    expect(withoutShareNames('Need 100.00 ppUSDC', () => undefined)).toBe('Need … USDC');
+    expect(withoutShareNames('Need 100.00 ppUSDC')).toBe('Need … USDC');
   });
 
   test('a bare name is renamed either way, and other text is untouched', () => {
@@ -123,12 +123,12 @@ describe('shareWeiText', () => {
     expect(shareWeiText(parseUnits('2', 18), { symbol: 'ppETH', decimals: 18 }, PP_ETH)).toBe('3 ETH');
   });
 
-  test('a share without a rate is its approximate count under the underlying', () => {
-    expect(shareWeiText(parseUnits('10', 18), units, undefined)).toBe('≈ 10 USDC');
+  test('a share without a rate is loading under the underlying, never its count', () => {
+    expect(shareWeiText(parseUnits('10', 18), units, undefined)).toBe('… USDC');
   });
 
   test('a rate for other units is not applied', () => {
-    expect(shareWeiText(parseUnits('10', 6), { symbol: 'ppUSDC', decimals: 6 }, PP_USDC_MAINNET)).toBe('≈ 10 USDC');
+    expect(shareWeiText(parseUnits('10', 6), { symbol: 'ppUSDC', decimals: 6 }, PP_USDC_MAINNET)).toBe('… USDC');
   });
 
   test('a plain token is itself', () => {
@@ -155,9 +155,10 @@ describe('relayed payment shortfall converts share figures', () => {
     expect(msg).not.toMatch(/ppUSDC|≈/);
   });
 
-  test('without a rate: the approximate share count', () => {
+  test('without a rate: the figures load, never the count', () => {
     const msg = formatRelayedPaymentShortfall(base);
-    expect(msg).toContain('≈ 101');
+    expect(msg).toContain('needs … USDC');
+    expect(msg).not.toMatch(/101|≈/);
     expect(msg).not.toContain('ppUSDC');
   });
 });
@@ -193,9 +194,9 @@ describe('a Send fee never reads low', () => {
     expect(parseUnits(shown.replace(/^~/, '').split(' ')[0], 6) >= exact).toBe(true);
   });
 
-  test('without a rate: the approximate share count, rounded up, never the share name', () => {
+  test('without a rate: loading, never the count and never the share name', () => {
     const text = feeShareText(parseUnits('0.00412345', 18), { symbol: 'ppETH', decimals: 18 }, undefined);
-    expect(text).toBe('≈ 0.004124 ETH');
+    expect(text).toBe('… ETH');
     expect(text).not.toMatch(/pp/i);
   });
 });
@@ -207,8 +208,8 @@ describe('a relayed shortfall "needs" figure never reads low', () => {
     expect(costShareText(parseUnits('0.0041', 18), { symbol: 'ppETH', decimals: 18 }, PP_ETH)).toBe('0.00615 ETH');
   });
 
-  test('without a rate: the approximate share count, rounded up', () => {
-    expect(costShareText(parseUnits('0.00412345', 18), { symbol: 'ppETH', decimals: 18 }, undefined)).toBe('≈ 0.004124 ETH');
+  test('without a rate: loading, never the count', () => {
+    expect(costShareText(parseUnits('0.00412345', 18), { symbol: 'ppETH', decimals: 18 }, undefined)).toBe('… ETH');
   });
 
   test('feeShareText is the same figure marked as an estimate', () => {

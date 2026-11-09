@@ -59,8 +59,7 @@ describe('the review renders no raw share symbol', () => {
   }
 
   test('the rate row names the underlying on both sides', () => {
-    expect(SOURCE).toContain("balanceDisplay('1', snapshot.fromToken.symbol, chainId).symbol");
-    expect(SOURCE).toContain("balanceDisplay('1', snapshot.outputToken.symbol, snapshot.destinationChainId).symbol");
+    expect(SOURCE).toContain("swapRateText(Number(snapshot.display.rate), balanceDisplay('1', snapshot.fromToken.symbol, chainId), balanceDisplay('1', snapshot.outputToken.symbol, snapshot.destinationChainId))");
   });
 });
 
@@ -72,11 +71,11 @@ describe('the rename is honest about what a share count is', () => {
   ];
 
   for (const [share, underlying] of cases) {
-    test(`${share} reads as ${underlying}, approximately`, () => {
+    test(`${share} reads as ${underlying}, its count never shown`, () => {
       expect(isShareSymbol(share)).toBe(true);
       expect(displayTokenSymbol(share)).toBe(underlying);
       const text = approxUnderlyingText(`5 ${share}`, share);
-      expect(text).toBe(`≈ 5 ${underlying}`);
+      expect(text).toBe(`… ${underlying}`);
       expect(text).not.toContain(share);
     });
   }

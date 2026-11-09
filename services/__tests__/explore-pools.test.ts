@@ -223,8 +223,8 @@ describe('formatPoolTokenAmount', () => {
   test('reads decimals from the row it was given, not from a default', () => {
     // The same base-unit string is 100 USDC at 6 decimals and dust at 18: the
     // amount and its decimals have to come from one and the same pool row.
-    expect(formatPoolTokenAmount('100000000', 6, 'USDC')).toBe('100 USDC');
-    expect(formatPoolTokenAmount('100000000', 18, 'USDC')).toBe('0.0000000001 USDC');
+    expect(formatPoolTokenAmount('100000000', 6, 'USDC')).toBe('100.00 USDC');
+    expect(formatPoolTokenAmount('100000000', 18, 'USDC')).toBe('<0.01 USDC');
   });
 
   test('compacts thousands and millions', () => {

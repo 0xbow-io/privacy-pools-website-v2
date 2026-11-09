@@ -89,7 +89,8 @@ import { fetchSuiApprovedSet } from '@/services/sui-witness/asp-labels';
 import { calculateLabelHash } from '@/services/sui-witness/crypto';
 import { getKnownTokenMetadata, getTokenMetadata, resolveTokenMetadata, formatTokenBalance, NATIVE_ASSET_ADDRESS, isStablecoin } from '@/config/tokens';
 import { useDebug } from '@/components/debug-provider';
-import { formatUsd } from '@/services/format-fiat';
+import { formatUsd, formatUsdBalance } from '@/services/format-fiat';
+import { LOADING_FIGURE } from '@/services/token-format';
 import { useTxActivity } from '@/components/tx-activity-provider';
 import { useLatchedWhile } from '@/hooks/use-latched-while';
 import { usePendingOwnRows } from '@/hooks/use-pending-own-rows';
@@ -2207,7 +2208,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
 
     // Per-row USD, captured while the row resolves its own decimals + price;
     // myPoolsStats sums THESE so the headline can't drift from the rows.
-    const rowUsd = new Map<string, { symbol: string; balanceUsd: number; pendingUsd: number }>();
+    const rowUsd = new Map<string, { symbol: string; balanceUsd: number; pendingUsd: number; waiting: boolean }>();
     // An emptied pool has nothing left to show: the row is dropped, for every
     // pool kind (Mike, DEV-466; it used to be legacy pools only, Pat
     // 2026-09-18). Any balance, pending amount or other live note keeps it.
@@ -2244,10 +2245,13 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
       // The hero total must be the sum of the ROWS: re-deriving decimals from
       // the static TOKEN_DECIMALS table and a symbol-only price made the total
       // disagree with the rows it summarises (kimi review, finding 7).
+      // A held share without its rate: its worth, and so the total, is not known yet (DEV-621).
+      const waiting = isShareSymbol(entry.symbol) && !shareRate && (BigInt(entry.balance) > 0n || BigInt(entry.pending) > 0n);
       rowUsd.set(`${entry.chainId}:${entry.symbol.toLowerCase()}`, { // not-rendered: map key
         symbol: entry.symbol,
         balanceUsd: balanceUsdValue,
         pendingUsd: pendingUsdValue,
+        waiting,
       });
       return {
         // Chain-qualified: the same symbol can hold value on several chains.
@@ -2255,7 +2259,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
         name: entry.symbol,
         tokenAddress: entry.tokenAddress,
         chainId: entry.chainId,
-        balance: formatUsd(balanceUsdValue),
+        balance: waiting ? LOADING_FIGURE : formatUsd(balanceUsdValue),
         // formatTokenBalance, not a bare toFixed(4): a tiny cBTC shield rounded
         // to "0.0000 cBTC" here while the Deposit row in My transactions (which
         // already goes through it) read "<0.0001 cBTC" — the balances row above
@@ -2267,7 +2271,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
         // rounded for layout, but a tap-to-max must never overshoot the
         // spendable balance, so it consumes this string.
         balanceTokenExact: formatUnits(BigInt(entry.balance), decimals),
-        pending: formatUsd(pendingUsdValue),
+        pending: waiting ? LOADING_FIGURE : formatUsd(pendingUsdValue),
         pendingToken: `${formatTokenBalance(pendingNum, entry.symbol)} ${entry.symbol}`, // raw-data: parsed as a number (action-hub); renders apply approxUnderlyingText
         pendingTokenExact: formatUnits(BigInt(entry.pending), decimals),
         // "DEPOSITS" column = the user's actual deposits for this asset, not
@@ -2794,7 +2798,9 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
     let totalPendingUsd = 0;
     const assetPercentages: PoolAsset[] = [];
 
+    let totalWaiting = false;
     for (const row of rowUsd.values()) {
+      if (row.waiting) totalWaiting = true;
       totalBalanceUsd += row.balanceUsd;
       totalPendingUsd += row.pendingUsd;
       assetPercentages.push({
@@ -2855,11 +2861,13 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
     }
 
     const myPoolsStats: MyPoolsStats = {
-      acceptedFundsValue: formatUsd(totalBalanceUsd),
+      // Exactly two decimals, never abbreviated; loading while a held share's
+      // rate is still out, rather than a total that leaves it out (DEV-621).
+      acceptedFundsValue: totalWaiting ? LOADING_FIGURE : formatUsdBalance(totalBalanceUsd),
       acceptedFundsUsd: totalBalanceUsd,
       acceptedFundsChange: computeChange24h(statistics),
       acceptedFundsLabel: 'past 24h',
-      pendingValue: formatUsd(totalPendingUsd),
+      pendingValue: totalWaiting ? LOADING_FIGURE : formatUsdBalance(totalPendingUsd),
       pendingChange: '0%',
       totalDeposits,
       totalTransfers,

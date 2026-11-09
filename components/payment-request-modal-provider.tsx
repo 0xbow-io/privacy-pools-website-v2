@@ -1403,7 +1403,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
     // live inputs (codex r3: a 1 ETH request could display as Ready for a
     // later 2 USDC edit).
     const frozenView = balanceDisplay(amountInput.trim(), isSui ? 'SUI' : requestTokenSymbol, chainId);
-    const frozenAmountLabel = `${isShareSymbol(requestTokenSymbol) && frozenView.converted ? '≈ ' : ''}${frozenView.text}`;
+    const frozenAmountLabel = `${isShareSymbol(requestTokenSymbol) && frozenView.converted ? '~' : ''}${frozenView.text}`;
     // === Stellar path === the SDK's blind request (stellar-request.ts): the
     // link carries note slots, a payment key and a tag, never this account's
     // address. The SDK keeps the request in this account, and its sync finds

@@ -377,7 +377,7 @@ describe('activity assembly: recorded on the sending device', () => {
     const receiveAs: SwapRecord = { kind: 'receive-as', txHash: SWAP_TX, sourceChainId: MAINNET, timestamp: 1, outputChainId: MAINNET, outputToken: USDC, quotedOutput: '1247900000' };
     const { mine, all } = assemble([deposit, change], [swapTransact], [feedWithdrawal], [], [receiveAs]);
     expect(mine.map((r) => [r.type, r.receivedAs?.asset, r.receivedAs?.rawAmount])).toEqual([['Withdrawal', 'USDC', '1247900000']]);
-    expect(swapHeadline(mine[0], (leg) => `${leg.tokenAmount} ${leg.asset}`)).toBe('0.5 ETH → ≈ 1247.9 USDC');
+    expect(swapHeadline(mine[0], (leg) => `${leg.tokenAmount} ${leg.asset}`)).toBe('0.5 ETH → ~1247.9 USDC');
     expect(all.map((r) => [r.type, r.receivedAs?.asset])).toEqual([['Withdrawal', 'USDC']]);
     const batch = assemble([deposit, change], [swapTransact], [feedWithdrawal, strangerInBatch], [], [receiveAs]);
     expect(batch.all.every((r) => !r.receivedAs)).toBe(true);
@@ -396,11 +396,11 @@ describe('activity assembly: recorded on the sending device', () => {
     expect(after.all.map((r) => [r.type, r.swappedFrom?.asset])).toEqual([['Deposit', 'ETH']]);
     for (const row of [before.mine[0], after.mine[0], after.all[0]]) {
       expect(rowTypeLabel(row)).toBe('Deposit via swap');
-      expect(swapHeadline(row, (leg) => `${leg.tokenAmount} ${leg.asset}`)).toBe('≈ 0.5012 ETH → 1250 USDC');
+      expect(swapHeadline(row, (leg) => `${leg.tokenAmount} ${leg.asset}`)).toBe('~0.5012 ETH → 1250 USDC');
     }
-    // Without a rate the share leg reads as its coin, approximately.
+    // Without a rate the share leg loads under its coin, never the count.
     expect(swapHeadline({ ...after.mine[0], asset: 'ppUSDC' }, (leg) => tokenAmountLabel(String(leg.tokenAmount), leg.asset)))
-      .toBe('≈ 0.5012 ETH → ≈ 1250 USDC');
+      .toBe('~0.5012 ETH → … USDC');
     // Never a swap, never a Reshield: no record, no decoration.
     expect(assemble([shieldNote], [], [indexed]).mine[0].swappedFrom).toBeUndefined();
   });
@@ -408,7 +408,7 @@ describe('activity assembly: recorded on the sending device', () => {
   test('a cross-chain Shield input remains approximate: only the quote is recorded', () => {
     const record: SwapRecord = { kind: 'shield', txHash: SWAP_TX, sourceChainId: MAINNET, timestamp: 1, depositChainId: BSC, inputToken: ETH, estimatedInput: '500000000000000000', commitment: BSC_OUT };
     const { mine } = assemble([crossOut('ACTIVE')], [], [{ ...destFeedRow, rawAmount: '1248000000', tokenAmount: 1248 }], [], [record]);
-    expect(swapHeadline(mine[0], (leg) => `${leg.tokenAmount} ${leg.asset}`)).toBe('≈ 0.5 ETH → 1248 USDC');
+    expect(swapHeadline(mine[0], (leg) => `${leg.tokenAmount} ${leg.asset}`)).toBe('~0.5 ETH → 1248 USDC');
   });
 
   test('the delivered leg is the owned note, never the record', () => {

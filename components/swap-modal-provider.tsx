@@ -9,6 +9,7 @@ import { formatUnits } from 'viem';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { BalanceAmount } from '@/components/pools/balance-amount';
+import { FigureText } from '@/components/ui/share-figure';
 import { HoverHint } from '@/components/ui/hover-hint';
 import { compactPhoneLayout } from '@/services/header-nav';
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, useSyncExternalStore } from 'react';
@@ -92,7 +93,7 @@ import { isCustomSlippage, parseCustomSlippage, slippageLabel } from '@/services
 import { isLegacyPlainToken } from '@/config/pool-paths';
 import { getKnownTokenMetadata, getTokenMetadata } from '@/config/tokens';
 import { visibleSwapSources } from '@/services/pool-slug';
-import { displayTokenSymbol} from '@/services/share-display';
+import { displayTokenSymbol, swapRateText } from '@/services/share-display';
 import { handoffRefused, resolveHandoffToken } from '@/services/swap-token-handoff';
 import { friendlySwapError, relaySwapRefusalText } from '@/services/swap-error-copy';
 import { sameSymbol } from '@/services/symbol-match';
@@ -3359,7 +3360,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                   {!!snapshot.display.rate && (
                     <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                       <Text className="text-[13px] text-text-muted font-pp-medium">Rate</Text>
-                      <Text className="text-[13px] text-text font-pp-regular">1 {balanceDisplay('1', snapshot.fromToken.symbol, chainId).symbol} ≈ {Number(snapshot.display.rate) * balanceDisplay('1', snapshot.outputToken.symbol, snapshot.destinationChainId).amount / balanceDisplay('1', snapshot.fromToken.symbol, chainId).amount} {balanceDisplay('1', snapshot.outputToken.symbol, snapshot.destinationChainId).symbol}</Text>
+                      <Text className="text-[13px] text-text font-pp-regular"><FigureText text={swapRateText(Number(snapshot.display.rate), balanceDisplay('1', snapshot.fromToken.symbol, chainId), balanceDisplay('1', snapshot.outputToken.symbol, snapshot.destinationChainId))} /></Text>
                     </View>
                   )}
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">

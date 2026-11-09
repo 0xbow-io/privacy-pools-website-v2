@@ -1490,8 +1490,8 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   // A figure in the selected note's units as shown. With the live rate it is
   // written exactly as the amount field writes it (amountField.display), so MAX,
   // the field and every limit in these messages name the same number, and typing
-  // a named limit back sends that exact share amount. Before the rate arrives it
-  // is the approximate share count; `cap` then floors it.
+  // a named limit back sends that exact share amount. Before the rate arrives the
+  // figure is loading ("… USDC"), never the count (DEV-621).
   const selectedRate = isSui || isStellar ? undefined : rateFor(activeEvmChainId, selectedTokenId);
   const fieldDisplay = amountField.display;
   const noteFigure = useCallback((wei: bigint, cap?: { enteredWei: bigint }) => (
@@ -1504,10 +1504,10 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         : undefined,
     )
   ), [selectedSymbol, selectedDecimals, selectedRate, fieldDisplay]);
-  // An estimate ("~"), unless the figure already says it is approximate.
+  // An estimate ("~"), unless the figure already says so or is still loading.
   const noteFigureAbout = useCallback((wei: bigint) => {
     const text = noteFigure(wei);
-    return text.startsWith('≈') ? text : `~${text}`;
+    return /^[~≈…]/.test(text) ? text : `~${text}`;
   }, [noteFigure]);
   // A FEE never reads low: a share fee is converted rounding UP and written with
   // the cost formatter (formatShortfallAmount, up), not the field's rounded-down

@@ -16,15 +16,20 @@ const STABLE_FRACTION_DIGITS = 2;
  * number they act on is never too small; reachable balances round down.
  */
 export function formatShortfallAmount(value: bigint, decimals: number, up: boolean, symbol?: string): string {
-  if (value <= 0n) return '0';
+  const stable = isStablecoin(symbol);
+  if (value <= 0n) return stable ? '0.00' : '0';
   const digits = value.toString().length;
-  const drop = isStablecoin(symbol)
+  const drop = stable
     ? Math.max(0, decimals - STABLE_FRACTION_DIGITS)
     : Math.max(0, Math.min(decimals, digits - SIG_DIGITS));
   const unit = 10n ** BigInt(drop);
   let rounded = (value / unit) * unit;
   if (up && rounded < value) rounded += unit;
-  return formatUnits(rounded, decimals);
+  const text = formatUnits(rounded, decimals);
+  if (!stable) return text;
+  // Exactly two decimals for a stablecoin, like money (DEV-621): "5.00", not "5".
+  const [whole, frac = ''] = text.split('.');
+  return `${whole}.${frac.padEnd(STABLE_FRACTION_DIGITS, '0')}`;
 }
 
 /**

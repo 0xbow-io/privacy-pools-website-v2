@@ -2,9 +2,8 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { formatUnits } from 'viem';
 import { shareAmountFromUnderlying } from '@/services/share-amount-entry';
-import { shareBalanceDisplay, shareRateSnapshotKey, shareUsdDisplayExact } from '@/services/share-balance-display';
+import { shareBalanceDisplay, shareFieldFigure, shareRateSnapshotKey, shareUsdDisplayExact } from '@/services/share-balance-display';
 import { parseTokenAmount, sanitizeAmountInput } from '@/services/token-amount';
-import { formatTokenBalanceDown } from '@/services/token-format';
 import { displayTokenSymbol, isShareSymbol } from '@/services/share-display';
 import type { ShareRate } from '@/services/share-rates';
 // Bun.Transpiler is not in the app's type declarations, so the typecheck gate would reject a direct use.
@@ -33,7 +32,7 @@ function fieldHarness(initialAmount = '', fieldRate: ShareRate | null = rate) {
     useAllChainsPriceMap: () => ({ asset: 2000 }),
     useBalanceDisplay: () => (exact: string) => shareBalanceDisplay({ sharesExact: exact, shareSymbol: 'ppETH', rate: fieldRate ?? undefined, priceMap: {}, fallbackPrice: 0 }),
     getTokenMetadataBySymbol: () => ({ address: 'share' }),
-    formatUnits, shareAmountFromUnderlying, shareRateSnapshotKey, shareUsdDisplayExact, formatTokenBalanceDown,
+    formatUnits, shareAmountFromUnderlying, shareFieldFigure, shareRateSnapshotKey, shareUsdDisplayExact,
     parseTokenAmount, sanitizeAmountInput, displayTokenSymbol, isShareSymbol,
   };
   const useField = new Function(...Object.keys(dependencies), `${body}; return useShareAmountField;`)(...Object.values(dependencies));
@@ -139,13 +138,18 @@ test('Send manual edit converts once, rounds down and clamps to the exact share 
   expect(h.amount()).toBe('1'); // clamped
 });
 
-test('Send without a live rate: the field holds the share count, labelled approximate, never the share name', () => {
+test('Send without a live rate: the typed draft waits for the rate, the field never shows a count (DEV-621)', () => {
   const h = fieldHarness('', null);
   h.cap('1');
   const field = h.type('0.25');
-  expect(h.amount()).toBe('0.25'); // shares as typed, nothing converted
-  expect(field.value).toBe('0.25');
-  expect(field.unitLabel).toBe('≈ ETH');
-  expect(field.unitLabel).not.toMatch(/pp/i);
-  expect(field.display('0.25')).toBeNull(); // messages fall back to their own ≈ form
+  expect(h.amount()).toBe(''); // nothing converted, nothing taken as a count
+  expect(field.value).toBe('0.25'); // the typed draft stays on screen
+  expect(field.loading).toBe(true);
+  expect(field.unitLabel).toBe('ETH');
+  expect(field.unitLabel).not.toMatch(/pp|≈/i);
+  expect(field.display('0.25')).toBeNull();
+  // An exact amount set without a rate (MAX) shows no figure: the caller shows the shimmer.
+  const max = h.max('0.5');
+  expect(max.value).toBe('');
+  expect(max.loading).toBe(true);
 });

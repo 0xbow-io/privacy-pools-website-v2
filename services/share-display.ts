@@ -2,20 +2,21 @@
 // amounts, validation, quotes, relayer and on-chain values stay in shares
 // (exact strings/bigints). Never convert an amount to underlying and back,
 // never feed a displayed underlying figure into an operation.
-// Display headlines use underlying through shareBalanceDisplay; shares appear
-// only in the (i) hint (unnamed) or, while the rate is unknown, as a count
-// under the underlying's name marked approximate ("≈"). The share symbol itself
-// is never shown (Mike, 2026-11-07).
+// Display headlines use underlying through shareBalanceDisplay. While the rate
+// is unknown a figure is LOADING ("… USDC", LOADING_FIGURE), rendered as the
+// Portfolio shimmer; a count stand-in never reaches the screen, not even marked
+// approximate (DEV-621). The share symbol itself is never shown (Mike,
+// 2026-11-07).
 // Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
 // MAX retains the original exact shares. USD edits use an exact decimal price
 // in that same boundary. No other operation converts display back.
 // Display-only coin names and amount formatting. Raw symbols stay in state,
 // proof/signing inputs, storage and analytics. Accounting exports write a share
 // as its underlying coin and amount at the time of the transaction.
-// UI amounts use the converted value when available; otherwise share counts
-// read "≈" under their coin name until the rate is known.
+// UI amounts use the converted value when available; otherwise the figure is
+// loading until the rate is known.
 
-import { displayFractionDigits, isStablecoin } from '@/services/token-format';
+import { displayFractionDigits, formatTokenBalance, isStablecoin, LOADING_FIGURE } from '@/services/token-format';
 
 /** Share symbol (upper-cased) → the underlying it is denominated in. */
 const SHARE_UNDERLYING: Record<string, string> = {
@@ -109,10 +110,9 @@ export function wrapsIntoShareSubtitle(shareSymbol: string | undefined): string 
 }
 
 /**
- * Converted underlying when supplied. While the rate is unknown, the share
- * COUNT under the underlying's name, marked approximate ("≈ 49.87 USDC"): the
- * gap is the accrued rate and it understates, so it never reads as more than
- * the note holds. The share's own name is never shown.
+ * Converted underlying when supplied. While the rate is unknown the figure is
+ * loading ("… USDC"): a count is not what the note is worth, so it is never
+ * shown in its place (DEV-621). The share's own name is never shown.
  */
 export function shareAmountText(args: {
   amount: number;
@@ -126,13 +126,14 @@ export function shareAmountText(args: {
   const symbol = displayTokenSymbol(assetSymbol);
   return underlyingAmount != null
     ? `${format(underlyingAmount, symbol)} ${symbol}`
-    : `≈ ${format(amount, assetSymbol)} ${symbol}`;
+    : `${amount === 0 ? format(0, symbol) : LOADING_FIGURE} ${symbol}`;
 }
 
 /**
  * The same rule for an amount that arrives ALREADY FORMATTED with its symbol in
  * it (an ASP compact figure, a provider balanceToken): a share is renamed to its
- * underlying and marked approximate. A non-share string is only renamed.
+ * underlying and its figure, a count, reads as loading ("… USDC"). A
+ * non-share string is only renamed.
  */
 export function approxUnderlyingText(text: string, assetSymbol: string): string {
   if (!text) return text;
@@ -140,7 +141,7 @@ export function approxUnderlyingText(text: string, assetSymbol: string): string 
   if (symbol === assetSymbol && !isShareSymbol(assetSymbol)) return text;
   const renamed = text.replace(new RegExp(`\\b${assetSymbol}\\b`, 'gi'), symbol);
   if (!isShareSymbol(assetSymbol)) return renamed;
-  return renamed.trimStart().startsWith('≈') ? renamed : `≈ ${renamed}`;
+  return renamed.replace(/(?:[≈~]\s*)?<?\d[\d,]*(?:\.\d+)?[KMB]?/gi, (figure) => shareCountFigure(figure));
 }
 
 /**
@@ -155,9 +156,10 @@ export function netSharesWei(enteredWei: bigint, feeWei: bigint, receiveExact: b
 
 /**
  * Review/success headline for the net figure. A share never reads as a USDC
- * amount unless it HAS been converted: converted → "≈ 105.2 USDC"; read in
- * flight → "Estimating USDC…"; not readable → the share count under the coin,
- * marked approximate ("≈ 100 USDC"). Anything else: amount + its own symbol.
+ * amount unless it HAS been converted: converted → "~105.20 USDC" (an
+ * estimate: the vault rate moves until it settles); read in flight →
+ * "Estimating USDC…"; not readable → loading ("… USDC"), never the count.
+ * Anything else: amount + its own symbol.
  */
 export function shareReviewHeadline(args: {
   isShare: boolean;
@@ -172,11 +174,10 @@ export function shareReviewHeadline(args: {
   // The underlying as the user knows it (WETH reads as ETH).
   const underlyingSymbol = displayTokenSymbol(args.underlyingSymbol);
   if (!isShare) return `${format(shares, shareSymbol)} ${underlyingSymbol}`;
-  if (underlying != null) return `≈ ${format(underlying, underlyingSymbol)} ${underlyingSymbol.toUpperCase()}`;
+  if (underlying != null) return `~${format(underlying, underlyingSymbol)} ${underlyingSymbol.toUpperCase()}`;
   if (pending) return `Estimating ${underlyingSymbol.toUpperCase()}…`;
-  // A failed rate read: the count under the coin, marked approximate. The share
-  // is never named (shareAmountText).
-  return `≈ ${format(shares, shareSymbol)} ${underlyingSymbol.toUpperCase()}`;
+  // A failed rate read: still loading, never the count (shareAmountText).
+  return `${LOADING_FIGURE} ${underlyingSymbol.toUpperCase()}`;
 }
 
 /**
@@ -192,11 +193,37 @@ export function previewReceiveFigure(args: { isShare: boolean; amount: number; u
 }
 
 /**
+ * A quote's rate line, "1 ETH = 2,512.12 USDC", from the quote's own rate and
+ * the balance views of one unit of each side (a pool side at its vault rate).
+ * The figure loads while either side's rate does, and is formatted by the
+ * coin's own rules (two decimals for a stablecoin), never a raw float.
+ */
+export function swapRateText(
+  rate: number,
+  from: { symbol: string; amount: number; loading?: boolean },
+  to: { symbol: string; amount: number; loading?: boolean },
+): string {
+  const fromCoin = displayTokenSymbol(from.symbol);
+  const toCoin = displayTokenSymbol(to.symbol);
+  if (from.loading || to.loading || !(from.amount > 0) || !Number.isFinite(rate)) return `1 ${fromCoin} = ${LOADING_FIGURE} ${toCoin}`;
+  return `1 ${fromCoin} = ${formatTokenBalance(rate * to.amount / from.amount, toCoin)} ${toCoin}`;
+}
+
+/**
+ * A share count where a figure is due: zero is zero in any unit, so it is kept;
+ * anything else is not what the note is worth and reads as loading.
+ */
+function shareCountFigure(figure: string): string {
+  return /^[\d,.]+$/.test(figure) && Number(figure.replace(/,/g, '')) === 0 ? figure : LOADING_FIGURE;
+}
+
+/**
  * Preformatted raw units at a display boundary, without claiming a share is
- * 1:1. Renames and marks only; convert first where a rate is available.
+ * 1:1: a share count is not shown at all, the figure reads as loading
+ * ("… USDC"). Convert first where a rate is available.
  */
 export function tokenAmountLabel(amount: string, symbol: string): string {
-  return `${isShareSymbol(symbol) ? '≈ ' : ''}${amount} ${displayTokenSymbol(symbol)}`;
+  return `${isShareSymbol(symbol) ? shareCountFigure(amount.trim()) : amount} ${displayTokenSymbol(symbol)}`;
 }
 
 // A share symbol as a whole word in free text, case-insensitive.
@@ -275,9 +302,10 @@ function convertFigure(figure: string, rate: number, underlying: string, directi
  * underlying's name. A figure written right before a share name is a share
  * count: with the live rate (`rateOf`, from the share-rate feed) it is
  * converted to the underlying (convertFigure: a cost rounds up, a limit or
- * anything else rounds down, see figureRounding); without one
- * it stays the share count under the underlying's name, marked approximate,
- * the rule in shareAmountText. Text without a share name is returned untouched.
+ * anything else rounds down, see figureRounding); without one the figure
+ * reads as loading ("… USDC"), the rule in shareAmountText. An estimate mark
+ * in front of a converted figure is written "~". Text without a share name is
+ * returned untouched.
  */
 export function withoutShareNames(text: string, rateOf?: ShareRateOf): string;
 export function withoutShareNames(text: string | null | undefined, rateOf?: ShareRateOf): string | null | undefined;
@@ -293,8 +321,8 @@ export function withoutShareNames(text: string | null | undefined, rateOf?: Shar
       ? convertFigure(figure, rate, underlying, figureRounding(text.slice(0, offset)))
       : null;
     return converted != null
-      ? `${mark ?? ''}${converted} ${underlying}`
-      : `${mark ?? '≈ '}${figure} ${underlying}`;
+      ? `${mark ? '~' : ''}${converted} ${underlying}`
+      : `${LOADING_FIGURE} ${underlying}`;
   });
   return marked.replace(SHARE_WORD, (share: string) => SHARE_UNDERLYING[share.toUpperCase()]);
 }

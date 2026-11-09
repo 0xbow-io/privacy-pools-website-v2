@@ -99,7 +99,7 @@ describe('no raw share symbol can reach a render', () => {
   test('the display rules rename shares and leave plain tokens alone', () => {
     expect(displayTokenSymbol('ppUSDT')).toBe('USDT');
     expect(displayTokenSymbol('USDC')).toBe('USDC');
-    expect(approxUnderlyingText('1.5 ppUSDC', 'ppUSDC')).toBe('≈ 1.5 USDC');
+    expect(approxUnderlyingText('1.5 ppUSDC', 'ppUSDC')).toBe('… USDC');
     expect(approxUnderlyingText('1.5 USDC', 'USDC')).toBe('1.5 USDC');
   });
 });
@@ -231,12 +231,12 @@ describe('no share name reaches a render under another name', () => {
     }
   });
 
-  test('withoutShareNames renames a share and marks its count approximate', () => {
+  test('withoutShareNames renames a share and never shows its count (DEV-621)', () => {
     expect(withoutShareNames('Insufficient ppUSDC balance: need 12.5 ppUSDC, have 1,234.5 PPUSDC'))
-      .toBe('Insufficient USDC balance: need ≈ 12.5 USDC, have ≈ 1,234.5 USDC');
-    expect(withoutShareNames('Relayer fee ≈ 0.1 ppETH')).toBe('Relayer fee ≈ 0.1 ETH');
-    expect(withoutShareNames('~3 ppusdt')).toBe('~3 USDT');
-    expect(withoutShareNames('Fee 1.23K ppUSDC.')).toBe('Fee ≈ 1.23K USDC.');
+      .toBe('Insufficient USDC balance: need … USDC, have … USDC');
+    expect(withoutShareNames('Relayer fee ≈ 0.1 ppETH')).toBe('Relayer fee … ETH');
+    expect(withoutShareNames('~3 ppusdt')).toBe('… USDT');
+    expect(withoutShareNames('Fee 1.23K ppUSDC.')).toBe('Fee … USDC.');
     expect(withoutShareNames('ppUSDT Pool')).toBe('USDT Pool');
     expect(withoutShareNames('0.5 WETH and 3 USDC')).toBe('0.5 WETH and 3 USDC');
     expect(withoutShareNames('xppUSDC')).toBe('xppUSDC');
