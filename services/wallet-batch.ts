@@ -30,7 +30,7 @@ export type ChainCapabilities = Record<string, unknown> | undefined;
 
 export interface WalletBatchDeps {
   getCapabilities: (chainId: number) => Promise<ChainCapabilities>;
-  sendCalls: (args: { chainId: number; calls: BatchCall[] }) => Promise<{ id: string }>;
+  sendCalls: (args: { chainId: number; calls: BatchCall[]; id?: string }) => Promise<{ id: string }>;
   /** One status read of the bundle (EIP-5792 `wallet_getCallsStatus`). */
   getCallsStatus: (id: string) => Promise<CallsStatus>;
   /** Waits between status reads; injectable so tests do not sleep. */
@@ -106,23 +106,25 @@ const isFinal = (status: string | undefined) => status === 'success' || status =
  */
 export async function submitAtomicBatch(
   deps: WalletBatchDeps,
-  args: { chainId: number; calls: BatchCall[]; onBroadcast?: (hash: Hex) => void },
+  args: { chainId: number; calls: BatchCall[]; onBroadcast?: (hash: Hex) => void; resumeId?: string },
 ): Promise<BatchedResult | null> {
-  let capabilities: ChainCapabilities;
-  try {
-    capabilities = await deps.getCapabilities(args.chainId);
-  } catch {
-    // Rabby and other wallets without EIP-5792 reject the method itself.
-    return null;
-  }
-  if (!supportsAtomicBatch(capabilities)) return null;
+  let id = args.resumeId;
+  if (!id) {
+    let capabilities: ChainCapabilities;
+    try {
+      capabilities = await deps.getCapabilities(args.chainId);
+    } catch {
+      // Rabby and other wallets without EIP-5792 reject the method itself.
+      return null;
+    }
+    if (!supportsAtomicBatch(capabilities)) return null;
 
-  let id: string;
-  try {
-    ({ id } = await deps.sendCalls({ chainId: args.chainId, calls: args.calls }));
-  } catch (err) {
-    if (isUnsupportedMethod(err)) return null;
-    throw err;
+    try {
+      ({ id } = await deps.sendCalls({ chainId: args.chainId, calls: args.calls }));
+    } catch (err) {
+      if (isUnsupportedMethod(err)) return null;
+      throw err;
+    }
   }
 
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));

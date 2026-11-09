@@ -6,7 +6,8 @@ import { Pressable, Text, View, useWindowDimensions } from 'react-native';
 import { Modal } from '@/components/ui/modal';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAccount, useConfig, usePublicClient, useSwitchChain } from 'wagmi';
-import { getAccount } from 'wagmi/actions';
+import { getAccount, getConnectorClient } from 'wagmi/actions';
+import { getCapabilities, getCallsStatus, sendCalls } from 'viem/actions';
 import type { Address as ViemAddress, Hex } from 'viem';
 
 import { useTheme } from '@/components/theme-provider';
@@ -63,6 +64,7 @@ import {
 } from '@/services/receive-setup';
 import { priceWalletTx, registrationOwnerUnchanged, walletTxFields, type FeeReadClient } from '@/services/wallet-tx-fees';
 import { sendWalletTransaction } from '@/services/wallet-send-refusal';
+import { clearRegistrationBatch, hasPendingRegistrationBatch, RegistrationBatchPendingError, submitRegistrationBatch } from '@/services/registration-batch';
 
 export const REGISTRATION_CLOSED_BEFORE_PROMPT = 'Registration was closed before the wallet prompt. Nothing was sent.';
 export const REGISTRATION_OWNER_CHANGED =
@@ -610,7 +612,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
   // While that warning is up, Register is off: the press could only open a
   // wallet prompt that fails for want of gas (QA on DEV-589). Reopening the
   // modal probes again, so a wallet funded meanwhile gets the button back.
-  const gasBlocked = !gaslessEligible && !quotedPlan && !publishStep && !!stuckMessage
+  const gasBlocked = !hasPendingRegistrationBatch(address, chainId) && !gaslessEligible && !quotedPlan && !publishStep && !!stuckMessage
     && registrationBlockedByGas(gasless, { gaslessAllowed });
 
   /**
@@ -830,7 +832,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
       // Gasless first, and awaited rather than read: a press that lands before
       // the probe resolves must still take the right branch, or a wallet with no
       // gas gets a wallet prompt it can only reject.
-      const eligibility = await resolveGasless();
+      const eligibility = hasPendingRegistrationBatch(address, chainId) ? null : await resolveGasless();
       if (eligibility?.kind === 'eligible') {
         // The first relayer contact of the whole flow, and only because the
         // user pressed. Price it, then STOP and show what it costs — nothing is
@@ -871,6 +873,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
         registration = await session.prepareRegisterKeystore();
       }
       const finishAlreadyRegistered = async () => {
+        if (address) clearRegistrationBatch(address, chainId);
         // Race / external registration: mark and exit cleanly.
         setReceiveSetup(sessionAddress ?? address, chainId, 'complete', 'onchain');
         setStatus('registered');
@@ -910,6 +913,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
       // not what is happening here.
       let registrationLegSent = false;
       const runOwner = address;
+      if (!runOwner) throw new Error(REGISTRATION_OWNER_CHANGED);
       // Captured with the owner: a switch mid-run must not move the marker.
       const runSetupKey = sessionAddress ?? address;
       const sendRegistrationLeg = async (calldata: { to: string; data: string; value: string | number | bigint }) => {
@@ -954,7 +958,26 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
           if (ownsUi()) setAwaitingWallet(false);
         }
       };
-      if (keystoreCalldata) {
+      let batchClient: Awaited<ReturnType<typeof getConnectorClient>> | undefined;
+      const getBatchClient = async () => batchClient ??= await getConnectorClient(wagmiConfig, { account: runOwner, chainId });
+      const batch = await submitRegistrationBatch({
+        getCapabilities: async () => getCapabilities(await getBatchClient(), { account: runOwner, chainId }),
+        sendCalls: ({ calls, id }) => sendCalls(batchClient!, {
+          account: runOwner, chain: batchClient!.chain, forceAtomic: true, id,
+          calls: calls.map(call => ({ to: call.to as ViemAddress, data: call.data as Hex, value: BigInt(call.value ?? 0) })),
+        }),
+        getCallsStatus: async (id) => getCallsStatus(await getBatchClient(), { id }),
+      }, {
+        owner: runOwner, chainId,
+        calls: [keystoreCalldata, viewingKeyCalldata].filter((call) => call != null).map(call => ({ ...call, value: String(call.value) })),
+        beforeSend: () => {
+          if (!deliversToCaller()) throw new Error(REGISTRATION_CLOSED_BEFORE_PROMPT);
+          if (!registrationOwnerUnchanged({ owner: runOwner, chainId, current: getAccount(wagmiConfig) })) throw new Error(REGISTRATION_OWNER_CHANGED);
+        },
+        onAwaitingWallet: (waiting) => { if (ownsUi()) setAwaitingWallet(waiting); },
+      });
+      if (batch && !batch.success) throw new Error('The registration transaction failed onchain. Try again to finish.');
+      if (!batch && keystoreCalldata) {
         let keystoreHash: Hex | null = null;
         try {
           keystoreHash = await sendRegistrationLeg(keystoreCalldata);
@@ -983,7 +1006,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
           }
         }
       }
-      if (viewingKeyCalldata) {
+      if (!batch && viewingKeyCalldata) {
         const viewingKeyHash = await sendRegistrationLeg(viewingKeyCalldata);
         sentUnconfirmed = true;
         sentHash = viewingKeyHash;
@@ -1009,7 +1032,9 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
       deliverRegistered(home);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if ((/already/i.test(message) && /policy|registered/i.test(message)) || isAuthPolicyAlreadySetError(collectErrorText(err))) {
+      if (err instanceof RegistrationBatchPendingError) {
+        if (ownsUi()) setErrorMessage(err.message);
+      } else if ((/already/i.test(message) && /policy|registered/i.test(message)) || isAuthPolicyAlreadySetError(collectErrorText(err))) {
         // Keystore_AuthPolicyAlreadySet: another tab / a deposit got there
         // first. That race can land the auth policy without the viewing key,
         // so re-read the identity rather than assuming 'complete' — otherwise
