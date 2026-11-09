@@ -15,7 +15,12 @@
 // Prod world, read-only wallets (./harness.ts): nothing is ever sent, and the
 // backup "download" goes to an in-page stub.
 import { randomBytes } from 'node:crypto';
-import { check, connect, finish, hold, hubTab, isShareRateRead, launch, open, sleep, unlockWithWallet } from './harness.ts';
+import { formatUnits } from 'viem';
+import { decodePaymentRequestPayloadFromUrl } from '../../../services/payment-request-codec.ts';
+import {
+  amountLines, amountShown, check, connect, expectedUnderlyingLabel, finish, hold, hubTab, isShareRateRead, launch, open,
+  sleep, trackShareRates, unlockWithWallet,
+} from './harness.ts';
 
 // The two flows this PR owns, plus anything they raise. The rest of the page
 // (other tabs) is guarded by their own smokes.
@@ -27,10 +32,26 @@ const SCOPE = [
 
 // Yield-share token addresses on Ethereum (config/prod-deployments.ts), and the
 // decimals their amounts are in.
+const SHARE_DECIMALS = 18;
 const SHARE_TOKENS = [
-  { coin: 'USDC', token: '0xC246aFb23482fF9596E9cee5f1f678eFe0EB1ad6' },
-  { coin: 'ETH', token: '0x66051920D25af4E3596A8a46309F4D045F9D83B7' },
+  { coin: 'USDC', token: '0xC246aFb23482fF9596E9cee5f1f678eFe0EB1ad6', decimals: 6, stable: true },
+  { coin: 'ETH', token: '0x66051920D25af4E3596A8a46309F4D045F9D83B7', decimals: 18, stable: false },
 ];
+const shareToken = (address: string) => SHARE_TOKENS.find((t) => t.token.toLowerCase() === address.toLowerCase());
+const RECEIPT_SHARES = 5n * 10n ** 18n;
+
+/**
+ * The line the app must print for `shares` of a share token, from the rate the
+ * page itself received (undefined until one arrived): the underlying value, with
+ * the coin's own decimals and never the share count under the coin's name.
+ */
+function expectedFor(rates: ReturnType<typeof trackShareRates>, tokenAddress: string, shares: bigint): string | undefined {
+  const t = shareToken(tokenAddress);
+  const rate = t && rates.rateOf(t.token);
+  return t && rate ? expectedUnderlyingLabel(shares, rate, SHARE_DECIMALS, { symbol: t.coin, decimals: t.decimals, stable: t.stable }) : undefined;
+}
+/** What a raw share count would read as if it were printed under the coin's name. */
+const countLabel = (tokenAddress: string, shares: bigint) => `${formatUnits(shares, SHARE_DECIMALS)} ${shareToken(tokenAddress)?.coin}`;
 const hex32 = () => `0x${randomBytes(32).toString('hex')}`;
 function receiptLink(token: string): string {
   const payload = {
@@ -40,7 +61,7 @@ function receiptLink(token: string): string {
     chainId: 1,
     recipientAddress: `0x${randomBytes(20).toString('hex')}`,
     tokenId: token,
-    amount: `0x${(5n * 10n ** 18n).toString(16)}`,
+    amount: `0x${RECEIPT_SHARES.toString(16)}`,
     noteAddressHash: hex32(),
     commitment: hex32(),
     label: hex32(),
@@ -50,10 +71,21 @@ function receiptLink(token: string): string {
   return Buffer.from(JSON.stringify(payload)).toString('base64url');
 }
 
+// Strict: a field that never shows, a fill that throws, or a field that does not
+// end up holding the typed figure fails the smoke (the throw is caught by the
+// section's try/catch and recorded as a failed check).
 async function typeAmount(page, key: string, value: string) {
   const field = page.locator(`[data-testid="hub-page-${key}"]:not([aria-hidden="true"]) [data-testid="hub-amount-input"]`).first();
-  if (await field.isVisible().catch(() => false)) await field.fill(value).catch(() => {});
-  await sleep(1500);
+  await field.waitFor({ state: 'visible', timeout: 30_000 });
+  await field.fill(value);
+  let held = '';
+  for (let i = 0; i < 20; i++) {
+    held = await field.inputValue();
+    if (Number(held.replace(/,/g, '')) === Number(value)) break;
+    await sleep(250);
+  }
+  const ok = check(held !== '' && Number(held.replace(/,/g, '')) === Number(value), `${key}: the amount field holds the typed ${value}`, JSON.stringify(held));
+  if (!ok) throw new Error(`${key}: the amount field holds ${JSON.stringify(held)}, not ${value}`);
 }
 
 // The app's pay link is /pay#<payload> (older ones /pay/<payload>): the path
@@ -71,6 +103,7 @@ try {
       async createWritable() { return { async write() {}, async close() { (window as any).__backupSaved = true; } }; },
     });
   });
+  const rates = trackShareRates(page);
   const rate = await hold(page, isShareRateRead);
   await open(page, '/?action=send');
   check(await connect(page), 'requester: the read-only wallet connects');
@@ -110,7 +143,10 @@ try {
   await req.guardStep('request created, rate loading');
   check(rate.held() > 0, 'requester: the share-rate reads were held', `${rate.held()} held`);
   rate.release();
-  await sleep(8000);
+  // Wait for the rate answer itself, not a fixed time: the "rate loaded" steps
+  // must run after the page has the rate.
+  for (let i = 0; i < 120 && rates.seen() === 0; i++) await sleep(500);
+  check(rates.seen() > 0, 'requester: the page received a share rate', `${rates.seen()} vault(s)`);
   await req.guardStep('request created, rate loaded');
   await hubTab(page, 'send');
   await req.guardStep('send, rate loaded, amount typed');
@@ -122,35 +158,46 @@ try {
 await req.browser.close().catch(() => {});
 
 // ---------------------------------------------------------------- 2. payer + 3. claim links
+// The pay page and the claim page each print the amount as a whole line twice
+// (the item and the Total). Before the rate: never the share count under the
+// coin's name. After it: the underlying value from the rate the page received,
+// 2 decimals for a stablecoin, rounded down.
 const payer = await launch('pay-claim');
 try {
   const { page } = payer;
+  const rates = trackShareRates(page);
   const rate = await hold(page, isShareRateRead);
-  if (payLink) {
-    await open(page, payPath(payLink));
-    check(await connect(page), 'payer: the read-only wallet connects');
-    await sleep(6000);
-    check(/5(\.0+)?\s*USDC|USDC/.test(await payer.text()), 'payer: the pay page names the coin');
-    await payer.guardStep('pay link, rate loading');
-  }
-  for (const { coin, token } of SHARE_TOKENS) {
-    await open(page, `/receive/${receiptLink(token)}`);
-    await sleep(6000);
-    const text = await payer.text();
-    check(new RegExp(`\\b${coin}\\b`).test(text), `claim link (${coin} share): the page names the coin`);
-    await payer.guardStep(`claim link (${coin} share), rate loading`);
+  // The link's own amount and token, read with the app's decoder.
+  const requested = payLink ? (() => {
+    const u = new URL(payLink);
+    const decoded: any = decodePaymentRequestPayloadFromUrl(u.hash.slice(1) || u.pathname.split('/').pop()!);
+    return { token: String(decoded.tokenId), shares: BigInt(decoded.amount) };
+  })() : null;
+  const pages = [
+    ...(payLink && requested ? [{ name: 'pay link', path: payPath(payLink), ...requested, coin: shareToken(requested.token)?.coin }] : []),
+    ...SHARE_TOKENS.map((t) => ({ name: `claim link (${t.coin} share)`, path: '', token: t.token, shares: RECEIPT_SHARES, coin: t.coin })),
+  ];
+  if (payLink && requested) check(!!shareToken(requested.token), 'payer: the pay link names a known yield-share token', requested.token);
+  const openPage = async (p: (typeof pages)[number]) => {
+    await open(page, p.path || `/receive/${receiptLink(p.token)}`);
+    // An amount line is on screen: the page rendered the figure (or its loading form).
+    for (let i = 0; i < 120 && amountLines(await payer.text()).length === 0; i++) await sleep(500);
+  };
+  for (const p of pages) {
+    await openPage(p);
+    if (p.name === 'pay link') check(await connect(page), 'payer: the read-only wallet connects');
+    const lines = amountLines(await payer.text());
+    check(!lines.includes(countLabel(p.token, p.shares)), `${p.name}: before the rate, no share count under the coin's name`, lines.join(' | '));
+    await payer.guardStep(`${p.name}, rate loading`);
   }
   check(rate.held() > 0, 'payer: the share-rate reads were held', `${rate.held()} held`);
   rate.release();
-  if (payLink) {
-    await open(page, payPath(payLink));
-    await sleep(8000);
-    await payer.guardStep('pay link, rate loaded');
-  }
-  for (const { coin, token } of SHARE_TOKENS) {
-    await open(page, `/receive/${receiptLink(token)}`);
-    await sleep(8000);
-    await payer.guardStep(`claim link (${coin} share), rate loaded`);
+  for (const p of pages) {
+    await openPage(p);
+    const shown = await amountShown(page, () => expectedFor(rates, p.token, p.shares));
+    const want = expectedFor(rates, p.token, p.shares);
+    check(shown.ok, `${p.name}: the amount is the underlying value at the rate the page received`, `want ${want ?? 'no rate seen'}, page printed ${shown.lines.join(' | ') || 'no amount'}`);
+    await payer.guardStep(`${p.name}, rate loaded`);
   }
   await payer.shot('claim');
   check(payer.refusedSends.length === 0, 'payer: nothing asked the wallet to send', payer.refusedSends.join(', '));
