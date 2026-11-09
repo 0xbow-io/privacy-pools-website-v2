@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Text, View } from 'react-native';
 import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
-import { shareFreeText } from '@/services/share-display';
+import { useShareNameText } from '@/hooks/use-share-rates';
 
 // The four phases a deposit moves through. The provider's loading message is
 // matched to one of these so the indicator advances step by step with the
@@ -56,7 +56,10 @@ function usePhase(message?: string): number {
  * "Selecting notes…" twice, once here and once in the caller's own bold line
  * (QA, 2026-09-22).
  */
-export function FlowProgress({ message, showMessage = true }: { message?: string; showMessage?: boolean }) {
+export function FlowProgress({ message, showMessage = true, chainId }: { message?: string; showMessage?: boolean; chainId?: number }) {
+  // The flow's chain, so a share count quoted in the message converts at that
+  // chain's rate; without it only a rate every chain agrees on is used.
+  const shareText = useShareNameText(chainId);
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const phase = usePhase(message);
@@ -128,7 +131,7 @@ export function FlowProgress({ message, showMessage = true }: { message?: string
       </View>
 
       {message && showMessage ? (
-        <Text className="pt-[2px] text-center text-[13px] text-text-secondary font-pp-regular">{shareFreeText(message)}</Text>
+        <Text className="pt-[2px] text-center text-[13px] text-text-secondary font-pp-regular">{shareText(message)}</Text>
       ) : null}
     </View>
   );

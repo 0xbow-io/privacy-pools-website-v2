@@ -8,7 +8,7 @@
 // Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
 // MAX retains the original exact shares. USD edits use an exact decimal price
 // in that same boundary. No other operation converts display back.
-import { useShareFreeBalanceDisplay } from '@/hooks/use-balance-display';
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { useActiveEvmChain } from '@/hooks/use-active-evm-chain';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { useRef, useState } from 'react';
@@ -17,7 +17,8 @@ import { formatUnits } from 'viem';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/components/theme-provider';
 import { Colors } from '@/constants/theme';
-import { displayTokenSymbol} from '@/services/share-display';
+import { displayTokenSymbol } from '@/services/share-display';
+import { useShareNameText } from '@/hooks/use-share-rates';
 import {
   consolidationSelectionError, consolidationNet, MAX_CONSOLIDATION_INPUTS, planConsolidation, selectConsolidationGroup,
   type ConsolidationCandidate,
@@ -27,7 +28,7 @@ export function ConsolidationSummary({ total, fee, decimals, symbol }: {
   total: bigint; fee: bigint | null; decimals: number; symbol: string;
 }) {
   const chainId = useActiveEvmChain().id;
-  const balanceDisplay = useShareFreeBalanceDisplay(chainId);
+  const balanceDisplay = useBalanceDisplay(chainId);
   const net = consolidationNet(total, fee);
   const units = (value: bigint) => balanceDisplay(formatUnits(value, decimals), symbol, chainId).text;
   return (
@@ -48,7 +49,7 @@ export function ConsolidationSummary({ total, fee, decimals, symbol }: {
 }
 
 /** Local selection only. Opening, switching groups and checking notes never fetch. */
-export function ConsolidationPanel({ groups, selected, fee, decimals, symbol, error, onChange, onReview, onClose, onBack }: {
+export function ConsolidationPanel({ groups, selected, fee, decimals, symbol, error, onChange, onReview, onClose, onBack, chainId: notesChainId }: {
   groups: ConsolidationCandidate[];
   selected: string[];
   fee: bigint | null;
@@ -60,10 +61,14 @@ export function ConsolidationPanel({ groups, selected, fee, decimals, symbol, er
   onClose: () => void;
   /** Present when the picker was opened from the asset list. */
   onBack?: () => void;
+  /** The notes' chain: a share count quoted in `error` converts at its rate. */
+  chainId?: number;
 }) {
+  const activeChainId = useActiveEvmChain().id;
+  const chainId = notesChainId ?? activeChainId;
+  const shareText = useShareNameText(chainId);
   // Keep the open group when its last note is unchecked; recover if a sync removes it.
-  const chainId = useActiveEvmChain().id;
-  const balanceDisplay = useShareFreeBalanceDisplay(chainId);
+  const balanceDisplay = useBalanceDisplay(chainId);
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const [groupLabel, setGroupLabel] = useState(() => groups.find((g) => g.notes.some((n) => selected.includes(n.commitment)))?.label);
@@ -177,7 +182,7 @@ export function ConsolidationPanel({ groups, selected, fee, decimals, symbol, er
         </View>
       ) : <Text className="font-pp-regular text-[14px] text-text-secondary">No compatible notes are available for this asset.</Text>}
       <ConsolidationGroupSummary groups={groups} selected={selected} fee={fee} />
-      {(selectionMessage || invalid) && <Text accessibilityRole="alert" className="font-pp-regular text-[13px] leading-[18px] text-warning">{selectionMessage ?? invalid}</Text>}
+      {(selectionMessage || invalid) && <Text accessibilityRole="alert" className="font-pp-regular text-[13px] leading-[18px] text-warning">{shareText(selectionMessage ?? invalid)}</Text>}
       <View className="flex-row gap-[10px]">
         <Pressable accessibilityRole="button" onPress={onBack ?? onClose} className="h-[46px] px-[18px] items-center justify-center rounded-control border border-border">
           <Text className="font-pp-medium text-[14px] text-text">{onBack ? 'Back' : 'Cancel'}</Text>

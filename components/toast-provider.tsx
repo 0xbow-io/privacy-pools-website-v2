@@ -6,6 +6,7 @@ import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import { useNativeBottomInset } from '@/hooks/use-native-bottom-inset';
 import { DROPDOWN_SHADOW } from '@/components/ui/web-style-shims';
+import { useShareNameText } from '@/hooks/use-share-rates';
 
 // Lightweight in-app toast layer for transaction status notifications
 // (deposit approved/declined). One fixed stack in the bottom-right, auto-dismiss,
@@ -94,6 +95,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 function ToastItem({ entry: t, colors, onDismiss }: { entry: ToastEntry; colors: (typeof Colors)['light']; onDismiss: () => void }) {
+  const shareText = useShareNameText();
   const destructive = t.variant === 'destructive';
   const warning = t.variant === 'warning';
   const accent = destructive ? colors.danger : warning ? colors.warning : colors.success;
@@ -127,10 +129,10 @@ function ToastItem({ entry: t, colors, onDismiss }: { entry: ToastEntry; colors:
         color={accent}
       />
       <View className="flex-1 gap-[2px]">
-        <Text className="font-pp-sans-medium text-[13px] leading-[18px] text-text">{t.title}</Text>
+        <Text className="font-pp-sans-medium text-[13px] leading-[18px] text-text">{shareText(t.title)}</Text>
         {t.description ? (
           <Text className="font-pp-sans text-[13px] leading-[18px] text-text-secondary">
-            {t.description}
+            {shareText(t.description)}
           </Text>
         ) : null}
       </View>

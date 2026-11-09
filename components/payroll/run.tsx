@@ -16,7 +16,7 @@ import { buildRunItems, resolvePayrollTransferParams, applyMarkPaid, payrollSent
 import { networkChainId } from '@/services/payroll-store';
 import { useActiveEvmChain } from '@/hooks/use-active-evm-chain';
 import { useTransferFeeEstimate } from '@/hooks/use-transfer-fee-estimate';
-import { useShareFreeBalanceDisplay } from '@/hooks/use-balance-display';
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { getKnownTokenMetadata } from '@/config/tokens';
 import { getConfiguredYieldDeploymentForAsset } from '@/config/yield';
 import { ceilFeeToDisplayGrain } from '@/services/relay-fee-split';
@@ -51,7 +51,7 @@ export function PayrollRunView() {
   // and its review show (DEV-622), read off the feed grid (no request). Per coin,
   // for the pool token a payment of that coin is spent from.
   const feeFor = useTransferFeeEstimate(activeEvmChainId);
-  const feeDisplay = useShareFreeBalanceDisplay(activeEvmChainId);
+  const feeDisplay = useBalanceDisplay(activeEvmChainId);
   const feePreview = byCurrency.map(([cur]) => {
     const meta = getTokenMetadataBySymbol(cur, activeEvmChainId);
     if (!meta) return null;

@@ -367,11 +367,10 @@ describe('topNAcrossLabels (mixed-label per-proof cap)', () => {
 });
 
 describe('DEV-408: the swap shortfall names the coin, never a share count (DEV-621)', () => {
-  test('a ppUSDT shortfall without a rate reads under USDT, each figure loading', async () => {
+  test('a ppUSDT shortfall reads as USDT, each share figure loading without a rate', async () => {
     const { noteShortfallMessage } = await import('@/services/swap-note-shortfall');
     const msg = noteShortfallMessage({ reason: 'input-cap', selectableWei: 18_972789n, withheldWei: 0n }, { symbol: 'ppUSDT', decimals: 6 });
     expect(msg).not.toContain('ppUSDT');
-    expect(msg).not.toMatch(/\bshares?\b/i);
     expect(msg).not.toContain('18.97');
     expect(msg).toContain('… USDT');
     const waiting = noteShortfallMessage({ reason: 'unapproved', selectableWei: 0n, withheldWei: 5_000000n }, { symbol: 'ppUSDT', decimals: 6 });

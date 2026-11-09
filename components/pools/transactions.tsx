@@ -9,7 +9,7 @@ import { formatUnits } from 'viem';
 // Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
 // MAX retains the original exact shares. USD edits use an exact decimal price
 // in that same boundary. No other operation converts display back.
-import { useShareFreeBalanceDisplay } from '@/hooks/use-balance-display';
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import React, { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react';
 import { DROPDOWN_SHADOW, WEB_FIXED_POSITION } from '@/components/ui/web-style-shims';
@@ -75,7 +75,7 @@ import { formatUsd, formatUsdPrecise } from '@/services/format-fiat';
 import { useShareRates } from '@/hooks/use-share-rates';
 import { TransactionRowMenu, type TransactionRowMenuItem } from '@/components/pools/transaction-row-menu';
 import { ExplorerPrivacyHint, explorerPrivacyText } from '@/components/ui/explorer-privacy-hint';
-import { classifyTransfer, computeUserTransferAmount, mergeMyTransactions, withLineageTransfers } from '@/services/transfer-direction';
+import { claimedNetAmount, classifyTransfer, computeUserTransferAmount, mergeMyTransactions, withLineageTransfers } from '@/services/transfer-direction';
 import { activityHeaderCount } from '@/services/global-events-pages';
 import { findPaidRequest } from '@/services/paid-requests-store';
 import { priceFromMap } from '@/services/price-map-merge';
@@ -680,7 +680,7 @@ export function TransactionDetailModal({ tx, onClose, onCloseForAction, actions 
   const { data: poolsData } = usePools();
   // The detail header speaks the same units as the row that opened it.
   const { rateFor: rateForDetail } = useShareRates();
-  const balanceDisplay = useShareFreeBalanceDisplay(tx.chainId);
+  const balanceDisplay = useBalanceDisplay(tx.chainId);
   const exactUnitsLabel = (wei: bigint, decimals: number, symbol: string) => isShareSymbol(symbol)
     ? balanceDisplay(formatUnits(wei, decimals), symbol, tx.chainId, tx.tokenAddress).text
     : tokenAmountLabel(detailAmountDigits(formatFeeUnits(wei, decimals), displayTokenSymbol(symbol)), symbol);
@@ -751,6 +751,10 @@ export function TransactionDetailModal({ tx, onClose, onCloseForAction, actions 
   if (transferRaw === null && direction && direction !== 'self' && tx.isLineageSynthetic) {
     try { transferRaw = BigInt(tx.rawAmount); } catch { transferRaw = null; }
   }
+  // A claimed payment leads with what reached the balance, as its list row
+  // does; the amount sent and the claim fee are rows below (DEV-621).
+  const claimGrossRaw = direction === 'in' && tx.claimTxHash ? transferRaw : null;
+  if (direction === 'in') transferRaw = claimedNetAmount(tx, transferRaw);
   let transferTokenAmount: number | null = null;
   let transferUsd: number | null = null;
   if (transferRaw !== null) {
@@ -964,6 +968,9 @@ export function TransactionDetailModal({ tx, onClose, onCloseForAction, actions 
     detailRows.push({ label: 'Amount moved', value: exactUnitsLabel(rawWei(tx.movedAmountRaw), rowDecimals, tx.asset) });
   }
   if (feeText) detailRows.push({ label: 'Relayer fee', value: feeText });
+  if (claimGrossRaw !== null && transferRaw !== null && claimGrossRaw !== transferRaw) {
+    detailRows.push({ label: 'Sent to you', value: exactUnitsLabel(claimGrossRaw, transferRowDecimals(tx), tx.asset) });
+  }
   if (claimFeeText) detailRows.push({ label: tx.withRegistration ? 'Claim and registration fee' : 'Claim fee', value: claimFeeText });
   if (showReconciled && reconciledLabel && reconciledText) detailRows.push({ label: reconciledLabel, value: reconciledText });
   // Two transactions when a cross-chain swap has delivered, one otherwise.
@@ -1235,7 +1242,7 @@ export function Transactions({
   const { data } = usePools();
   // Live USDC-per-ppUSDC: a share row prints the USDC it is worth, share named in a hint.
   const { rateFor } = useShareRates();
-  const balanceDisplay = useShareFreeBalanceDisplay();
+  const balanceDisplay = useBalanceDisplay();
   // The feed is a LIST of self-describing rows, not a column grid, so there are
   // no per-column visibility breakpoints left: each row carries its own asset
   // mark, direction glyph and stacked amount, and the meta line ellipsizes.
@@ -2050,6 +2057,8 @@ export function Transactions({
           if (transferRaw === null && direction && direction !== 'self' && tx.isLineageSynthetic) {
             try { transferRaw = BigInt(tx.rawAmount); } catch { transferRaw = null; }
           }
+          // A claimed payment shows what reached the balance (DEV-621).
+          if (direction === 'in') transferRaw = claimedNetAmount(tx, transferRaw);
           let transferTokenAmount: number | null = null;
           let transferUsd: number | null = null;
           if (transferRaw !== null) {

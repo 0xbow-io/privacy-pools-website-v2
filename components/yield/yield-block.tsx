@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, Pressable } from 'react-native';
 import { formatApyPercent } from '@/services/share-yield';
+import { tokenAmountLabel } from '@/services/share-display';
 import { YieldPositionHint } from '@/components/yield/yield-position-hint';
 
 /**
@@ -103,7 +104,7 @@ export function YieldCostRow({
         Non-yield pool fee
       </Text>
       <Text className="text-right font-pp-regular text-[16px] leading-[24px] text-warning">
-        +{optOutFee.toFixed(4)} {symbol}
+        +{tokenAmountLabel(optOutFee.toFixed(4), symbol)}
       </Text>
     </View>
   );

@@ -9,7 +9,7 @@ import { ShareCountHint } from '@/components/pools/share-count-hint';
 // Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
 // MAX retains the original exact shares. USD edits use an exact decimal price
 // in that same boundary. No other operation converts display back.
-import { useShareFreeBalanceDisplay } from '@/hooks/use-balance-display';
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Platform, Pressable, Share, Text, View, type LayoutChangeEvent } from 'react-native';
 
@@ -46,7 +46,7 @@ import { getKnownTokenMetadata, getTokenMetadata, isStablecoin } from '@/config/
 import { getChainConfig, STELLAR_TESTNET_ID } from '@/config/chains';
 import { STELLAR_XLM } from '@/config/stellar-deployment';
 import { PAY_URL_BASE } from '@/config/env';
-import { isShareSymbol} from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol } from '@/services/share-display';
 import { formatUsd } from '@/services/format-fiat';
 import { priceFromMap } from '@/services/price-map-merge';
 import { shareNumberAsUnderlying, underlyingPriceFor } from '@/services/share-rates';
@@ -135,7 +135,7 @@ export function PaymentRequestsCard({
   const { data: poolsData } = usePools();
   const priceMap = poolsData?.priceMap;
   const { rateFor } = useShareRates();
-  const balanceDisplay = useShareFreeBalanceDisplay();
+  const balanceDisplay = useBalanceDisplay();
   // The dollar line under each amount, priced like Activity rows: the row's
   // own chain's price, and a share at its underlying through the live rate.
   const usdLabel = useCallback((r: PaymentRequestListRow): string => {
@@ -458,7 +458,7 @@ export function PaymentRequestsCard({
                       <View className="min-w-0 flex-1 flex-row items-center gap-[10px]">
                         {/* The chain rides the icon's badge, as on Activity rows; the
                             testnet pill is what tells Sepolia from Ethereum. */}
-                        <View accessible accessibilityRole="image" accessibilityLabel={`${r.assetSymbol} on ${r.chainName}`}>
+                        <View accessible accessibilityRole="image" accessibilityLabel={`${displayTokenSymbol(r.assetSymbol)} on ${r.chainName}`}>
                           <TokenNetworkIcon symbol={r.assetSymbol} chainId={r.chainId} size={28} badgeSize={14} />
                         </View>
                         <View className="min-w-0 flex-1 gap-[3px]">
