@@ -1943,7 +1943,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
           throw new ReshieldPreflightError('Swapping to that network is not available yet.');
         }
         if (requestSendTo && !crossChainSendOutputSupported(requestOutputToken.address, requestDestination)) {
-          throw new ReshieldPreflightError('This asset cannot be sent privately to that network. Pick a pool share, or use Withdraw.');
+          throw new ReshieldPreflightError('This asset cannot be sent privately to that network. Pick a supported token, or use Withdraw.');
         }
         const crossSource = sessions.source as unknown as ReshieldCrosschainSessionLike;
         // Same estimate the transfer flow runs at Confirm, so Review matches it.
@@ -2970,7 +2970,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                 {thirdPartyRecipient && !swapSendOutputOk && (
                   <Text className="text-[12px] leading-[17px] text-text-muted font-pp-regular" testID="swap-send-output-unsupported">
                     {crossChainReshield
-                      ? `Only a pool share can be sent privately to ${destinationName}. Pick one, or use Withdraw.`
+                      ? `Only a supported token can be sent privately to ${destinationName}. Pick one, or use Withdraw.`
                       : 'This asset can’t be sent privately to another address yet. Pick a different asset, or send to your own account.'}
                   </Text>
                 )}

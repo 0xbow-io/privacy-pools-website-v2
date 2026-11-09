@@ -38,7 +38,7 @@ export type ShareBalanceDisplay = {
   /** USD for the figure; approximate when not converted. */
   usd: number;
   converted: boolean;
-  /** Tooltip naming the share count; null when there is nothing to explain. */
+  /** Tooltip naming what the balance is worth today; null when there is nothing to explain. */
   hint: string | null;
 };
 
@@ -65,7 +65,7 @@ export function shareBalanceDisplay(args: {
       usd: underlying * underlyingPriceFor(rate, priceMap),
       converted: true,
       hint: shares > 0
-        ? `${formatTokenBalance(shares, shareSymbol)} shares, worth ${text} today. Shares keep their count, their value grows as yield accrues.`
+        ? `Worth ${text} today. The value grows as yield accrues.`
         : null,
     };
   }

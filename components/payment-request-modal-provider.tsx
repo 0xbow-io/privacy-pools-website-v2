@@ -2245,7 +2245,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           const have = balanceDisplay(formatUnits(payerBalance, meta.decimals), meta.symbol, request.chainId, request.tokenId).text;
           throw new Error(
             isShareSymbol(meta.symbol)
-              ? `This request asks for ${need}, a pool share your wallet cannot hold. Nothing was paid. Pay it from your shielded ${displayTokenSymbol(meta.symbol)} balance instead.`
+              ? `This request asks for ${need}, a pool token your wallet cannot hold. Nothing was paid. Pay it from your shielded ${displayTokenSymbol(meta.symbol)} balance instead.`
               : `You need ${need} in your wallet to pay this request, and you have ${have}. Nothing was paid.`,
           );
         }

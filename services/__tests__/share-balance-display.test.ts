@@ -2,9 +2,10 @@
 // amounts, validation, quotes, relayer and on-chain values stay in shares
 // (exact strings/bigints). Never convert an amount to underlying and back,
 // never feed a displayed underlying figure into an operation.
-// Display headlines use underlying through shareBalanceDisplay; shares appear
-// only in the (i) hint, in fields labelled with the share symbol, or while the
-// rate is unknown. Never print a share count under the underlying symbol.
+// Display headlines use underlying through shareBalanceDisplay; the (i) hint
+// names only the worth. Share counts appear only in fields labelled with the
+// share symbol, or while the rate is unknown.
+// Never print a share count under the underlying symbol.
 import { describe, expect, test } from 'bun:test';
 import { shareBalanceDisplay } from '@/services/share-balance-display';
 import { parseTokenAmount } from '@/services/token-amount';
@@ -46,10 +47,12 @@ describe('shareBalanceDisplay', () => {
     expect(v.usd).toBeGreaterThan(0.09989 * 2459);
   });
 
-  test('the hint names the share count under the share symbol and the worth', () => {
+  test('the hint names only the worth, never a share count or the word shares', () => {
     const v = shareBalanceDisplay({ sharesExact: '0.09989', shareSymbol: 'ppETH', rate: PP_ETH, priceMap: PRICES, fallbackPrice: 0 });
-    expect(v.hint).toBe('0.09989 shares, worth 0.10 ETH today. Shares keep their count, their value grows as yield accrues.');
+    expect(v.hint).toBe('Worth 0.10 ETH today. The value grows as yield accrues.');
     expect(v.hint).not.toContain('—');
+    expect(v.hint).not.toMatch(/shares?/i);
+    expect(v.hint).not.toContain('ppETH');
   });
 
   test('no rate: the share count under the coin name, marked approximate, never the share symbol', () => {
@@ -76,7 +79,7 @@ describe('shareBalanceDisplay', () => {
     expect(v.amount).toBeCloseTo(38.103924, 5);
     // a stablecoin with no quote is $1
     expect(v.usd).toBeCloseTo(38.103924, 5);
-    expect(v.hint).toBe('38.10 shares, worth 38.10 USDC today. Shares keep their count, their value grows as yield accrues.');
+    expect(v.hint).toBe('Worth 38.10 USDC today. The value grows as yield accrues.');
   });
 
   test('a string that is not a plain decimal never becomes a share count', () => {
@@ -94,7 +97,7 @@ test('display conversion leaves the exact share input used by spend paths unchan
   const submittedBeforeDisplay = parseTokenAmount(amount, 18);
   const view = shareBalanceDisplay({ sharesExact: amount, shareSymbol: 'ppETH', rate: PP_ETH, priceMap: PRICES, fallbackPrice: 0 });
   expect(view.text).toBe('0.10 ETH');
-  expect(view.hint).toContain('0.09989 shares, worth');
+  expect(view.hint).toBe('Worth 0.10 ETH today. The value grows as yield accrues.');
   expect(parseTokenAmount(amount, 18)).toBe(99891872636417805n);
   expect(parseTokenAmount(amount, 18)).toBe(submittedBeforeDisplay);
 });

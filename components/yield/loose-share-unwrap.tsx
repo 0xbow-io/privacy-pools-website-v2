@@ -69,7 +69,7 @@ function UnwrapRow({ share: { deployment, shares }, chainId, owner, allowance }:
       update(`Waiting for ${label} confirmation`);
       // This is our own wallet broadcast, never a relayed transaction hash.
       const receipt = await publicClient!.waitForTransactionReceipt({ hash, timeout: 180_000 });
-      if (receipt.status !== 'success') throw new Error(`${label} reverted. Your shares were not unwrapped.`);
+      if (receipt.status !== 'success') throw new Error(`${label} reverted. Nothing was unwrapped.`);
     };
     try {
       live();
