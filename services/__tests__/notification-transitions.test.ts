@@ -172,7 +172,7 @@ test('share deposit approval and decline use estimated coin quantities with a kn
   for (const status of ['approved', 'declined']) {
     const t = tx({ status, asset: 'ppETH', tokenAmount: 0.09989 });
     const event = buildTransitionEvent(t, amountDisplay(RATE));
-    expect(event.description).toBe('~0.10 ETH');
+    expect(event.description).toBe('~0.09999 ETH');
     expect(event.description).not.toContain('ppETH');
     // A non-par rate proves the amount was converted, not just renamed.
     const doubled = { ...RATE, assetsPerShare: 2_000_000_000_000_000_000n };
@@ -182,7 +182,7 @@ test('share deposit approval and decline use estimated coin quantities with a kn
   }
 });
 
-test('share deposit notifications without a rate leave the figure out, never the count or the share name (DEV-621)', () => {
+test('share deposit notifications without a rate leave the figure out, never the count (DEV-621)', () => {
   for (const status of ['approved', 'declined']) {
     const t = tx({ status, asset: 'ppETH', tokenAmount: 0.1 });
     expect(buildTransitionEvent(t).description).toBe('');

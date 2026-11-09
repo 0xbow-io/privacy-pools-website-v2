@@ -9,6 +9,7 @@ import { formatUnits } from 'viem';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { BalanceAmount } from '@/components/pools/balance-amount';
+import { FigureText } from '@/components/ui/share-figure';
 import { HoverHint } from '@/components/ui/hover-hint';
 import { compactPhoneLayout } from '@/services/header-nav';
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, useSyncExternalStore } from 'react';
@@ -18,7 +19,7 @@ import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
 import { AlertCircleIcon, CaretDownIcon, CheckCircleIcon, CloseIcon } from '@/components/ui/modal-icons';
 import { WEB_NO_OUTLINE } from '@/components/ui/web-style-shims';
 import { View, Text, Pressable, Platform, useWindowDimensions, TextInput, Animated, ScrollView, Linking } from 'react-native';
-import { FigureText, ShareFigure } from '@/components/ui/share-figure';
+import { ShareFigure } from '@/components/ui/share-figure';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Svg, { Circle } from 'react-native-svg';
 import { useAccount } from 'wagmi';
@@ -95,7 +96,7 @@ import { isCustomSlippage, parseCustomSlippage, slippageLabel } from '@/services
 import { isLegacyPlainToken } from '@/config/pool-paths';
 import { getKnownTokenMetadata, getTokenMetadata } from '@/config/tokens';
 import { visibleSwapSources } from '@/services/pool-slug';
-import { displayTokenSymbol, isShareSymbol, swapRateText, underlyingOnlyView } from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol, swapRateText } from '@/services/share-display';
 import { handoffRefused, resolveHandoffToken } from '@/services/swap-token-handoff';
 import { friendlySwapError, relaySwapRefusalText } from '@/services/swap-error-copy';
 import { sameSymbol } from '@/services/symbol-match';
@@ -155,6 +156,8 @@ import { useNativeMockBlock } from '@/hooks/use-native-mock-block';
 import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { FeeWarning } from '@/components/fee-warning';
 import { buildFeeBreakdown, gasCostUsd, quoteGas, splitRelayerFee, swapLossUsd, tokenUsd, type FeeGasReading } from '@/services/fee-warning';
+import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
+import type { ShareRate } from '@/services/share-rates';
 
 // Intent swap (withdraw-and-swap): a private note leaves the pool, swaps
 // through a LiFi route that is sealed inside the ZK proof, and the output
@@ -431,7 +434,7 @@ type ReshieldSnapshot = {
  * so it is a deposit the ASP will refuse above the cap. Surfaced as a preflight
  * error (nothing signed or spent), same channel as the too-small-note refusal.
  */
-async function assertReshieldCap(noteValueWei: bigint, token: { symbol: string; decimals: number }): Promise<void> {
+async function assertReshieldCap(noteValueWei: bigint, token: { symbol: string; decimals: number }, rate?: ShareRate): Promise<void> {
   try {
     await assertDepositCap({
       amountWei: noteValueWei,
@@ -439,6 +442,10 @@ async function assertReshieldCap(noteValueWei: bigint, token: { symbol: string; 
       symbol: token.symbol,
       capUsd: ACTIVE_ENVIRONMENT.maxDepositUsd,
       fetchPrice: getPrice,
+      // The message's figure in the underlying it names. Display only.
+      underlyingPerShare: rate && rate.shareDecimals === token.decimals
+        ? Number(rate.assetsPerShare) / 10 ** rate.underlyingDecimals
+        : undefined,
     });
   } catch (err) {
     if (err instanceof DepositCapError) throw new ReshieldPreflightError(err.message);
@@ -466,15 +473,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
   // showing whenever the selection and the wallet split.
   const chainId = useActiveEvmChain().id;
   const balanceDisplay = useBalanceDisplay(chainId);
-  // DEV-591: the Swap tab never names a share. Every figure it shows goes
-  // through this: the underlying at the live rate, or "0.00999 ETH shares"
-  // while the rate is unknown, never the share's own symbol. Display only,
-  // never an amount.
-  const swapView = useCallback(
-    (exact: string | number, symbol: string, cid: number | undefined, tokenAddress?: string) =>
-      underlyingOnlyView(balanceDisplay(exact, symbol, cid, tokenAddress), symbol),
-    [balanceDisplay],
-  );
+  const shareText = useShareNameText(chainId);
+  // Feed-grid rates (no request), for a figure a message names in the underlying.
+  const { rateFor } = useShareRates();
   // The SESSION's chain (connector-first). Quotes select notes from the live
   // session, so a quote/review/confirm may only run while the session and the
   // app agree — see the context guards below and the invalidation effect.
@@ -609,6 +610,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
   const [customSlippageError, setCustomSlippageError] = useState<string | null>(null);
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [snapshot, setSnapshot] = useState<QuoteSnapshot | null>(null);
+  // LI.FI's delivery detail is about the DESTINATION leg, so a share figure in
+  // it converts at the destination chain's rate, not the source chain's.
+  const deliveryShareText = useShareNameText(reshieldSnapshot?.destinationChainId ?? snapshot?.destinationChainId);
   const feePricing = useFeePricing(chainId);
   // Withdraw-and-swap: the relayer fee split into the gas it re-bills and its
   // margin, plus what the swap loses between the netted input and the output.
@@ -1542,12 +1546,12 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
           // share counts, shown as the underlying at the live rate (DEV-591).
           { symbol: requestFromToken.symbol, decimals: requestFromToken.decimals },
           undefined,
-          (wei: bigint) => swapView(formatUnits(wei, requestFromToken.decimals), requestFromToken.symbol, chainId, requestFromToken.address).text,
+          (wei: bigint) => balanceDisplay(formatUnits(wei, requestFromToken.decimals), requestFromToken.symbol, chainId, requestFromToken.address).text,
         ),
       };
     }
     return { notes: selection.notes };
-  }, [swapApproval, noteManager, swapView, chainId]);
+  }, [swapApproval, noteManager, balanceDisplay, chainId]);
 
   /**
    * Make room for the registration modal without losing the form.
@@ -1951,7 +1955,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
           throw new ReshieldPreflightError('Swapping to that network is not available yet.');
         }
         if (requestSendTo && !crossChainSendOutputSupported(requestOutputToken.address, requestDestination)) {
-          throw new ReshieldPreflightError('This asset cannot be sent privately to that network. Pick a pool share, or use Withdraw.');
+          throw new ReshieldPreflightError('This asset cannot be sent privately to that network. Pick a supported token, or use Withdraw.');
         }
         const crossSource = sessions.source as unknown as ReshieldCrosschainSessionLike;
         // Same estimate the transfer flow runs at Confirm, so Review matches it.
@@ -2010,7 +2014,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       }
       // Launch cap on the note this reshield would create (codex: the deposit
       // modal's check never sees this path).
-      await assertReshieldCap(BigInt(estimate.noteValue), requestOutputToken);
+      await assertReshieldCap(BigInt(estimate.noteValue), requestOutputToken, rateFor(outputToken.chainId, requestOutputToken.address));
 
       if (!isCurrent()) return;
       setReshieldSnapshot({
@@ -2084,7 +2088,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     } finally {
       if (isCurrent()) setIsQuoting(false);
     }
-  }, [canReview, outputToken, amountWei, fromToken, slippage, chainId, sessionChainId, address, trimmedRecipient, swapSend, noteIdentity, destinationChainId, createReshieldCrosschainSessions, selectApprovedNotes, resolveSwapSession, log, swapErrorText]);
+  }, [canReview, outputToken, rateFor, amountWei, fromToken, slippage, chainId, sessionChainId, address, trimmedRecipient, swapSend, noteIdentity, destinationChainId, createReshieldCrosschainSessions, selectApprovedNotes, resolveSwapSession, log, swapErrorText]);
   const getReshieldEstimateRef = useRef(getReshieldEstimate);
   getReshieldEstimateRef.current = getReshieldEstimate;
 
@@ -2458,7 +2462,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
             // moves the output between the two clicks essentially always, and
             // an exact floor refused every attempt (QA, 2026-09-22).
             minNoteValueWei: reshieldConsentFloor(snap.display.newNoteValueWei, snap.slippage),
-        assertNoteValue: (wei) => assertReshieldCap(wei, snap.outputToken),
+        assertNoteValue: (wei) => assertReshieldCap(wei, snap.outputToken, rateFor(snap.destinationChainId, snap.outputToken.address)),
             outputUnits: { symbol: snap.outputToken.symbol, decimals: snap.outputToken.decimals },
             destinationName: getChainConfig(snap.destinationChainId)?.displayName ?? `chain ${snap.destinationChainId}`,
             // Swap-send: the note is FOR this account on the destination chain,
@@ -2564,7 +2568,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         // Bind execution to the figure shown on Review — a route that got worse
         // in the meantime must ask again rather than execute silently.
         minNoteValueWei: reshieldConsentFloor(snap.display.newNoteValueWei, snap.slippage),
-        assertNoteValue: (wei) => assertReshieldCap(wei, snap.outputToken),
+        assertNoteValue: (wei) => assertReshieldCap(wei, snap.outputToken, rateFor(snap.destinationChainId, snap.outputToken.address)),
         // Swap-send: the new note is FOR this account. Read from the snapshot
         // Review showed, never from the live form.
         ...(snap.recipient ? { recipient: sameBlind ? sameBlind.recipient : { discoveryData: { evmAddress: snap.recipient } } } : {}),
@@ -2685,7 +2689,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       }
       setStep('review');
     }
-  }, [reshieldSnapshot, selectApprovedNotes, resolveSwapSession, chainId, sessionChainId, noteIdentity, refreshNotes, createReshieldCrosschainSessions, queryClient, log, refuseIfSelectionPendingRelay, prepareBlindSwapSend]);
+  }, [reshieldSnapshot, selectApprovedNotes, rateFor, resolveSwapSession, chainId, sessionChainId, noteIdentity, refreshNotes, createReshieldCrosschainSessions, queryClient, log, refuseIfSelectionPendingRelay, prepareBlindSwapSend]);
 
   // Same-tick double-press guard (shared lock) — see hooks/use-op-lock.ts.
   const confirmReshield = useMemo(() => withOpLock(confirmReshieldUnlocked), [withOpLock, confirmReshieldUnlocked]);
@@ -2800,7 +2804,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                 )}
                 {swapError && !swapUnavailable && (
                   <View className="w-full rounded-legacy-8 border border-danger bg-danger-bg px-[12px] py-[10px]">
-                    <Text className="text-[12px] leading-[17px] text-danger font-pp-medium" testID="swap-error"><FigureText text={swapError} /></Text>
+                    <Text className="text-[12px] leading-[17px] text-danger font-pp-medium" testID="swap-error">{shareText(swapError)}</Text>
                   </View>
                 )}
 
@@ -2810,9 +2814,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[12px] leading-[17px] text-text-muted font-pp-regular">You swap</Text>
                     <Text className="text-[12px] leading-[17px] text-text-muted font-pp-regular">
-                      Available: {poolsLoading ? '—' : <ShareFigure view={swapView(formatUnits(balanceWei, fromToken.decimals), fromToken.symbol, chainId)} />}
+                      Available: {poolsLoading ? '—' : <ShareFigure view={balanceDisplay(formatUnits(balanceWei, fromToken.decimals), fromToken.symbol, chainId)} />}
                     </Text>
-                    {!poolsLoading ? <ShareCountHint hint={swapView(formatUnits(balanceWei, fromToken.decimals), fromToken.symbol, chainId).hint} /> : null}
+                    {!poolsLoading ? <ShareCountHint hint={balanceDisplay(formatUnits(balanceWei, fromToken.decimals), fromToken.symbol, chainId).hint} /> : null}
                   </View>
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <TextInput
@@ -2991,7 +2995,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                 {thirdPartyRecipient && !swapSendOutputOk && (
                   <Text className="text-[12px] leading-[17px] text-text-muted font-pp-regular" testID="swap-send-output-unsupported">
                     {crossChainReshield
-                      ? `Only a pool share can be sent privately to ${destinationName}. Pick one, or use Withdraw.`
+                      ? `Only a supported token can be sent privately to ${destinationName}. Pick one, or use Withdraw.`
                       : 'This asset can’t be sent privately to another address yet. Pick a different asset, or send to your own account.'}
                   </Text>
                 )}
@@ -3174,7 +3178,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
 
                 {swapError && (
                   <View className="w-full rounded-legacy-8 border border-danger bg-danger-bg px-[12px] py-[10px]">
-                    <Text className="text-[12px] leading-[17px] text-danger font-pp-medium" testID="swap-error"><FigureText text={swapError} /></Text>
+                    <Text className="text-[12px] leading-[17px] text-danger font-pp-medium" testID="swap-error">{shareText(swapError)}</Text>
                   </View>
                 )}
 
@@ -3204,11 +3208,11 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                   </Text>
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[13px] text-text-muted font-pp-medium">You swap</Text>
-                    <BalanceAmount view={swapView(formatUnits(reshieldSnapshot.grossWei, reshieldSnapshot.fromToken.decimals), reshieldSnapshot.fromToken.symbol, chainId)} className="text-[13px] text-text font-pp-regular" />
+                    <BalanceAmount view={balanceDisplay(formatUnits(reshieldSnapshot.grossWei, reshieldSnapshot.fromToken.decimals), reshieldSnapshot.fromToken.symbol, chainId)} className="text-[13px] text-text font-pp-regular" />
                   </View>
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[13px] text-text-muted font-pp-medium">Relayer fee</Text>
-                    <BalanceAmount view={swapView(formatUnits(BigInt(reshieldSnapshot.estimate.feeAmount), reshieldSnapshot.fromToken.decimals), reshieldSnapshot.fromToken.symbol, chainId)} className="text-[13px] text-text font-pp-regular" />
+                    <BalanceAmount view={balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.feeAmount), reshieldSnapshot.fromToken.decimals), reshieldSnapshot.fromToken.symbol, chainId)} className="text-[13px] text-text font-pp-regular" />
                   </View>
                   <FeeWarning breakdown={reshieldFeeBreakdown} testID="reshield-fee-warning" />
                 </View>
@@ -3228,7 +3232,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                     <Text className="text-[13px] text-text-muted font-pp-medium">
                       {reshieldSnapshot.recipient ? 'New shielded note for them (at least)' : 'New shielded note (at least)'}
                     </Text>
-                    <BalanceAmount view={swapView(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-bold" showUsd />
+                    <BalanceAmount view={balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-bold" showUsd />
                   </View>
                   {reshieldSnapshot.recipient && (
                     <View className="flex-row flex-wrap items-center justify-between gap-[8px]" testID="swap-send-review-recipient">
@@ -3286,21 +3290,21 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                   <View className="w-full gap-[8px] rounded-control border border-border p-[16px]" testID="reshield-details">
                     <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                       <Text className="text-[13px] text-text-muted font-pp-medium">Swapped after fee</Text>
-                      <BalanceAmount view={swapView(formatUnits(BigInt(reshieldSnapshot.estimate.netSwapAmount), swapInputUnits(chainId, reshieldSnapshot.fromToken.address, reshieldSnapshot.fromToken).decimals), swapInputUnits(chainId, reshieldSnapshot.fromToken.address, reshieldSnapshot.fromToken).symbol, chainId)} className="text-[13px] text-text font-pp-regular" />
+                      <BalanceAmount view={balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.netSwapAmount), swapInputUnits(chainId, reshieldSnapshot.fromToken.address, reshieldSnapshot.fromToken).decimals), swapInputUnits(chainId, reshieldSnapshot.fromToken.address, reshieldSnapshot.fromToken).symbol, chainId)} className="text-[13px] text-text font-pp-regular" />
                     </View>
                     <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                       <Text className="text-[13px] text-text-muted font-pp-medium">Swap output (est.)</Text>
-                      <BalanceAmount view={swapView(formatUnits(BigInt(reshieldSnapshot.estimate.estimatedOutput), reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />
+                      <BalanceAmount view={balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.estimatedOutput), reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />
                     </View>
                     <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                       <Text className="text-[13px] text-text-muted font-pp-medium">Swap output (min.)</Text>
-                      <BalanceAmount view={swapView(formatUnits(BigInt(reshieldSnapshot.estimate.estimatedMinOutput), reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />
+                      <BalanceAmount view={balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.estimatedMinOutput), reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />
                     </View>
                     {/* Named for the leg that charges it. The Entrypoint takes
                         it on the DEPOSIT, so it is in the deposited token. */}
                     <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                       <Text className="text-[13px] text-text-muted font-pp-medium">Pool vetting fee on the new note</Text>
-                      <BalanceAmount view={swapView(formatUnits(BigInt(reshieldSnapshot.estimate.vettingFee), reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />
+                      <BalanceAmount view={balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.vettingFee), reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />
                     </View>
                     <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                       <Text className="text-[13px] text-text-muted font-pp-medium">Max slippage</Text>
@@ -3345,44 +3349,44 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
 
                 {swapError && (
                   <View className="w-full rounded-legacy-8 border border-danger bg-danger-bg px-[12px] py-[10px]">
-                    <Text className="text-[12px] leading-[17px] text-danger font-pp-medium" testID="swap-error"><FigureText text={swapError} /></Text>
+                    <Text className="text-[12px] leading-[17px] text-danger font-pp-medium" testID="swap-error">{shareText(swapError)}</Text>
                   </View>
                 )}
 
                 <View className="w-full gap-[8px] rounded-control border border-border p-[16px]">
                   {/* The asset you PAY. These three are SHARE counts, so
-                      swapView shows them as the underlying at the live rate
+                      balanceDisplay shows them as the underlying at the live rate
                       (DEV-591): the share is named nowhere the user reads. A
                       plain symbol passes through. */}
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[13px] text-text-muted font-pp-medium">You swap</Text>
-                    <BalanceAmount view={swapView(snapshot.amountText, snapshot.fromToken.symbol, chainId)} className="text-[13px] text-text font-pp-regular" />
+                    <BalanceAmount view={balanceDisplay(snapshot.amountText, snapshot.fromToken.symbol, chainId)} className="text-[13px] text-text font-pp-regular" />
                   </View>
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[13px] text-text-muted font-pp-medium">Relayer fee</Text>
-                    <BalanceAmount view={swapView(snapshot.display.relayerFee, snapshot.fromToken.symbol, chainId)} className="text-[13px] text-text font-pp-regular" />
+                    <BalanceAmount view={balanceDisplay(snapshot.display.relayerFee, snapshot.fromToken.symbol, chainId)} className="text-[13px] text-text font-pp-regular" />
                   </View>
                   <FeeWarning breakdown={walletFeeBreakdown} testID="swap-fee-warning" />
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[13px] text-text-muted font-pp-medium">Swapped after fee</Text>
-                    <BalanceAmount view={swapView(snapshot.display.netSwapped, snapshot.fromToken.symbol, chainId)} className="text-[13px] text-text font-pp-regular" />
+                    <BalanceAmount view={balanceDisplay(snapshot.display.netSwapped, snapshot.fromToken.symbol, chainId)} className="text-[13px] text-text font-pp-regular" />
                   </View>
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[13px] text-text-muted font-pp-medium">Estimated received</Text>
-                    <BalanceAmount view={swapView(snapshot.display.estimatedOutput, snapshot.outputToken.symbol, snapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" showUsd />
+                    <BalanceAmount view={balanceDisplay(snapshot.display.estimatedOutput, snapshot.outputToken.symbol, snapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" showUsd />
                   </View>
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[13px] text-text-muted font-pp-medium">Min received</Text>
-                    <Text className="text-[13px] text-text font-pp-bold"><ShareFigure view={swapView(snapshot.display.minReceived, snapshot.outputToken.symbol, snapshot.destinationChainId)} /></Text>
+                    <Text className="text-[13px] text-text font-pp-bold"><ShareFigure view={balanceDisplay(snapshot.display.minReceived, snapshot.outputToken.symbol, snapshot.destinationChainId)} /></Text>
                   </View>
                   {/* A rate between share COUNTS is not a rate between the coins,
                       so it shows only once both sides read as their coin. */}
                   {!!snapshot.display.rate
-                    && (!isShareSymbol(snapshot.fromToken.symbol) || swapView('1', snapshot.fromToken.symbol, chainId).converted)
-                    && (!isShareSymbol(snapshot.outputToken.symbol) || swapView('1', snapshot.outputToken.symbol, snapshot.destinationChainId).converted) && (
+                    && (!isShareSymbol(snapshot.fromToken.symbol) || balanceDisplay('1', snapshot.fromToken.symbol, chainId).converted)
+                    && (!isShareSymbol(snapshot.outputToken.symbol) || balanceDisplay('1', snapshot.outputToken.symbol, snapshot.destinationChainId).converted) && (
                     <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                       <Text className="text-[13px] text-text-muted font-pp-medium">Rate</Text>
-                      <Text className="text-[13px] text-text font-pp-regular"><FigureText text={swapRateText(Number(snapshot.display.rate), swapView('1', snapshot.fromToken.symbol, chainId), swapView('1', snapshot.outputToken.symbol, snapshot.destinationChainId))} /></Text>
+                      <Text className="text-[13px] text-text font-pp-regular"><FigureText text={swapRateText(Number(snapshot.display.rate), balanceDisplay('1', snapshot.fromToken.symbol, chainId), balanceDisplay('1', snapshot.outputToken.symbol, snapshot.destinationChainId))} /></Text>
                     </View>
                   )}
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
@@ -3515,14 +3519,14 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                 {!(delivery?.status === 'recovered' || delivery?.status === 'failed') && (
                   <Text className="w-full text-center text-[12px] text-text-muted font-pp-regular">
                     <FigureText text={reshieldSnapshot.destinationChainId !== chainId && reshieldSnapshot.recipient && delivery?.status === 'done'
-                      ? `At least ${swapView(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} was deposited as a new shielded note for ${reshieldSnapshot.recipient.slice(0, 6)}…${reshieldSnapshot.recipient.slice(-4)} on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`}. They will see it after their next sync.`
+                      ? `At least ${balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} was deposited as a new shielded note for ${reshieldSnapshot.recipient.slice(0, 6)}…${reshieldSnapshot.recipient.slice(-4)} on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`}. They will see it after their next sync.`
                       : reshieldSnapshot.destinationChainId !== chainId && reshieldSnapshot.recipient
-                      ? `At least ${swapView(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} is being deposited as a new shielded note for ${reshieldSnapshot.recipient.slice(0, 6)}…${reshieldSnapshot.recipient.slice(-4)} on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`}. The deposit follows this transaction and can take a few minutes.`
+                      ? `At least ${balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} is being deposited as a new shielded note for ${reshieldSnapshot.recipient.slice(0, 6)}…${reshieldSnapshot.recipient.slice(-4)} on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`}. The deposit follows this transaction and can take a few minutes.`
                       : reshieldSnapshot.destinationChainId !== chainId
-                      ? `At least ${swapView(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} as a new shielded note on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`}. The transaction above is this chain's leg; the deposit over there follows and can take a few minutes, and it becomes spendable once that pool's association set includes it.`
+                      ? `At least ${balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} as a new shielded note on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`}. The transaction above is this chain's leg; the deposit over there follows and can take a few minutes, and it becomes spendable once that pool's association set includes it.`
                       : reshieldSnapshot.recipient
-                        ? `At least ${swapView(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} was deposited as a new shielded note for ${reshieldSnapshot.recipient.slice(0, 6)}…${reshieldSnapshot.recipient.slice(-4)}. They will see it after their next sync, and it becomes spendable once the pool's association set includes it.`
-                        : `At least ${swapView(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} as a new shielded note. It becomes spendable once the pool's association set includes it.`} />
+                        ? `At least ${balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} was deposited as a new shielded note for ${reshieldSnapshot.recipient.slice(0, 6)}…${reshieldSnapshot.recipient.slice(-4)}. They will see it after their next sync, and it becomes spendable once the pool's association set includes it.`
+                        : `At least ${balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} as a new shielded note. It becomes spendable once the pool's association set includes it.`} />
                   </Text>
                 )}
                 {/* Live status of the far leg, same tracker flow 1 uses. Without
@@ -3535,7 +3539,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                       : delivery.status === 'recovered'
                       ? `The deposit on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`} did not run, so ${recoveredWhere(delivery.refunded, sourceChainName, getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`)}. It is in your wallet, not in the pool.`
                       : delivery.status === 'failed'
-                        ? `The deposit on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`} did not complete${delivery.detail ? `: ${delivery.detail}` : ''}. LI.FI pays the fallback address on that chain when the far side cannot deposit.`
+                        ? `The deposit on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`} did not complete${delivery.detail ? `: ${deliveryShareText(delivery.detail)}` : ''}. LI.FI pays the fallback address on that chain when the far side cannot deposit.`
                         : `${deliveryProgress ?? 'Tracking the bridge…'} Deposit pending on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`}.`}
                   </Text>
                 )}
@@ -3607,7 +3611,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                 </Text>
                 {!snapshot.crossChain && (
                   <Text className="w-full text-center text-[12px] text-text-muted font-pp-regular">
-                    Min <ShareFigure view={swapView(snapshot.display.minReceived, snapshot.outputToken.symbol, snapshot.destinationChainId)} /> to your recipient.
+                    Min <ShareFigure view={balanceDisplay(snapshot.display.minReceived, snapshot.outputToken.symbol, snapshot.destinationChainId)} /> to your recipient.
                   </Text>
                 )}
                 {snapshot.crossChain && (
@@ -3615,11 +3619,11 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                     <FigureText text={delivery?.status === 'recovered' && delivery.refunded
                       ? `The swap on ${snapshot.destinationName} did not run, so ${recoveredWhere(true, sourceChainName, snapshot.destinationName)}.`
                       : delivery?.status === 'done'
-                      ? `Delivered on ${snapshot.destinationName} (min ${swapView(snapshot.display.minReceived, snapshot.outputToken.symbol, snapshot.destinationChainId).text}).`
+                      ? `Delivered on ${snapshot.destinationName} (min ${balanceDisplay(snapshot.display.minReceived, snapshot.outputToken.symbol, snapshot.destinationChainId).text}).`
                       : delivery?.status === 'recovered'
                       ? `The swap on ${snapshot.destinationName} did not run, so the bridge paid your address there in the token it carried rather than ${displayTokenSymbol(snapshot.outputToken.symbol)}.`
                       : delivery?.status === 'failed'
-                        ? `Bridge delivery failed${delivery.detail ? `: ${delivery.detail}` : ''}. Destination-swap failures refund to your address on ${snapshot.destinationName}; certain bridge failures refund to the source-chain RelaySwaps contract and need relayer assistance to recover.`
+                        ? `Bridge delivery failed${delivery.detail ? `: ${deliveryShareText(delivery.detail)}` : ''}. Destination-swap failures refund to your address on ${snapshot.destinationName}; certain bridge failures refund to the source-chain RelaySwaps contract and need relayer assistance to recover.`
                         : `${deliveryProgress ?? 'Tracking the bridge…'} Delivery pending on ${snapshot.destinationName}.`} />
                   </Text>
                 )}

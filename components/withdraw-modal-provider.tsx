@@ -1,6 +1,7 @@
 import { spendableBalanceLabel } from '@/services/spendable-balance-label';
 import { presetExceedsWithdrawMax } from '@/services/withdraw-preset-guard';
 import { useShareAmountField } from '@/hooks/use-share-amount-field';
+import { formatUsdBalance } from '@/services/format-fiat';
 // RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
 // amounts, validation, quotes, relayer and on-chain values stay in shares
 // (exact strings/bigints). Never convert an amount to underlying and back,
@@ -11,6 +12,7 @@ import { useShareAmountField } from '@/hooks/use-share-amount-field';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { BalanceAmount } from '@/components/pools/balance-amount';
+import { FigureText } from '@/components/ui/share-figure';
 import { compactPhoneLayout } from '@/services/header-nav';
 import { HoverHint } from '@/components/ui/hover-hint';
 import { crossFlowsEnabled } from '@/config/intent-lockdown';
@@ -199,8 +201,7 @@ import { feeWithinReviewed, relayerFeeJitterAllowance } from '@/services/relayer
 import { quoteMatchesSignedCommitment } from '@/services/relayer-quote-integrity';
 import { decodeGasTopUpWei, formatGasTopUp } from '@/services/gas-top-up';
 import { setReceiveSetup } from '@/services/receive-setup';
-import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, netSharesWei, previewReceiveFigure, shareRedemptionDisclosure, shareReviewHeadline, swapRateText } from '@/services/share-display';
-import { FigureText } from '@/components/ui/share-figure';
+import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, netSharesWei, presetChipLabel, previewReceiveFigure, shareRedemptionDisclosure, shareReviewHeadline, swapRateText } from '@/services/share-display';
 import { sdkErrorText, type ErrorUnits } from '@/services/sdk-error-amounts';
 import { RelayFeeIncreasedError, relayWithdrawalWithFreshQuote } from '@/services/relayed-withdrawal';
 import { PREVIEW_REDEEM_ABI } from '@/services/deposit-limits';
@@ -209,6 +210,8 @@ import { useNativeMockBlock } from '@/hooks/use-native-mock-block';
 import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { FeeWarning } from '@/components/fee-warning';
 import { buildFeeBreakdown, gasCostUsd, quoteGas, splitRelayerFee, swapLossUsd, type FeeGasReading } from '@/services/fee-warning';
+import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
+import { shareNumberAsUnderlying } from '@/services/share-rates';
 
 const WITHDRAW_RELAY_METHOD = /^relay(Withdrawal|RegisterAndWithdrawal|WithAnnounce)$/;
 const SWAP_EXIT_PENDING_MESSAGE = 'The relayer accepted this withdrawal, but it has not been included in a block yet. It has not failed and can still land, so these funds are held for it. Your balance and history update on their own once it settles; if it is still pending after 10 minutes, report it from the pending notice.';
@@ -571,6 +574,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   const balanceDisplay = useBalanceDisplay(chainId);
   const spendableLabel = (exact: string, symbol: string, cid: number) =>
     spendableBalanceLabel(exact, symbol, () => balanceDisplay(exact, symbol, cid).text);
+  const shareText = useShareNameText(chainId);
   const withOpLock = useOpLock();
   // Chain FROZEN at submission — explorer links must not follow a later
   // app-chain switch (codex round 3, P2).
@@ -1779,9 +1783,10 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   const amountDollarLabel = useCallback((sharesExact: string) => {
     if (isShareSymbol(selectedToken)) {
       const view = balanceDisplay(sharesExact, selectedToken, chainId);
-      return view.converted ? `$${view.usd.toFixed(2)}` : '';
+      // The balance header's formatter: cents rounded DOWN, one figure (DEV-621).
+      return view.converted ? formatUsdBalance(view.usd) : '';
     }
-    return `$${((parseFloat(sharesExact) || 0) * currentPrice).toFixed(2)}`;
+    return formatUsdBalance((parseFloat(sharesExact) || 0) * currentPrice);
   }, [selectedToken, balanceDisplay, chainId, currentPrice]);
   const displayAvailableNum = isSui
     ? Number(suiWithdraw.maxSingle) / altScale
@@ -1869,6 +1874,16 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // The greyed receive figure on the form, before Review: the same redeemed
   // underlying, never the share count under the coin's name.
   const previewNet = previewReceiveFigure({ isShare: selectedIsShare, amount: reviewNet, underlying: reviewNetUnderlyingNum });
+  // Full-balance (gross) mode before the quote: the fee comes out of the
+  // amount and is unknown until Withdraw fetches the quote, so the redeem read
+  // above has no net to price and the figure was a bare dash at Max (QA on
+  // #72). Show the entered amount at the live feed rate, marked "~" and
+  // before the fee, as the plain-asset path does. Reads the feed grid only.
+  const { rateFor: shareRateFor } = useShareRates();
+  const previewShareRate = selectedIsShare ? shareRateFor(chainId, selectedTokenAddress) : undefined;
+  const previewNetEstimate = previewNet == null && selectedIsShare && !relayerQuote && previewShareRate && enteredAmount > 0
+    ? shareNumberAsUnderlying(enteredAmount, previewShareRate)
+    : null;
   // The dollar total beside it: the redeemed underlying at the underlying's
   // price, never shares × that price (codex P2 on 0cea0b3). Null hides the
   // line while the conversion is unknown.
@@ -3346,7 +3361,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           reasons: [
             !t.isActive && 'not ACTIVE',
             !t.inSpendableSet && 'not in ASP spendable set',
-            !t.matchesToken && `token ${t.tokenSymbol} != ${selectedToken}`,
+            !t.matchesToken && `token ${t.tokenSymbol} != ${selectedToken}`, // not-rendered: diagnostic log payload
             !t.matchesPA && `label != selectedPA (${selectedPA})`,
           ].filter(Boolean),
         })),
@@ -5022,7 +5037,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     onPress={() => setTokenDropdownOpen(!tokenDropdownOpen)}
                   >
                     <Text className="text-[16px] leading-[16px] flex-1 text-text font-pp-regular">
-                      {amountField.symbol}
+                      {amountField.unitLabel}
                     </Text>
                     <Pressable
                       className="flex-row items-center gap-[4px] px-[8px] py-[4px] border border-border-light rounded-control"
@@ -5128,7 +5143,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                         </Text>
                       </View>
                       {isShareSymbol(selectedToken) ? <BalanceAmount view={balanceDisplay(amount || '0', selectedToken, chainId)} className="text-[12px] text-text-secondary" /> : null}
-                      {amountField.error ? <Text className="text-[12px] text-danger">{amountField.error}</Text> : null}
+                      {amountField.error ? <Text className="text-[12px] text-danger">{shareText(amountField.error)}</Text> : null}
                       <View className="shrink gap-[6px] items-end">
                         <View className="flex-row items-center gap-[4px] flex-wrap justify-end">
                           <Text className="text-[14px] text-[#999999] text-right font-pp-regular">
@@ -5225,7 +5240,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                           disabled={spendabilityBlocked}
                         >
                           <Text className={`text-[13px] font-pp-regular ${active ? 'text-tint' : 'text-text'}`}>
-                            {isShareSymbol(selectedToken) ? `${formatQuickAmount(preset)} ${amountField.symbol}` : formatQuickAmount(preset)}
+                            {isShareSymbol(selectedToken) ? presetChipLabel(formatQuickAmount(preset), amountField.unitLabel) : formatQuickAmount(preset)}
                           </Text>
                         </Pressable>
                       );
@@ -5261,7 +5276,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                               {enteredAmount > 0
                                 ? (isSwapExit
                                   ? (swapExitEstimateText ?? '—')
-                                  : (previewNet == null ? '—' : groupThousands(formatTokenBalanceDown(previewNet, recvSymbol))))
+                                  : (previewNet != null ? groupThousands(formatTokenBalanceDown(previewNet, recvSymbol)) : previewNetEstimate != null ? `~${groupThousands(formatTokenBalanceDown(previewNetEstimate, recvSymbol))}` : '—'))
                                 : '0'}
                             </Text>
                             <Pressable
@@ -6018,7 +6033,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                   {/* FlowProgress prints the live message under the rail
                       itself, so this must not repeat it (QA saw "Preparing
                       withdrawal proof..." twice). */}
-                  <FlowProgress message={loadingMessage} />
+                  <FlowProgress message={loadingMessage} chainId={chainId} />
                   {/* Batch progress bar: N proofs take minutes — show how far
                       along the batch is so the app never looks stuck. */}
                   {batchProgress ? (
@@ -6065,7 +6080,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                 </Text>
                 <View className="w-full border rounded-control p-[12px] border-warning bg-warning-bg">
                   <Text className="text-[13px] leading-[19px] font-pp-medium text-warning">
-                    {withdrawError}
+                    {shareText(withdrawError)}
                   </Text>
                 </View>
                 <PendingRelayNotice chainId={chainId} owner={connectedAddress} />
@@ -6104,7 +6119,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     Something went wrong
                   </Text>
                   <Text className="text-[13px] leading-[20px] text-center font-pp-regular text-danger">
-                    {withdrawError || 'An unexpected error occurred. Please try again.'}
+                    {shareText(withdrawError) || 'An unexpected error occurred. Please try again.'}
                   </Text>
                 </View>
 

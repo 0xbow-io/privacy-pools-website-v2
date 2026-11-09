@@ -16,7 +16,6 @@ import { withPublicSwapRows } from '@/services/swap-route-evidence';
 import { swapHeadline, type SwapLeg } from '@/services/swap-rows';
 import { consolidationHeadline } from '@/services/self-transfer-row';
 import { Platform, Pressable, ScrollView, Text, View, useWindowDimensions, type ViewStyle } from 'react-native';
-import { FigureText, ShareFigure } from '@/components/ui/share-figure';
 import { DROPDOWN_SHADOW } from '@/components/ui/web-style-shims';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
@@ -71,8 +70,6 @@ function NotificationRow({ tx, colors, colorScheme }: { tx: Transaction; colors:
   const balanceDisplay = useBalanceDisplay(tx.chainId);
   const amountView = balanceDisplay(tx.tokenAmount, tx.asset, tx.chainId, tx.tokenAddress);
   const swapAmount = (leg: SwapLeg) => balanceDisplay(leg.tokenAmount, leg.asset, leg.chainId, leg.tokenAddress).text;
-  // A two-leg headline is text: a leg still loading becomes the shimmer (FigureText).
-  const headline = consolidationHeadline(tx) ?? swapHeadline(tx, swapAmount);
   const pending = tx.status === 'pending';
   // Same mark and direction glyph as the My transactions rows.
   const baseType = transactionBaseType(tx.type);
@@ -86,7 +83,7 @@ function NotificationRow({ tx, colors, colorScheme }: { tx: Transaction; colors:
           {/* nw-keep(data-color): direction glyph color is per-type (theme token, or the bespoke transfer hue) into the vector-icon sink */}
           <Ionicons name={transactionTypeGlyph(tx.type, baseType)} size={13} color={transactionTypeColor(baseType, colors, colorScheme)} />
           <Text className="min-w-0 flex-1 font-pp-medium text-[12.5px] text-text" numberOfLines={1}>
-            {rowTypeLabel(tx)} · {headline != null ? <FigureText text={headline} /> : <ShareFigure view={amountView} />}
+            {rowTypeLabel(tx)} · {consolidationHeadline(tx) ?? swapHeadline(tx, swapAmount) ?? amountView.text}
           </Text>
         </View>
         <Text className="font-pp-regular text-[11px] text-text-muted" numberOfLines={1}>

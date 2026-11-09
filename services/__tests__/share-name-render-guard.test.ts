@@ -8,9 +8,8 @@
  *     not a hand-written list, and every share there must have a display rule.
  *  2. The copy builders the Swap tab renders are RUN for every configured share,
  *     with and without a live rate, and their output must not name a share.
- *  3. Swap balance views go through underlyingOnlyView. No helper falls back to
- *     the share's own symbol any more: without a rate a rendered figure is a
- *     shimmer and plain text reads the count under the coin, marked "≈".
+ *  3. Balance views are share-free by construction (shareBalanceDisplay): without a
+ *     rate a rendered figure is a shimmer and plain text reads the loading figure.
  *  4. No string literal or JSX text in components/, app/ or hooks/ names a
  *     configured share.
  *
@@ -23,7 +22,7 @@ import { join, relative } from 'node:path';
 
 import { ENVIRONMENTS } from '@/config/environments';
 import {
-  approxUnderlyingText, displayTokenSymbol, isShareSymbol, shareAmountText, shareReviewHeadline, tokenAmountLabel, underlyingOnlyView,
+  approxUnderlyingText, displayTokenSymbol, isShareSymbol, shareAmountText, shareReviewHeadline, tokenAmountLabel,
 } from '@/services/share-display';
 import { shareBalanceDisplay } from '@/services/share-balance-display';
 import type { ShareRate } from '@/services/share-rates';
@@ -110,7 +109,7 @@ describe('what the Swap tab renders never names a share', () => {
     test(`${share.symbol}: a balance view, with and without a rate`, () => {
       for (const rate of [undefined, rateFor(share)]) {
         for (const sharesExact of ['0', '0.00999', '12.5']) {
-          const view = underlyingOnlyView(shareBalanceDisplay({ sharesExact, shareSymbol: share.symbol, rate, priceMap: {}, fallbackPrice: 0 }), share.symbol);
+          const view = shareBalanceDisplay({ sharesExact, shareSymbol: share.symbol, rate, priceMap: {}, fallbackPrice: 0 });
           expect(view.text).not.toMatch(SHARE_NAME);
           expect(view.symbol).not.toMatch(SHARE_NAME);
           expect(view.hint ?? '').not.toMatch(SHARE_NAME);
@@ -123,7 +122,7 @@ describe('what the Swap tab renders never names a share', () => {
 
     test(`${share.symbol}: nothing held and no rate reads as a plain zero, the coin named once`, () => {
       const coin = displayTokenSymbol(share.symbol);
-      const view = underlyingOnlyView(shareBalanceDisplay({ sharesExact: '0', shareSymbol: share.symbol, rate: undefined, priceMap: {}, fallbackPrice: 0 }), share.symbol);
+      const view = shareBalanceDisplay({ sharesExact: '0', shareSymbol: share.symbol, rate: undefined, priceMap: {}, fallbackPrice: 0 });
       expect(view.text).toMatch(new RegExp(`^0(?:\\.0+)? ${escape(coin)}$`));
       expect(view.text).not.toContain('shares');
       expect(view.symbol).toBe(coin);
@@ -139,7 +138,7 @@ describe('what the Swap tab renders never names a share', () => {
     expect(tokenAmountLabel('1.5', 'USDC')).toBe('1.5 USDC');
     expect(tokenAmountLabel('1.5', 'WETH')).toBe('1.5 ETH');
     const view = shareBalanceDisplay({ sharesExact: '1.5', shareSymbol: 'USDC', rate: undefined, priceMap: {}, fallbackPrice: 1 });
-    expect(underlyingOnlyView(view, 'USDC')).toBe(view);
+    expect(view.text).toBe("1.50 USDC");
   });
 
   test('the approval states name no share', () => {
@@ -183,24 +182,6 @@ describe('swap surfaces only use the share-free display rules', () => {
         expect(text).not.toMatch(/\bshares\b/i);
       }
     }
-  });
-
-  test('every balance view in the swap modal goes through underlyingOnlyView', () => {
-    const src = stripComments(read('components/swap-modal-provider.tsx'));
-    // The one call is inside swapView itself.
-    expect(src.match(/\bbalanceDisplay\(/g) ?? []).toHaveLength(1);
-    expect(src).toContain('underlyingOnlyView(balanceDisplay(exact, symbol, cid, tokenAddress), symbol)');
-    const sheet = stripComments(read('components/ui/token-select-sheet.tsx'));
-    for (const m of sheet.match(/\bbalanceDisplay\([^\n]*/g) ?? []) {
-      expect(m.startsWith('balanceDisplay(pool.balanceTokenExact')).toBe(true);
-    }
-    expect(sheet).toContain('underlyingOnlyView(balanceDisplay(pool.balanceTokenExact');
-  });
-
-  test('the hub balance headline is share-free on every tab', () => {
-    const hub = read('components/home/action-hub.tsx');
-    expect(hub).toContain('const pageBalanceView = underlyingOnlyView(');
-    expect(hub).toContain('const pagePendingView = underlyingOnlyView(');
   });
 });
 
@@ -294,7 +275,7 @@ describe('the word "shares" never reaches a screen', () => {
     test(`${share}: a balance view loads as a shimmer, then reads the converted coin`, () => {
       for (const rate of [undefined, RATE_OF(share)]) {
         for (const sharesExact of ['0', '0.00999', '12.5']) {
-          const view = underlyingOnlyView(shareBalanceDisplay({ sharesExact, shareSymbol: share, rate, priceMap: {}, fallbackPrice: 0 }), share);
+          const view = shareBalanceDisplay({ sharesExact, shareSymbol: share, rate, priceMap: {}, fallbackPrice: 0 });
           clean(view.text);
           clean(view.hint);
           expect(view.symbol).toBe(coin);

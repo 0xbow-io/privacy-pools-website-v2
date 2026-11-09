@@ -15,7 +15,6 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { CloseIcon } from '@/components/ui/modal-icons';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { FlatList, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from 'react-native';
-import { ShareFigure } from '@/components/ui/share-figure';
 import type { ViewStyle } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { useQuery } from '@tanstack/react-query';
@@ -28,7 +27,7 @@ import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import { ChainLogo, chainLogoChainFor } from '@/components/ui/chain-logo';
 import { TokenNetworkIcon } from '@/components/ui/token-network-icon';
-import { COMING_SOON_ASSET_SUBTITLE, displayTokenSymbol, isShareSymbol, LEGACY_ASSET_SUBTITLE, shareSubtitle, underlyingOnlyView, wrapsIntoShareSubtitle } from '@/services/share-display';
+import { COMING_SOON_ASSET_SUBTITLE, displayTokenSymbol, isShareSymbol, LEGACY_ASSET_SUBTITLE, shareSubtitle, wrapsIntoShareSubtitle } from '@/services/share-display';
 import { getKnownTokenMetadata } from '@/config/tokens';
 import { DEPOSITS_PAUSED_SUBTITLE, getConfiguredDepositRouteForPayToken } from '@/config/yield';
 import { useShareYield } from '@/hooks/use-share-yield';
@@ -195,8 +194,6 @@ type TokenRow = {
    * asset has none (or the pools data has not resolved) — never a fake 0.
    */
   privateBalance?: string;
-  /** The same balance as a view: a shimmer while the share rate loads. */
-  privateBalanceView?: { text: string; symbol: string; loading?: boolean };
   privateHint?: string | null;
   /** Directly depositable on the active chain (present in the pool config). */
   poolSupported: boolean;
@@ -374,9 +371,7 @@ export function TokenSelectSheet({
       // omits the line rather than printing "0 private".
       if (!Number.isFinite(amount) || amount <= 0) return;
       const key = pool.tokenAddress?.toLowerCase();
-      // A picker never names the share (DEV-591): the underlying at the live
-      // rate, or "0.00999 ETH shares" until the rate is known.
-      const formatted = underlyingOnlyView(balanceDisplay(pool.balanceTokenExact, pool.name, pool.chainId, pool.tokenAddress), pool.name);
+      const formatted = balanceDisplay(pool.balanceTokenExact, pool.name, pool.chainId, pool.tokenAddress);
       // Chain-qualified keys: myPools spans chains, and a bare address/symbol
       // key let a foreign row overwrite the active chain's entry — guaranteed
       // for the shared native sentinel (kimi review, finding 3).
@@ -630,7 +625,7 @@ export function TokenSelectSheet({
       // Read with the ROW's chain (an all-chains list spans several).
       const rowChain = chainOf(token);
       const priv = privateByToken.get(`${rowChain}:${token.address.toLowerCase()}`)
-        ?? privateByToken.get(`${rowChain}:${token.symbol.toUpperCase()}`);
+        ?? privateByToken.get(`${rowChain}:${token.symbol.toUpperCase()}`); // not-rendered: map key
       return {
         key: `${custom ? 'custom' : 'pool'}:${rowChain}:${token.address.toLowerCase()}`,
         symbol: token.symbol,
@@ -650,7 +645,7 @@ export function TokenSelectSheet({
           : (token.unavailableReason ? token.walletUsdValue : undefined),
         // Custom (pasted) tokens are not pool assets, so they have no shielded
         // balance by definition.
-        ...(!custom && priv && balanceMode !== 'none' ? { privateBalance: priv.text, privateBalanceView: priv, privateHint: priv.hint } : {}),
+        ...(!custom && priv && balanceMode !== 'none' ? { privateBalance: priv.text, privateHint: priv.hint } : {}),
         poolSupported: !custom,
         custom,
         poolAsset: !custom && !!token.poolAsset,
@@ -885,7 +880,7 @@ export function TokenSelectSheet({
           {row.privateHint ? <ShareCountHint hint={row.privateHint} /> : null}
           {row.privateBalance ? (
             <Text className="font-pp-regular text-[11px] text-text-muted">
-              {row.privateBalanceView ? <ShareFigure view={row.privateBalanceView} /> : row.privateBalance} private
+              {row.privateBalance} private
             </Text>
           ) : null}
         </View>

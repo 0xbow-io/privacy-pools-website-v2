@@ -448,7 +448,7 @@ export function describeSwapSendsSoFar(
   cleanup?: AllowanceCleanup,
   swap?: SwapSubmissionState | null,
 ): string {
-  const symbol = token?.symbol ?? 'your pay token';
+  const symbol = token ? displayTokenSymbol(token.symbol) : 'your pay token';
   const stillLive = liveAllowancesAfter(sent);
   const broadcast = broadcastApprovals(sent);
   const pending = broadcast.filter((record) => record.pending);
@@ -2396,7 +2396,7 @@ export async function runReshieldCrosschain(
   // before any estimate, when the output is not a share or the build lacks them.
   const transfer = params.recipient ? requireTransferCrosschainSession(sourceSession) : null;
   if (transfer && !needsShareRoute) {
-    throw new ReshieldPreflightError('This asset cannot be sent privately to that network. Pick a pool share, or use Withdraw.');
+    throw new ReshieldPreflightError('This asset cannot be sent privately to that network. Pick a supported token, or use Withdraw.');
   }
   if (needsShareRoute && !transfer) redepositYieldTarget(destinationSession, params.outputToken, true);
   const gross = toHex(params.grossWei);

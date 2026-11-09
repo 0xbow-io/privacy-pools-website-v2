@@ -5,8 +5,10 @@ import { spendableBalanceLabel } from '@/services/spendable-balance-label';
 import { pendingPoolReopenStep, type PendingPoolReopen } from '@/services/pool-pick-reopen';
 import { useShareAmountField } from '@/hooks/use-share-amount-field';
 import { depositValueText } from '@/services/sdk-error-amounts';
+import { formatUsdBalance } from '@/services/format-fiat';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
+import { FigureText } from '@/components/ui/share-figure';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SWAP_DEPOSIT_REFUND_NOTE } from '@/services/swap-deposit-copy';
 import { ENS_UNSUPPORTED_MESSAGE, isPotentialEnsName } from '@/services/ens';
@@ -22,7 +24,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { CARD_SHADOW, WEB_NO_OUTLINE } from '@/components/ui/web-style-shims';
 import { HoverHint } from '@/components/ui/hover-hint';
 import { ActivityIndicator, Animated, Easing, Linking, Platform, Pressable, ScrollView as RNScrollView, Text, TextInput, useWindowDimensions, View, type ViewStyle } from 'react-native';
-import { ShareFigure } from '@/components/ui/share-figure';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useIsFocused, useLocalSearchParams, useNavigation, usePathname, useRouter } from 'expo-router';
 import { useAccount, useBalance, useEstimateFeesPerGas, usePublicClient, useReadContract } from 'wagmi';
@@ -83,7 +84,7 @@ import { fiatEntryAvailable, formatUsdLabel, sanitizeUsdInput, shieldDestination
 import { getUiParam, pushUiParamEntry, retireUiParamEntry, rebaseUiParamEntry, subscribeUiUrl } from '@/components/ui-url-events';
 import { useShareYield } from '@/hooks/use-share-yield';
 import { useYieldVaultProbeVersion } from '@/hooks/use-yield-vault-probe';
-import { displayTokenSymbol, isShareSymbol, shareRedemptionDisclosure, underlyingOnlyView } from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol, presetChipLabel, shareRedemptionDisclosure, tokenAmountLabel } from '@/services/share-display';
 import { amountInputDisplay, compactAmountLabel, formatCopyAmount, formatTokenBalance, groupThousands, isStablecoin, stripAmountSeparators } from '@/services/token-format';
 import { conversionFundingToken, targetAcceptsConversion } from '@/config/intent-targets';
 import { getYieldShareToken } from '@/services/share-yield';
@@ -98,7 +99,7 @@ import { useWalletTokens } from '@/components/wallet-tokens-provider';
 import { listShieldPools, defaultPoolFor, type ShieldPool } from '@/services/shield-pools';
 import { fetchLifiContractCallDeliverable } from '@/services/lifi-quote';
 import { useSwapPreview } from '@/hooks/use-swap-preview';
-import { useShareRates } from '@/hooks/use-share-rates';
+import { useShareRates, useShareNameText } from '@/hooks/use-share-rates';
 import { previewInputAmount, previewIsIdentity, previewOutputUsd } from '@/services/swap-preview-input';
 import { formatSwapExitEstimate } from '@/services/swap-exit-estimate';
 import { sizeConvertingDeposit } from '@/services/cross-pay-sizing';
@@ -833,6 +834,7 @@ export function ActionHub({
     router.push(poolHubTabPath(path, action, id) as Parameters<typeof router.push>[0]);
     return true;
   }, [chainId, pathname, action, router]);
+  const shareText = useShareNameText(chainId);
   // Registration state of the typed recipient, checked while typing so the
   // form says what is about to happen BEFORE Shield is pressed: a deposit to
   // an unregistered address works, but it ends in a one-time claim link the
@@ -3148,12 +3150,15 @@ export function ActionHub({
   };
 
   const renderZone = (a: Action) => {
+    // This page's own entry. Every page renders at once (the pager shows the
+    // neighbours while swiping), and `amount` is the LIVE tab's: a Withdraw max
+    // (a share count, 18 decimals) printed on the off-screen Shield page as
+    // "Into the $USDC pool … 1752.504386443988721838 USDC" (QA on #72).
+    const pageAmount = a === action ? amount : (amounts[a] ?? '');
     const { symbol: pageTargetSymbol, chainId: pageChainId, shielded: pageShielded } = pageFigures[a];
     const pagePool = data.myPools.find((p) => p.name.toUpperCase() === pageTargetSymbol.toUpperCase() && p.chainId === pageChainId);
-    // The headline never names the share (DEV-591): the underlying at the live
-    // rate, or "0.00999 ETH shares" until it is known. Display only.
-    const pageBalanceView = underlyingOnlyView(balanceDisplay(a === 'withdraw' ? withdrawSpendableExact : pageShielded.exact, pageTargetSymbol, pageChainId, pagePool?.tokenAddress), pageTargetSymbol);
-    const pagePendingView = underlyingOnlyView(balanceDisplay(pagePool?.pendingTokenExact ?? '0', pageTargetSymbol, pageChainId, pagePool?.tokenAddress), pageTargetSymbol);
+    const pageBalanceView = balanceDisplay(a === 'withdraw' ? withdrawSpendableExact : pageShielded.exact, pageTargetSymbol, pageChainId, pagePool?.tokenAddress);
+    const pagePendingView = balanceDisplay(pagePool?.pendingTokenExact ?? '0', pageTargetSymbol, pageChainId, pagePool?.tokenAddress);
     // The single source for the CTA's dead state. It used to be written twice
     // inline (once for `disabled`, once for the opacity class), which is how a
     // condition can be added to the look and not to the behaviour.
@@ -3163,7 +3168,7 @@ export function ActionHub({
     const ctaDisabled = ((a === 'withdraw' || a === 'send') && !!amountField.error)
       || (a === 'swap' && (!swapOutToken || swapRecipientBlocks))
       || (a === 'shield' && (shieldRecipientInvalid || shieldCapBlocksDeposit || shieldPricing || shieldDepositsPaused));
-    const compactShield = landing && a === 'shield' && !amount && !shieldRecipientEnabled;
+    const compactShield = landing && a === 'shield' && !pageAmount && !shieldRecipientEnabled;
     const active = ACTIONS.find((x) => x.key === a)!;
     // A settling deposit keeps the FORM on screen (input visible, disabled)
     // and swaps only the bottom half (presets/fee/info/CTA) for the progress
@@ -3209,8 +3214,8 @@ export function ActionHub({
     const fiatTokenLine = a === 'shield'
       ? `${amount || '0'} ${displayTokenSymbol(payMeta.symbol)}`
       : a === 'request'
-        ? `${requestAmount || '0'} ${isShareSymbol(requestToken.symbol) ? requestToken.symbol : displayTokenSymbol(requestToken.symbol)}`
-        : `${amountField.value || '0'} ${amountField.symbol}`;
+        ? tokenAmountLabel(requestAmount || '0', requestToken.symbol)
+        : `${amountField.value || '0'} ${amountField.unitLabel}`;
     // A created request is frozen into its payload and its pay link: the figure
     // stays visible but inert. The PILL stays live — switching the token is the
     // documented way back to the form.
@@ -3254,7 +3259,7 @@ export function ActionHub({
           className={`items-center rounded-[6px] border px-[7px] py-[3px] ${activePreset ? 'border-tint' : 'border-border bg-card-background'} ${outOfReach ? 'opacity-40' : ''}`}
         >
           <Text className={`text-[11px] font-pp-regular ${activePreset ? 'text-tint' : outOfReach ? 'text-text-secondary' : 'text-text'}`}>
-            {zoneFiatEntry ? usdChipLabel(preset, fiatPrice) : a === 'withdraw' && isShareSymbol(tokenMeta.symbol) ? `${compactAmountLabel(preset)} ${amountField.symbol}` : compactAmountLabel(preset)}
+            {zoneFiatEntry ? usdChipLabel(preset, fiatPrice) : (a === 'withdraw' && isShareSymbol(tokenMeta.symbol) ? presetChipLabel(compactAmountLabel(preset), amountField.unitLabel) : compactAmountLabel(preset))}
           </Text>
         </Pressable>
       );
@@ -3598,7 +3603,7 @@ export function ActionHub({
               <TokenNetworkIcon symbol={tokenMeta.symbol} size={28} badgeSize={16} badgeTestnetLabel={false} chainId={chainId} />
               {/* nw-keep(data-color): per-asset runtime hue */}
               <Text className="font-pp-sans-semi-bold text-[15px]" style={{ color: hue.fg }}>
-                {a === 'swap' ? displayTokenSymbol(tokenMeta.symbol) : amountField.symbol}
+                {amountField.unitLabel}
               </Text>
               {/* nw-keep(data-color): caret color is a runtime theme token (vector-icon sink) */}
               <Ionicons name="chevron-down" size={14} color={colors.text} />
@@ -3643,7 +3648,7 @@ export function ActionHub({
               <TokenNetworkIcon symbol={requestToken.symbol} size={28} badgeSize={16} badgeTestnetLabel={false} chainId={requestToken.chainId} />
               {/* nw-keep(data-color): pill text uses the runtime per-asset hue */}
               <Text className="font-pp-sans-semi-bold text-[15px]" style={{ color: (TokenHues[colorScheme][requestToken.symbol] ?? TokenHues[colorScheme].ETH).fg }}>
-                {isShareSymbol(requestToken.symbol) ? requestToken.symbol : displayTokenSymbol(requestToken.symbol)}
+                {displayTokenSymbol(requestToken.symbol)}
               </Text>
               {/* Sui requests are always native SUI (the create path emits
                   0x2::sui::SUI): no sheet, so no caret. */}
@@ -3672,15 +3677,17 @@ export function ActionHub({
               className="-mt-[8px] flex-row items-center gap-[4px] self-start"
             >
               <Text className="font-pp-mono text-[13px] text-text-muted">
-                {zoneFiatEntry ? fiatTokenLine : formatUsdLabel(isShareSymbol(fiatAsset) ? shareFiatEntry ? amountField.usdValue : String(balanceDisplay(activeAmountText || '0', fiatAsset, chainId).usd) : usdInput)}
+                {/* A held position's dollar line is the balance header's figure, rounded DOWN (DEV-621). */}
+                {zoneFiatEntry ? fiatTokenLine : isShareSymbol(fiatAsset)
+                  ? formatUsdBalance(shareFiatEntry ? parseFloat(amountField.usdValue) || 0 : balanceDisplay(activeAmountText || '0', fiatAsset, chainId).usd)
+                  : formatUsdLabel(usdInput)}
               </Text>
               {/* nw-keep(data-color): swap glyph colour is a runtime theme token (vector-icon sink) */}
               <Ionicons name="swap-vertical" size={12} color={colors.textMuted} />
             </Pressable>
           ) : null}
-
           {a === action && (a === 'withdraw' || a === 'send') && amountField.error ? (
-            <Text className="font-pp-sans text-[12px] text-danger">{amountField.error}</Text>
+            <Text className="font-pp-sans text-[12px] text-danger">{shareText(amountField.error)}</Text>
           ) : null}
           {/* flex-NOwrap + min-w-0 on the right text: wrapping would grow the
               card (both reviews reproduced it with long balance+pending at
@@ -3717,10 +3724,7 @@ export function ActionHub({
                       : 'Shielded balance'}
               </Text>
               <Text className="font-pp-mono text-[12.5px] text-primary">
-                {/* A share figure waiting on its rate is a shimmer, never a share count. */}
-                {a !== 'shield' && !stellarLocked && pageBalanceView.loading && !(a === 'withdraw' ? (withdrawBalanceUnavailable || withdrawBalanceLoading) : poolsLoading)
-                  ? <ShareFigure view={pageBalanceView} />
-                  : groupThousands(a === 'shield'
+                <FigureText text={groupThousands(a === 'shield'
                   ? (walletBalanceLoading
                     ? '—'
                     // walletBalanceText is the PAY token's balance (formatted with
@@ -3737,7 +3741,7 @@ export function ActionHub({
                         : spendableBalanceLabel(withdrawSpendableExact, pageTargetSymbol, () => pageBalanceView.text))
                     : (poolsLoading
                       ? '—'
-                      : pageBalanceView.text))}
+                      : pageBalanceView.text))} />
               </Text>
             </Pressable>
             {a !== 'shield' && !poolsLoading && !stellarLocked && !(a === 'withdraw' && withdrawBalanceBlocked) ? <ShareCountHint hint={pageBalanceView.hint} /> : null}
@@ -3769,7 +3773,7 @@ export function ActionHub({
                       ? 'sign in to view'
                       : poolsLoading
                       ? '—'
-                      : <ShareFigure view={{ ...pageBalanceView, text: groupThousands(pageBalanceView.text) }} />}
+                      : <FigureText text={groupThousands(pageBalanceView.text)} />}
                   </Text>
                   {!poolsLoading && pageBalanceView.hint ? <Text className="text-text-muted">{' ⓘ'}</Text> : null}
                   {!poolsLoading && pageShielded.pending > 0 ? (
@@ -3872,7 +3876,7 @@ export function ActionHub({
                     // The quote's units, not the pool's: see shieldFundingUnits.
                     ? `~${formatCopyAmount(parseFloat(formatUnits(shieldQuote.toAmount!, shieldFundingUnits?.decimals ?? shieldPool.decimals)), displayTokenSymbol(shieldFundingUnits?.symbol ?? shieldPool.symbol))}`
                     : '—')
-                  : (amount || '0')}
+                  : (pageAmount || '0')}
               </Text>
               <Pressable
                 onPress={() => { if (!poolPickEnabled) return; setPoolSheetMode('shield'); setPoolSheetOpen(true); }}
@@ -4060,7 +4064,7 @@ export function ActionHub({
           className={`font-pp-sans text-[12px] ${shieldCapVerdict.reason === 'pending' ? 'text-text-muted' : 'text-[#E53935]'}`}
           testID="hub-shield-cap"
         >
-          {shieldCapVerdict.message}
+          {shareText(shieldCapVerdict.message)}
         </Text>
       )}
 
@@ -4071,9 +4075,9 @@ export function ActionHub({
           overlap.) */}
       {a === 'shield' && !shieldBusy && !isSui && walletConnected && !walletBalanceLoading
         && !shieldCapBlocksDeposit
-        && (parseFloat(amount) || 0) > (parseFloat(shieldMaxText) || 0) && (
+        && (parseFloat(pageAmount) || 0) > (parseFloat(shieldMaxText) || 0) && (
         <Text className="font-pp-sans text-[12px] text-[#E53935]">
-          {(parseFloat(amount) || 0) > (parseFloat(walletBalanceText) || 0)
+          {(parseFloat(pageAmount) || 0) > (parseFloat(walletBalanceText) || 0)
             ? `Exceeds your wallet balance (${formatCopyAmount(parseFloat(walletBalanceText) || 0, displayTokenSymbol(payMeta.symbol))} ${displayTokenSymbol(payMeta.symbol)}).`
             : `Leave room for ${shieldHeadroomRoomText({ vettingFeeBps, crossPayShield, payIsNative: !tokenAddress })}. You can shield up to ${formatCopyAmount(parseFloat(shieldMaxText) || 0, displayTokenSymbol(payMeta.symbol))} ${displayTokenSymbol(payMeta.symbol)}.`}
         </Text>
@@ -4364,7 +4368,7 @@ export function ActionHub({
           <Text className="text-center font-pp-sans-semi-bold text-[15px] text-text">
             Depositing {depositFlow.depositAmountFormatted}
           </Text>
-          <FlowProgress message={depositFlow.loadingMessage} />
+          <FlowProgress message={depositFlow.loadingMessage} chainId={chainId} />
           {/* "Deposit from" route cost, once the quote exists — the wallet is
               about to ask for an amount of the paying token the user never typed. */}
           {depositFlow.swapRouteEstimate && !depositFlow.swapConsent ? (
@@ -4396,7 +4400,7 @@ export function ActionHub({
               ) : null}
               {depositFlow.swapConsent.needsApproval ? (
                 <Text className="font-pp-sans text-[12px] leading-[17px] text-text-secondary">
-                  Two transactions: a {depositFlow.swapConsent.paySymbol} approval first, then the swap.
+                  Two transactions: a {displayTokenSymbol(depositFlow.swapConsent.paySymbol)} approval first, then the swap.
                 </Text>
               ) : null}
               {/* DEV-436: the wallet preview shows the unused slippage come back. */}
@@ -4493,7 +4497,7 @@ export function ActionHub({
           amount 1:1 and the fee comes out of the CONVERTED amount, so the fee
           is the quote's ≈ figure. */}
       {a === 'shield' && !shieldBusy && !isSui && vettingFeeBps != null && (!compactShield || vettingFeeBps > 0) && (() => {
-        const amt = parseFloat(amount) || 0;
+        const amt = parseFloat(pageAmount) || 0;
         const totalText = crossPayShield
           ? `${formatCopyAmount(amt, displayTokenSymbol(payMeta.symbol), 'up')} ${displayTokenSymbol(payMeta.symbol)}`
           : `${formatCopyAmount(amt * (1 + vettingFeeBps / 10000), displayTokenSymbol(pageTargetSymbol), 'up')} ${displayTokenSymbol(pageTargetSymbol)}`;
@@ -4810,7 +4814,7 @@ export function ActionHub({
         )}
 
         {picker.error && (
-          <Text className="text-center font-pp-sans text-[12px] text-danger">{picker.error}</Text>
+          <Text className="text-center font-pp-sans text-[12px] text-danger">{shareText(picker.error)}</Text>
         )}
 
         {!picker.wcUri && <Pressable onPress={closePicker} accessibilityRole="button" className="min-h-[44px] flex-row items-center justify-center gap-[8px]" hitSlop={8}>
