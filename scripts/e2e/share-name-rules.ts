@@ -36,12 +36,20 @@ export function findShareNames(text: string): ShareNameHit[] {
   // DEV-621: a stablecoin figure always has exactly two decimals ("4.97 USDT"),
   // so more is a count or an unformatted value ("4.918123 USDT").
   const STABLE_DIGITS = /(?<![\d.])\d[\d,]*\.\d{3,}\s+(USDC|USDT)\b/g;
+  // DEV-621: a dollar figure with decimals has exactly two ("$4.97"), so "$4.9"
+  // and "$4.9694" are an unformatted value. An abbreviated figure ("$10.82k",
+  // "$1.5M") and a "<$0.01" threshold are the other shapes. A whole-dollar
+  // amount ("$100") is not judged here: the Shield presets are whole dollars on
+  // purpose. figures.smoke.ts checks the pages that hold balances for it.
+  const USD_DIGITS = /(?<![\d.])\$\d[\d,]*(?:\.\d{3,}|\.\d(?![\d.,kKmMbB]))/g;
   const hits: ShareNameHit[] = [];
   const snip = (at: number, len: number) =>
     text.slice(Math.max(0, at - 40), Math.min(text.length, at + len + 40)).replace(/\s+/g, ' ').trim();
-  for (const re of [SYMBOL, PLURAL, COUNT, STABLE_DIGITS]) {
+  for (const re of [SYMBOL, PLURAL, COUNT, STABLE_DIGITS, USD_DIGITS]) {
     re.lastIndex = 0;
-    for (let m = re.exec(text); m; m = re.exec(text)) hits.push({ match: m[0], snippet: snip(m.index, m[0].length) });
+    for (let m = re.exec(text); m; m = re.exec(text)) {
+      hits.push({ match: m[0], snippet: snip(m.index, m[0].length) });
+    }
   }
   SINGULAR.lastIndex = 0;
   for (let m = SINGULAR.exec(text); m; m = SINGULAR.exec(text)) {
