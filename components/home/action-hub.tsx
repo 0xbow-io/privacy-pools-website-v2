@@ -1062,11 +1062,13 @@ export function ActionHub({
   const swapPreviewText = !swapOutUnits
     ? null
     : swapQuotedNet !== null && swapOutToken
-      ? `~${depositValueText(swapQuotedNet, swapOutToken.decimals)}`
+      ? `~${isStablecoin(swapOutToken.symbol)
+        ? formatSwapExitEstimate(swapQuotedNet, swapOutToken.decimals, swapOutToken.symbol)
+        : depositValueText(swapQuotedNet, swapOutToken.decimals)}`
     : swapPreviewIdentity && swapPreviewInWei !== null && swapPreviewInWei > 0n
-      ? `~${formatSwapExitEstimate(swapPreviewInWei, swapOutUnits.decimals)}`
+      ? `~${formatSwapExitEstimate(swapPreviewInWei, swapOutUnits.decimals, swapOutUnits.symbol)}`
       : swapPreview.status === 'ok'
-        ? `~${formatSwapExitEstimate(swapPreview.toAmount, swapOutUnits.decimals)}`
+        ? `~${formatSwapExitEstimate(swapPreview.toAmount, swapOutUnits.decimals, swapOutUnits.symbol)}`
         : null;
   // A bridge fee charged on top of the tokens (Stargate's LayerZero fee into
   // Ethereum runs ~$8 to $9). It is netted out of the estimate above, and named
