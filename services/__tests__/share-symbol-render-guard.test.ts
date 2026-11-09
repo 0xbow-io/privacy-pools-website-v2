@@ -102,7 +102,7 @@ describe('no raw share symbol can reach a render', () => {
   test('the display rules rename shares and leave plain tokens alone', () => {
     expect(displayTokenSymbol('ppUSDT')).toBe('USDT');
     expect(displayTokenSymbol('USDC')).toBe('USDC');
-    expect(approxUnderlyingText('1.5 ppUSDC', 'ppUSDC')).toBe('≈ 1.5 USDC');
+    expect(approxUnderlyingText('1.5 ppUSDC', 'ppUSDC')).toBe('… USDC');
     expect(approxUnderlyingText('1.5 USDC', 'USDC')).toBe('1.5 USDC');
   });
 });
@@ -144,13 +144,13 @@ describe('the word "shares" never reaches a screen', () => {
 
   for (const share of SHARE_SYMBOLS) {
     const coin = displayTokenSymbol(share);
-    test(`${share}: labels are the plain coin, amounts never a share count label`, () => {
+    test(`${share}: labels are the plain coin, a count never reaches the screen (DEV-621)`, () => {
       expect(coin).toMatch(/^(?:USDC|USDT|ETH)$/);
-      expect(tokenAmountLabel('0.1', share)).toBe(`≈ 0.1 ${coin}`);
-      expect(approxUnderlyingText(`0.1 ${share}`, share)).toBe(`≈ 0.1 ${coin}`);
+      expect(tokenAmountLabel('0.1', share)).toBe(`… ${coin}`);
+      expect(approxUnderlyingText(`0.1 ${share}`, share)).toBe(`… ${coin}`);
       const format = (n: number) => String(n);
-      expect(shareAmountText({ amount: 0.1, assetSymbol: share, underlyingAmount: null, format })).toBe(`≈ 0.1 ${coin}`);
-      expect(shareReviewHeadline({ isShare: true, shares: 0.1, shareSymbol: share, underlyingSymbol: coin, underlying: null, pending: false, format })).toBe(`≈ 0.1 ${coin}`);
+      expect(shareAmountText({ amount: 0.1, assetSymbol: share, underlyingAmount: null, format })).toBe(`… ${coin}`);
+      expect(shareReviewHeadline({ isShare: true, shares: 0.1, shareSymbol: share, underlyingSymbol: coin, underlying: null, pending: false, format })).toBe(`… ${coin}`);
       for (const text of [tokenAmountLabel('0.1', share), approxUnderlyingText(`0.1 ${share}`, share)]) clean(text);
     });
 

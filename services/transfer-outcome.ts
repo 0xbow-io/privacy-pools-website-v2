@@ -171,8 +171,8 @@ export function translateSdkTransactError(
       return null;
     }
     const short = requested > available ? requested - available : 0n;
-    // A share figure is a count of the coin's shares ("0.1 ETH shares"), never
-    // the share's own name (services/share-display.ts).
+    // A share figure without its rate reads as loading ("… ETH"), never the
+    // count and never the share's own name (services/share-display.ts).
     // Costs round up, what the notes hold rounds down (Mike, #282).
     const f = (v: bigint, up: boolean) =>
       tokenAmountLabel(formatShortfallAmount(v, token.decimals, up, token.symbol), token.symbol);

@@ -17,15 +17,14 @@
 //
 // Rate unknown (loading, read gap): a held share is `loading`, and a rendered
 // figure shows the shimmer (components/ui/share-figure.tsx) until the rate
-// arrives. `text` then holds the count under the coin, marked approximate
-// ("≈ 0.09989 ETH"), only for plain-text messages that cannot hold a shimmer.
-// Nothing held reads as a plain zero under the coin ("0.00 ETH"). `symbol` is
+// arrives. `text` then holds the loading figure ("… ETH", LOADING_FIGURE),
+// never the count (DEV-621). Nothing held reads as a plain zero under the coin ("0.00 ETH"). `symbol` is
 // always the coin, never the share. Display only: nothing here feeds a MAX
 // or withdraw amount, those keep reading the exact share strings.
 import { formatUnits } from 'viem';
 import { parseTokenAmount } from '@/services/token-amount';
-import { formatTokenBalance } from '@/services/token-format';
-import { displayTokenSymbol, isShareSymbol, tokenAmountLabel } from '@/services/share-display';
+import { formatTokenBalance, LOADING_FIGURE } from '@/services/token-format';
+import { displayTokenSymbol, isShareSymbol } from '@/services/share-display';
 import { formatShareAsUnderlying, shareExactAsUnderlying, underlyingPriceFor, type ShareRate } from '@/services/share-rates';
 
 export type ShareBalanceDisplay = {
@@ -34,14 +33,13 @@ export type ShareBalanceDisplay = {
   /** The coin the figure is in: always the underlying's name, never the share's. */
   symbol: string;
   /**
-   * "0.1 ETH", or "0.00 ETH" when nothing is held. While loading, the share
-   * count marked approximate ("≈ 0.09989 ETH"): a fallback for plain-text
-   * messages only. A rendered figure shows the shimmer instead (ShareFigure).
+   * "0.1 ETH", or "0.00 ETH" when nothing is held. While loading, "… ETH": a
+   * rendered figure shows the shimmer there (ShareFigure, FigureText).
    */
   text: string;
-  /** A share is held and its rate is not known yet: render a shimmer, not `text`. */
+  /** A share is held and its rate is not known yet: render a shimmer, not a number. */
   loading: boolean;
-  /** USD for the figure; approximate when not converted. */
+  /** USD for the figure; 0 while loading (the caller shows the shimmer). */
   usd: number;
   converted: boolean;
   /** Tooltip naming the share count; null when there is nothing to explain. */
@@ -76,18 +74,18 @@ export function shareBalanceDisplay(args: {
       loading: false,
     };
   }
-  // Nothing held reads as a plain zero; a holding is the share count under the
-  // coin's name, marked approximate (tokenAmountLabel).
+  // Nothing held reads as a plain zero; a held share waits for its rate and
+  // never shows its count (DEV-621).
   const symbol = displayTokenSymbol(shareSymbol);
-  const figure = formatTokenBalance(shares, symbol);
+  const loading = isShareSymbol(shareSymbol) && shares > 0;
   return {
-    amount: shares,
+    amount: loading ? 0 : shares,
     symbol,
-    text: shares > 0 ? tokenAmountLabel(figure, shareSymbol) : `${figure} ${symbol}`,
-    usd: shares * fallbackPrice,
+    text: `${loading ? LOADING_FIGURE : formatTokenBalance(shares, symbol)} ${symbol}`,
+    usd: loading ? 0 : shares * fallbackPrice,
     converted: false,
     hint: null,
-    loading: isShareSymbol(shareSymbol) && shares > 0,
+    loading,
   };
 }
 

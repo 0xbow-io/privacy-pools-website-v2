@@ -2,6 +2,7 @@ import { spendableBalanceLabel } from '@/services/spendable-balance-label';
 import { useShareAmountField } from '@/hooks/use-share-amount-field';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
+import { Skeleton } from '@/components/ui/skeleton';
 import { SWAP_DEPOSIT_REFUND_NOTE } from '@/services/swap-deposit-copy';
 import { ENS_UNSUPPORTED_MESSAGE, isPotentialEnsName } from '@/services/ens';
 import { ExplorerPrivacyHint, explorerNameFromUrl } from '@/components/ui/explorer-privacy-hint';
@@ -78,7 +79,7 @@ import { getUiParam, pushUiParamEntry, retireUiParamEntry, rebaseUiParamEntry, s
 import { useShareYield } from '@/hooks/use-share-yield';
 import { useYieldVaultProbeVersion } from '@/hooks/use-yield-vault-probe';
 import { displayTokenSymbol, isShareSymbol, shareRedemptionDisclosure } from '@/services/share-display';
-import { formatTokenBalance, isStablecoin } from '@/services/token-format';
+import { formatCopyAmount, formatTokenBalance, isStablecoin } from '@/services/token-format';
 import { conversionFundingToken, targetAcceptsConversion } from '@/config/intent-targets';
 import { getYieldShareToken } from '@/services/share-yield';
 import { compactPhoneLayout } from '@/services/header-nav';
@@ -2793,7 +2794,7 @@ export function ActionHub({
             const held = parseFloat(walletBalanceText) || 0;
             if ((parseFloat(amount) || 0) > held) {
               toast({
-                title: `That's more ${displayTokenSymbol(payMeta.symbol)} than your wallet holds on ${getChainConfig(chainId)?.displayName ?? 'this network'} (${held.toLocaleString('en-US', { maximumFractionDigits: 6 })} ${displayTokenSymbol(payMeta.symbol)}).`,
+                title: `That's more ${displayTokenSymbol(payMeta.symbol)} than your wallet holds on ${getChainConfig(chainId)?.displayName ?? 'this network'} (${formatCopyAmount(held, displayTokenSymbol(payMeta.symbol))} ${displayTokenSymbol(payMeta.symbol)}).`,
                 variant: 'destructive',
               });
               return;
@@ -3425,6 +3426,13 @@ export function ActionHub({
           {zoneFiatEntry ? (
             <Text testID="hub-fiat-prefix" className={`py-[2px] font-pp-sans-bold ${heroText} tracking-[-1px] text-text-secondary`}>$</Text>
           ) : null}
+          {/* A share amount set (MAX, a preset) before the rate is in: the
+              field waits with the shimmer, never the count (DEV-621). */}
+          {!zoneFiatEntry && !isRequestCard && amountField.loading && !amountField.value && (parseFloat(amount) || 0) > 0 ? (
+            <View testID="hub-amount-loading" className="min-w-0 flex-1 py-[10px]">
+              <Skeleton width={140} height={tight ? 30 : 38} radius={8} />
+            </View>
+          ) : (
           <TextInput
             value={zoneFiatEntry ? shareFiatEntry ? amountField.usdValue : usdInput : isRequestCard ? requestAmount : amountField.value}
             onChangeText={(text) => {
@@ -3490,6 +3498,7 @@ export function ActionHub({
               ),
             }]}
           />
+          )}
           {/* Selector pill on the amount row, aligned with the figure
               (2026-08-18 layout): withdraw/send/swap = the source POOL
               (chain-grouped sheet); shield = the PAY token (Alchemy-fed
@@ -3779,7 +3788,7 @@ export function ActionHub({
                 {compactShield ? shieldDestinationLabel(shieldPool) : crossPayShield
                   ? (shieldQuote.status === 'ok' && shieldPool
                     // The quote's units, not the pool's: see shieldFundingUnits.
-                    ? `≈ ${parseFloat(formatUnits(shieldQuote.toAmount!, shieldFundingUnits?.decimals ?? shieldPool.decimals)).toLocaleString('en-US', { maximumFractionDigits: 6 })}`
+                    ? `~${formatCopyAmount(parseFloat(formatUnits(shieldQuote.toAmount!, shieldFundingUnits?.decimals ?? shieldPool.decimals)), displayTokenSymbol(shieldFundingUnits?.symbol ?? shieldPool.symbol))}`
                     : '—')
                   : (amount || '0')}
               </Text>
@@ -3966,8 +3975,8 @@ export function ActionHub({
         && (parseFloat(amount) || 0) > (parseFloat(shieldMaxText) || 0) && (
         <Text className="font-pp-sans text-[12px] text-[#E53935]">
           {(parseFloat(amount) || 0) > (parseFloat(walletBalanceText) || 0)
-            ? `Exceeds your wallet balance (${(parseFloat(walletBalanceText) || 0).toLocaleString('en-US', { maximumFractionDigits: 6 })} ${displayTokenSymbol(payMeta.symbol)}).`
-            : `Leave room for ${shieldHeadroomRoomText({ vettingFeeBps, crossPayShield, payIsNative: !tokenAddress })}. You can shield up to ${(parseFloat(shieldMaxText) || 0).toLocaleString('en-US', { maximumFractionDigits: 6 })} ${displayTokenSymbol(payMeta.symbol)}.`}
+            ? `Exceeds your wallet balance (${formatCopyAmount(parseFloat(walletBalanceText) || 0, displayTokenSymbol(payMeta.symbol))} ${displayTokenSymbol(payMeta.symbol)}).`
+            : `Leave room for ${shieldHeadroomRoomText({ vettingFeeBps, crossPayShield, payIsNative: !tokenAddress })}. You can shield up to ${formatCopyAmount(parseFloat(shieldMaxText) || 0, displayTokenSymbol(payMeta.symbol))} ${displayTokenSymbol(payMeta.symbol)}.`}
         </Text>
       )}
 
@@ -4370,17 +4379,17 @@ export function ActionHub({
       {a === 'shield' && !shieldBusy && !isSui && vettingFeeBps != null && (!compactShield || vettingFeeBps > 0) && (() => {
         const amt = parseFloat(amount) || 0;
         const totalText = crossPayShield
-          ? `${amt.toLocaleString('en-US', { maximumFractionDigits: 6 })} ${displayTokenSymbol(payMeta.symbol)}`
-          : `${(amt * (1 + vettingFeeBps / 10000)).toLocaleString('en-US', { maximumFractionDigits: 6 })} ${displayTokenSymbol(pageTargetSymbol)}`;
+          ? `${formatCopyAmount(amt, displayTokenSymbol(payMeta.symbol), 'up')} ${displayTokenSymbol(payMeta.symbol)}`
+          : `${formatCopyAmount(amt * (1 + vettingFeeBps / 10000), displayTokenSymbol(pageTargetSymbol), 'up')} ${displayTokenSymbol(pageTargetSymbol)}`;
         const feeText = vettingFeeBps === 0
           ? null
           : amt <= 0
             ? `Vetting fee 0 ${displayTokenSymbol(pageTargetSymbol)}`
             : crossPayShield
               ? (shieldQuote.status === 'ok' && shieldQuote.toAmount != null && shieldPool
-                ? `Vetting fee ≈ ${parseFloat(formatUnits((shieldQuote.toAmount * BigInt(vettingFeeBps)) / 10_000n, shieldPool.decimals)).toLocaleString('en-US', { maximumFractionDigits: 6 })} ${displayTokenSymbol(shieldPool.symbol)}`
+                ? `Vetting fee ~${formatCopyAmount(parseFloat(formatUnits((shieldQuote.toAmount * BigInt(vettingFeeBps)) / 10_000n, shieldPool.decimals)), displayTokenSymbol(shieldPool.symbol), 'up')} ${displayTokenSymbol(shieldPool.symbol)}`
                 : null)
-              : `Vetting fee ${(amt * (vettingFeeBps / 10000)).toLocaleString('en-US', { maximumFractionDigits: 6 })} ${displayTokenSymbol(pageTargetSymbol)}`;
+              : `Vetting fee ${formatCopyAmount(amt * (vettingFeeBps / 10000), displayTokenSymbol(pageTargetSymbol), 'up')} ${displayTokenSymbol(pageTargetSymbol)}`;
         return (
           <View className="flex-row flex-nowrap items-center justify-between gap-[8px] px-[2px]">
             {!compactShield && <Text numberOfLines={1} className="min-w-0 shrink font-pp-sans text-[12px] text-text-muted">

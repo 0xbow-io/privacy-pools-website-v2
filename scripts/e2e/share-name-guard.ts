@@ -3,6 +3,10 @@
 //
 // The share-name guard for every browser run.
 //
+// It also fails a run that paints a raw count under a coin label ("≈ 4.94
+// USDT") or a stablecoin figure with more than two decimals (DEV-621): the
+// rules are in share-name-rules.ts.
+//
 // Installed once per page, it scans what the user can read: document.body
 // innerText plus every aria-label, title, placeholder and alt. It scans on
 // every DOM change (debounced), so a toast, modal or dialog that is up for one

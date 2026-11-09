@@ -4,8 +4,8 @@
  * everywhere the Send flow, its receipts, the activity row that follows, the
  * payment-request pay flow and the claim link render, with or without a live
  * rate. While the rate loads a rendered figure is a shimmer (view.loading), and
- * plain text reads the count under the coin, marked approximate ("≈ 0.1 ETH").
- * Never a share name, never the word "shares".
+ * plain text holds the loading figure ("… ETH"), never the count (DEV-621).
+ * Never a share name, never the noun.
  *
  * The share list comes from CONFIG (every environment's token registry), and
  * every builder below is RUN for each share, with and without a rate. The
@@ -134,7 +134,7 @@ describe('what the Send flow renders never names a share', () => {
           for (const shown of [view.text, `~${view.text}`, view.hint ?? '', view.symbol]) expect(shown).not.toMatch(SHARE_NAME);
           for (const shown of [view.text, view.hint ?? '']) expect(shown).not.toMatch(/\bshares?\b/i);
           expect(view.loading).toBe(!rate && exact !== '0');
-          if (!rate && exact !== '0') expect(view.text).toBe(`≈ ${view.text.replace(/^≈ /, '').split(' ')[0]} ${coin}`);
+          if (!rate && exact !== '0') expect(view.text).toBe(`… ${coin}`);
           if (rate) expect(view.converted).toBe(true);
         }
         // Numbers (activity rows pass tokenAmount as a number).
@@ -203,9 +203,9 @@ describe('what the Send flow renders never names a share', () => {
 
     test(`${share.symbol}: request labels and counts name the coin only`, () => {
       expect(displayTokenSymbol(share.symbol)).toBe(coin);
-      expect(tokenAmountLabel('0.01', share.symbol)).toBe(`≈ 0.01 ${coin}`);
-      expect(shareFreeText(`Received payment imported as 0.5 ${share.symbol}.`)).toBe(`Received payment imported as ≈ 0.5 ${coin}.`);
-      expect(shareFreeText(`Received ≈ 0.5 ${share.symbol}.`)).toBe(`Received ≈ 0.5 ${coin}.`);
+      expect(tokenAmountLabel('0.01', share.symbol)).toBe(`… ${coin}`);
+      expect(shareFreeText(`Received payment imported as 0.5 ${share.symbol}.`)).toBe(`Received payment imported as … ${coin}.`);
+      expect(shareFreeText(`Received ≈ 0.5 ${share.symbol}.`)).toBe(`Received … ${coin}.`);
     });
   }
 

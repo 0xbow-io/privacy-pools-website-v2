@@ -1623,7 +1623,7 @@ export function shapeReshieldForDisplay(
   const amountText = (value: bigint, units: { symbol: string; decimals: number }) => {
     const figure = formatUnitsText(value, units.decimals, fractionDigitsFor(value, units.decimals));
     const symbol = displayTokenSymbol(units.symbol);
-    return isShareSymbol(units.symbol) ? `≈ ${figure} ${symbol}` : `${figure} ${symbol}`;
+    return isShareSymbol(units.symbol) ? tokenAmountLabel(figure, units.symbol) : `${figure} ${symbol}`;
   };
   const inputText = (raw: string) => amountText(hexToBigInt(raw), input);
   const outputText = (raw: string) => amountText(hexToBigInt(raw), output);

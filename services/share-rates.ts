@@ -65,12 +65,24 @@ export function shareExactAsUnderlying(sharesExact: string, rate: ShareRate): nu
   try {
     sharesWei = parseUnits(sharesExact || '0', rate.shareDecimals);
   } catch {
-    // Not a decimal string this rate can convert: the caller keeps the share
-    // count rather than printing a false "0.00 USDC" (codex on 0659770).
+    // Not a decimal string this rate can convert: the caller shows the figure
+    // as loading rather than printing a false "0.00 USDC" (codex on 0659770).
     return null;
   }
-  const assets = (sharesWei * rate.assetsPerShare) / 10n ** BigInt(rate.shareDecimals);
-  return Number(formatUnits(assets, rate.underlyingDecimals));
+  return Number(formatUnits(displayUnderlyingWei(sharesWei, rate), rate.underlyingDecimals));
+}
+
+/**
+ * The underlying base units a share amount is worth, for DISPLAY: the exact
+ * product taken up to the next base unit. A typed underlying amount is turned
+ * into the pool's units by flooring (shareAmountFromUnderlying), which leaves
+ * it worth a fraction of a base unit less than typed; a floor here as well made a typed
+ * "5" read back "4.99" once rounded down to cents. Never an operation amount.
+ */
+export function displayUnderlyingWei(sharesWei: bigint, rate: ShareRate): bigint {
+  const unit = 10n ** BigInt(rate.shareDecimals);
+  const product = sharesWei * rate.assetsPerShare;
+  return product / unit + (product % unit > 0n ? 1n : 0n);
 }
 
 /**

@@ -34,8 +34,8 @@ export function useBalanceDisplay(activeChainId?: number) {
 /**
  * useBalanceDisplay for a surface that never names the share (the Send flow,
  * its receipts and activity rows, payment requests, claim links): the converted
- * underlying, or "0.1 ETH shares" while the rate is still loading, never the
- * share's own name. Same signature and fields, display only.
+ * underlying, or loading ("… ETH", the shimmer) while the rate is, never the
+ * count and never the share's own name. Same signature and fields, display only.
  */
 export function useShareFreeBalanceDisplay(activeChainId?: number) {
   const display = useBalanceDisplay(activeChainId);

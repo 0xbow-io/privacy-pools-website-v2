@@ -12,6 +12,7 @@ import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { useShareFreeBalanceDisplay } from '@/hooks/use-balance-display';
 
 import { BalanceAmount } from '@/components/pools/balance-amount';
+import { FigureText } from '@/components/ui/share-figure';
 import { TokenMark } from '@/components/ui/token-network-icon';
 import { sdkErrorText } from '@/services/sdk-error-amounts';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
@@ -1398,7 +1399,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
     // live inputs (codex r3: a 1 ETH request could display as Ready for a
     // later 2 USDC edit).
     const frozenView = balanceDisplay(amountInput.trim(), isSui ? 'SUI' : requestTokenSymbol, chainId);
-    const frozenAmountLabel = `${isShareSymbol(requestTokenSymbol) && frozenView.converted ? '≈ ' : ''}${frozenView.text}`;
+    const frozenAmountLabel = `${isShareSymbol(requestTokenSymbol) && frozenView.converted ? '~' : ''}${frozenView.text}`;
     // === Stellar path === the SDK's blind request (stellar-request.ts): the
     // link carries note slots, a payment key and a tag, never this account's
     // address. The SDK keeps the request in this account, and its sync finds
@@ -4071,17 +4072,17 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                 and the success card after it (DEV-496). */}
             {statusMessage && !payRunning && !statusBoxHidden ? (
               <View className="rounded-control border border-[#98B975] bg-[#F5FAEE] px-[12px] py-[10px]">
-                <Text className="font-pp-regular text-[13px] text-[#6E8A42]">{shareFreeText(statusMessage)}</Text>
+                <Text className="font-pp-regular text-[13px] text-[#6E8A42]"><FigureText text={shareFreeText(statusMessage)} /></Text>
               </View>
             ) : null}
             {warningMessage ? (
               <View className="rounded-control border border-[#E1C26B] bg-[#FFF9E8] px-[12px] py-[10px]">
-                <Text className="font-pp-regular text-[13px] text-[#8A6B1F]">{shareFreeText(warningMessage)}</Text>
+                <Text className="font-pp-regular text-[13px] text-[#8A6B1F]"><FigureText text={shareFreeText(warningMessage)} /></Text>
               </View>
             ) : null}
             {errorMessage ? (
               <View className="rounded-control border border-[#F2B8B5] bg-[#FFF4F4] px-[12px] py-[10px]">
-                <Text className="font-pp-regular text-[13px] text-danger">{shareFreeText(errorMessage)}</Text>
+                <Text className="font-pp-regular text-[13px] text-danger"><FigureText text={shareFreeText(errorMessage)} /></Text>
               </View>
             ) : null}
 

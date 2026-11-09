@@ -202,7 +202,7 @@ describe('feed -> SDK input mapping', () => {
     const entry = toYieldEarnedEntry(result, rateSeries!.assetDecimals);
     // 100 shares held at 1.01, bought for exactly 100 USDC.
     expect(entry).toMatchObject({ status: 'ok', earnedTotal: 1_000_000n, assetDecimals: 6 });
-    expect(yieldEarnedDisplay(entry, 'USDC')?.text).toBe('+1 USDC');
+    expect(yieldEarnedDisplay(entry, 'USDC')?.text).toBe('+1.00 USDC');
   });
 
   test('an own deposit the feed has not indexed yet is no figure, not a guess', () => {
@@ -238,10 +238,10 @@ describe('display threshold', () => {
 
   test('figures in the underlying, "—" (null) when there is none or the bound shows', () => {
     expect(yieldEarnedDisplay(ok(1_234_567n, 2n), 'USDC')).toEqual({ text: '+1.23 USDC', amount: 1.234567 });
-    expect(yieldEarnedDisplay(ok(3_000n, 2n), 'USDT')).toEqual({ text: '+0.003 USDT', amount: 0.003 });
-    expect(yieldEarnedDisplay(ok(0n, 0n), 'USDC')).toEqual({ text: '0 USDC', amount: 0 });
+    expect(yieldEarnedDisplay(ok(3_000n, 2n), 'USDT')).toEqual({ text: '<0.01 USDT', amount: 0.003 });
+    expect(yieldEarnedDisplay(ok(0n, 0n), 'USDC')).toEqual({ text: '0.00 USDC', amount: 0 });
     // Negative only within the bound: printed as zero, never red.
-    expect(yieldEarnedDisplay(ok(-2n, 3n), 'USDC')).toEqual({ text: '0 USDC', amount: 0 });
+    expect(yieldEarnedDisplay(ok(-2n, 3n), 'USDC')).toEqual({ text: '0.00 USDC', amount: 0 });
     expect(yieldEarnedDisplay(ok(12_345_000_000_000_000n, 3n, 18), 'ETH')).toEqual({ text: '+0.01235 ETH', amount: 0.012345 });
     expect(yieldEarnedDisplay(ok(5_000_000n, 10_000n), 'USDC')).toBeNull();
     expect(yieldEarnedDisplay({ status: 'unavailable', reason: 'no-rate-series' }, 'USDC')).toBeNull();

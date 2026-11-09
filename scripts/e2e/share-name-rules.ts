@@ -29,10 +29,17 @@ export function findShareNames(text: string): ShareNameHit[] {
   const NOUN_BEFORE = /(\d|\b(a|an|the|one|each|per|every|pool|vault|yield|your|this|that|its|their|of|in|as))\s+$/i;
   // A unit after it: "share count", "share amount", "share balance", "share rate".
   const NOUN_AFTER = /^\s+(counts?|amounts?|balances?|rates?|prices?|tokens?|values?|units?|figures?|symbols?|names?|class|of\b)/i;
+  // DEV-621: a raw count under a coin label. The old fallback printed the count
+  // marked "≈" ("≈ 4.94 USDT"); a converted estimate is written "~", and a
+  // figure still loading is a shimmer, so a "≈" before a coin figure is a count.
+  const COUNT = /≈\s*<?\d[\d,]*(?:\.\d+)?[KMB]?\s+(ETH|USDC|USDT)\b/g;
+  // DEV-621: a stablecoin figure always has exactly two decimals ("4.97 USDT"),
+  // so more is a count or an unformatted value ("4.918123 USDT").
+  const STABLE_DIGITS = /(?<![\d.])\d[\d,]*\.\d{3,}\s+(USDC|USDT)\b/g;
   const hits: ShareNameHit[] = [];
   const snip = (at: number, len: number) =>
     text.slice(Math.max(0, at - 40), Math.min(text.length, at + len + 40)).replace(/\s+/g, ' ').trim();
-  for (const re of [SYMBOL, PLURAL]) {
+  for (const re of [SYMBOL, PLURAL, COUNT, STABLE_DIGITS]) {
     re.lastIndex = 0;
     for (let m = re.exec(text); m; m = re.exec(text)) hits.push({ match: m[0], snippet: snip(m.index, m[0].length) });
   }

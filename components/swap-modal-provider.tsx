@@ -18,7 +18,7 @@ import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
 import { AlertCircleIcon, CaretDownIcon, CheckCircleIcon, CloseIcon } from '@/components/ui/modal-icons';
 import { WEB_NO_OUTLINE } from '@/components/ui/web-style-shims';
 import { View, Text, Pressable, Platform, useWindowDimensions, TextInput, Animated, ScrollView, Linking } from 'react-native';
-import { ShareFigure } from '@/components/ui/share-figure';
+import { FigureText, ShareFigure } from '@/components/ui/share-figure';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Svg, { Circle } from 'react-native-svg';
 import { useAccount } from 'wagmi';
@@ -93,7 +93,7 @@ import { isCustomSlippage, parseCustomSlippage, slippageLabel } from '@/services
 import { isLegacyPlainToken } from '@/config/pool-paths';
 import { getKnownTokenMetadata, getTokenMetadata } from '@/config/tokens';
 import { visibleSwapSources } from '@/services/pool-slug';
-import { displayTokenSymbol} from '@/services/share-display';
+import { displayTokenSymbol, swapRateText } from '@/services/share-display';
 import { handoffRefused, resolveHandoffToken } from '@/services/swap-token-handoff';
 import { friendlySwapError, relaySwapRefusalText } from '@/services/swap-error-copy';
 import { sameSymbol } from '@/services/symbol-match';
@@ -3343,7 +3343,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                   {!!snapshot.display.rate && (
                     <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                       <Text className="text-[13px] text-text-muted font-pp-medium">Rate</Text>
-                      <Text className="text-[13px] text-text font-pp-regular">1 {balanceDisplay('1', snapshot.fromToken.symbol, chainId).symbol} ≈ {Number(snapshot.display.rate) * balanceDisplay('1', snapshot.outputToken.symbol, snapshot.destinationChainId).amount / balanceDisplay('1', snapshot.fromToken.symbol, chainId).amount} {balanceDisplay('1', snapshot.outputToken.symbol, snapshot.destinationChainId).symbol}</Text>
+                      <Text className="text-[13px] text-text font-pp-regular"><FigureText text={swapRateText(Number(snapshot.display.rate), balanceDisplay('1', snapshot.fromToken.symbol, chainId), balanceDisplay('1', snapshot.outputToken.symbol, snapshot.destinationChainId))} /></Text>
                     </View>
                   )}
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">

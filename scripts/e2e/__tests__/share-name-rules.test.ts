@@ -16,6 +16,20 @@ describe('share-name guard rules', () => {
     expect(names('appETHx')).toEqual([]);
   });
 
+  test('a raw count under a coin label is caught (DEV-621)', () => {
+    // The old fallback: the count, marked "≈", under the coin's name.
+    expect(names('Shielded ≈ 4.94 USDT')).toEqual(['≈ 4.94 usdt']);
+    expect(names('≈ 0.09989 ETH pending')).toHaveLength(1);
+    expect(names('need ≈1,234.5 USDC')).toHaveLength(1);
+    // A stablecoin figure with more than two decimals: a count or a raw value.
+    expect(names('Received 4.918123 USDT')).toEqual(['4.918123 usdt']);
+    expect(names('1,250.505 USDC')).toHaveLength(1);
+    // What the screen shows now passes: the converted figure, an estimate, a dollar figure.
+    for (const ok of ['4.97 USDT', '~4.97 USDT', '≈ $4.97', '0.00412 ETH', '1 ETH = 2,512.12 USDC', '<0.01 USDC', '… USDT']) {
+      expect(names(ok)).toEqual([]);
+    }
+  });
+
   test('the noun is caught', () => {
     expect(names('Your shares were not unwrapped.')).toEqual(['shares']);
     expect(names('Pick a pool share, or use Withdraw.')).toEqual(['share']);
