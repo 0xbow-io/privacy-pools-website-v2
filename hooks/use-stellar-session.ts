@@ -69,6 +69,7 @@ const STABLE_ACTIONS = {
   ensureCanReceive: stellarAccount.ensureCanReceive.bind(stellarAccount),
   createPaymentRequest: stellarAccount.createPaymentRequest.bind(stellarAccount),
   payPaymentRequest: stellarAccount.payPaymentRequest.bind(stellarAccount),
+  depositForPaymentRequest: stellarAccount.depositForPaymentRequest.bind(stellarAccount),
   exportBackup: stellarAccount.exportBackup.bind(stellarAccount),
   importBackup: stellarAccount.importBackup.bind(stellarAccount),
   recordRequestRow: stellarAccount.recordRequestRow.bind(stellarAccount),
