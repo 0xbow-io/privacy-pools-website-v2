@@ -10,6 +10,11 @@ import {
   registrationOwnerUnchanged,
   planWalletTx,
   priceWalletTx,
+  readFeeMarket,
+  WALLET_PRICED_FEE_FLOOR_WEI,
+  walletGasLimit,
+  walletPricedFeeFloorFor,
+  walletTxAffordable,
   walletTxCostWei,
   walletTxFields,
   type FeeReadClient,
@@ -179,7 +184,7 @@ describe('wallet tx fee policy (DEV-542)', () => {
     expect(captured).toBeGreaterThan(0);
     expect(captured).toBeLessThan(check);
     const partial = modal.indexOf("if (registrationLegSent) setReceiveSetup(runSetupKey, chainId, 'partial', 'local');", check);
-    const send = modal.indexOf('sendTransactionAsync({ ...tx, account: runOwner as ViemAddress, ...walletTxFields(plan) })', check);
+    const send = modal.indexOf('sendWalletTransaction(wagmiConfig, { ...tx, account: runOwner as ViemAddress, ...walletTxFields(plan) })', check);
     expect(check).toBeGreaterThan(0);
     expect(partial).toBeGreaterThan(check);
     expect(send).toBeGreaterThan(partial);
@@ -224,13 +229,21 @@ describe('wallet tx fee policy (DEV-542)', () => {
     expect(held < 840_000_000_000_000n).toBe(true);
   });
 
-  test('BNB Chain with baseFeePerGas 0 is priced legacy, never EIP-1559', async () => {
+  test('BNB Chain: no fee fields, the wallet prices it; gas limit and cost bound kept (DEV-589)', async () => {
     for (const chainId of [56, 97]) {
-      const c = client({ block: { baseFeePerGas: 0n } });
+      const c = client({ block: { baseFeePerGas: 0n }, gas: 51_084n });
       const plan = await priceWalletTx(c, TX, null, chainId);
-      expect(plan?.fees).toEqual({ gasPrice: GAS_PRICE });
-      expect('maxFeePerGas' in walletTxFields(plan)).toBe(false);
+      expect(plan?.fees).toBeNull();
+      expect(walletTxFields(plan)).toEqual({ gas: (51_084n * 12n) / 10n });
+      // Bounded at max(2 x gasPrice, 1 gwei): pre-checks and top-ups keep headroom over the wallet's tier.
+      expect(plan?.costWei).toBe(((51_084n * 12n) / 10n) * GWEI);
       expect(c.calls).not.toContain('tip');
+      expect(c.calls).not.toContain('block');
+    }
+    // Every other chain keeps the DEV-542 caps.
+    for (const chainId of [1, 10, 8453]) {
+      const plan = await priceWalletTx(client(), TX, null, chainId);
+      expect('maxFeePerGas' in walletTxFields(plan)).toBe(true);
     }
   });
 
@@ -242,7 +255,7 @@ describe('wallet tx fee policy (DEV-542)', () => {
     // Only the FIRST leg may be cancelled; once one went out the second proceeds.
     const guard = modal.indexOf('if (!registrationLegSent && !deliversToCaller()) throw new Error(REGISTRATION_CLOSED_BEFORE_PROMPT);', price);
     const mark = modal.indexOf('registrationLegSent = true;', guard);
-    const send = modal.indexOf('sendTransactionAsync({ ...tx, account: runOwner as ViemAddress, ...walletTxFields(plan) })', price);
+    const send = modal.indexOf('sendWalletTransaction(wagmiConfig, { ...tx, account: runOwner as ViemAddress, ...walletTxFields(plan) })', price);
     expect(price).toBeGreaterThan(0);
     expect(guard).toBeGreaterThan(price);
     expect(mark).toBeGreaterThan(guard);
@@ -286,5 +299,62 @@ describe('wallet tx fee policy (DEV-542)', () => {
     expect(decideViewingKeyPath({ balanceWei: 5_000_000_000_000n, gasPriceWei: 10_000_000n, gasEstimate: 51_000n, chainId: 10 }).path)
       .toBe('self-register');
     expect(viewingKeyShortfallWei({ gasPriceWei: 10_000_000n, balanceWei: 0n, gasEstimate: 51_000n, chainId: 10 })).toBe(61_200n * 20_000_000n);
+  });
+
+  test('BNB Chain keeps the "not enough BNB for gas" check while the wallet prices the fee (DEV-589 review)', async () => {
+    for (const chainId of [56, 97]) {
+      // The plan the publish hook builds: same fee read, same viewing-key plan.
+      const market = await readFeeMarket(client({ block: { baseFeePerGas: 0n } }), chainId);
+      const plan = viewingKeyTxPlan({ ...market, gasEstimate: 51_084n, minMaxFeeWei: walletPricedFeeFloorFor(chainId) });
+      expect(plan.fees).toBeNull();
+      expect(plan.costWei > 0n).toBe(true);
+      expect(walletTxAffordable({ plan, balanceWei: 0n, chainId })).toBe(false);
+      expect(walletTxAffordable({ plan, balanceWei: plan.costWei - 1n, chainId })).toBe(false);
+      expect(walletTxAffordable({ plan, balanceWei: plan.costWei, chainId })).toBe(true);
+    }
+    // A block that could not be read (no fee fields off BNB) still leaves it to the wallet.
+    const unread = await readFeeMarket(client({ block: new Error('rpc down') }), 1);
+    const unreadPlan = viewingKeyTxPlan({ ...unread, gasEstimate: 51_084n });
+    expect(unreadPlan.fees).toBeNull();
+    expect(walletTxAffordable({ plan: unreadPlan, balanceWei: 0n, chainId: 1 })).toBe(true);
+    // Priced chains are checked as before.
+    const eth = viewingKeyTxPlan({ ...(await readFeeMarket(client(), 1)), gasEstimate: 51_084n });
+    expect(walletTxAffordable({ plan: eth, balanceWei: 0n, chainId: 1 })).toBe(false);
+    // The publish hook goes through this check, never a bare `fees === null` pass.
+    const { readFileSync } = require('node:fs') as typeof import('node:fs');
+    const hook = readFileSync(new URL('../../hooks/use-publish-viewing-key.ts', import.meta.url), 'utf8');
+    expect(hook).toContain('affordable: walletTxAffordable({ plan, balanceWei, chainId })');
+    expect(hook).not.toMatch(/fees\s*===?\s*null\s*\?\s*true/);
+  });
+
+  test('BNB Chain: every cost bound has a 1 gwei floor, so a wallet pricing above 2x eth_gasPrice is covered (DEV-589 review)', async () => {
+    const APP_GAS_PRICE = 50_000_000n; // 0.05 gwei, the app RPC on BSC
+    const WALLET_PRICE = 500_000_000n; // a wallet node at 10x that
+    const gasLimit = (51_084n * 12n) / 10n;
+    for (const chainId of [56, 97]) {
+      expect(walletPricedFeeFloorFor(chainId)).toBe(WALLET_PRICED_FEE_FLOOR_WEI);
+      // The top-up is sized for the floor, not 2 x 0.05 gwei...
+      const shortfall = viewingKeyShortfallWei({ gasPriceWei: APP_GAS_PRICE, balanceWei: 0n, gasEstimate: 51_084n, chainId });
+      expect(shortfall).toBe(gasLimit * GWEI);
+      expect(shortfall >= gasLimit * WALLET_PRICE).toBe(true);
+      // ...and the publish pre-check, after that top-up lands, agrees with it.
+      const market = await readFeeMarket({ ...client(), getGasPrice: async () => APP_GAS_PRICE }, chainId);
+      const plan = viewingKeyTxPlan({ ...market, gasEstimate: 51_084n, minMaxFeeWei: walletPricedFeeFloorFor(chainId) });
+      expect(plan.costWei).toBe(shortfall);
+      expect(walletTxAffordable({ plan, balanceWei: shortfall, chainId })).toBe(true);
+      // The Max-shield reserve uses the same floor.
+      const bound = walletTxCostWei({ gasUnits: DEPOSIT_GAS_BUDGET, gasPriceWei: APP_GAS_PRICE, chainId });
+      expect(bound).toBe(walletGasLimit(DEPOSIT_GAS_BUDGET) * GWEI);
+      expect(nativeDepositGasReserveWei({ gasPriceWei: APP_GAS_PRICE, chainId })).toBe((bound * 160n) / 100n);
+      // A gas price already above the floor keeps the 2x bound.
+      expect(walletTxCostWei({ gasUnits: 51_084n, gasPriceWei: GWEI, chainId })).toBe(gasLimit * 2n * GWEI);
+    }
+    // Other chains: no floor.
+    for (const chainId of [1, 10, 8453]) expect(walletPricedFeeFloorFor(chainId)).toBe(0n);
+    expect(walletTxCostWei({ gasUnits: 51_000n, gasPriceWei: 10_000_000n, chainId: 10 })).toBe(61_200n * 20_000_000n);
+    // The hook passes the floor into the plan it checks.
+    const { readFileSync } = require('node:fs') as typeof import('node:fs');
+    const hook = readFileSync(new URL('../../hooks/use-publish-viewing-key.ts', import.meta.url), 'utf8');
+    expect(hook).toContain('minMaxFeeWei: walletPricedFeeFloorFor(chainId)');
   });
 });
