@@ -11,16 +11,17 @@ import { estimatedUsdLabel } from '@/services/estimated-usd';
 // in that same boundary. No other operation converts display back.
 import { Text, View } from 'react-native';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
+import { ShareFigure } from '@/components/ui/share-figure';
 import type { ShareBalanceDisplay } from '@/services/share-balance-display';
 
 export function BalanceAmount({ view, className, showUsd = false }: { view: ShareBalanceDisplay; className?: string; showUsd?: boolean }) {
   const amount = (
     <View className="flex-row items-center gap-[4px] shrink">
-      <Text className={className}>{view.text}</Text>
+      <Text className={className}><ShareFigure view={view} /></Text>
       <ShareCountHint hint={view.hint} />
     </View>
   );
-  const usd = showUsd ? estimatedUsdLabel(view.usd) : null;
+  const usd = showUsd && !view.loading ? estimatedUsdLabel(view.usd) : null;
   return usd ? (
     <View className="items-end gap-[2px] shrink">
       {amount}

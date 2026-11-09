@@ -71,6 +71,7 @@ import {
 } from '@/services/relayed-transfer';
 import { expectTransferRelay } from '@/services/transfer-relay-outputs';
 import { useNotes } from '@/hooks/use-notes';
+import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
 
 import { useTheme } from '@/components/theme-provider';
 import { PAY_URL_BASE } from '@/config/env';
@@ -565,6 +566,9 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
   // chain against itself and could never fire.
   const chainId = useActiveEvmChain().id;
   const balanceDisplay = useBalanceDisplay(chainId);
+  const shareText = useShareNameText(chainId);
+  // Feed-grid rates (no request): a share figure in a shortfall message reads as its underlying.
+  const { rateFor } = useShareRates();
   const withOpLock = useOpLock();
   const queryClient = useQueryClient();
   // The COMMITTED chain of the live session (null while none) — used ONLY to
@@ -1400,7 +1404,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
     // live inputs (codex r3: a 1 ETH request could display as Ready for a
     // later 2 USDC edit).
     const frozenView = balanceDisplay(amountInput.trim(), isSui ? 'SUI' : requestTokenSymbol, chainId);
-    const frozenAmountLabel = `${isShareSymbol(requestTokenSymbol) && frozenView.converted ? '≈ ' : ''}${frozenView.text}`;
+    const frozenAmountLabel = `${isShareSymbol(requestTokenSymbol) && frozenView.converted ? '~' : ''}${frozenView.text}`;
     // === Stellar path === the SDK's blind request (stellar-request.ts): the
     // link carries note slots, a payment key and a tag, never this account's
     // address. The SDK keeps the request in this account, and its sync finds
@@ -2251,7 +2255,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           const have = balanceDisplay(formatUnits(payerBalance, meta.decimals), meta.symbol, request.chainId, request.tokenId).text;
           throw new Error(
             isShareSymbol(meta.symbol)
-              ? `This request asks for ${need}, a pool share your wallet cannot hold. Nothing was paid. Pay it from your shielded ${displayTokenSymbol(meta.symbol)} balance instead.`
+              ? `This request asks for ${need}, a pool token your wallet cannot hold. Nothing was paid. Pay it from your shielded ${displayTokenSymbol(meta.symbol)} balance instead.`
               : `You need ${need} in your wallet to pay this request, and you have ${have}. Nothing was paid.`,
           );
         }
@@ -2915,6 +2919,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           decimals: requestToken.decimals,
           maxLabels,
           singleDepositTopUp,
+          rate: rateFor(request.chainId, request.tokenId),
         }));
       }
       // Account-level capacity, captured once so the pre-relay and retry
@@ -3176,6 +3181,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
             singleDepositTopUp: requestAmountWei + quotedRelayFee > capacityPairable
               ? requestAmountWei + quotedRelayFee - capacityPairable
               : requestAmountWei + quotedRelayFee,
+            rate: rateFor(request.chainId, request.tokenId),
           }));
         }
         return relayTransferParams({
@@ -3523,7 +3529,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
     // toast / queryClient / gateOnLockedSession are all called inside this
     // callback and were missing; the sibling wallet-pay handler's list was
     // corrected for the same three (code review 2026-08-27).
-  }, [address, walletAddress, walletChainId, chainId, ensureInitialized, exportAccount, gateOnLockedSession, identityMode, inputPayload, isDebugEnabled, keystoreManager, log, noteManager, notes, openKeystoreRegistrationModal, publicClient, queryClient, refetchNotes, refreshNotes, switchChainAsync, toast, beginTx, endTx, isSui, suiSession, selectChain]);
+  }, [address, walletAddress, walletChainId, chainId, ensureInitialized, rateFor, exportAccount, gateOnLockedSession, identityMode, inputPayload, isDebugEnabled, keystoreManager, log, noteManager, notes, openKeystoreRegistrationModal, publicClient, queryClient, refetchNotes, refreshNotes, switchChainAsync, toast, beginTx, endTx, isSui, suiSession, selectChain]);
 
   // Same-tick double-press guard (shared lock) — see hooks/use-op-lock.ts.
   const handlePayViaTransfer = useMemo(() => withOpLock(handlePayViaTransferUnlocked), [withOpLock, handlePayViaTransferUnlocked]);
@@ -4082,17 +4088,17 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                 and the success card after it (DEV-496). */}
             {statusMessage && !payRunning && !statusBoxHidden ? (
               <View className="rounded-control border border-[#98B975] bg-[#F5FAEE] px-[12px] py-[10px]">
-                <Text className="font-pp-regular text-[13px] text-[#6E8A42]">{statusMessage}</Text>
+                <Text className="font-pp-regular text-[13px] text-[#6E8A42]">{shareText(statusMessage)}</Text>
               </View>
             ) : null}
             {warningMessage ? (
               <View className="rounded-control border border-[#E1C26B] bg-[#FFF9E8] px-[12px] py-[10px]">
-                <Text className="font-pp-regular text-[13px] text-[#8A6B1F]">{warningMessage}</Text>
+                <Text className="font-pp-regular text-[13px] text-[#8A6B1F]">{shareText(warningMessage)}</Text>
               </View>
             ) : null}
             {errorMessage ? (
               <View className="rounded-control border border-[#F2B8B5] bg-[#FFF4F4] px-[12px] py-[10px]">
-                <Text className="font-pp-regular text-[13px] text-danger">{errorMessage}</Text>
+                <Text className="font-pp-regular text-[13px] text-danger">{shareText(errorMessage)}</Text>
               </View>
             ) : null}
 
@@ -4138,7 +4144,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                       // (SUI / XLM): offering the EVM token list would
                       // mislabel what the request emits.
                       <View className="flex-row items-center gap-[6px] rounded-control border border-text bg-card-background px-[12px] py-[8px]">
-                        <Text className="font-pp-medium text-[13px] text-text">{requestTokenSymbol}</Text>
+                        <Text className="font-pp-medium text-[13px] text-text">{displayTokenSymbol(requestTokenSymbol)}</Text>
                       </View>
                     ) : (
                       requestableTokens.map((token) => {
@@ -4168,7 +4174,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                   {/* Same split as the token: inline, the hub's amount card owns
                       the figure and pushes it here. */}
                   {!inlineHubActive ? (<>
-                  <Text className="font-pp-semi-bold text-[12px] text-text-secondary">Amount ({requestTokenSymbol})</Text>
+                  <Text className="font-pp-semi-bold text-[12px] text-text-secondary">Amount ({displayTokenSymbol(requestTokenSymbol)})</Text>
                   <TextInput
                     value={amountInput}
                     onChangeText={(text) => setAmountInput(sanitizeAmountInput(text, requestTokenDecimals))}
@@ -4373,7 +4379,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                           the escape hatch -- the handler clears the armed
                           intent and runs its switch-and-stop. Never gate
                           `disabled` on a flag that can fail to clear. */}
-                      {isBusy || pendingAutoAction ? <FlowProgress message={statusMessage ?? undefined} /> : null}
+                      {isBusy || pendingAutoAction ? <FlowProgress message={statusMessage ?? undefined} chainId={chainId} /> : null}
                     </View>
                   ) : receivedNote ? (
                     /* Claim flow: the import above was DEVICE-LOCAL. Anchoring
@@ -4428,7 +4434,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                           the whole story and vanished the moment anything else
                           touched `status`. */}
                       {claimStatus === 'anchoring' ? (
-                        <FlowProgress message={claimStatusMessage} />
+                        <FlowProgress message={claimStatusMessage} chainId={chainId} />
                       ) : null}
                       {claimStatus === 'anchored' ? (
                         <Text className="font-pp-regular text-[12px] text-success">
@@ -4437,7 +4443,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                       ) : blocked ? (
                         <Text className="font-pp-regular text-[12px] text-text-secondary">{blocked}</Text>
                       ) : claimError ? (
-                        <Text className="font-pp-regular text-[12px] text-danger">{claimError}</Text>
+                        <Text className="font-pp-regular text-[12px] text-danger">{shareText(claimError)}</Text>
                       ) : null}
                     </View>
                       );
@@ -4460,7 +4466,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                           {isBusy ? 'Processing...' : 'Receive Payment'}
                         </Text>
                       </Pressable>
-                      {isBusy ? <FlowProgress message={statusMessage ?? undefined} /> : null}
+                      {isBusy ? <FlowProgress message={statusMessage ?? undefined} chainId={chainId} /> : null}
                     </View>
                   )}
                 </>

@@ -15,6 +15,8 @@ export {
 } from '@/services/transfer-note-selection';
 export type { GreedyTransferSelection } from '@/services/transfer-note-selection';
 import { TRANSFER_MAX_INPUTS } from '@/services/transfer-note-selection';
+import { parseUnits } from 'viem';
+import { shareWeiText, type ShareRate } from '@/services/share-rates';
 
 // Must match the SDK witness leaf: Poseidon(COMMITMENT_LEAF_TAG, commitment, timestamp).
 const COMMITMENT_LEAF_TAG =
@@ -77,9 +79,21 @@ export function formatTransferSpendabilityUnavailable(params: {
   availableAmount: string;
   tokenSymbol: string;
   maxInputs?: number;
+  /** Units of the two amounts; with `rate` a share's figures read as the underlying. */
+  decimals?: number;
+  /** Live share rate from the feed grid (display only; nothing here sizes the transfer). */
+  rate?: ShareRate;
 }): string {
   const maxInputs = params.maxInputs ?? TRANSFER_MAX_INPUTS;
-  return `Private funds are not currently spendable, indexed, or approved for this transfer. Requested ${params.requestedAmount} ${params.tokenSymbol}; verified spendable balance within ${maxInputs} inputs is ${params.availableAmount} ${params.tokenSymbol}. Try syncing again in a few minutes or choose a smaller amount.`;
+  const text = (amount: string) => {
+    let wei: bigint | null = null;
+    try { wei = params.decimals === undefined ? null : parseUnits(amount, params.decimals); } catch { wei = null; }
+    // Integer conversion rounds the share value down, so neither figure overstates.
+    return wei === null
+      ? shareWeiText(0n, { symbol: params.tokenSymbol, decimals: 0 }, undefined, () => amount)
+      : shareWeiText(wei, { symbol: params.tokenSymbol, decimals: params.decimals! }, params.rate);
+  };
+  return `Private funds are not currently spendable, indexed, or approved for this transfer. Requested ${text(params.requestedAmount)}; verified spendable balance within ${maxInputs} inputs is ${text(params.availableAmount)}. Try syncing again in a few minutes or choose a smaller amount.`;
 }
 
 export { formatRelayedPaymentShortfall, formatShortfallAmount } from '@/services/relayed-payment-shortfall';

@@ -43,7 +43,9 @@ import { setErrorReportWallet } from '@/services/error-reports';
 import { PASSKEY_EOA_CONNECTOR_ID } from '@/services/passkey-eoa/constants';
 import { EMBEDDED_CONNECTOR_ID } from '@/services/embedded-wallet/connector';
 import { useAccount, useConfig, usePublicClient, useReconnect, useSignTypedData } from 'wagmi';
-import { COINBASE_SMART_WALLET_SIGNIN_MESSAGE, connectorIsKnownDeterministicSigner, contractWalletVerdict, isPlainEcdsaSignature, NON_DETERMINISTIC_SIGNER_MESSAGE, SMART_WALLET_SIGNIN_MESSAGE } from '@/services/signer-determinism';
+import { COINBASE_SMART_WALLET_SIGNIN_MESSAGE, connectorIsKnownDeterministicSigner, isPlainEcdsaSignature, NON_DETERMINISTIC_SIGNER_MESSAGE, SMART_WALLET_SIGNIN_MESSAGE } from '@/services/signer-determinism';
+import { decideUnlockWalletKind, isEoaOnlyWallet, readWalletCode, unlockCodeReaders } from '@/services/unlock-wallet-kind';
+import { TOR_IN_FORCE } from '@/config/tor';
 import { passkeyUnlockDefault } from '@/services/passkey-policy';
 import { smartWalletPasskeyEnabled } from '@/config/smart-wallet-passkey-flag';
 import { passkeyRpIdFor } from '@/services/passkey-rp-id';
@@ -64,7 +66,13 @@ const getSdkSetup = () => import('@/services/sdk-runtime');
 import apiClient from '@/services/api-client';
 import { accountKeyFingerprint, decodeAccountKey, encodeAccountKey, type AccountKeyIdentity } from '@/services/account-key';
 import { registerDebugSnapshot } from '@/services/debug-snapshots';
-import { getPasskeyPrf, createPasskey } from '@/services/passkey';
+import { getPasskeyPrf, createPasskey, PasskeyCancelledError } from '@/services/passkey';
+import {
+  resolvePasskeyUnlockPlan, passkeyNotUsedMessage, type PasskeyPick,
+  discoverablePickVerdict, passkeyOwnerHandle, passkeyDisplayName, PASSKEY_WRONG_WALLET_MESSAGE, PASSKEY_UNPROVEN_MESSAGE,
+  keepCreatedPasskey, PASSKEY_CREATED_FOR_REGISTERED_MESSAGE,
+  PasskeyTapRequiredError,
+} from '@/services/passkey-unlock-plan';
 import { bumpPaymentRequestRevision } from '@/services/payment-request-revision';
 import { useDebug, isDebugModeActive } from '@/components/debug-provider';
 import { isStaleConnectorError, pruneBareRestoredConnection } from '@/services/stale-connector';
@@ -85,6 +93,7 @@ import { allowPaymentRequestWrites, purgePaymentRequestsOnSignOut } from '@/serv
 import { signedOutOwner } from '@/services/payment-request-signout-purge';
 import { noteManagerLimitedTo } from '@/services/batch-withdrawals';
 import { ARTIFACTS_BASE, artifactsBaseUrl } from '@/config/artifacts';
+import { assertDepositUnlock, assertUnlockFor, type UnlockPurpose } from '@/services/deposit-unlock-guard';
 
 // Key derivation now uses the SDK's canonical HKDF scheme via
 // services/sdk-setup (buildSecretDerivationPayload +
@@ -248,6 +257,9 @@ const PASSKEY_CRED_PREFIX = 'ppv2_passkey_cred_v2|';
 const LEGACY_PASSKEY_MARKER_KEY = 'ppv2_passkey_preview_v1';
 
 type PasskeyMarker = { credentialId?: string; ownerAddress: string; rpId?: string };
+
+/** What the unlock dialog hands a key build: its passkey choice, and that a passkey button was tapped. */
+export type PasskeyInitOptions = { passkeyPick?: PasskeyPick; passkeyTap?: boolean };
 
 function getRpId(): string {
   // Apex RP ID for every *.privacypools.com page (services/passkey-rp-id.ts).
@@ -718,7 +730,7 @@ async function resolveKeystoreIdentityStatus(
     const activeNull = String(hashService.hash([km.getPrivateNullifyingKey()]));
     return identityStatusFromRegistry(view, activeNull, km.getViewingKeyPair().publicKey);
   } catch {
-    return 'unknown'; // must not block sign-in / deposit
+    return 'unknown'; // sign-in and discovery stay available; write guards reject unknown
   }
 }
 
@@ -742,7 +754,13 @@ interface SdkContextValue {
   exportAccount: (sessionOverride?: PoolSession | null, opts?: { chainId?: number }) => Promise<AccountExport | null>;
   importAccount: (data: AccountExport) => Promise<void>;
   initializeKeys: () => Promise<void>;
-  ensureInitialized: () => Promise<PoolSession>;
+  /**
+   * passkeyPick: the unlock dialog's explicit passkey choice, passkeyTap: the
+   * call comes from a tap on one of its passkey buttons. Without passkeyTap a
+   * passkey unlock never reaches WebAuthn: it rejects with
+   * PasskeyTapRequiredError and asks for the unlock dialog (services/passkey-unlock-plan.ts).
+   */
+  ensureInitialized: (opts?: PasskeyInitOptions) => Promise<PoolSession>;
   // Synchronously read the managers committed by the most recent
   // createSession. Safe right after `await ensureInitialized()` even on the
   // first run, when render-captured noteManager/keystoreManager are still stale.
@@ -851,6 +869,13 @@ interface SdkContextValue {
   signerRefusedDerivation: boolean;
   /** Offer that wallet the passkey instead (no-op unless the refusal was actually observed). */
   choosePasskeyForRefusedSigner: () => void;
+  /** A passkey credential is remembered on this device for the connected owner (local read, no network). */
+  hasRememberedPasskey: () => boolean;
+  /**
+   * Bumped each time a key build needed a passkey tap and did not start one
+   * (services/passkey-unlock-plan.ts 'needs-tap'). The unlock dialog opens on it.
+   */
+  passkeyTapRequests: number;
   /**
    * The Base / Coinbase app signer failed sign-in for the connected address this
    * session: the dialog asks the user to use another wallet.
@@ -963,6 +988,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
   // instead of the wallet signature. The wallet still owns the account, so
   // identityMode/effectiveAddress are unchanged — only the key SOURCE differs.
   const [passkeyActive, setPasskeyActive] = useState<boolean>(false);
+  const [passkeyTapRequests, setPasskeyTapRequests] = useState(0);
   const passkeyModeRef = useRef<boolean>(false);
   // Which source produced the currently-committed keystore manager, so a
   // mode switch forces a re-derive even if `keysReady` is still true.
@@ -1039,13 +1065,26 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!passkeyFeatureOn || !smartWalletKey || !address || !chainPublicClient) return;
     let cancelled = false;
-    chainPublicClient.getCode({ address: address as `0x${string}` })
-      .then((code) => {
-        if (!cancelled) setSmartWalletProbe({ key: smartWalletKey, smart: contractWalletVerdict(code) === 'contract' });
+    // Same readers as the unlock (services/unlock-wallet-kind.ts): a retry, then
+    // the wallet's own provider, so one failed read does not leave this unset.
+    const connector = activeConnector;
+    readWalletCode(
+      unlockCodeReaders(
+        chainPublicClient,
+        connector ? { connector, getProvider: () => walletProvider(connector) } : null,
+        address,
+        chainId,
+        { torInForce: TOR_IN_FORCE },
+      ),
+    )
+      .then((read) => {
+        if (cancelled) return;
+        if (read) setSmartWalletProbe({ key: smartWalletKey, smart: read.verdict === 'contract' });
+        else setSmartWalletProbeFailedKey(smartWalletKey); /* fail open: see above */
       })
-      .catch(() => { if (!cancelled) setSmartWalletProbeFailedKey(smartWalletKey); /* fail open: see above */ });
+      .catch(() => { if (!cancelled) setSmartWalletProbeFailedKey(smartWalletKey); });
     return () => { cancelled = true; };
-  }, [passkeyFeatureOn, smartWalletKey, address, chainPublicClient]);
+  }, [passkeyFeatureOn, smartWalletKey, address, chainPublicClient, activeConnector, chainId]);
   // DEV-522: the auto sign-in after connect must not start a wallet signature
   // before this probe has answered, or a smart wallet gets the signature path
   // (and a WebAuthn call with no user activation) instead of the dialog.
@@ -1307,7 +1346,12 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
   // Key initialization via wallet signature
   // ---------------------------------------------------------------------------
 
-  const deriveKeystoreManager = useCallback(async (): Promise<IKeystoreManager> => {
+  // passkeyPick: the dialog's explicit passkey choice ("Use another passkey"
+  // or "Create a passkey"), services/passkey-unlock-plan.ts. Ignored outside
+  // the passkey unlock.
+  const deriveKeystoreManager = useCallback(async (opts?: PasskeyInitOptions): Promise<IKeystoreManager> => {
+    const passkeyPick = opts?.passkeyPick;
+    const passkeyTap = opts?.passkeyTap;
     if (!effectiveAddress || !isSupportedEvmChainId(chainId)) {
       throw new Error('Connect a wallet or sign in with an account key on a supported chain first.');
     }
@@ -1351,20 +1395,58 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
         const runPasskeyBranch = async (): Promise<IKeystoreManager> => {
           const ownerLc = String(derivationAddress).toLowerCase();
           const marker = loadPasskeyMarkerFor(ownerLc, getRpId());
-          const haveCredForOwner = !!marker?.credentialId;
+          const remembered = !!marker?.credentialId;
+          // services/passkey-unlock-plan.ts: a remembered id is a targeted GET,
+          // "Use another passkey" and a missing id are a discoverable GET, and
+          // CREATE runs only when the user explicitly asked for a new passkey.
+          // A missing id used to CREATE, so every new browser or cleared
+          // storage minted another passkey and another account (user report
+          // 2026-11-02: three passkeys for one wallet).
+          const plan = resolvePasskeyUnlockPlan({ rememberedCredentialId: marker?.credentialId, pick: passkeyPick, tap: passkeyTap });
+          // No tap on a passkey button, no ceremony: opening Withdraw (or any
+          // flow that builds the session) must not pop the OS passkey sheet
+          // (QA on PR #63). The unlock dialog asks for the tap instead.
+          if (plan.kind === 'needs-tap') {
+            setPasskeyTapRequests((n) => n + 1);
+            throw new PasskeyTapRequiredError();
+          }
+          // A dismissed or empty prompt (NotAllowed covers both) says where
+          // the way out is instead of a bare "dismissed". Same error class, so
+          // reporting still files it as a user rejection.
+          const notUsed = (e: unknown): never => {
+            if (e instanceof PasskeyCancelledError) throw new PasskeyCancelledError(passkeyNotUsedMessage(plan, remembered));
+            throw e;
+          };
           let prfFirst: `0x${string}`;
           let credentialId: string;
-          if (haveCredForOwner) {
+          // Set only for a discoverable pick: its handle is checked against
+          // this owner before the pick is remembered (see below).
+          let pickedHandle: Uint8Array | null | undefined;
+          let pickedRpId: string | undefined;
+          // Set when THIS tap created a new passkey (not another tab's).
+          let createdRpId: string | undefined;
+          if (plan.kind === 'targeted') {
             // Known passkey for this owner → targeted sign-in (no QR fallback).
-            const res = await getPasskeyPrf({ rpId: getRpId(), challenge: randomChallenge(), credentialId: marker!.credentialId });
+            const res = await getPasskeyPrf({ rpId: getRpId(), challenge: randomChallenge(), credentialId: plan.credentialId }).catch(notUsed);
             prfFirst = res.prf.first;
             credentialId = res.credentialId;
+          } else if (plan.kind === 'discoverable') {
+            // No credential id: the OS lists every passkey for this RP ID, so a
+            // wrong or deleted remembered passkey is no longer a dead end, and
+            // a new browser finds the passkey the wallet already uses.
+            const rpId = getRpId();
+            const res = await getPasskeyPrf({ rpId, challenge: randomChallenge() }).catch(notUsed);
+            prfFirst = res.prf.first;
+            credentialId = res.credentialId;
+            // Remembered only after the owner check below: the list holds every
+            // wallet's passkeys and the keys come from the PRF alone.
+            pickedHandle = res.userHandle;
+            pickedRpId = rpId;
           } else {
-            // First time for this owner under this RP ID → CREATE a passkey (the
-            // native "save passkey" prompt), not a GET (which would dead-end to
-            // the cross-device QR when no local credential exists). Serialized
-            // per (owner, RP ID) across tabs, re-checked under the lock, so two
-            // tabs cannot each mint a credential and a different account.
+            // The user asked for a NEW passkey (the native "save passkey"
+            // prompt). Serialized per (owner, RP ID) across tabs, re-checked
+            // under the lock, so two tabs cannot each mint a credential and a
+            // different account.
             const rpId = getRpId();
             const outcome = await withWebLock(`ppv2-passkey-create|${passkeyMarkerKey(ownerLc, rpId)}`, async () => {
               const raced = loadPasskeyMarkerFor(ownerLc, rpId);
@@ -1372,9 +1454,13 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
               const created = await createPasskey({
                 rpId,
                 rpName: 'Privacy Pools',
-                userId: randomChallenge().slice(0, 16),
-                userName: 'privacy-pools',
-                userDisplayName: 'Privacy Pools',
+                // The owner in the handle lets a later discoverable pick prove
+                // which wallet this passkey belongs to; the name tells two
+                // wallets' passkeys apart in the OS sheet. Neither feeds the
+                // key derivation.
+                userId: passkeyOwnerHandle(ownerLc),
+                userName: passkeyDisplayName(ownerLc),
+                userDisplayName: passkeyDisplayName(ownerLc),
                 challenge: randomChallenge(),
               });
               // Creation is an irreversible external side effect: record the id
@@ -1389,9 +1475,10 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
                 log('error', 'SDK', 'Passkey credential id could not be stored durably; refusing the passkey unlock', { address: derivationAddress });
                 throw new Error(PASSKEY_STORAGE_MESSAGE);
               }
-              return { credentialId: created.credentialId, prfFirst: created.prf?.first };
+              return { credentialId: created.credentialId, prfFirst: created.prf?.first, created: true };
             });
             credentialId = outcome.credentialId;
+            if ('created' in outcome) createdRpId = rpId;
             if (outcome.prfFirst) {
               prfFirst = outcome.prfFirst;
             } else {
@@ -1409,6 +1496,39 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
           // (deposit) on a mismatch, and the recovery flow can import the other
           // identity's notes to exit them.
           const pkStatus = await resolveKeystoreIdentityStatus(sdkSetup, pkKm, derivationAddress as `0x${string}`, chainId, REGISTRY_WAIT_MS);
+
+          if (createdRpId !== undefined && !keepCreatedPasskey(pkStatus)) {
+            // The wallet is already registered with another passkey, and the
+            // nullifying-key hash is write-once, so this new one could never
+            // deposit (review on PR #63). Forget it as this owner's passkey so
+            // the next Sign in lists the passkeys again instead of insisting on
+            // this one. The credential itself stays in the passkey manager.
+            persistPasskeyMarker({ ownerAddress: String(derivationAddress), rpId: createdRpId });
+            log('warn', 'SDK', 'New passkey does not match this wallet\'s registration; not keeping it', { address: derivationAddress, identity: pkStatus });
+            throw new Error(PASSKEY_CREATED_FOR_REGISTERED_MESSAGE);
+          }
+
+          if (pickedRpId !== undefined) {
+            // A discoverable pick is kept only when it provably belongs to this
+            // wallet (services/passkey-unlock-plan.ts): another wallet's passkey
+            // would give this wallet that wallet's keys and, once registered,
+            // link the two on chain (review on PR #63). Nothing is remembered
+            // or committed on a refusal.
+            const verdict = discoverablePickVerdict({ ownerAddress: ownerLc, userHandle: pickedHandle, identityStatus: pkStatus });
+            if (verdict !== 'accept') {
+              log('warn', 'SDK', 'Refusing a passkey pick that is not proven to belong to this wallet', { address: derivationAddress, verdict, identity: pkStatus });
+              throw new Error(verdict === 'wrong-wallet' ? PASSKEY_WRONG_WALLET_MESSAGE : PASSKEY_UNPROVEN_MESSAGE);
+            }
+            // The chosen passkey is the one this owner unlocks with from now on.
+            // Same rule as the create path: a record this page alone remembers
+            // is not a record, so a write that does not stick refuses the
+            // unlock (codex on PR #36).
+            if (credentialId !== marker?.credentialId
+              && !persistPasskeyMarker({ credentialId, ownerAddress: String(derivationAddress), rpId: pickedRpId })) {
+              log('error', 'SDK', 'Chosen passkey credential id could not be stored durably; refusing the passkey unlock', { address: derivationAddress });
+              throw new Error(PASSKEY_STORAGE_MESSAGE);
+            }
+          }
 
           // Commit only if still the current target AND epoch AND the UI is still
           // in passkey mode: a wallet change, a source switch or a mode flip
@@ -1565,35 +1685,39 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
           // passkey. An EIP-7702 delegated EOA still signs with its own key and
           // stays on the wallet path. Fail-open on an RPC error: the SDK's
           // 65-byte check is the enforcement (services/signer-determinism.ts).
-          let smartAtUnlock: boolean;
-          // The getCode verdict on this chain, or null when the read failed.
-          let codeVerdict: ReturnType<typeof contractWalletVerdict> | null = null;
-          let codeOnChain: string | undefined;
-          try {
-            if (!chainPublicClient) throw new Error('no public client for the active chain');
-            const code = await chainPublicClient.getCode({ address: derivationAddress as `0x${string}` });
-            codeOnChain = code;
-            codeVerdict = contractWalletVerdict(code);
-            smartAtUnlock = codeVerdict === 'contract';
-          } catch (codeErr) {
-            if (!passkeyUnlockEnabled()) {
-              // Feature off: main's behaviour. The probe is advice only and the
-              // SDK's 65-byte check remains the enforcement.
-              log('warn', 'SDK', 'Contract-wallet probe failed; continuing to the signature', { detail: describeRpcError(codeErr) });
-              smartAtUnlock = false;
-            } else {
-            // No verdict from this read. Reuse the ahead probe's settled verdict for
-            // this exact address:chain; with none, guessing "EOA" would send a smart
-            // wallet to the wallet prompt and the SDK's 65-byte failure, so ask for
-            // a retry instead (codex on PR #36).
-            const ahead = smartWalletProbeRef.current;
-            if (ahead?.key !== `${String(derivationAddress).toLowerCase()}:${chainId}`) {
-              log('warn', 'SDK', 'Contract-wallet probe failed with no earlier verdict', { detail: describeRpcError(codeErr) });
-              throw new Error('Could not verify the wallet type because a network request failed. Please try again.');
-            }
-            smartAtUnlock = ahead.smart;
-            }
+          // A failed read must not lock the user out: services/unlock-wallet-kind.ts
+          // retries it, asks the wallet's own provider, reuses the ahead probe,
+          // and only then decides (2026-10-24, MetaMask on mainnet refused).
+          const unlockConnector = liveConnection() ?? activeConnectorRef.current;
+          const codeRead = await readWalletCode(
+            unlockCodeReaders(
+              chainPublicClient,
+              unlockConnector ? { connector: unlockConnector, getProvider: () => walletProvider(unlockConnector) } : null,
+              String(derivationAddress),
+              chainId,
+              { torInForce: TOR_IN_FORCE },
+            ),
+            {
+              onFailure: ({ source, error }) => log('warn', 'SDK', 'Contract-wallet probe read failed', { source, detail: describeRpcError(error) }),
+            },
+          );
+          const walletKind = decideUnlockWalletKind({
+            read: codeRead,
+            passkeyUnlockEnabled: passkeyUnlockEnabled(),
+            key: `${String(derivationAddress).toLowerCase()}:${chainId}`,
+            ahead: smartWalletProbeRef.current,
+            eoaOnlyWallet: isEoaOnlyWallet(unlockConnector),
+          });
+          if (walletKind.kind === 'refuse') {
+            log('warn', 'SDK', 'Contract-wallet probe failed everywhere with no earlier verdict');
+            throw new Error(walletKind.message);
           }
+          if (walletKind.kind === 'assume-eoa') {
+            log('warn', 'SDK', 'Contract-wallet probe failed; continuing to the signature', { reason: walletKind.reason });
+          }
+          const smartAtUnlock = walletKind.kind === 'read' || walletKind.kind === 'ahead' ? walletKind.smart : false;
+          // The getCode verdict on this chain, or null when no read answered.
+          const codeVerdict = codeRead?.verdict ?? null;
           let coinbaseSmart = false;
           if (smartAtUnlock) {
             // A deployed Coinbase smart wallet (getCode found code) gets the Coinbase
@@ -1982,6 +2106,9 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
         // derivation): the next attempt runs fresh; not a failure to paint or to
         // log as one (codex on PR #36).
         const sourceChanged = err instanceof KeySourceChangedError;
+        // A passkey unlock waiting for its tap is not a failure: the dialog
+        // asks for the tap, and nothing was asked of the authenticator.
+        const awaitingTap = err instanceof PasskeyTapRequiredError;
         // A lazy import that cannot resolve (getSdkSetup and friends) means this
         // tab is older than the server, which has nothing to do with keys.
         const staleBundle = staleBundleMessage(raw);
@@ -2017,13 +2144,13 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
           if (pruned) wagmiConfig.setState(pruned);
           log('info', 'SDK', pruned ? 'Dropped the stale restored wallet connection' : 'Stale-connector error, but the current connection is live; left it alone');
         }
-        if (!sourceChanged && (!staleConnector || isDebugModeActive()) && stillCurrent()) {
+        if (!sourceChanged && !awaitingTap && (!staleConnector || isDebugModeActive()) && stillCurrent()) {
           setError(reconnecting ? message : `Key initialization failed: ${message}`);
         }
         // The stack and the connector's shape say WHERE this came from. Without
         // them a "not a function" error only says that some wagmi call ran against
         // a connection that was not live, not which call.
-        log(sourceChanged ? 'info' : 'error', 'SDK', `Key initialization failed: ${message}`, {
+        log(sourceChanged || awaitingTap ? 'info' : 'error', 'SDK', `Key initialization failed: ${message}`, {
           raw,
           staleConnector,
           stack: err instanceof Error ? err.stack?.split('\n').slice(0, 8).join(' | ') : undefined,
@@ -2563,7 +2690,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     }
   }, [chainPublicClient, log, poolSession]);
 
-  const ensureInitialized = useCallback(async (): Promise<PoolSession> => {
+  const ensureInitialized = useCallback(async (opts?: PasskeyInitOptions): Promise<PoolSession> => {
     if (!effectiveAddress) {
       throw new Error('Connect a wallet or sign in with an account key first.');
     }
@@ -2606,7 +2733,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     const initPromise = (async () => {
       setIsInitializing(true);
       const startEpoch = deriveEpochRef.current;
-      const km = await deriveKeystoreManager();
+      const km = await deriveKeystoreManager({ passkeyPick: opts?.passkeyPick, passkeyTap: opts?.passkeyTap });
       // If the key source (or wallet/chain) switched while we were deriving,
       // abort instead of committing a stale-source manager/session — a fresh
       // ensureInitialized will run for the new source.
@@ -2819,6 +2946,13 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     opts?: {
       /** Read-only discovery needs no address-keyed registration checks. */
       discoveryOnly?: boolean;
+      /**
+       * What this session does on the target chain. A failed identity read
+       * blocks only a write that lands a note there (`deposit`, the default,
+       * and `swap-destination`); registration and a swap's source chain treat
+       * it as unknown for that chain. A confirmed mismatch always blocks.
+       */
+      purpose?: UnlockPurpose;
       swapSourceChain?: {
         chainId: number;
         relaySwapsAddress: Address;
@@ -2877,11 +3011,12 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     // not whether that someone was this unlock. The nullifying-key hash is
     // write-once per address, so depositing under a different unlock than the
     // one registered there mints a note that can NEVER be spent and cannot be
-    // re-registered. Every caller here writes (cross-chain shield, reshield,
-    // far-chain registration), so like the other writes it waits for the grid
-    // to bring the registries current and never proceeds on 'unknown'.
-    // 'unregistered' falls through to the caller's own handling, which checks
-    // it against the live registration (ownRegistrationRefusal).
+    // re-registered. The answer comes from the bulk registries, so a write
+    // waits for the grid to bring them current. An unanswered lookup blocks
+    // only a write that lands a note on THIS chain; registration and a swap's
+    // source chain carry on, so one network's flaky read never blocks another.
+    // 'unregistered' falls through to the caller's registration handling
+    // (ownRegistrationRefusal). Discovery stays open.
     const targetIdentity = opts?.discoveryOnly ? 'unknown' : await resolveKeystoreIdentityStatus(
       sdkSetup,
       managers.keystoreManager as IKeystoreManager,
@@ -2889,12 +3024,13 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
       targetChainId,
       REGISTRY_WAIT_MS,
     );
-    if (targetIdentity === 'incompatible') {
-      throw new Error(
-        'This account is registered with a different unlock on that network. Switch unlock, or import its notes to exit.',
-      );
+    if (!opts?.discoveryOnly) {
+      const purpose = opts?.purpose ?? 'deposit';
+      // A deposit never proceeds on an unanswered identity: say the registries
+      // are still syncing. Other purposes keep the per-purpose guard.
+      if (purpose === 'deposit' && targetIdentity === 'unknown') throw new RegistrySyncingError();
+      assertUnlockFor(targetIdentity, purpose, targetConfig?.displayName);
     }
-    if (!opts?.discoveryOnly && targetIdentity === 'unknown') throw new RegistrySyncingError();
 
     const { createPoolSession } = await getPoolSessionService();
     // Seeded from that chain's own stored export so work appends to its notes
@@ -3802,7 +3938,10 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
   /** See the context type: a far-chain session without moving the app there. */
   const sessionForChain = useCallback(async (targetChainId: number): Promise<PoolSession | null> => {
     if (!isSupportedEvmChainId(targetChainId)) return null;
-    return buildSessionForChain(targetChainId);
+    // Registration and the swap's "registered there?" lookup: a failed identity
+    // read on that chain is unknown, not a block. The swap's destination
+    // deposit is checked strictly when its own session is built.
+    return buildSessionForChain(targetChainId, { purpose: 'register' });
   }, [buildSessionForChain]);
 
   const createReshieldCrosschainSessions = useCallback(async (args: {
@@ -3814,7 +3953,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     // share targets. It is still a separate session, and the destination note is
     // still persisted against it — losing it would leave the reshielded value
     // invisible locally until a rescan found it.
-    const destination = await buildSessionForChain(args.destinationChainId);
+    const destination = await buildSessionForChain(args.destinationChainId, { purpose: 'swap-destination' });
     if (!destination) return null;
     // `yields` is the destination chain's configured share namespaces. Handing
     // them to the source session is what lets the far-side deposit fund a share
@@ -3822,6 +3961,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     // over there, which no share pool accepts. Absent on an older SDK, in which
     // case this is simply omitted and plain targets behave exactly as before.
     const source = await buildSessionForChain(chainId, {
+      purpose: 'spend',
       reshieldDestinationChainId: args.destinationChainId,
       ...(destination.yields?.length ? { reshieldDestinationYieldTargets: destination.yields } : {}),
     });
@@ -3840,6 +3980,11 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     }
     if (!walletActive || !address) {
       throw new Error('Connect a wallet (or sign in with an account key) first.');
+    }
+    // A passkey account has no signature to export, so it is refused before
+    // the derivation: nothing to unlock, and no passkey prompt for it.
+    if (passkeyModeRef.current) {
+      throw new Error('The account changed or uses a passkey. Export from the current account’s recovery options.');
     }
     // Derive (or reuse) the keys so the deterministic signature(s) are
     // captured — prompts the wallet only if the account isn't unlocked yet.
@@ -4022,6 +4167,12 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     setPasskeyForSigner(current);
   }, [address, refusedSigners, setPasskeyForSigner]);
   const baseAppCannotSign = !!address && baseAppRefused.has(address.toLowerCase());
+  // Which passkey choices the unlock dialog offers: "Use another passkey" when
+  // one is remembered, "Create a passkey" when none is. localStorage only.
+  const hasRememberedPasskey = useCallback((): boolean => {
+    if (!effectiveAddress) return false;
+    return !!loadPasskeyMarkerFor(String(effectiveAddress).toLowerCase(), getRpId())?.credentialId;
+  }, [effectiveAddress]);
 
   const signOutAccountKey = useCallback(() => {
     persistImportedIdentity(null);
@@ -4043,8 +4194,8 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
   // can't authorize a spend/exit (the keystore nullifying key is write-once).
   // Re-reads on-chain against the COMMITTED manager rather than trusting the
   // React `keystoreIdentityStatus` (which can lag the just-derived identity, or
-  // be stale if another tab/device registered in between). Throws only on a
-  // definitive 'incompatible'; 'unknown' (RPC fail-open) and 'unregistered' pass.
+  // be stale if another tab/device registered in between). Unknown results
+  // block a deposit; first-time registration remains available.
   // Field tracing for the balances-landing bug: session readiness flips.
   useEffect(() => {
     console.log('[PP-SESSION]', JSON.stringify({ keysReady, identityMode, sessionAddress: effectiveAddress ?? null, chainId }));
@@ -4085,13 +4236,10 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
       throw new Error('Network changed since sign-in. Close the modal and try the deposit again.');
     }
     setKeystoreIdentityStatus(status);
-    if (status === 'incompatible') {
-      throw new Error('This account is registered with a different unlock. Switch unlock, or import its notes to exit.');
-    }
     // Never deposit on an unanswered identity: a registration under another
-    // unlock would strand the funds. The old RPC read caught it; the registry
-    // must be current to.
+    // unlock would strand the funds. The registry must be current to answer.
     if (status === 'unknown') throw new RegistrySyncingError();
+    assertDepositUnlock(status);
   }, [chainId]);
 
 
@@ -4229,6 +4377,8 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     passkeyActive,
     signerRefusedDerivation,
     choosePasskeyForRefusedSigner,
+    hasRememberedPasskey,
+    passkeyTapRequests,
     baseAppCannotSign,
     keystoreIdentityStatus,
     assertCanDeposit,

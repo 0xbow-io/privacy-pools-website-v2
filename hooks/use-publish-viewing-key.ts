@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { useAccount, usePublicClient, useSendTransaction, useSwitchChain } from 'wagmi';
+import { useAccount, useConfig, usePublicClient, useSwitchChain } from 'wagmi';
 import type { Address as ViemAddress, Hex } from 'viem';
 
 import { usePoolSession } from '@/hooks/use-pool-session';
@@ -9,7 +9,8 @@ import { isSupportedEvmChainId } from '@/config/chains';
 import { isSessionInitTimeout, withSessionInitTimeout } from '@/services/session-init-timeout';
 import { setReceiveSetup, viewingKeyTxPlan } from '@/services/receive-setup';
 import { ownRegistrationResultRefusal } from '@/services/keystore-scope';
-import { minPriorityFeeFor, readFeeMarket, type FeeReadClient } from '@/services/wallet-tx-fees';
+import { sendWalletTransaction } from '@/services/wallet-send-refusal';
+import { minPriorityFeeFor, readFeeMarket, walletPricedFeeFloorFor, walletTxAffordable, type FeeReadClient } from '@/services/wallet-tx-fees';
 
 export const PUBLISH_PROMPT_TIMEOUT_MS = 120_000;
 
@@ -49,7 +50,7 @@ export function usePublishViewingKey(chainId: number) {
   const { address } = useAccount();
   const sessionChainId = useSessionChainId();
   const publicClient = usePublicClient({ chainId });
-  const { sendTransactionAsync } = useSendTransaction();
+  const wagmiConfig = useConfig();
   const { switchChainAsync } = useSwitchChain();
   const { ensureInitialized, identityMode, sessionAddress, poolSession } = usePoolSession();
   const { log } = useDebug();
@@ -81,13 +82,16 @@ export function usePublishViewingKey(chainId: number) {
           // Fails for an account short of gas; the static budget is used instead.
         }
       }
-      const plan = viewingKeyTxPlan({ ...market, gasEstimate, minPriorityFeeWei: minPriorityFeeFor(chainId) });
+      const plan = viewingKeyTxPlan({
+        ...market, gasEstimate,
+        minPriorityFeeWei: minPriorityFeeFor(chainId), minMaxFeeWei: walletPricedFeeFloorFor(chainId),
+      });
       return {
         costWei: plan.costWei,
         balanceWei,
         // What the wallet reserves for the tx as sent; the shown estimate is this same figure.
-        // No fee caps (block unread): the wallet prices the tx, so it decides.
-        affordable: plan.fees === null ? true : balanceWei >= plan.costWei,
+        // Block unread: the wallet decides. BNB (wallet priced) is still checked.
+        affordable: walletTxAffordable({ plan, balanceWei, chainId }),
         plan,
       };
     } catch (err) {
@@ -153,14 +157,16 @@ export function usePublishViewingKey(chainId: number) {
     let hash: Hex;
     try {
       hash = await withSessionInitTimeout(
-        sendTransactionAsync({
+        // The wallet's refusal survives a 4200 answer to viem's retry (DEV-589).
+        sendWalletTransaction(wagmiConfig, {
           chainId,
+          account: address,
           to: calldata.to as ViemAddress,
           data: calldata.data as Hex,
           value: BigInt(calldata.value),
           // The checked numbers, not the wallet's own (often far higher) tier.
           ...(cost ? { gas: cost.plan.gas, ...(cost.plan.fees ?? {}) } : {}),
-        } as Parameters<typeof sendTransactionAsync>[0]),
+        } as Parameters<typeof sendWalletTransaction>[1]),
         { timeoutMs: PUBLISH_PROMPT_TIMEOUT_MS },
       );
     } catch (err) {
@@ -185,7 +191,7 @@ export function usePublishViewingKey(chainId: number) {
     ensureInitialized,
     sessionAddress,
     estimateCost,
-    sendTransactionAsync,
+    wagmiConfig,
     log,
   ]);
 

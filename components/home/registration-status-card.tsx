@@ -22,6 +22,7 @@ import type { KeystoreIdentityStatus } from '@/components/sdk-provider';
 import { receiveSetupVersion, subscribeReceiveSetup } from '@/services/receive-setup';
 import { rowStatus } from '@/services/registration-rows';
 import { useChainRouter } from '@/hooks/use-chain-router';
+import { AccountUnlockNotice } from '@/components/account-unlock-help';
 
 // Registration, per chain, made visible.
 //
@@ -62,6 +63,7 @@ function EvmRegistrationStatusCard() {
   const { openKeystoreRegistrationModal, openFinishSetup } = useKeystoreRegistrationModal();
   const activeChainId = useActiveEvmChain().id;
   const { state: activeReceive, partial: activePartial } = useReceiveSetup();
+  const activeMismatch = keysReady && activeReceive === 'incompatible';
 
   const [expanded, setExpanded] = useState(false);
 
@@ -197,8 +199,11 @@ function EvmRegistrationStatusCard() {
   return (
     <View
       testID="registration-status-card"
-      className={`w-full overflow-hidden rounded-card border bg-background-secondary ${partialCount > 0 || activePartial ? 'border-warning' : 'border-border-light'}`}
+      className={`w-full overflow-hidden rounded-card border bg-background-secondary ${partialCount > 0 || activePartial || activeMismatch ? 'border-warning' : 'border-border-light'}`}
     >
+      {activeMismatch ? (
+        <AccountUnlockNotice network={getChainConfig(activeChainId)?.displayName ?? 'this network'} />
+      ) : null}
       <Pressable
         onPress={toggle}
         accessibilityRole="button"
@@ -302,7 +307,7 @@ function ChainRow({
         <Text numberOfLines={1} className="font-pp-sans-medium text-[14px] text-text">{name}</Text>
         {state === 'incompatible' ? (
           <Text className="font-pp-sans text-[12px] leading-[16px] text-text-muted">
-            Registered with a different unlock. Switch unlock to use it here.
+            Use your original wallet or passkey to access this account.
           </Text>
         ) : state === 'partial' ? (
           <Text className="font-pp-sans text-[12px] leading-[16px] text-warning">
