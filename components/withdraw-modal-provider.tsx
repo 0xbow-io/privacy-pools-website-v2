@@ -197,12 +197,12 @@ import { createPendingRelaySettleWatch } from '@/services/pending-relays-store';
 import { PendingRelayNotice } from '@/components/pending-relay-notice';
 import { getYieldDeploymentForAsset } from '@/config/yield';
 import { recordOwnAction } from '@/services/own-actions-store';
-import { describeRedemption, planYieldRedemption, type YieldRedemptionPlan } from '@/services/yield-redemption';
+import { planYieldRedemption, type YieldRedemptionPlan } from '@/services/yield-redemption';
 import { feeWithinReviewed, relayerFeeJitterAllowance } from '@/services/relayer-fee-jitter';
 import { quoteMatchesSignedCommitment } from '@/services/relayer-quote-integrity';
 import { decodeGasTopUpWei, formatGasTopUp } from '@/services/gas-top-up';
 import { setReceiveSetup } from '@/services/receive-setup';
-import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, netSharesWei, previewReceiveFigure, shareRedemptionDisclosure, shareReviewHeadline } from '@/services/share-display';
+import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, netSharesWei, previewReceiveFigure, shareReviewHeadline } from '@/services/share-display';
 import { sdkErrorText, type ErrorUnits } from '@/services/sdk-error-amounts';
 import { RelayFeeIncreasedError, relayWithdrawalWithFreshQuote } from '@/services/relayed-withdrawal';
 import { PREVIEW_REDEEM_ABI } from '@/services/deposit-limits';
@@ -974,7 +974,6 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // refuses rather than paying the share the UI never promised.
   const selectedIsShare = isShareSymbol(selectedToken);
   const shareUnderlyingSymbol = displayTokenSymbol(selectedToken);
-  const sharePayoutDisclosure = selectedIsShare && !swapSnapshot ? shareRedemptionDisclosure(selectedToken) : null;
   const targetEnsName = useMemo(() => {
     // Sui recipients are raw addresses; there is no ENS on Sui.
     if (isSui) return null;
@@ -5700,12 +5699,6 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                   )}
                 </View>
 
-                {!swapSnapshot && sharePayoutDisclosure ? (
-                  <Text className="text-center font-pp-sans text-[11.5px] leading-[16px] text-text-secondary">
-                    {sharePayoutDisclosure}
-                  </Text>
-                ) : null}
-
                 {/* Special-case withdrawal disclosures. */}
                 {batchPlan ? (
                   <Text className="text-[11px] text-[#737373] font-pp-regular">
@@ -5820,12 +5813,6 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     })()}
                   </View>
                 </View>
-
-                {!swapSnapshot && sharePayoutDisclosure ? (
-                  <Text className="text-center text-[12px] leading-[17px] text-text-secondary font-pp-regular">
-                    {sharePayoutDisclosure}
-                  </Text>
-                ) : null}
 
                 {/* Special-case withdrawal disclosures. */}
                 {batchPlan ? (
@@ -6071,11 +6058,6 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       ? `≥ ${balanceDisplay(swapSnapshot.display.minReceived, swapSnapshot.outputToken.symbol, swapSnapshot.destinationChainId).text}`
                       : reviewNetLabel}
                   </Text>
-                  {!swapSnapshot && sharePayoutDisclosure ? (
-                    <Text className="max-w-[340px] text-center text-[12px] leading-[17px] text-text-secondary font-pp-regular">
-                      {sharePayoutDisclosure}
-                    </Text>
-                  ) : null}
                 </View>
 
                 {txHash && (
@@ -6189,15 +6171,6 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                         : `withdrawn from ${displayTokenSymbol(swapReviewInputSymbol)} Pool, swapped to ${displayTokenSymbol(swapSnapshot.outputToken.symbol)} on exit`)
                       : `withdrawn from ${poolName}`}
                   </Text>
-                  {yieldRedemption ? (
-                    <Text className="max-w-[340px] text-center text-[12px] leading-[17px] text-text-secondary font-pp-regular" testID="withdraw-success-redemption">
-                      Redeemed through the router: the recipient receives {describeRedemption({ quotedOut: yieldRedemption.quotedOut, minOut: yieldRedemption.minOut, decimals: yieldRedemption.underlyingDecimals, symbol: yieldRedemption.underlyingSymbol })}.
-                    </Text>
-                  ) : !swapSnapshot && sharePayoutDisclosure ? (
-                    <Text className="max-w-[340px] text-center text-[12px] leading-[17px] text-text-secondary font-pp-regular">
-                      {sharePayoutDisclosure}
-                    </Text>
-                  ) : null}
                   {gasTopUp && (
                     <Text className="text-[13px] text-text-secondary font-pp-sans" testID="withdraw-success-gas-top-up">
                       + {gasTopUp.amountText} for gas

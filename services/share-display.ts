@@ -57,18 +57,6 @@ export function shareSubtitle(symbol: string, netApyPercent?: number | null): st
     : 'Earns Aave yield';
 }
 
-/**
- * Payout for a share note: the withdraw flow REDEEMS it through the PPRouter
- * (share in, underlying out), always. When the router route is unavailable
- * the flow refuses with a clear error rather than paying the share, so this
- * line can promise the underlying without a fallback clause (Pat,
- * 2026-09-05: "withdrawing ppUSDC should always unwrap to USDC").
- */
-export function shareRedemptionDisclosure(symbol: string): string | null {
-  if (!isShareSymbol(symbol)) return null;
-  return `You receive ${displayTokenSymbol(symbol)}, redeemed at the vault on the way out.`;
-}
-
 /** Subtitle for a withdraw-only legacy asset (deposits closed, notes spendable). */
 export const LEGACY_ASSET_SUBTITLE = 'Deposits closed · withdraw or send';
 

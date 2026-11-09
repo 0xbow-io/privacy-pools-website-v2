@@ -79,7 +79,7 @@ import { fiatEntryAvailable, formatUsdLabel, sanitizeUsdInput, shieldDestination
 import { getUiParam, pushUiParamEntry, retireUiParamEntry, rebaseUiParamEntry, subscribeUiUrl } from '@/components/ui-url-events';
 import { useShareYield } from '@/hooks/use-share-yield';
 import { useYieldVaultProbeVersion } from '@/hooks/use-yield-vault-probe';
-import { displayTokenSymbol, isShareSymbol, shareRedemptionDisclosure } from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol } from '@/services/share-display';
 import { amountInputDisplay, formatTokenBalance, groupThousands, isStablecoin, stripAmountSeparators } from '@/services/token-format';
 import { conversionFundingToken, targetAcceptsConversion } from '@/config/intent-targets';
 import { getYieldShareToken } from '@/services/share-yield';
@@ -3273,10 +3273,9 @@ export function ActionHub({
                 </View>
               ) : null}
               {depositFlow.stellarLabelRetry ? <StellarLabelRetryNotice retry={depositFlow.stellarLabelRetry.retry} /> : null}
-              {/* No redemption line here. It describes what happens at WITHDRAW
-                  time, which is where the withdraw card already says it
-                  (shareRedemptionDisclosure), and on a deposit receipt it read
-                  as a condition on the deposit (Nathaniel, QA 2026-09-21). */}
+              {/* No redemption line here: on a deposit receipt it read as a condition
+                  on the deposit (Nathaniel, QA 2026-09-21), and the withdraw flow
+                  no longer shows one either (Mike, PR #37). */}
               {/* Live bridge state, polled from LiFi. Without it the card above
                   is the last word the user ever gets on a transfer that takes
                   minutes. */}
@@ -4093,22 +4092,6 @@ export function ActionHub({
           showDisclosure={!tight && (!landing || walletConnected)}
           compact={tight}
         />
-      )}
-      {/* Withdrawing a share note ALWAYS redeems through the PPRouter (share
-          in, underlying out); when the route is unavailable the flow refuses
-          rather than paying the share, so this can promise the underlying
-          (Pat, 2026-09-05). */}
-      {a === 'withdraw' && !isSui && isShareSymbol(pageTargetSymbol) && (
-        /* pb-[22px]: the receive card that follows is seamed to the card above
-           by PairArrow, whose -28 top margin reaches 16px past the 12px gap
-           and into whatever sits here. With this line in the seam the globe
-           chip landed on the word "vault" (Nathaniel, QA 2026-09-21). The
-           padding is inside the text box, so the chip overlaps empty space
-           instead of glyphs, at every width and however many lines it wraps
-           to. */
-        <Text className="pb-[22px] font-pp-sans text-[12px] leading-[17px] text-text-secondary">
-          {shareRedemptionDisclosure(pageTargetSymbol)}
-        </Text>
       )}
       {/* The "Pending until approved" explainer box lived here until QA
           2026-08-17 — removed as noise; the pending state itself still shows
