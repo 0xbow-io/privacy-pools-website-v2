@@ -12,7 +12,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import { StellarWalletOption } from '@/components/stellar-wallet-option';
-import { useConnectFreighter, useStellarWallet } from '@/components/stellar-wallet-provider';
+import { useConnectStellarWallet, useStellarWallet } from '@/components/stellar-wallet-provider';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { AccountKeySignIn } from '@/components/account-key-sign-in';
 import { useMobileAccountKeys } from '@/components/mobile-account-keys-context';
@@ -580,7 +580,7 @@ export function WalletConnectModalProvider({ children }: { children: ReactNode }
   // from effects keyed on it (the /modal route), and a Stellar wallet state
   // change must not re-fire them.
   const { isStellar: activeIsStellar } = useChainRouter();
-  const connectFreighter = useConnectFreighter();
+  const connectFreighter = useConnectStellarWallet();
   const stellarWallet = useStellarWallet();
   const stellarRef = useRef({ activeIsStellar, connectFreighter, stellarWallet });
   stellarRef.current = { activeIsStellar, connectFreighter, stellarWallet };
@@ -588,11 +588,11 @@ export function WalletConnectModalProvider({ children }: { children: ReactNode }
     const { activeIsStellar: onStellar, connectFreighter: connectStellar, stellarWallet: freighter } = stellarRef.current;
     if (onStellar) {
       if (freighter.isConnected) return;
-      // A detected Freighter connects in one step. Otherwise show the picker
+      // A single detected wallet connects in one step; with both installed the user picks. Otherwise show the picker
       // with the Freighter row: going straight to window.open(freighter.app)
       // is blocked as a popup when nothing was clicked (a ?modal=connect
       // link), and the user saw nothing at all.
-      if (freighter.availabilityChecked && freighter.isAvailable) {
+      if (freighter.availabilityChecked && freighter.isAvailable && !(freighter.walletAvailable.freighter && freighter.walletAvailable.metamask)) {
         await connectStellar();
         return;
       }

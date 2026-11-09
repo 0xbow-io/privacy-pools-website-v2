@@ -94,7 +94,7 @@ import { useChainRouter } from '@/hooks/use-chain-router';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { STELLAR_XLM } from '@/config/stellar-deployment';
 import { encodeStellarBlindRequest, stellarBlindRequestId } from '@/services/stellar/stellar-request';
-import { describeStellarStage, stellarErrorMessage } from '@/services/stellar/stellar-copy';
+import { describeStellarStage, stellarErrorMessage, stellarWalletName } from '@/services/stellar/stellar-copy';
 import { withStellarLinkParams } from '@/services/stellar/stellar-link';
 import { canProveSave, saveWithProof, type PickerHost } from '@/services/backup-file-proof';
 import { ACTIVE_APP_ENVIRONMENT } from '@/config/app-environment';
@@ -1457,7 +1457,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
       } catch (error) {
         setStatusMessage(null);
         const raw = error instanceof Error ? error.message : String(error);
-        setErrorMessage(/reject|denied|cancel|declined/i.test(raw) ? 'Request cancelled in Freighter.' : stellarErrorMessage(raw));
+        setErrorMessage(/reject|denied|cancel|declined/i.test(raw) ? `Request cancelled in ${stellarWalletName()}.` : stellarErrorMessage(raw));
       } finally {
         setIsBusy(false);
       }

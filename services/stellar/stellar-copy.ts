@@ -6,21 +6,33 @@
  * Pure module (no react-native) so it is bun-testable.
  */
 import type { StellarFlowStage } from '@/services/stellar/stellar-account';
+import { STELLAR_WALLET_NAMES, type StellarWalletKind } from '@/services/stellar/stellar-wallet-choice';
+import { metaMaskNetworkMismatchMessage } from '@/services/stellar/metamask-stellar';
+
+// The wallet the copy names, set by the wallet provider on connect. Freighter until told otherwise.
+let walletName: string = STELLAR_WALLET_NAMES.freighter;
+export function setStellarCopyWallet(kind: StellarWalletKind): void {
+  walletName = STELLAR_WALLET_NAMES[kind];
+}
+/** The connected wallet's name, for copy that is built outside this module. */
+export function stellarWalletName(): string {
+  return walletName;
+}
 
 export function describeStellarStage(stage: StellarFlowStage): string {
   switch (stage) {
     case 'unlocking':
-      return 'Unlocking your private account (sign in Freighter)...';
+      return `Unlocking your private account (sign in ${walletName})...`;
     case 'registering':
-      return 'Setting up your private account (up to two approvals in Freighter)...';
+      return `Setting up your private account (up to two approvals in ${walletName})...`;
     case 'proving':
       return 'Building the zero-knowledge proof...';
     case 'signing':
-      return 'Submitting (approve in Freighter)...';
+      return `Submitting (approve in ${walletName})...`;
     case 'confirming':
       return 'Waiting for confirmation...';
     case 'registering-label':
-      return 'Submitting for approval (approve in Freighter)...';
+      return `Submitting for approval (approve in ${walletName})...`;
     case 'relaying':
       return 'Sending through the relayer...';
     case 'syncing':
@@ -34,9 +46,10 @@ const RULES: [RegExp, string][] = [
   // transactions), and a retry builds only the missing step, so the copy is scoped to this one.
   [/\btxTooLate\b/, 'The approval took too long and the network refused it. This transaction was not sent. Try again.'],
   [/\btxBadSeq\b/, 'Another transaction from this wallet went through first. This transaction was not sent. Try again.'],
-  [/network.*mismatch|StellarWalletNetworkMismatch/i, 'Freighter is on another network. Switch it to Testnet and try again.'],
-  [/not installed|StellarWalletNotAvailable/i, 'Freighter is not available in this browser.'],
-  [/locked|not connected/i, 'Unlock Freighter and try again.'],
+  [/MetaMask supports Stellar mainnet only|Unknown network passphrase/i, metaMaskNetworkMismatchMessage()],
+  [/network.*mismatch|StellarWalletNetworkMismatch/i, '{wallet} is on another network. Switch it to Testnet and try again.'],
+  [/not installed|StellarWalletNotAvailable/i, '{wallet} is not available in this browser.'],
+  [/locked|not connected/i, 'Unlock {wallet} and try again.'],
   // Before the generic 'not active' / 'insufficient' rules: these are note
   // state, not wallet state.
   [/RecipientViewingKeyUnregistered|no on-chain viewing key/i, 'The recipient has not set up a private account on Stellar yet. They need to open the app and make any private action first.'],
@@ -62,7 +75,7 @@ export function stellarErrorMessage(raw: string): string {
     return `The network rejected this transaction (error #${contract[1]}). Nothing was sent. Sync and try again.`;
   }
   for (const [pattern, message] of RULES) {
-    if (pattern.test(raw)) return message;
+    if (pattern.test(raw)) return message.replace('{wallet}', walletName);
   }
   // Soroban errors can carry a whole XDR blob; keep the head only.
   return raw.length > 240 ? `${raw.slice(0, 240)}…` : raw;
@@ -73,5 +86,5 @@ export function stellarUnlockErrorTitle(caught: unknown): string {
   const raw = caught instanceof Error ? caught.message : String(caught);
   // A contract rejection's diagnostic log can contain these words too.
   const cancelled = /reject|denied|cancel|declined/i.test(raw) && !CONTRACT_ERROR.test(raw);
-  return cancelled ? 'Sign-in cancelled in Freighter.' : stellarErrorMessage(raw);
+  return cancelled ? `Sign-in cancelled in ${walletName}.` : stellarErrorMessage(raw);
 }

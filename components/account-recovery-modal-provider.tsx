@@ -29,7 +29,7 @@ import { useChainRouter } from '@/hooks/use-chain-router';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { STELLAR_TESTNET_ID } from '@/config/chains';
 import { isStellarBackupPayload, isStellarRequestBackupPayload } from '@/services/stellar/stellar-backup';
-import { stellarErrorMessage } from '@/services/stellar/stellar-copy';
+import { stellarErrorMessage, stellarWalletName } from '@/services/stellar/stellar-copy';
 import { backupTextNeedsPassword } from '@/services/account-backup-core';
 
 type RecoveryMode = 'export' | 'import';
@@ -217,7 +217,7 @@ export function AccountRecoveryModalProvider({ children }: { children: React.Rea
     } catch (error) {
       if (!current()) return;
       const raw = error instanceof Error ? error.message : String(error);
-      setErrorMessage(isStellar && /reject|denied|cancel|declined/i.test(raw) ? 'Cancelled in Freighter.'
+      setErrorMessage(isStellar && /reject|denied|cancel|declined/i.test(raw) ? `Cancelled in ${stellarWalletName()}.`
         : isStellar ? stellarErrorMessage(raw) : raw);
     } finally {
       if (current()) {
@@ -369,7 +369,7 @@ export function AccountRecoveryModalProvider({ children }: { children: React.Rea
         closeAccountRecoveryModal();
       } catch (error) {
         const raw = error instanceof Error ? error.message : String(error);
-        setErrorMessage(/reject|denied|cancel|declined/i.test(raw) ? 'Cancelled in Freighter.' : stellarErrorMessage(raw));
+        setErrorMessage(/reject|denied|cancel|declined/i.test(raw) ? `Cancelled in ${stellarWalletName()}.` : stellarErrorMessage(raw));
       } finally {
         setIsImporting(false);
       }
@@ -392,7 +392,7 @@ export function AccountRecoveryModalProvider({ children }: { children: React.Rea
         closeAccountRecoveryModal();
       } catch (error) {
         const raw = error instanceof Error ? error.message : String(error);
-        setErrorMessage(/reject|denied|cancel|declined/i.test(raw) ? 'Cancelled in Freighter.' : stellarErrorMessage(raw));
+        setErrorMessage(/reject|denied|cancel|declined/i.test(raw) ? `Cancelled in ${stellarWalletName()}.` : stellarErrorMessage(raw));
       } finally {
         setIsImporting(false);
       }

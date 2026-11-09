@@ -22,7 +22,7 @@ import { useChainRouter } from '@/hooks/use-chain-router';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { useTabCloseGuard } from '@/hooks/use-tab-close-guard';
 import { decodeStellarClaim, stellarClaimTotal } from '@/services/stellar/stellar-claim';
-import { describeStellarStage, stellarErrorMessage } from '@/services/stellar/stellar-copy';
+import { describeStellarStage, stellarErrorMessage, stellarWalletName } from '@/services/stellar/stellar-copy';
 
 function short(value: string): string {
   return value.length <= 12 ? value : `${value.slice(0, 6)}…${value.slice(-6)}`;
@@ -30,7 +30,7 @@ function short(value: string): string {
 
 function errorText(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
-  return /reject|denied|cancel|declined/i.test(raw) ? 'Cancelled in Freighter.' : stellarErrorMessage(raw);
+  return /reject|denied|cancel|declined/i.test(raw) ? `Cancelled in ${stellarWalletName()}.` : stellarErrorMessage(raw);
 }
 
 export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
@@ -76,7 +76,7 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
     }
     if (!wallet.isConnected) {
       const connected = await wallet.connect();
-      if (!connected) { setError(wallet.isAvailable ? 'Connect Freighter to claim.' : 'Install Freighter to claim.'); return false; }
+      if (!connected) { setError(wallet.isAvailable ? 'Connect a Stellar wallet to claim.' : 'Install Freighter or MetaMask to claim.'); return false; }
     }
     return true;
   };

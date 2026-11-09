@@ -61,7 +61,7 @@ import { getExplorerName, getExplorerTxUrl, getChainConfig, isChainSelectable, s
 import { STELLAR_TESTNET_CONTRACTS, STELLAR_XLM } from '@/config/stellar-deployment';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { useStellarBalance } from '@/hooks/use-stellar-balance';
-import { describeStellarStage, stellarErrorMessage } from '@/services/stellar/stellar-copy';
+import { describeStellarStage, stellarErrorMessage, stellarWalletName } from '@/services/stellar/stellar-copy';
 import { StellarLabelRetryNotice } from '@/components/stellar-label-retry';
 import { isStellarAccountAddress } from '@/services/stellar/stellar-request';
 import type { PendingLabel } from '@/services/stellar/stellar-account';
@@ -4270,7 +4270,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       } catch (caught) {
         const raw = caught instanceof Error ? caught.message : String(caught);
         errorToast({
-          title: /reject|denied|cancel|declined/i.test(raw) ? 'Cancelled in Freighter.' : stellarErrorMessage(raw),
+          title: /reject|denied|cancel|declined/i.test(raw) ? `Cancelled in ${stellarWalletName()}.` : stellarErrorMessage(raw),
           variant: 'destructive',
         });
         return false;

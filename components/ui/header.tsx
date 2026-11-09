@@ -25,7 +25,7 @@ import { useTheme } from '@/components/theme-provider';
 import { Logo } from './logo';
 import { VersionSwitch } from './version-switch';
 import { ChainLogo, chainLogoChainFor, type ChainLogoChain } from './chain-logo';
-import { useConnectFreighter, useStellarWallet } from '@/components/stellar-wallet-provider';
+import { useConnectStellarWallet, useStellarWallet } from '@/components/stellar-wallet-provider';
 import { useSupportedWalletConnection } from '@/hooks/use-supported-wallet-connection';
 import { usePoolSession } from '@/hooks/use-pool-session';
 import { useChainRouter } from '@/hooks/use-chain-router';
@@ -149,7 +149,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
   // affordance below (ENS, finish-setup, account-key rows) keys off this.
   const connectedIsNonEvm = connectedIsSuiWallet || connectedIsStellar;
   const stellarWallet = useStellarWallet();
-  const connectFreighter = useConnectFreighter();
+  const connectFreighter = useConnectStellarWallet();
   const { isConnected: evmConnected } = useAccount();
   const suiAccount = useCurrentAccount();
   const { disconnect } = useDisconnect();
