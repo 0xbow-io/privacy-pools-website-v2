@@ -56,6 +56,9 @@ import { useSupportedWalletConnection } from '@/hooks/use-supported-wallet-conne
 import { useMultiChainWallet } from '@/hooks/use-multi-chain-wallet';
 import { useNotes } from '@/hooks/use-notes';
 import { fundedActionsDisabled } from '@/services/action-gate';
+import { formatUsdBalance } from '@/services/format-fiat';
+import { ShareFigure } from '@/components/ui/share-figure';
+import { Skeleton } from '@/components/ui/skeleton';
 import { isMyDeposit, normalizeCommitment } from '@/services/deposit-ownership';
 import { buildPaidRequestTxHashSet } from '@/services/paid-requests-store';
 import { buildOutgoingDepositTxHashSet } from '@/services/outgoing-deposits-store';
@@ -689,18 +692,20 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
                     My private balance
                   </Text>
                   <Text numberOfLines={1} className="font-pp-bold text-[46px] leading-[56px] tracking-[-1px] text-text">
-                    ${userPoolBalance.activeView.usd.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                    {userPoolBalance.activeView.loading
+                      ? <Skeleton width={120} height={40} radius={8} />
+                      : formatUsdBalance(userPoolBalance.activeView.usd)}
                   </Text>
                   <View className="flex-row flex-wrap items-center gap-[6px]">
                     <Text testID="pool-private-balance" className="font-pp-regular text-[13px] leading-[15px] text-text-secondary">
-                      {userPoolBalance.activeView.text}
+                      <ShareFigure view={userPoolBalance.activeView} />
                     </Text>
                     <ShareCountHint hint={userPoolBalance.activeView.hint} testID="pool-private-balance-hint" />
                   </View>
                   {userPoolBalance.pendingNum > 0 && (
                     <View className="flex-row flex-wrap items-center gap-[4px] pt-[4px]">
                       <Text className="font-pp-regular text-[12px] leading-[16px] text-warning">
-                        {userPoolBalance.pendingView.text} pending
+                        <ShareFigure view={userPoolBalance.pendingView} /> pending
                       </Text>
                       <ShareCountHint hint={userPoolBalance.pendingView.hint} testID="pool-pending-balance-hint" />
                     </View>

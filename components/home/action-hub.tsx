@@ -1,4 +1,5 @@
 import { spendableBalanceLabel } from '@/services/spendable-balance-label';
+import { pendingPoolReopenStep, type PendingPoolReopen } from '@/services/pool-pick-reopen';
 import { useShareAmountField } from '@/hooks/use-share-amount-field';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
@@ -2007,6 +2008,23 @@ export function ActionHub({
     return true;
   }, [requestSheetOpen, requestSheetNetwork, chainId, isSui, isFocused, requestToken.address, requestToken.chainId, selectChain, openPoolPageFor, syncRequestForm]);
 
+  // A Withdraw or Send pool picked on another chain re-opens its inline flow
+  // only once a render carries the new chain (services/pool-pick-reopen.ts).
+  const [pendingPoolReopen, setPendingPoolReopen] = useState<PendingPoolReopen | null>(null);
+  const reopenInlineFlow = useCallback((mode: PendingPoolReopen['mode'], symbol: string, carried: string | undefined) => {
+    if (mode === 'withdraw') openWithdrawModal(undefined, { tokenSymbol: symbol, amount: carried, inline: true });
+    else openTransferModal({ tokenSymbol: symbol as 'ETH' | 'USDC' | 'USDT', amount: carried, inline: true });
+  }, [openWithdrawModal, openTransferModal]);
+  // Each pick is a fresh object, so the ref marks it handled without a state reset.
+  const handledPoolReopenRef = useRef<PendingPoolReopen | null>(null);
+  useEffect(() => {
+    if (!pendingPoolReopen || handledPoolReopenRef.current === pendingPoolReopen) return;
+    const step = pendingPoolReopenStep(pendingPoolReopen, chainId);
+    if (step === 'none' || step === 'wait') return;
+    handledPoolReopenRef.current = pendingPoolReopen;
+    if (step === 'open') reopenInlineFlow(pendingPoolReopen.mode, pendingPoolReopen.symbol, pendingPoolReopen.amount);
+  }, [pendingPoolReopen, chainId, reopenInlineFlow]);
+
   const publishPoolSheet = useCallback(() => {
     if (!poolSheetOpen) return false;
     const shieldPools = listShieldPools().filter((pool) => {
@@ -2108,7 +2126,8 @@ export function ActionHub({
             && Platform.OS === 'web'
             && identityMode !== 'key'
             && crossChainSwapDepositSupported(chainId, targetChain);
-          if (targetChain !== chainId && !keepChainForCrossChainShield) {
+          const switchesChain = targetChain !== chainId && !keepChainForCrossChainShield;
+          if (switchesChain) {
             if (openPoolPageFor(targetChain, t.symbol)) return;
             const outcome = await selectChain(targetChain);
             if (outcome !== 'committed') return; // refused switch = keep the old pool
@@ -2130,10 +2149,14 @@ export function ActionHub({
               const next = sanitizeAmountInput(current, t.decimals);
               return next === current ? previous : { ...previous, [mode]: next };
             });
-            if (mode === 'withdraw' && withdrawInline) {
-              openWithdrawModal(undefined, { tokenSymbol: t.symbol, amount: amount || undefined, inline: true });
-            } else if (mode === 'send' && transferInline) {
-              openTransferModal({ tokenSymbol: t.symbol as 'ETH' | 'USDC' | 'USDT', amount: amount || undefined, inline: true });
+            const reopen = mode === 'withdraw' && withdrawInline ? 'withdraw' : mode === 'send' && transferInline ? 'send' : null;
+            if (reopen && switchesChain) {
+              // The openers held here still read the OLD chain: Send checked the
+              // picked token against it and reported "USDT is not available on
+              // this network" for a valid pick. Re-open once the switch renders.
+              setPendingPoolReopen({ fromChainId: chainId, chainId: targetChain, mode: reopen, symbol: t.symbol, amount: amount || undefined });
+            } else if (reopen) {
+              reopenInlineFlow(reopen, t.symbol, amount || undefined);
             }
             return;
           }
@@ -2144,7 +2167,7 @@ export function ActionHub({
       onClose: () => { setPoolSheetOpen(false); setPoolSheetNetwork(null); },
     });
     return true;
-  }, [poolSheetOpen, poolSheetNetwork, poolSheetMode, shieldPool, payTokenAddr, chainId, isSui, isFocused, selectChain, openPoolPageFor, tokenMeta.symbol, amount, withdrawInline, withdrawStep, openWithdrawModal, transferInline, openTransferModal, setToken, toast, data.myPools, identityMode]);
+  }, [poolSheetOpen, poolSheetNetwork, poolSheetMode, shieldPool, payTokenAddr, chainId, isSui, isFocused, selectChain, openPoolPageFor, tokenMeta.symbol, amount, withdrawInline, withdrawStep, reopenInlineFlow, transferInline, setToken, toast, data.myPools, identityMode]);
 
   useEffect(() => {
     // One host, three possible sheets — whichever picker the user just tapped
