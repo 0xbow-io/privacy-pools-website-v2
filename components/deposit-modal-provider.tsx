@@ -19,7 +19,7 @@ import { reportErrorReport } from '@/services/error-reports';
 import { classifyFailure } from '@/services/error-reports-cause';
 import { stellarErrorReportStage, type ErrorReportStage } from '@/services/error-reports-failure';
 import { TEST_MODE } from '@/config/env';
-import { DEPOSIT_FAQ_URL, SUPPORT_FORM_URL, SUPPORT_TELEGRAM_URL } from '@/config/support';
+import { DEPOSIT_FAQ_URL, SUPPORT_TELEGRAM_URL } from '@/config/support';
 import { ENTRYPOINT_ASSETS_ABI, getMinimumDepositAmount, getVettingFeeBPS, type EntrypointAssetConfig } from '@/services/entrypoint-assets';
 import { sameSymbol } from '@/services/symbol-match';
 import { formatDepositMinimum, friendlyDepositError, PREVIEW_MINT_ABI, requiredUnderlyingForMinShares, scaleUnits } from '@/services/deposit-limits';
@@ -4799,12 +4799,6 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
               <Pressable onPress={() => Linking.openURL(DEPOSIT_FAQ_URL)}>
                 <Text className="text-[12px] text-[#4D4D4D] font-pp-regular">
                   FAQ
-                </Text>
-              </Pressable>
-              <View className="w-[1px] h-[12px] bg-[#4D4D4D]" />
-              <Pressable onPress={() => Linking.openURL(SUPPORT_FORM_URL)}>
-                <Text className="text-[12px] text-[#4D4D4D] font-pp-regular">
-                  Support
                 </Text>
               </Pressable>
               <View className="w-[1px] h-[12px] bg-[#4D4D4D]" />
