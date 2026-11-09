@@ -5,7 +5,8 @@ import { shareAmountFromUnderlying } from '@/services/share-amount-entry';
 import { shareBalanceDisplay, shareFieldFigure, shareRateSnapshotKey, shareUsdDisplayExact } from '@/services/share-balance-display';
 import { parseTokenAmount, sanitizeAmountInput } from '@/services/token-amount';
 import { displayTokenSymbol, isShareSymbol } from '@/services/share-display';
-import type { ShareRate } from '@/services/share-rates';
+import { underlyingFeedPrice, type ShareRate } from '@/services/share-rates';
+import { formatUsdBalance } from '@/services/format-fiat';
 // Bun.Transpiler is not in the app's type declarations, so the typecheck gate would reject a direct use.
 type BunGlobal = { Bun: { Transpiler: new (options: { loader: 'ts' }) => { transformSync(source: string): string } } };
 
@@ -15,7 +16,7 @@ const read = (file: string) => readFileSync(new URL(`../../${file}`, import.meta
 
 // Execute the real hook with local state/effect and feed adapters. No global
 // module mocks, React Native imports, DOM, timers or network dependencies.
-function fieldHarness(initialAmount = '', fieldRate: ShareRate | null = rate) {
+function fieldHarness(initialAmount = '', fieldRate: ShareRate | null = rate, prices: Record<string, number> = { asset: 2000 }) {
   const states: unknown[] = [];
   let cursor = 0;
   let effects: (() => void)[] = [];
@@ -29,11 +30,11 @@ function fieldHarness(initialAmount = '', fieldRate: ShareRate | null = rate) {
       return [states[i], (value: unknown) => { states[i] = value; }]; },
     useEffect: (effect: () => void) => { effects.push(effect); },
     useShareRates: () => ({ rateFor: () => fieldRate ?? undefined }),
-    useAllChainsPriceMap: () => ({ asset: 2000 }),
+    useAllChainsPriceMap: () => prices,
     useBalanceDisplay: () => (exact: string) => shareBalanceDisplay({ sharesExact: exact, shareSymbol: 'ppETH', rate: fieldRate ?? undefined, priceMap: {}, fallbackPrice: 0 }),
     getTokenMetadataBySymbol: () => ({ address: 'share' }),
     formatUnits, shareAmountFromUnderlying, shareFieldFigure, shareRateSnapshotKey, shareUsdDisplayExact,
-    parseTokenAmount, sanitizeAmountInput, displayTokenSymbol, isShareSymbol,
+    parseTokenAmount, sanitizeAmountInput, displayTokenSymbol, isShareSymbol, underlyingFeedPrice,
   };
   const useField = new Function(...Object.keys(dependencies), `${body}; return useShareAmountField;`)(...Object.values(dependencies));
   const render = () => {
@@ -152,4 +153,42 @@ test('Send without a live rate: the typed draft waits for the rate, the field ne
   const max = h.max('0.5');
   expect(max.value).toBe('');
   expect(max.loading).toBe(true);
+});
+
+// QA on #72: the USDT pool header read "$4.76 / 4.77 USDT" while Withdraw at
+// MAX read "4.77" over "$4.77". One position, one number (DEV-621 rule 3).
+test('the field dollar line at MAX equals the balance header for the same position', () => {
+  const usdt: ShareRate = { chainId: 1, share: 'share', underlying: '0xdac17f958d2ee523a2206206994597c13d831ec7', shareSymbol: 'ppUSDT',
+    shareDecimals: 18, underlyingDecimals: 6, underlyingSymbol: 'USDT', assetsPerShare: 1_005_578n };
+  const prices = { [usdt.underlying]: 0.998, USDT: 0.998 };
+  const cases: [ShareRate, Record<string, number>, string[]][] = [
+    [usdt, prices, ['4.7525', '4.75249', '1', '0.5', '12.345678901234567891', '1234.5678']],
+    [rate, { asset: 2459.37 }, ['0.0019', '0.1', '1', '0.099891872636417805']],
+  ];
+  for (const [fieldRate, priceMap, amounts] of cases) {
+    for (const max of amounts) {
+      const header = shareBalanceDisplay({ sharesExact: max, shareSymbol: fieldRate.shareSymbol, rate: fieldRate, priceMap, fallbackPrice: 0 });
+      const h = fieldHarness('', fieldRate, priceMap);
+      h.cap(max);
+      const field = h.max(max);
+      expect(`${field.value} ${header.symbol}`).toBe(header.text);
+      expect(formatUsdBalance(parseFloat(field.usdValue))).toBe(formatUsdBalance(header.usd));
+      expect(field.usdValue).toBe(formatUsdBalance(header.usd).replace(/[$,]/g, ''));
+    }
+  }
+  // The QA position: both read $4.76, never $4.77.
+  const h = fieldHarness('', usdt, prices);
+  h.cap('4.7525');
+  expect(h.max('4.7525').usdValue).toBe('4.76');
+  expect(formatUsdBalance(shareBalanceDisplay({ sharesExact: '4.7525', shareSymbol: 'ppUSDT', rate: usdt, priceMap: prices, fallbackPrice: 0 }).usd)).toBe('$4.76');
+});
+
+test('every dollar line under an amount field uses the header formatter', () => {
+  const withdraw = read('components/withdraw-modal-provider.tsx');
+  const label = withdraw.slice(withdraw.indexOf('const amountDollarLabel'), withdraw.indexOf('const displayAvailableNum'));
+  expect(label).toContain('formatUsdBalance(view.usd)');
+  expect(label).not.toContain('toFixed(');
+  const hub = read('components/home/action-hub.tsx');
+  expect(hub).toContain('formatUsdBalance(shareFiatEntry ? parseFloat(amountField.usdValue) || 0 : balanceDisplay(activeAmountText');
+  expect(read('hooks/use-share-amount-field.ts')).toContain('underlyingFeedPrice(rate, prices)');
 });

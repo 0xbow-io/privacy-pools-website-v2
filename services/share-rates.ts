@@ -103,6 +103,16 @@ export function displayUnderlyingWei(sharesWei: bigint, rate: ShareRate): bigint
  * never shares × price (codex on 0659770).
  */
 export function underlyingPriceFor(rate: ShareRate, priceMap: Record<string, number> | undefined): number {
+  return underlyingFeedPrice(rate, priceMap) ?? (isStablecoin(rate.underlyingSymbol) ? 1 : 0);
+}
+
+/**
+ * The feed's own quote for the underlying, the lookup underlyingPriceFor makes
+ * before its stablecoin par fallback: undefined when the feed has none. The
+ * amount field prices its dollar line with this, so it reads the same number
+ * as the balance header (DEV-621) and never assumes par for dollar entry.
+ */
+export function underlyingFeedPrice(rate: ShareRate, priceMap: Record<string, number> | undefined): number | undefined {
   const byAddress = priceMap?.[rate.underlying.toLowerCase()];
   if (typeof byAddress === 'number' && byAddress > 0) return byAddress;
   const bySymbol = priceMap?.[rate.underlyingSymbol] ?? priceMap?.[rate.underlyingSymbol.toLowerCase()];
@@ -112,7 +122,7 @@ export function underlyingPriceFor(rate: ShareRate, priceMap: Record<string, num
   const shown = displayTokenSymbol(rate.underlyingSymbol);
   const byDisplay = shown === rate.underlyingSymbol ? undefined : (priceMap?.[shown] ?? priceMap?.[shown.toLowerCase()]);
   if (typeof byDisplay === 'number' && byDisplay > 0) return byDisplay;
-  return isStablecoin(rate.underlyingSymbol) ? 1 : 0;
+  return undefined;
 }
 
 /** Underlying value of a share amount already held as a number (the activity rows). */

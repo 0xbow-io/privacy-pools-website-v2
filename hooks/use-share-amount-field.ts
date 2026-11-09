@@ -7,6 +7,7 @@ import { isShareSymbol, displayTokenSymbol } from '@/services/share-display';
 import { shareFieldFigure, shareRateSnapshotKey, shareUsdDisplayExact } from '@/services/share-balance-display';
 import { parseTokenAmount, sanitizeAmountInput } from '@/services/token-amount';
 import { shareAmountFromUnderlying } from '@/services/share-amount-entry';
+import { underlyingFeedPrice } from '@/services/share-rates';
 
 // RULE (Pat 2026-10-21): displayed underlying never replaces exact share state.
 // Headlines use underlying. While the rate is unknown the field shows no figure
@@ -19,8 +20,9 @@ export function useShareAmountField(args: { amount: string; symbol: string; chai
   const { rateFor } = useShareRates();
   const prices = useAllChainsPriceMap(chainId);
   const rate = underlyingEntry && isShareSymbol(symbol) ? rateFor(chainId, getTokenMetadataBySymbol(symbol, chainId)?.address) : undefined;
-  // No stablecoin fallback: dollar ENTRY requires a real price from the grid.
-  const price = rate ? prices[rate.underlying.toLowerCase()] ?? prices[rate.underlyingSymbol] ?? prices[displayTokenSymbol(rate.underlyingSymbol)] : undefined;
+  // The balance header's lookup (underlyingPriceFor) without its stablecoin
+  // par fallback: dollar ENTRY requires a real price from the grid.
+  const price = rate ? underlyingFeedPrice(rate, prices) : undefined;
   const priceExact = typeof price === 'number' && Number.isFinite(price) && price > 0
     ? price.toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 20 }) : undefined;
   const usdAvailable = shareUsdDisplayExact('0', rate, priceExact) !== null;

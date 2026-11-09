@@ -1,6 +1,7 @@
 import { spendableBalanceLabel } from '@/services/spendable-balance-label';
 import { presetExceedsWithdrawMax } from '@/services/withdraw-preset-guard';
 import { useShareAmountField } from '@/hooks/use-share-amount-field';
+import { formatUsdBalance } from '@/services/format-fiat';
 // RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
 // amounts, validation, quotes, relayer and on-chain values stay in shares
 // (exact strings/bigints). Never convert an amount to underlying and back,
@@ -1774,9 +1775,10 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   const amountDollarLabel = useCallback((sharesExact: string) => {
     if (isShareSymbol(selectedToken)) {
       const view = balanceDisplay(sharesExact, selectedToken, chainId);
-      return view.converted ? `$${view.usd.toFixed(2)}` : '';
+      // The balance header's formatter: cents rounded DOWN, one figure (DEV-621).
+      return view.converted ? formatUsdBalance(view.usd) : '';
     }
-    return `$${((parseFloat(sharesExact) || 0) * currentPrice).toFixed(2)}`;
+    return formatUsdBalance((parseFloat(sharesExact) || 0) * currentPrice);
   }, [selectedToken, balanceDisplay, chainId, currentPrice]);
   const displayAvailableNum = isSui
     ? Number(suiWithdraw.maxSingle) / altScale

@@ -49,7 +49,7 @@ test('both quick-preset surfaces label literals and convert presses; percentages
 test('share USD display writers use the exact equivalent, not shares times an underlying price', () => {
   const source = read('components/withdraw-modal-provider.tsx');
   expect(source).toContain('const view = balanceDisplay(sharesExact, selectedToken, chainId);');
-  expect(source).toContain('view.usd.toFixed(2)');
+  expect(source).toContain('formatUsdBalance(view.usd)');
   expect(source).toContain('setDollarValue(amountDollarLabel(val));');
   expect(source).not.toMatch(/setDollarValue\(`\$\$\{.*currentPrice/);
   expect(read('hooks/use-share-amount-field.ts')).toContain('shareUsdDisplayExact(shares, rate, priceExact, { field: true })');

@@ -111,10 +111,13 @@ export function shareUsdDisplayExact(sharesExact: string, rate: ShareRate | unde
   const price = parseTokenAmount(priceExact, priceDecimals);
   if (price <= 0n) return null;
   const shares = parseTokenAmount(sharesExact, rate.shareDecimals);
-  const assets = shares * rate.assetsPerShare / 10n ** BigInt(rate.shareDecimals);
+  // The field's dollar line is the balance header's figure: the same converted
+  // quantity (displayUnderlyingWei) and cents rounded DOWN like formatUsdBalance,
+  // so MAX reads "$4.76" where the header reads "$4.76" (DEV-621).
+  const assets = options?.field ? displayUnderlyingWei(shares, rate) : shares * rate.assetsPerShare / 10n ** BigInt(rate.shareDecimals);
   const usd = assets * price * 10n ** 18n / 10n ** BigInt(rate.underlyingDecimals + priceDecimals);
   if (options?.field) {
-    const cents = (usd + 5_000_000_000_000_000n) / 10_000_000_000_000_000n;
+    const cents = usd / 10_000_000_000_000_000n;
     if (cents === 0n && usd > 0n) return formatUnits(usd, 18);
     return `${cents / 100n}.${(cents % 100n).toString().padStart(2, '0')}`;
   }
