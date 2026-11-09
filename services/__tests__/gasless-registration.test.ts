@@ -429,8 +429,8 @@ describe('claim page shows the top-up payout (DEV-482)', () => {
     const hook = readFileSync(join(ROOT, 'hooks/use-note-import.ts'), 'utf8');
     expect(hook).toContain('setClaimSplit({ feeWei: BigInt(quote.feeAmount), payoutWei: plan.payoutWei, changeWei: plan.changeWei })');
     const page = readFileSync(join(ROOT, 'app/import-note/[encoded].tsx'), 'utf8');
-    expect(page).toContain('{PUBLIC_PAYOUT_LABEL}: {linkAmountText(claimSplit.payoutWei, token)}');
-    expect(page).toContain('Stays shielded: {linkAmountText(claimSplit.changeWei, token)}');
+    expect(page).toContain('{PUBLIC_PAYOUT_LABEL}: <FigureText text={linkAmountText(claimSplit.payoutWei, token, shareRate)} />');
+    expect(page).toContain('Stays shielded: <FigureText text={linkAmountText(claimSplit.changeWei, token, shareRate)} />');
   });
 });
 
