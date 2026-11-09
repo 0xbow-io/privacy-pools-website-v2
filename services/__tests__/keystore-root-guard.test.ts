@@ -105,7 +105,7 @@ describe('keystore root health check', () => {
   test('(b) the rebuilt root equals the chain current root, with all 363 leaves', async () => {
     const { deps: d } = deps({ rows: staleRows() });
     await checkKeystoreRoot(d);
-    const held = getKeystoreCorrection(KEYSTORE)!;
+    const held = getKeystoreCorrection(CHAIN_ID, KEYSTORE)!;
     expect(held.leaves).toHaveLength(CHAIN_LEAVES);
     expect(held.root).toBe(chainRoot);
     expect(BigInt(await merkle.computeRoot(held.leaves))).toBe(chainRoot);
@@ -115,7 +115,7 @@ describe('keystore root health check', () => {
     const { deps: d, counters } = deps({ rows: chainEvents.map(toRow) });
     expect(await checkKeystoreRoot(d)).toEqual({ status: 'current' });
     expect(counters).toEqual({ head: 1, root: 1, events: 0 });
-    expect(getKeystoreCorrection(KEYSTORE)).toBeUndefined();
+    expect(getKeystoreCorrection(CHAIN_ID, KEYSTORE)).toBeUndefined();
   });
 
   test('a held correction that still matches the chain costs no log read either', async () => {
@@ -128,7 +128,7 @@ describe('keystore root health check', () => {
 
   test('the correction is dropped once the snapshot catches up', async () => {
     await checkKeystoreRoot(deps({ rows: staleRows() }).deps);
-    expect(getKeystoreCorrection(KEYSTORE)).toBeDefined();
+    expect(getKeystoreCorrection(CHAIN_ID, KEYSTORE)).toBeDefined();
     // The correction still matches, so it stays until the held rows are right too.
     const caught = deps({ rows: chainEvents.map(toRow) });
     caught.deps.readRoot = async () => chainRoot;
@@ -143,7 +143,7 @@ describe('keystore root health check', () => {
     const { deps: d } = deps({ rows: staleRows(), logs: lossy });
     const verdict = await checkKeystoreRoot(d);
     expect(verdict.status).toBe('unrepaired');
-    expect(getKeystoreCorrection(KEYSTORE)).toBeUndefined();
+    expect(getKeystoreCorrection(CHAIN_ID, KEYSTORE)).toBeUndefined();
   });
 
   test('(e) a lossy read that drops a middle event is not accepted either', async () => {
@@ -153,7 +153,7 @@ describe('keystore root health check', () => {
     d.heldRows = async () => chainEvents.slice(0, 100).map(toRow);
     const verdict = await checkKeystoreRoot(d);
     expect(verdict.status).toBe('unrepaired');
-    expect(getKeystoreCorrection(KEYSTORE)).toBeUndefined();
+    expect(getKeystoreCorrection(CHAIN_ID, KEYSTORE)).toBeUndefined();
   });
 
   test('a provider that is lossy once and whole the second time still repairs from the full history', async () => {
@@ -268,6 +268,36 @@ describe('keystore root health check', () => {
     expect(calls).toBeLessThanOrEqual(8);
   });
 
+  test('production shares one keystore address across chains: a repair on A leaves B alone, and a healthy B does not delete A', async () => {
+    const CHAIN_B = 56;
+    // A repairs.
+    await checkKeystoreRoot(deps({ rows: staleRows() }).deps);
+    const heldA = getKeystoreCorrection(CHAIN_ID, KEYSTORE);
+    expect(heldA).toBeDefined();
+    expect(getKeystoreCorrection(CHAIN_B, KEYSTORE)).toBeUndefined();
+
+    // B is healthy on the same address: it must not delete (or create) anything for A.
+    const healthyB = deps({ rows: chainEvents.map(toRow) });
+    healthyB.deps.chainId = CHAIN_B;
+    expect(await checkKeystoreRoot(healthyB.deps)).toEqual({ status: 'current' });
+    expect(getKeystoreCorrection(CHAIN_ID, KEYSTORE)).toBe(heldA);
+    expect(getKeystoreCorrection(CHAIN_B, KEYSTORE)).toBeUndefined();
+
+    // And the other way round: B repairs, A's held set is untouched.
+    resetKeystoreRootGuardState();
+    await checkKeystoreRoot(deps({ rows: staleRows() }).deps);
+    const keptA = getKeystoreCorrection(CHAIN_ID, KEYSTORE);
+    const lagB = deps({ rows: staleRows() });
+    lagB.deps.chainId = CHAIN_B;
+    expect((await checkKeystoreRoot(lagB.deps)).status).toBe('repaired');
+    expect(getKeystoreCorrection(CHAIN_ID, KEYSTORE)).toBe(keptA);
+    expect(getKeystoreCorrection(CHAIN_B, KEYSTORE)).not.toBe(keptA);
+
+    // Chain A's interactor does not read chain B's correction.
+    const interactorA = correctKeystoreInteractor({ getKeystoreLeaves: async () => ['0x1'] }, 137, KEYSTORE);
+    expect(await interactorA.getKeystoreLeaves()).toEqual(['0x1']);
+  });
+
   test('with no snapshot held the check changes nothing', async () => {
     const { deps: d, counters } = deps({ rows: null });
     expect((await checkKeystoreRoot(d)).status).toBe('unchecked');
@@ -361,7 +391,7 @@ describe('exit preparation without the ASP', () => {
     expect((await checkKeystoreRoot(run.deps)).status).toBe('repaired');
 
     // The session's interactor read the short list and caches it.
-    const interactor = correctKeystoreInteractor(sdkInteractor(staleRows), KEYSTORE);
+    const interactor = correctKeystoreInteractor(sdkInteractor(staleRows), CHAIN_ID, KEYSTORE);
     const witness = await exitWitness(interactor);
     expect(vaultAccepts(witness.witness.keystoreRoot, chain.root)).toBe(true);
   });
@@ -374,18 +404,73 @@ describe('exit preparation without the ASP', () => {
     const run = deps({ rows: staleRows.map(toRow), logs: (from, to) => chain.events.filter((e) => e.blockNumber >= from && e.blockNumber <= to) });
     run.deps.readRoot = async () => chain.root;
     await checkKeystoreRoot(run.deps);
-    const witness = await exitWitness(correctKeystoreInteractor(sdkInteractor(staleRows), KEYSTORE));
+    const witness = await exitWitness(correctKeystoreInteractor(sdkInteractor(staleRows), CHAIN_ID, KEYSTORE));
     expect(vaultAccepts(witness.witness.keystoreRoot, chain.root)).toBe(true);
   });
 
   test('ASP snapshot unavailable: the whole leaf set comes from the chain and the witness is accepted', async () => {
     const chain = chainWithUser(100);
     // No snapshot: the wrapper falls through to the chain sweep, which serves every event.
-    const witness = await exitWitness(correctKeystoreInteractor(sdkInteractor(chain.events), KEYSTORE));
+    const witness = await exitWitness(correctKeystoreInteractor(sdkInteractor(chain.events), CHAIN_ID, KEYSTORE));
     expect(vaultAccepts(witness.witness.keystoreRoot, chain.root)).toBe(true);
     // And the grid check, with no snapshot to compare, asks the ASP for nothing and breaks nothing.
     const run = deps({ rows: null });
     expect((await checkKeystoreRoot(run.deps)).status).toBe('unchecked');
+  });
+
+  test('repair, another registration, ASP refresh: an existing interactor still returns the complete set', async () => {
+    // The session's interactor read the short list (362 leaves) and moved its cursor past leaf 362.
+    const stale = chainEvents.slice(0, CHAIN_LEAVES - 1);
+    const tree = new LeanIMT((a: string, b: string) => hash.hash([a as `0x${string}`, b as `0x${string}`]));
+    for (const leaf of leaves) tree.insert(leaf);
+    const newLeaf = hash.hash(['0xabcdef']) as `0x${string}`;
+    tree.insert(newLeaf);
+    const added: KeystoreEvent = {
+      kind: 'inserted', leafIndex: BigInt(CHAIN_LEAVES), leaf: BigInt(newLeaf), root: BigInt(tree.root),
+      blockNumber: HEAD + 10n, logIndex: 0,
+    };
+    const after = [...chainEvents, added];
+
+    let served: KeystoreEvent[] = stale;
+    let head = HEAD;
+    const rpc = {
+      getBlockNumber: async () => `0x${head.toString(16)}`,
+      // Delta reads only: the SDK asks from its cursor + 1, so the block it already passed is never served again.
+      getLogsPaginated: async (p: { fromBlock: bigint }) => served
+        .filter((e) => e.blockNumber >= BigInt(p.fromBlock))
+        .map((e) => ({
+          eventName: 'LeafInserted',
+          args: { _newLeaf: e.leaf, _root: e.root, _leafIndex: e.leafIndex },
+          blockNumber: `0x${e.blockNumber.toString(16)}`,
+          transactionHash: '0x',
+        })),
+      getLogs: async () => [],
+    };
+    const interactor = correctKeystoreInteractor(createEvmKeystoreInteractor({
+      rpcInteractor: rpc as never,
+      contractAddress: KEYSTORE as `0x${string}`,
+      deploymentBlock: FROM_BLOCK,
+    }), CHAIN_ID, KEYSTORE);
+    expect(await interactor.getKeystoreLeaves()).toHaveLength(CHAIN_LEAVES - 1);
+
+    // 1. The grid repairs (the ASP list is one behind).
+    expect((await checkKeystoreRoot(deps({ rows: staleRows() }).deps)).status).toBe('repaired');
+
+    // 2. Another registration lands. The interactor's next delta carries only it.
+    served = after;
+    head = HEAD + 20n;
+    // 3. The ASP refreshes and is now complete.
+    const refreshed = deps({ rows: after.map(toRow) });
+    refreshed.deps.readHead = async () => head;
+    refreshed.deps.readRoot = async () => added.root;
+    expect(await checkKeystoreRoot(refreshed.deps)).toEqual({ status: 'current' });
+    expect(refreshed.counters.events).toBe(0);
+
+    // The old interactor still skips leaf 362 by itself; the held snapshot keeps the set complete.
+    const out = await interactor.getKeystoreLeaves();
+    expect(out).toHaveLength(CHAIN_LEAVES + 1);
+    expect(out.every((l) => typeof l === 'string')).toBe(true);
+    expect(out.map(BigInt)).toEqual(after.map((e) => e.leaf));
   });
 
   test('a failing interactor read answers from the held correction', async () => {
@@ -393,7 +478,7 @@ describe('exit preparation without the ASP', () => {
     const run = deps({ rows: chain.events.slice(0, CHAIN_LEAVES - 1).map(toRow), logs: (from, to) => chain.events.filter((e) => e.blockNumber >= from && e.blockNumber <= to) });
     run.deps.readRoot = async () => chain.root;
     await checkKeystoreRoot(run.deps);
-    const broken = correctKeystoreInteractor({ getKeystoreLeaves: async () => { throw new Error('rpc down'); } }, KEYSTORE);
+    const broken = correctKeystoreInteractor({ getKeystoreLeaves: async () => { throw new Error('rpc down'); } }, CHAIN_ID, KEYSTORE);
     expect(await broken.getKeystoreLeaves()).toHaveLength(CHAIN_LEAVES);
   });
 });

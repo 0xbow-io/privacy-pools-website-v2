@@ -985,6 +985,11 @@ class ChunkedRPCInteractor implements IRPCInteractor {
     this.rangeWindow = rangeWindowForChain(chainId, maxBlockRange);
   }
 
+  /** The chain this interactor reads. Keys the held keystore correction (the keystore address alone is shared across chains). */
+  getChainId(): number {
+    return this.chainId;
+  }
+
   // PRIVACY choke point. The vendored SDK still issues per-note reads from
   // inside note discovery (resolveCommitmentTimestamp for every decrypted note),
   // addNotes on the reshield path, and recoverRejectedNotes (spentNullifiers per
@@ -1145,7 +1150,7 @@ class ChunkedRPCInteractor implements IRPCInteractor {
       // current root, and the ASP's copy did not. Their coverage is the head
       // they were verified at, so the sweep above them is only the blocks since.
       if (kind === 'keystore-leaves') {
-        const correction = getKeystoreCorrection(this.keystoreAddress);
+        const correction = getKeystoreCorrection(this.chainId, this.keystoreAddress);
         if (correction) {
           const logs: GetLogsResult = [];
           for (const event of correction.events) {
@@ -1397,7 +1402,10 @@ export function createKeystoreInteractor(
     rpcInteractor: withDefaultFromBlock(rpc, fromBlock),
     contractAddress: keystoreAddress,
   });
-  return correctKeystoreInteractor(interactor, keystoreAddress);
+  // The correction is keyed by chain and address. An rpc that cannot name its
+  // chain gets no correction rather than a guess.
+  const chainId = (rpc as { getChainId?: () => number }).getChainId?.();
+  return chainId === undefined ? interactor : correctKeystoreInteractor(interactor, chainId, keystoreAddress);
 }
 
 // SDK workaround: reconcile the NoteManager state against the on-chain

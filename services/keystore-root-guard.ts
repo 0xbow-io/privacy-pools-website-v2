@@ -123,6 +123,15 @@ export type KeystoreCorrection = {
 
 const STORE_FLAG = '__ppv2KeystoreCorrections';
 
+/**
+ * Chain AND address. Production deployments reuse one keystore address on
+ * several chains, so an address alone would let a repair on one chain replace
+ * another chain's valid leaves, or a healthy check delete them.
+ */
+function correctionKey(chainId: number, keystore: string): string {
+  return `${chainId}:${keystore.toLowerCase()}`;
+}
+
 function corrections(): Map<string, KeystoreCorrection> {
   const holder = globalThis as Record<string, unknown>;
   const existing = holder[STORE_FLAG] as Map<string, KeystoreCorrection> | undefined;
@@ -133,16 +142,16 @@ function corrections(): Map<string, KeystoreCorrection> {
 }
 
 /** The verified chain-rebuilt leaves for a chain, or undefined while the ASP's copy is right. */
-export function getKeystoreCorrection(keystore: string): KeystoreCorrection | undefined {
-  return corrections().get(keystore.toLowerCase());
+export function getKeystoreCorrection(chainId: number, keystore: string): KeystoreCorrection | undefined {
+  return corrections().get(correctionKey(chainId, keystore));
 }
 
-export function setKeystoreCorrection(keystore: string, correction: KeystoreCorrection): void {
-  corrections().set(keystore.toLowerCase(), correction);
+export function setKeystoreCorrection(chainId: number, keystore: string, correction: KeystoreCorrection): void {
+  corrections().set(correctionKey(chainId, keystore), correction);
 }
 
-export function clearKeystoreCorrection(keystore: string): void {
-  corrections().delete(keystore.toLowerCase());
+export function clearKeystoreCorrection(chainId: number, keystore: string): void {
+  corrections().delete(correctionKey(chainId, keystore));
 }
 
 export function resetKeystoreCorrections(): void {
@@ -179,6 +188,7 @@ export function reconcileKeystoreLeaves(
  */
 export function correctKeystoreInteractor<T extends { getKeystoreLeaves: () => Promise<any> }>(
   interactor: T,
+  chainId: number,
   keystoreAddress: string,
 ): T {
   return new Proxy(interactor, {
@@ -186,7 +196,7 @@ export function correctKeystoreInteractor<T extends { getKeystoreLeaves: () => P
       const value = Reflect.get(target, prop, target);
       if (prop === 'getKeystoreLeaves' && typeof value === 'function') {
         return async () => {
-          const correction = getKeystoreCorrection(keystoreAddress);
+          const correction = getKeystoreCorrection(chainId, keystoreAddress);
           let leaves: readonly (string | undefined)[];
           try {
             leaves = await (value as () => Promise<string[]>).call(target);
@@ -337,7 +347,7 @@ export async function checkKeystoreRoot(deps: KeystoreRootDeps): Promise<Keystor
   const now = deps.now ?? (() => Date.now());
   const head = await deps.readHead();
   const chainRoot = await deps.readRoot(head);
-  const held = getKeystoreCorrection(deps.keystoreAddress);
+  const held = getKeystoreCorrection(deps.chainId, deps.keystoreAddress);
 
   if (held && held.root === chainRoot) {
     log('correction still matches the chain');
@@ -348,7 +358,12 @@ export async function checkKeystoreRoot(deps: KeystoreRootDeps): Promise<Keystor
   if (rowEvents) {
     const ok = await verified(deps, rowEvents, chainRoot);
     if (ok) {
-      clearKeystoreCorrection(deps.keystoreAddress);
+      // Never delete a held correction just because the snapshot verifies: an
+      // SDK interactor that cached the short list has already moved its cursor
+      // past the missing event, and would return it again. The verified
+      // snapshot REPLACES the correction, so existing sessions keep getting
+      // complete leaves.
+      if (held) setKeystoreCorrection(deps.chainId, deps.keystoreAddress, { ...ok, head });
       return { status: 'current' };
     }
   } else if (!held) {
@@ -377,7 +392,7 @@ export async function checkKeystoreRoot(deps: KeystoreRootDeps): Promise<Keystor
   };
   const succeed = (tier: 'tail' | 'full', candidate: KeystoreCorrection): KeystoreRootVerdict => {
     state.failures = 0;
-    setKeystoreCorrection(deps.keystoreAddress, { ...candidate, head });
+    setKeystoreCorrection(deps.chainId, deps.keystoreAddress, { ...candidate, head });
     log(`repaired from the ${tier === 'tail' ? 'tail' : 'full history'}`);
     return { status: 'repaired', tier };
   };

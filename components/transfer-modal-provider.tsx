@@ -3220,7 +3220,11 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         if (live()) {
           setStep('review');
           reportTransferError(
-            `The relayer would not submit this transfer: ${message.split('\n')[0]}. Nothing was sent, no note was spent, and your balance is unchanged. Review again to build a fresh proof.`,
+            // The incident's HTTP 400 is a relayer refusal too: say the data is
+            // refreshing, not the raw contract error.
+            isUnknownKeystoreRoot(message)
+              ? keystoreRootRefreshingMessage('transfer')
+              : `The relayer would not submit this transfer: ${message.split('\n')[0]}. Nothing was sent, no note was spent, and your balance is unchanged. Review again to build a fresh proof.`,
           );
         }
         return;
