@@ -10,10 +10,9 @@ import { ShareCountHint } from '@/components/pools/share-count-hint';
 // Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
 // MAX retains the original exact shares. USD edits use an exact decimal price
 // in that same boundary. No other operation converts display back.
-import { useShareFreeBalanceDisplay } from '@/hooks/use-balance-display';
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
 
 import { BalanceAmount } from '@/components/pools/balance-amount';
-import { FigureText } from '@/components/ui/share-figure';
 import { TokenMark } from '@/components/ui/token-network-icon';
 import { sdkErrorText } from '@/services/sdk-error-amounts';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
@@ -22,7 +21,7 @@ import { setReceiveSetup } from '@/services/receive-setup';
 import { isSupersededLegacyPool, poolDisplayLabel } from '@/config/pool-paths';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ACTIVE_ENVIRONMENT } from '@/config/environments';
-import { tokenAmountLabel, isShareSymbol, displayTokenSymbol, shareFreeText } from '@/services/share-display';
+import { tokenAmountLabel, isShareSymbol, displayTokenSymbol } from '@/services/share-display';
 import { assertPaymentRequestBounds, PaymentRequestBoundsError } from '@/services/payment-request-bounds';
 import { assertDepositCap } from '@/services/deposit-cap';
 import { getPrice } from '@/services/price-service';
@@ -72,6 +71,7 @@ import {
 } from '@/services/relayed-transfer';
 import { expectTransferRelay } from '@/services/transfer-relay-outputs';
 import { useNotes } from '@/hooks/use-notes';
+import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
 
 import { useTheme } from '@/components/theme-provider';
 import { PAY_URL_BASE } from '@/config/env';
@@ -564,7 +564,10 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
   // chainId` switch guard below meaningful: it used to compare the wallet's
   // chain against itself and could never fire.
   const chainId = useActiveEvmChain().id;
-  const balanceDisplay = useShareFreeBalanceDisplay(chainId);
+  const balanceDisplay = useBalanceDisplay(chainId);
+  const shareText = useShareNameText(chainId);
+  // Feed-grid rates (no request): a share figure in a shortfall message reads as its underlying.
+  const { rateFor } = useShareRates();
   const withOpLock = useOpLock();
   const queryClient = useQueryClient();
   // The COMMITTED chain of the live session (null while none) — used ONLY to
@@ -2242,7 +2245,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           const have = balanceDisplay(formatUnits(payerBalance, meta.decimals), meta.symbol, request.chainId, request.tokenId).text;
           throw new Error(
             isShareSymbol(meta.symbol)
-              ? `This request asks for ${need}, a pool share your wallet cannot hold. Nothing was paid. Pay it from your shielded ${displayTokenSymbol(meta.symbol)} balance instead.`
+              ? `This request asks for ${need}, a pool token your wallet cannot hold. Nothing was paid. Pay it from your shielded ${displayTokenSymbol(meta.symbol)} balance instead.`
               : `You need ${need} in your wallet to pay this request, and you have ${have}. Nothing was paid.`,
           );
         }
@@ -2906,6 +2909,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           decimals: requestToken.decimals,
           maxLabels,
           singleDepositTopUp,
+          rate: rateFor(request.chainId, request.tokenId),
         }));
       }
       // Account-level capacity, captured once so the pre-relay and retry
@@ -3167,6 +3171,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
             singleDepositTopUp: requestAmountWei + quotedRelayFee > capacityPairable
               ? requestAmountWei + quotedRelayFee - capacityPairable
               : requestAmountWei + quotedRelayFee,
+            rate: rateFor(request.chainId, request.tokenId),
           }));
         }
         return relayTransferParams({
@@ -3514,7 +3519,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
     // toast / queryClient / gateOnLockedSession are all called inside this
     // callback and were missing; the sibling wallet-pay handler's list was
     // corrected for the same three (code review 2026-08-27).
-  }, [address, walletAddress, walletChainId, chainId, ensureInitialized, exportAccount, gateOnLockedSession, identityMode, inputPayload, isDebugEnabled, keystoreManager, log, noteManager, notes, openKeystoreRegistrationModal, publicClient, queryClient, refetchNotes, refreshNotes, switchChainAsync, toast, beginTx, endTx, isSui, suiSession, selectChain]);
+  }, [address, walletAddress, walletChainId, chainId, ensureInitialized, rateFor, exportAccount, gateOnLockedSession, identityMode, inputPayload, isDebugEnabled, keystoreManager, log, noteManager, notes, openKeystoreRegistrationModal, publicClient, queryClient, refetchNotes, refreshNotes, switchChainAsync, toast, beginTx, endTx, isSui, suiSession, selectChain]);
 
   // Same-tick double-press guard (shared lock) — see hooks/use-op-lock.ts.
   const handlePayViaTransfer = useMemo(() => withOpLock(handlePayViaTransferUnlocked), [withOpLock, handlePayViaTransferUnlocked]);
@@ -4073,17 +4078,17 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                 and the success card after it (DEV-496). */}
             {statusMessage && !payRunning && !statusBoxHidden ? (
               <View className="rounded-control border border-[#98B975] bg-[#F5FAEE] px-[12px] py-[10px]">
-                <Text className="font-pp-regular text-[13px] text-[#6E8A42]"><FigureText text={shareFreeText(statusMessage)} /></Text>
+                <Text className="font-pp-regular text-[13px] text-[#6E8A42]">{shareText(statusMessage)}</Text>
               </View>
             ) : null}
             {warningMessage ? (
               <View className="rounded-control border border-[#E1C26B] bg-[#FFF9E8] px-[12px] py-[10px]">
-                <Text className="font-pp-regular text-[13px] text-[#8A6B1F]"><FigureText text={shareFreeText(warningMessage)} /></Text>
+                <Text className="font-pp-regular text-[13px] text-[#8A6B1F]">{shareText(warningMessage)}</Text>
               </View>
             ) : null}
             {errorMessage ? (
               <View className="rounded-control border border-[#F2B8B5] bg-[#FFF4F4] px-[12px] py-[10px]">
-                <Text className="font-pp-regular text-[13px] text-danger"><FigureText text={shareFreeText(errorMessage)} /></Text>
+                <Text className="font-pp-regular text-[13px] text-danger">{shareText(errorMessage)}</Text>
               </View>
             ) : null}
 
@@ -4129,7 +4134,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                       // (SUI / XLM): offering the EVM token list would
                       // mislabel what the request emits.
                       <View className="flex-row items-center gap-[6px] rounded-control border border-text bg-card-background px-[12px] py-[8px]">
-                        <Text className="font-pp-medium text-[13px] text-text">{requestTokenSymbol}</Text>
+                        <Text className="font-pp-medium text-[13px] text-text">{displayTokenSymbol(requestTokenSymbol)}</Text>
                       </View>
                     ) : (
                       requestableTokens.map((token) => {
@@ -4163,7 +4168,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                   <TextInput
                     value={amountInput}
                     onChangeText={(text) => setAmountInput(sanitizeAmountInput(text, requestTokenDecimals))}
-                    placeholder={`${!isSui && isStablecoin(selectedToken.symbol) ? '5' : '0.01'} ${displayTokenSymbol(requestTokenSymbol)}`}
+                    placeholder={`${!isSui && isStablecoin(selectedToken.symbol) ? '5' : '0.01'} ${requestTokenSymbol}`}
                     // nw-keep(data-color): placeholder color is a TextInput sink (theme token, no className path)
                     placeholderTextColor={colors.textMuted}
                     keyboardType="numeric"
@@ -4364,7 +4369,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                           the escape hatch -- the handler clears the armed
                           intent and runs its switch-and-stop. Never gate
                           `disabled` on a flag that can fail to clear. */}
-                      {isBusy || pendingAutoAction ? <FlowProgress message={statusMessage ?? undefined} /> : null}
+                      {isBusy || pendingAutoAction ? <FlowProgress message={statusMessage ?? undefined} chainId={chainId} /> : null}
                     </View>
                   ) : receivedNote ? (
                     /* Claim flow: the import above was DEVICE-LOCAL. Anchoring
@@ -4419,7 +4424,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                           the whole story and vanished the moment anything else
                           touched `status`. */}
                       {claimStatus === 'anchoring' ? (
-                        <FlowProgress message={claimStatusMessage} />
+                        <FlowProgress message={claimStatusMessage} chainId={chainId} />
                       ) : null}
                       {claimStatus === 'anchored' ? (
                         <Text className="font-pp-regular text-[12px] text-success">
@@ -4428,7 +4433,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                       ) : blocked ? (
                         <Text className="font-pp-regular text-[12px] text-text-secondary">{blocked}</Text>
                       ) : claimError ? (
-                        <Text className="font-pp-regular text-[12px] text-danger">{claimError}</Text>
+                        <Text className="font-pp-regular text-[12px] text-danger">{shareText(claimError)}</Text>
                       ) : null}
                     </View>
                       );
@@ -4451,7 +4456,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                           {isBusy ? 'Processing...' : 'Receive Payment'}
                         </Text>
                       </Pressable>
-                      {isBusy ? <FlowProgress message={statusMessage ?? undefined} /> : null}
+                      {isBusy ? <FlowProgress message={statusMessage ?? undefined} chainId={chainId} /> : null}
                     </View>
                   )}
                 </>

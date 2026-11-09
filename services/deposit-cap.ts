@@ -12,6 +12,7 @@
  * PURE module: the price is injected, so the rule is unit-testable.
  */
 import { isStablecoin } from '@/services/token-format';
+import { displayTokenSymbol, isShareSymbol } from '@/services/share-display';
 
 /**
  * Parse an `EXPO_PUBLIC_MAX_DEPOSIT_USD` style override. Unset or garbage keeps
@@ -62,6 +63,12 @@ export function checkDepositCap(input: {
   priceUsd: number | null | undefined;
   capUsd: number | undefined;
   pricePending?: boolean;
+  /**
+   * Live underlying per share, when `symbol` is a share priced per share. Only
+   * the message's "about N" uses it, so the figure is in the underlying it
+   * names. The verdict never does.
+   */
+  underlyingPerShare?: number;
 }): DepositCapVerdict {
   const { amount, symbol, capUsd } = input;
   if (capUsd === undefined) return { ok: true };
@@ -77,15 +84,22 @@ export function checkDepositCap(input: {
     return {
       ok: false,
       reason: 'no-price',
-      message: `Can't check the $${capUsd} launch limit right now (no ${symbol} price). Try again shortly.`,
+      message: `Can't check the $${capUsd} launch limit right now (no ${displayTokenSymbol(symbol)} price). Try again shortly.`,
     };
   }
   if (amount * price <= capUsd) return { ok: true };
   return {
     ok: false,
     reason: 'over',
-    message: `Launch limit is $${capUsd} per deposit (about ${formatCapMaxTokens(capUsd, price)} ${symbol}).`,
+    message: `Launch limit is $${capUsd} per deposit (about ${formatCapMaxTokens(capUsd, capUnitPrice(symbol, price, input.underlyingPerShare))} ${displayTokenSymbol(symbol)}).`,
   };
+}
+
+/** USD per unit of the coin the message names: per underlying for a share whose rate is known. */
+function capUnitPrice(symbol: string, price: number, underlyingPerShare: number | undefined): number {
+  return isShareSymbol(symbol) && underlyingPerShare && Number.isFinite(underlyingPerShare) && underlyingPerShare > 0
+    ? price / underlyingPerShare
+    : price;
 }
 
 export class DepositCapError extends Error {
@@ -108,6 +122,8 @@ export async function assertDepositCap(input: {
   symbol: string;
   capUsd: number | undefined;
   fetchPrice: (symbol: string) => Promise<number>;
+  /** See checkDepositCap: the message only. */
+  underlyingPerShare?: number;
 }): Promise<void> {
   if (input.capUsd === undefined) return;
   const amount = Number(input.amountWei) / 10 ** input.decimals;
@@ -119,7 +135,7 @@ export async function assertDepositCap(input: {
       priceUsd = null; // fails closed below
     }
   }
-  const verdict = checkDepositCap({ amount, symbol: input.symbol, priceUsd, capUsd: input.capUsd });
+  const verdict = checkDepositCap({ amount, symbol: input.symbol, priceUsd, capUsd: input.capUsd, underlyingPerShare: input.underlyingPerShare });
   if (!verdict.ok) throw new DepositCapError(verdict);
 }
 

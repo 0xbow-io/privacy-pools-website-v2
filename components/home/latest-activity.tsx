@@ -8,7 +8,7 @@
 // Exception: Withdraw/Send edits cross shareAmountFromUnderlying once; untouched
 // MAX retains the original exact shares. USD edits use an exact decimal price
 // in that same boundary. No other operation converts display back.
-import { useShareFreeBalanceDisplay } from '@/hooks/use-balance-display';
+import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { useEffect, useState } from 'react';
 import { rowTypeLabel } from '@/services/row-type-label';
@@ -16,14 +16,16 @@ import { withPublicSwapRows } from '@/services/swap-route-evidence';
 import { swapHeadline, type SwapLeg } from '@/services/swap-rows';
 import { consolidationHeadline } from '@/services/self-transfer-row';
 import { Pressable, Text, View, useWindowDimensions } from 'react-native';
-import { FigureText, ShareFigure } from '@/components/ui/share-figure';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Colors, TokenHues } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import { usePools } from '@/components/pools-provider';
 import { useMultiChainWallet } from '@/hooks/use-multi-chain-wallet';
 import { useMyTransactionOwnership } from '@/hooks/use-my-transaction-ownership';
-import { mergeMyTransactions } from '@/services/transfer-direction';
+import { claimedNetAmount, mergeMyTransactions } from '@/services/transfer-direction';
+import { formatUnits } from 'viem';
+import { getTokenMetadata } from '@/config/tokens';
+import { FigureText } from '@/components/ui/share-figure';
 import type { Transaction } from '@/components/pools-provider';
 
 
@@ -62,11 +64,15 @@ const TYPE_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
 };
 
 export function ActivityRow({ tx, colors }: { tx: Transaction; colors: typeof Colors['light'] }) {
-  const balanceDisplay = useShareFreeBalanceDisplay(tx.chainId);
-  const amountView = balanceDisplay(tx.tokenAmount, tx.asset, tx.chainId, tx.tokenAddress);
+  const balanceDisplay = useBalanceDisplay(tx.chainId);
+  // A claimed payment shows what reached the balance, as My transactions does (DEV-621).
+  const claimNet = (() => {
+    if (!tx.claimTxHash) return null;
+    try { return claimedNetAmount(tx, BigInt(tx.rawAmount)); } catch { return null; }
+  })();
+  const shownAmount = claimNet != null ? formatUnits(claimNet, getTokenMetadata(tx.tokenAddress, tx.chainId).decimals ?? 18) : tx.tokenAmount;
+  const amountView = balanceDisplay(shownAmount, tx.asset, tx.chainId, tx.tokenAddress);
   const swapAmount = (leg: SwapLeg) => balanceDisplay(leg.tokenAmount, leg.asset, leg.chainId, leg.tokenAddress).text;
-  // A two-leg headline is text: a leg still loading becomes the shimmer (FigureText).
-  const headline = consolidationHeadline(tx) ?? swapHeadline(tx, swapAmount);
   const scheme = colors === Colors.dark ? 'dark' : 'light';
   const hue = TokenHues[scheme][tx.asset.toUpperCase()] ?? TokenHues[scheme].ETH;
   const pending = tx.status === 'pending';
@@ -81,7 +87,7 @@ export function ActivityRow({ tx, colors }: { tx: Transaction; colors: typeof Co
       </View>
       <View className="flex-1 gap-[1px]">
         <Text className="font-pp-sans-medium text-[13px] text-text" numberOfLines={1}>
-          {rowTypeLabel(tx)} · <Text className="font-pp-mono">{headline != null ? <FigureText text={headline} /> : <ShareFigure view={amountView} />}</Text>
+          {rowTypeLabel(tx)} · <Text className="font-pp-mono"><FigureText text={consolidationHeadline(tx) ?? swapHeadline(tx, swapAmount) ?? amountView.text} /></Text>
         </Text>
         <Text className="font-pp-sans text-[11.5px] text-text-muted" numberOfLines={1}>
           {timeAgo(tx.timestamp, now)} · {tx.chain}

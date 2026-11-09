@@ -59,7 +59,7 @@ describe('DEV-573 explorer links carry the privacy note', () => {
   test('names the explorer', async () => {
     const { explorerPrivacyText, explorerNameFromUrl } = await import('../explorer-privacy');
     expect(explorerPrivacyText('Etherscan')).toBe(
-      'Opening the explorer shows your IP address to Etherscan and links it to this transaction. Use a VPN or Tor if that matters to you.',
+      'Opening the explorer sends your IP address to Etherscan and links it to this transaction. Use a VPN or Tor if that matters to you.',
     );
     expect(explorerNameFromUrl('https://www.etherscan.io/tx/0x1')).toBe('etherscan.io');
     expect(explorerNameFromUrl('not a url')).toBe('the explorer');

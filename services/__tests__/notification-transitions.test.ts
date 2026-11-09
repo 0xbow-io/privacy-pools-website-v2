@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { shareBalanceDisplay } from '@/services/share-balance-display';
-import { underlyingOnlyView } from '@/services/share-display';
 import type { ShareRate } from '@/services/share-rates';
 
 import {
@@ -164,9 +163,8 @@ const RATE: ShareRate = {
   assetsPerShare: 1_001_100_000_000_000_000n,
 };
 const amountDisplay = (rate: ShareRate | undefined) => (t: TransitionTx) => {
-  // The same share-free view the deposit toast (status-notifier) renders.
-  const view = underlyingOnlyView(shareBalanceDisplay({ sharesExact: String(t.tokenAmount), shareSymbol: t.asset,
-    rate, priceMap: {}, fallbackPrice: 0 }), t.asset);
+  const view = shareBalanceDisplay({ sharesExact: String(t.tokenAmount), shareSymbol: t.asset,
+    rate, priceMap: {}, fallbackPrice: 0 });
   return `${view.converted ? '~' : ''}${view.text}`;
 };
 
@@ -174,7 +172,7 @@ test('share deposit approval and decline use estimated coin quantities with a kn
   for (const status of ['approved', 'declined']) {
     const t = tx({ status, asset: 'ppETH', tokenAmount: 0.09989 });
     const event = buildTransitionEvent(t, amountDisplay(RATE));
-    expect(event.description).toBe('~0.10 ETH');
+    expect(event.description).toBe('~0.09999 ETH');
     expect(event.description).not.toContain('ppETH');
     // A non-par rate proves the amount was converted, not just renamed.
     const doubled = { ...RATE, assetsPerShare: 2_000_000_000_000_000_000n };
@@ -184,7 +182,7 @@ test('share deposit approval and decline use estimated coin quantities with a kn
   }
 });
 
-test('share deposit notifications without a rate leave the figure out, never the count or the share name (DEV-621)', () => {
+test('share deposit notifications without a rate leave the figure out, never the count (DEV-621)', () => {
   for (const status of ['approved', 'declined']) {
     const t = tx({ status, asset: 'ppETH', tokenAmount: 0.1 });
     expect(buildTransitionEvent(t).description).toBe('');

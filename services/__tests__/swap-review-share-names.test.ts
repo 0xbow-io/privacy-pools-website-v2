@@ -77,7 +77,6 @@ describe('the rename is honest about what a share count is', () => {
       const text = approxUnderlyingText(`5 ${share}`, share);
       expect(text).toBe(`… ${underlying}`);
       expect(text).not.toContain(share);
-      expect(text).not.toMatch(/\bshares?\b/i);
     });
   }
 
