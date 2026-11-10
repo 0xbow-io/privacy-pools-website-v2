@@ -9,6 +9,7 @@ import {
   REGISTRY_WAIT_MS,
   REGISTRY_SYNCING_MESSAGE,
 } from '@/services/nullifying-key-hash-cache';
+import { addTorAccount } from '@/services/tor-groups';
 import { canonicalizeExportTokenIds } from '@/services/canonical-token-id';
 import { createChainLimiter, feedHasData, snapshotActivityFingerprint, snapshotScanComplete, sweepChains, waitForFeed, earliestScanOptions, type ChainStepResult } from '@/services/chain-sweep';
 
@@ -1377,6 +1378,8 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
       throw new Error('Connect a wallet or sign in with an account key on a supported chain first.');
     }
     const derivationAddress = effectiveAddress;
+    // Its keystore reads below name it: anon-rpc must know it first.
+    addTorAccount(derivationAddress);
 
     // Reuse the cached manager only if it was derived by the CURRENT source.
     // Toggling passkey mode changes the source, which must force a re-derive
@@ -2270,6 +2273,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     currentChainId: number,
     currentKeystoreManager: IKeystoreManager,
   ): Promise<PoolSession> => {
+    addTorAccount(currentAddress);
     const key = `${currentAddress}:${currentChainId}`;
     const sessionEpoch = deriveEpochRef.current;
     if (key === sessionKeyRef.current && poolSession) {

@@ -143,6 +143,7 @@ import { relayedSpendBreakdown } from '@/services/fee-warning';
 import { AddressAutocomplete } from '@/components/contacts/address-autocomplete';
 import { SHIELDED_TRANSFER_GAS } from '@/services/transfer-fee-estimate';
 import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
+import { useTorOperation } from '@/hooks/use-tor-operation';
 import { costShareText, relayFeeText, shareWeiText, type ShareRate } from '@/services/share-rates';
 import { formatTokenBalanceDown, isStablecoin } from '@/services/token-format';
 
@@ -402,6 +403,7 @@ function createRelayRun(): RelayRun {
 
 export function TransferModalProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
+  useTorOperation(isOpen);
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const isDark = colorScheme === 'dark';

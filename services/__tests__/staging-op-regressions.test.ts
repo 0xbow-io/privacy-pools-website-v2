@@ -3,6 +3,7 @@
 // only indirectly, so reverting any single fix now fails a named test.
 
 import { describe, expect, test, mock } from 'bun:test';
+import { PROD_BY_CHAIN } from '../../config/prod-deployments';
 import { STAGING_CHAINS } from '../../config/staging-deployments';
 import { buildStagingPoolMenuOptions } from '../staging-pool-menu';
 
@@ -36,6 +37,14 @@ describe('OP staging entry facts (finding 4)', () => {
     // what was measured to work there.
     expect(op?.logsMaxBlockRange).toBeGreaterThan(0n);
     expect(op?.logsMaxBlockRange).toBeLessThanOrEqual(opOnAlchemy ? 500_000n : 3000n);
+  });
+
+  test('the public OP endpoint is one Tor exits can reach, in production and staging', () => {
+    // mainnet.optimism.io answered 403 to 8 of 8 Tor exits, and publicnode
+    // answered all 8 (2026-10-31).
+    const publicOp = 'https://optimism-rpc.publicnode.com';
+    expect(PROD_BY_CHAIN[10]?.rpcUrls?.at(-1)).toBe(publicOp);
+    expect(op?.rpcUrls?.at(-1)).toBe(publicOp);
   });
 
   test('Ethereum stays first — STAGING_CHAINS[0] is the staging default chain', () => {

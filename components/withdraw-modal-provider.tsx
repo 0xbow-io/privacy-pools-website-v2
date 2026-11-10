@@ -219,6 +219,7 @@ import { buildFeeBreakdown, gasCostUsd, quoteGas, splitRelayerFee, swapLossUsd, 
 import { AddressAutocomplete } from '@/components/contacts/address-autocomplete';
 import { confirmedRegistration } from '@/services/keystore-registry-events';
 import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
+import { useTorOperation } from '@/hooks/use-tor-operation';
 import { shareNumberAsUnderlying } from '@/services/share-rates';
 
 /** Recipient shapes for the confirm paths (same as altRecipientPattern). */
@@ -552,6 +553,7 @@ function quoteFailureMessage(message: string, shown: string = message): string {
 
 export function WithdrawModalProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
+  useTorOperation(isOpen);
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const isDark = colorScheme === 'dark';
