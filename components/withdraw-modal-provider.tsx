@@ -12,6 +12,7 @@ import { formatUsdBalance } from '@/services/format-fiat';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { BalanceAmount } from '@/components/pools/balance-amount';
+import { getCachedNullifyingKeyHash } from '@/services/nullifying-key-hash-cache';
 import { FigureText } from '@/components/ui/share-figure';
 import { compactPhoneLayout } from '@/services/header-nav';
 import { HoverHint } from '@/components/ui/hover-hint';
@@ -211,6 +212,7 @@ import { useNativeMockBlock } from '@/hooks/use-native-mock-block';
 import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { FeeWarning } from '@/components/fee-warning';
 import { buildFeeBreakdown, gasCostUsd, quoteGas, splitRelayerFee, swapLossUsd, type FeeGasReading } from '@/services/fee-warning';
+import { confirmedRegistration } from '@/services/keystore-registry-events';
 import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
 import { shareNumberAsUnderlying } from '@/services/share-rates';
 
@@ -3491,7 +3493,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         keystoreSyncFromBlock,
       );
       const keystoreLeaves = await keystoreInteractor.getKeystoreLeaves();
-      const onChainNullifyingKeyHash = await keystoreInteractor.getNullifyingKeyHash(connectedAddress as `0x${string}`);
+      // Bulk ASP registry copy, never a per-account RPC read (write-once, so a hit is current).
+      const onChainNullifyingKeyHash = getCachedNullifyingKeyHash(chainId, connectedAddress, chainKeystoreAddress);
       const privateNullifyingKey = keystoreManager.getPrivateNullifyingKey();
       const privateRevocableKey = keystoreManager.getPrivateRevocableKey();
       const nullifyingKeyHash = hashService.hash([privateNullifyingKey]);
@@ -3516,7 +3519,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
 
       if (!keystoreLeafFound) {
         throw new Error(
-          onChainNullifyingKeyHash.toLowerCase() !== nullifyingKeyHash.toLowerCase()
+          onChainNullifyingKeyHash != null && BigInt(onChainNullifyingKeyHash) !== BigInt(nullifyingKeyHash)
             ? 'Current wallet-derived keys do not match the registered keystore for this account.'
             : 'Current auth policy leaf is not present in the keystore tree.',
         );
@@ -4600,6 +4603,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         }
         markRegistered(connectedAddress, chainId);
         // registerAndRelay sets no viewing key, so the account is only partially set up.
+        confirmedRegistration(connectedAddress, chainId, false);
         setReceiveSetup(connectedAddress, chainId, 'partial', 'local');
       }
 

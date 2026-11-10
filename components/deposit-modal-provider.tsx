@@ -3,6 +3,7 @@ import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
 import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 import { shieldHeadroomRoomText } from '@/services/shield-headroom-copy';
 import { relaunchReady } from '@/services/deposit-relaunch';
+import { ownRegistrationRefusal } from '@/services/keystore-identity-status';
 import { simulateWithAllowanceOverride } from '@/services/allowance-override-sim';
 import { KEY_SESSION_DEPOSIT_FOR_COPY } from '@/services/recipient-registration-hint';
 import { submitWalletTransaction } from '@/services/wallet-submit';
@@ -732,6 +733,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     getCommittedManagers,
     refreshNotes,
     assertCanDeposit,
+    keystoreStatusForChain,
     createCrossChainShieldSession,
   } = usePoolSession();
 
@@ -1946,6 +1948,21 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
         isRegistered = await depositSession.isKeystoreRegistered();
       }
       console.log('[Deposit][debug] keystore registered:', isRegistered);
+      // isKeystoreRegistered() only says SOMEONE registered this address, not
+      // with which keys. Before minting under this session's keys, the bulk
+      // registry must agree it is THIS unlock: a registry miss next to a
+      // registered chain may be another unlock's registration the local copy
+      // has not caught up with, and depositing would strand the note. Local
+      // read only (it waits for the grid, never fetches).
+      if (!recipientMode) {
+        const ownIdentity = await keystoreStatusForChain(depositChainId, { chainFallback: true });
+        if (!live()) { releaseTx(); log('warn', 'Deposit', 'Stale run aborted after the identity check'); return; }
+        const refusal = ownRegistrationRefusal(ownIdentity, isRegistered);
+        if (refusal) {
+          log('warn', 'Deposit', 'Refused: registry identity does not confirm this unlock', { chainId: depositChainId, identity: ownIdentity, isRegistered });
+          throw new Error(refusal);
+        }
+      }
       if (!isRegistered && keyOwnedDeposit) {
         // The connected wallet is only the payer — it cannot register the
         // key account's keystore (registration must come from the owner).
@@ -3639,6 +3656,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     depositVettingFeeBps,
     amount,
     assertCanDeposit,
+    keystoreStatusForChain,
     chainId,
     walletChainId,
     wagmiConfig,

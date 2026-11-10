@@ -64,6 +64,9 @@ import {
   VIEWING_KEY_GAS_LIMIT,
 } from '@/services/receive-setup';
 import { priceWalletTx, registrationOwnerUnchanged, walletTxFields, type FeeReadClient } from '@/services/wallet-tx-fees';
+import { ownRegistrationResultRefusal } from '@/services/keystore-scope';
+import { confirmedRegistration } from '@/services/keystore-registry-events';
+import { REGISTRATION_INCOMPATIBLE_MESSAGE } from '@/services/keystore-identity-status';
 import { sendWalletTransaction } from '@/services/wallet-send-refusal';
 import { clearRegistrationBatch, hasPendingRegistrationBatch, RegistrationBatchPendingError, submitRegistrationBatch } from '@/services/registration-batch';
 
@@ -377,8 +380,8 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
     try {
       // Reads the named chain's keystore, not the active session's. Also the
       // only load-time viewing-key read the receive prompts rely on.
-      const identity = await keystoreStatusForChain(chainId);
-      if (identity === 'unknown') throw new Error(`Registration on chain ${chainId} could not be read.`);
+      const identity = await keystoreStatusForChain(chainId, { chainFallback: true });
+      if (identity === 'unknown') throw new Error(`Registration on chain ${chainId} is still syncing. Try again in a moment.`);
       setReceiveSetup(sessionAddress ?? address, chainId, receiveSetupFromIdentity(identity), 'onchain');
       // 'partial' and 'incompatible' both have an auth policy.
       const registered = identity !== 'unregistered';
@@ -765,7 +768,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
           // re-read rather than assume complete.
           setErrorMessage(null);
           try {
-            const identity = await keystoreStatusForChain(chainId);
+            const identity = await keystoreStatusForChain(chainId, { chainFallback: true });
             // The read follows the CURRENT identity: only store it under the
             // captured owner if that is still who it read.
             if (stillBound()) setReceiveSetup(owner, chainId, receiveSetupFromIdentity(identity), 'onchain');
@@ -874,9 +877,23 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
         await new Promise((resolve) => setTimeout(resolve, AUTH_LAG_RETRY_MS));
         registration = await session.prepareRegisterKeystore();
       }
+      // SDK 1.0.2 answers "already registered" (or plans only the viewing key)
+      // for ANY auth policy on the address, never comparing it with these
+      // keys. Marking that 'complete' mirrored another unlock's registration
+      // as ours and let a deposit through under the wrong keys. Only go on
+      // when the hash the SDK's own check just read is this session's.
+      const refuseIfNotOurs = (result: typeof registration) => {
+        const refusal = ownRegistrationResultRefusal(chainId, sessionAddress ?? address, result);
+        if (!refusal) return;
+        if (refusal === REGISTRATION_INCOMPATIBLE_MESSAGE) {
+          setReceiveSetup(sessionAddress ?? address, chainId, 'incompatible', 'onchain');
+        }
+        throw new Error(refusal);
+      };
+      refuseIfNotOurs(registration);
       const finishAlreadyRegistered = async () => {
+        // Race / external registration, confirmed ours above: mark and exit.
         if (address) clearRegistrationBatch(address, chainId);
-        // Race / external registration: mark and exit cleanly.
         setReceiveSetup(sessionAddress ?? address, chainId, 'complete', 'onchain');
         setStatus('registered');
         const home = await returnHome();
@@ -993,6 +1010,9 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
           registrationLegSent = false;
           const fresh = await session.prepareRegisterKeystore();
           viewingKeyCalldata = fresh.alreadyRegistered ? null : fresh.viewingKeyCalldata;
+          // The wallet says a policy is set, so check it as one even if this
+          // read still plans the auth leg.
+          refuseIfNotOurs({ ...fresh, keystoreCalldata: null });
           if (!viewingKeyCalldata) {
             await finishAlreadyRegistered();
             return;
@@ -1025,6 +1045,10 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
       } catch {
         // SDK already has it; duplicate marker calls are harmless.
       }
+      // Every leg above was confirmed by a successful receipt (or a successful
+      // batch): record it so a deposit resumed right after this does not wait
+      // for the ASP to index the registration.
+      confirmedRegistration(sessionAddress ?? address, chainId, true);
       setReceiveSetup(sessionAddress ?? address, chainId, 'complete', 'onchain');
       setStatus('registered');
       // Back on the app's chain before the caller resumes.
@@ -1043,7 +1067,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
         // useReceiveSetup is left at a stale 'unknown'/'partial' while this
         // caller resumes as if setup finished.
         try {
-          const identity = await keystoreStatusForChain(chainId);
+          const identity = await keystoreStatusForChain(chainId, { chainFallback: true });
           setReceiveSetup(sessionAddress ?? address, chainId, receiveSetupFromIdentity(identity), 'onchain');
         } catch (readErr) {
           console.warn('[KeystoreRegistration] post-race identity re-read failed', readErr instanceof Error ? readErr.message : String(readErr));
