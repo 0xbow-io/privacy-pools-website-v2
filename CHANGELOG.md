@@ -2,6 +2,19 @@
 
 All notable changes to the Privacy Pools v2 web app are documented in this file.
 
+## [1.5.0] - 2026-11-10
+
+### Added
+- Contacts: every recipient field suggests your previous recipients, with local names you can set, and Settings can import and export the list. Stored on the device only (#37).
+
+### Changed
+- An empty recipient on Withdraw no longer falls back to the connected wallet. It asks for an address instead (#37).
+- Sign-in and deposit check your keystore identity against the bulk ASP registries instead of asking the RPC about your account (#34).
+
+### Fixed
+- Payroll pays the exact salary in the coin. Yield pools no longer overpay by the share rate (#78).
+- Playwright scripts run on Chrome stable with the sandbox on and refuse an older Chrome (#60).
+
 ## [1.2.1] - 2026-10-23
 
 ### Fixed

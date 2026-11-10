@@ -1,7 +1,7 @@
 {
   "name": "privacy-pools",
   "main": "./index.js",
-  "version": "1.2.1",
+  "version": "1.5.0",
   "scripts": {
     "build:web": "bun scripts/build-web.mjs",
     "build:worker": "bun ./scripts/check-pinned-deps.mjs && bun ./scripts/build-snarkjs-worker.mjs && bun ./scripts/build-witness-worker.mjs",
