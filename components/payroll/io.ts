@@ -111,7 +111,7 @@ export function resolvePayrollTransferParams(item: PayrollRunItem, deps: Payroll
   const currency = displayTokenSymbol(item.currency);
   const token = deps.getToken(currency, chainId);
   if (!token) {
-    return { refusal: `${item.currency} is not available on ${item.network}. Edit the employee's currency before paying.` };
+    return { refusal: `${currency} is not available on ${item.network}. Edit the employee's currency before paying.` };
   }
   const amount = item.amountText ?? safeDecimalString(item.amount);
   if (!/^\d+(\.\d+)?$/.test(amount) || !Number.isFinite(Number(amount)) || Number(amount) <= 0) {
@@ -122,7 +122,7 @@ export function resolvePayrollTransferParams(item: PayrollRunItem, deps: Payroll
   // base units), so the executed amount would not be the stored one.
   const frac = amount.split('.')[1] ?? '';
   if (frac.length > token.decimals) {
-    return { refusal: `${item.currency} supports ${token.decimals} decimal places. Edit the salary (${amount} has ${frac.length}).` };
+    return { refusal: `${currency} supports ${token.decimals} decimal places. Edit the salary (${amount} has ${frac.length}).` };
   }
   return { recipient: item.walletAddress, amount, tokenSymbol: currency, amountUnits: 'underlying', decimals: token.decimals };
 }
