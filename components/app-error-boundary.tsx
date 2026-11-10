@@ -11,7 +11,10 @@
  * WHAT IT DOES NOT DO, and must not.
  *
  * It does not send the error. Not the message, not the stack, not the component
- * trace. The whole error reporting design is that callers name a message from a fixed
+ * trace: only identifiers derived from them (the error class, the first named
+ * component, the SHAPE of a recognised message and the build position of the
+ * first frame), each refused by the constructor unless it is a bare identifier.
+ * The whole error reporting design is that callers name a message from a fixed
  * list and pass booleans, with "deliberately no parameter that could carry" a
  * note. A render error is the WORST case for that rule, not an exception to it:
  * the message is whatever some library interpolated, and on this app that can
@@ -32,6 +35,8 @@ import React from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
 
 import { reportErrorReport } from '@/services/error-reports';
+import { firstComponentName, firstFramePosition } from '@/services/crash-frame';
+import { errorShape } from '@/services/error-shape';
 
 type Props = { children: React.ReactNode };
 type State = { crashed: boolean };
@@ -43,28 +48,6 @@ type State = { crashed: boolean };
  * has no equivalent that is safe to call from here. On native the button is
  * hidden rather than made to do nothing.
  */
-/**
- * The name of the component the crash came from, if the stack names one.
- *
- * React writes the stack as lines of `    at Name (file:line)`, innermost
- * first, so the first name is the component that threw. Only the NAME is
- * taken: the file and position go nowhere, and the constructor drops anything
- * that is not a bare identifier anyway, which is what makes this safe to send
- * from a production session.
- *
- * A minified bundle may have renamed the component, in which case this is a
- * short meaningless name rather than a wrong one, and `errorName` still says
- * what kind of failure it was.
- */
-function firstComponentName(componentStack: string | null | undefined): string | undefined {
-  if (!componentStack) return undefined;
-  for (const line of componentStack.split('\n')) {
-    const name = /^\s*(?:at\s+)?([A-Za-z_$][A-Za-z0-9_$]*)/.exec(line)?.[1];
-    if (name) return name;
-  }
-  return undefined;
-}
-
 function reloadDocument(): void {
   if (Platform.OS !== 'web') return;
   try {
@@ -93,11 +76,19 @@ export class AppErrorBoundary extends React.Component<Props, State> {
         // cannot travel by being forgotten here.
         detail: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
       }, {
-        // EVERY environment, prod included. Two identifiers, no values: enough
-        // to tell a TypeError in the swap modal from one in the pools provider
-        // without knowing anything about the person who hit it.
+        // EVERY environment, prod included. Identifiers, no values: enough to
+        // tell a TypeError in the swap modal from one in the pools provider
+        // without knowing anything about the person who hit it. The first two
+        // were not enough for V2-APP-5 (2026-10-30: `Error` and `https`), so
+        // the SHAPE of the message ("read_undefined_decimals") and the build
+        // position of the first frame go too. Both are built from fixed
+        // sentences and the build's own file name, and the constructor refuses
+        // anything that is not a bare identifier (services/error-shape.ts,
+        // services/crash-frame.ts).
         errorName: error instanceof Error ? error.name : typeof error,
         componentFrame: firstComponentName(info?.componentStack),
+        errorShape: errorShape(error instanceof Error ? error.message : undefined),
+        componentPosition: firstFramePosition(info?.componentStack),
       });
     } catch {
       /* Reporting must never be the reason the fallback fails to render. */

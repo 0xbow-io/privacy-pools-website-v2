@@ -22,7 +22,7 @@
  * which already resolves a share to its underlying), so a test drives the real
  * rule.
  */
-import { approxUnderlyingText } from '@/services/share-display';
+import { tokenAmountLabel } from '@/services/share-display';
 import { isRelayerOutOfGas, isRelayerRateLimited, relayerOutOfGasMessage, relayerRateLimitedMessage } from '@/services/transfer-outcome';
 import { formatUnits } from 'viem';
 
@@ -41,7 +41,8 @@ const LIFI_INPUT_SHORTFALL = /LiFi needs\s+(\d+)\s+input but only\s+(\d+)\s+avai
 
 /** Trim a formatted amount to something readable without losing the difference. */
 function amountText(raw: string, units: AmountUnits): string {
-  return approxUnderlyingText(`${formatUnits(BigInt(raw), units.decimals)} ${units.symbol}`, units.symbol);
+  // No rate here: a share count reads "0.5 ETH shares", never ppETH (DEV-591).
+  return tokenAmountLabel(formatUnits(BigInt(raw), units.decimals), units.symbol);
 }
 
 /**
@@ -64,6 +65,22 @@ export function friendlySwapError(message: string, units: AmountUnits): string |
       + ` a shortfall of ${amountText(gap.toString(), units)}. Reduce the amount slightly and try again.`;
   }
   return null;
+}
+
+/**
+ * The relayer caps the native value a swap route may carry (`maxSwapValueWei`
+ * on `/v1/details`, the bridge messaging fee RelaySwaps pays on the way). The
+ * SDK checks it before proving and throws `SwapValueExceedsRelayerCap`, whose
+ * message is base units and an internal field name. The relayer itself refuses
+ * the same thing by naming `max_swap_value_wei`. Both read as this one line.
+ * Nothing was proved or sent at that point.
+ */
+export const SWAP_VALUE_CAP_TEXT =
+  'This route needs a bridge fee above the relayer limit. Nothing was sent. Pick another destination or try again later.';
+
+export function isSwapValueOverRelayerCap(err: unknown): boolean {
+  if (!(err instanceof Error)) return typeof err === 'string' && /max_swap_value_wei/.test(err);
+  return err.name === 'SwapValueExceedsRelayerCap' || /max_swap_value_wei/.test(err.message);
 }
 
 /**

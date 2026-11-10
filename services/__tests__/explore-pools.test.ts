@@ -5,6 +5,7 @@ import {
   EXPLORE_POOLS_PAGE_SIZE,
   applyChainFilter,
   filterRowsToChains,
+  formatCompactTokenAmount,
   formatPoolTokenAmount,
   poolChainFilterOptions,
   poolTableChains,
@@ -223,8 +224,8 @@ describe('formatPoolTokenAmount', () => {
   test('reads decimals from the row it was given, not from a default', () => {
     // The same base-unit string is 100 USDC at 6 decimals and dust at 18: the
     // amount and its decimals have to come from one and the same pool row.
-    expect(formatPoolTokenAmount('100000000', 6, 'USDC')).toBe('100 USDC');
-    expect(formatPoolTokenAmount('100000000', 18, 'USDC')).toBe('0.0000000001 USDC');
+    expect(formatPoolTokenAmount('100000000', 6, 'USDC')).toBe('100.00 USDC');
+    expect(formatPoolTokenAmount('100000000', 18, 'USDC')).toBe('<0.01 USDC');
   });
 
   test('compacts thousands and millions', () => {
@@ -244,5 +245,34 @@ describe('showMoreLabel', () => {
   test('counts only when one tap leaves rows hidden', () => {
     expect(showMoreLabel(50, 71)).toBe('Show more (50 of 71)');
     expect(showMoreLabel(5, 5)).toBe('Show more');
+  });
+});
+
+describe('formatCompactTokenAmount', () => {
+  test('one shape for every pool size', () => {
+    expect(formatCompactTokenAmount(134.36539, 'ETH')).toBe('134.37 ETH');
+    expect(formatCompactTokenAmount(55414.12, 'USDC')).toBe('55.41K USDC');
+    expect(formatCompactTokenAmount(12.02698, 'ETH')).toBe('12.02698 ETH');
+  });
+
+  test('picks the unit from the rounded figure', () => {
+    expect(formatCompactTokenAmount(999.996, 'ETH')).toBe('1.00K ETH');
+    expect(formatCompactTokenAmount(999_996, 'USDC')).toBe('1.00M USDC');
+    expect(formatCompactTokenAmount(999.99, 'ETH')).toBe('999.99 ETH');
+    expect(formatCompactTokenAmount(999_990, 'USDC')).toBe('999.99K USDC');
+  });
+});
+
+describe('pool size reads the same on the pool page (review of #35)', () => {
+  const read = (path: string) => require('node:fs').readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8') as string;
+
+  test('the share pool page TVL uses the Explore rounding', () => {
+    const page = read('components/pools/pool-page-content.tsx');
+    expect(page).toContain('formatCompactTokenAmount(shareNumberAsUnderlying(tvlShares, tvlRate), displayTokenSymbol(tvlRate.underlyingSymbol))');
+    expect(page).not.toContain('formatShareAsUnderlying(shareNumberAsUnderlying(tvlShares');
+  });
+
+  test('stacked stat columns keep a min width so a USD figure wraps, never truncates, at 320px', () => {
+    expect(read('components/stats/stats-asset-cards.tsx')).toContain("'w-1/3 min-w-[84px] gap-[2px] pr-[8px]'");
   });
 });

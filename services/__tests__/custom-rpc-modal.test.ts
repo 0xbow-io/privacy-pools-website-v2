@@ -10,7 +10,7 @@ const OTHER_GATEWAY = GATEWAY.replace('12298', '12299');
 const source = ts.createSourceFile('custom-rpc-modal-provider.tsx', readFileSync(new URL('../../components/custom-rpc-modal-provider.tsx', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const component = source.statements.find((s): s is ts.FunctionDeclaration => ts.isFunctionDeclaration(s) && s.name?.text === 'CustomRpcModalProvider')!;
 const body = component.body!.statements.filter(s => !ts.isReturnStatement(s)).map(s => s.getText(source)).join('\n');
-const fields = ['openCustomRpcModal', 'closeCustomRpcModal', 'handleSave', 'testAll', 'testTorGateway', 'editRow', 'setTorEnabled', 'setTorProvider', 'setTorGateway', 'setTorAcceptedSuggested', 'setPersist', 'rows', 'skippedIds', 'formError', 'torError', 'torEnabled', 'torGateway', 'torAcceptedSuggested', 'persist', 'checking', 'torChecked', 'torProbing', 'torStatus'];
+const fields = ['openCustomRpcModal', 'closeCustomRpcModal', 'showEndpoints', 'setShowEndpoints', 'torFirst', 'handleSave', 'testAll', 'testTorGateway', 'editRow', 'setTorEnabled', 'setTorProvider', 'setTorGateway', 'setTorAcceptedSuggested', 'setPersist', 'rows', 'skippedIds', 'formError', 'torError', 'torEnabled', 'torGateway', 'torAcceptedSuggested', 'persist', 'checking', 'torChecked', 'torProbing', 'torStatus'];
 const code = ts.transpileModule(`${body}; return { ${fields.join(',')} };`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 const chains = [{ chainId: 1, name: 'Ethereum' }, { chainId: 10, name: 'Optimism' }];
 
@@ -385,4 +385,37 @@ test('revoking suggested gateway consent closes a pending endpoint probe transpo
   await pending;
   expect(app.writes).toEqual([]);
   expect(app.render().formError).toContain('field changed');
+});
+
+
+test('connection settings lead with routing and defer empty custom endpoint fields', () => {
+  const form = modal().render();
+  expect(form.torFirst).toBe(true);
+  expect(form.showEndpoints).toBe(false);
+  expect(form.torEnabled).toBe(false);
+});
+
+test('saved custom endpoints stay visible, including their excluded-network warning', () => {
+  const form = modal({ overrides: { 1: 'https://node.example/rpc' } }).render();
+  expect(form.showEndpoints).toBe(true);
+  expect(form.rows[1].value).toBe('https://node.example/rpc');
+  expect(form.skippedIds).toContain(10);
+});
+
+test('revealing custom endpoints keeps a draft through route edits without writing it', () => {
+  const app = modal();
+  app.render().setShowEndpoints(true);
+  app.render().editRow(1, 'https://draft.example/rpc');
+  app.render().setTorEnabled(true);
+  const form = app.render();
+  expect(form.showEndpoints).toBe(true);
+  expect(form.rows[1].value).toBe('https://draft.example/rpc');
+  expect(app.writes).toEqual([]);
+});
+
+
+test('saved overrides outside the visible chain list keep advanced settings and reset accessible', () => {
+  const form = modal({ overrides: { 56: 'https://other-network.example/rpc' } }).render();
+  expect(form.showEndpoints).toBe(true);
+  expect(form.skippedIds).toEqual([1, 10]);
 });

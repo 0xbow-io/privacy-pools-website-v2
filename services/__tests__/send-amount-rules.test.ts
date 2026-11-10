@@ -104,8 +104,9 @@ describe('the Send form uses them', () => {
     // Ticked or not since DEV-490.
     expect(src).toContain('(hideAddress && !isSwapSend && feeOverflowsCap(enteredAmountWei, relayFeeCeiled, maxSpendableWei))');
     expect(src).toContain('const effectiveReceiveExact = !maxGrossIntent && resolveEffectiveReceiveExact(');
-    expect(src).toContain('capText(maxSpendableWei, enteredAmountWei, selectedDecimals)');
-    expect(src).toContain('const displayAmountError = amountError?.replace(');
+    // The floored cap, through noteFigure so a share reads at the live rate.
+    expect(readFileSync(join(ROOT, 'services/note-figure.ts'), 'utf8')).toContain('capText(v, cap.enteredWei, d)');
+    expect(src).toContain('noteFigure(maxSpendableWei, { enteredWei: enteredAmountWei })');
     expect(src).toContain('onPress={() => setAmount(maxSpendableFormatted)}');
     expect(src).toContain("`Exceeds your shielded balance of ${cap}`");
     expect(src).not.toContain('parseFloat(maxSpendableFormatted).toFixed(4)');

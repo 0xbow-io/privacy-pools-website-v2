@@ -25,6 +25,9 @@ import { useChainRouter } from '@/hooks/use-chain-router';
 import { parseTokenAmount, sanitizeAmountInput } from '@/services/token-amount';
 import { tokenIconFor } from '@/components/pools/pool-page-shared';
 import { displayTokenSymbol} from '@/services/share-display';
+import { FigureText } from '@/components/ui/share-figure';
+import { LOADING_FIGURE } from '@/services/token-format';
+import { formatUsdBalance } from '@/services/format-fiat';
 
 /**
  * Always-visible action panel for a pool page — the pool-scoped cousin of the
@@ -253,17 +256,19 @@ export function PoolActionPanel({
               <View className="flex-row items-center gap-[6px] rounded-pill border border-border bg-card-background px-[10px] py-[5px]">
                 <TokenIcon size={18} />
                 <Text numberOfLines={1} className="font-pp-semi-bold text-[13px] text-text">
-                  {active.spendsPool ? amountField.symbol : displayTokenSymbol(amountSymbol)}
+                  {active.spendsPool ? amountField.unitLabel : displayTokenSymbol(amountSymbol)}
                 </Text>
               </View>
             </View>
             <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
               <Text numberOfLines={1} className="font-pp-regular text-[11px] leading-[14px] text-text-muted">
-                ${(active.spendsPool ? balanceDisplay(amount || '0', symbol, activeChainId).usd : amountNum * amountPriceUsd).toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                {active.spendsPool && balanceView.loading
+                  ? <FigureText text={LOADING_FIGURE} />
+                  : formatUsdBalance(active.spendsPool ? balanceDisplay(amount || '0', symbol, activeChainId).usd : amountNum * amountPriceUsd)}
               </Text>
               <Text numberOfLines={1} className="font-pp-regular text-[11px] leading-[14px] text-text-muted">
                 {active.spendsPool
-                  ? `Spendable: ${balanceView.text}`
+                  ? <FigureText text={`Spendable: ${balanceView.text}`} />
                   : 'From your wallet balance'}
               </Text>
               {active.spendsPool ? <ShareCountHint hint={balanceView.hint} /> : null}
@@ -272,10 +277,10 @@ export function PoolActionPanel({
         ) : (
           <View className="gap-[6px] rounded-inner bg-background-secondary p-[14px]">
             <Text numberOfLines={1} className="font-pp-semi-bold text-[14px] leading-[18px] text-text">
-              Get paid without an address
+              Request a private payment
             </Text>
             <Text numberOfLines={2} className="font-pp-regular text-[12px] leading-[17px] text-text-secondary">
-              Share a link. The payer never learns your balance.
+              Share a payment link. Review identity details before sharing.
             </Text>
           </View>
         )}

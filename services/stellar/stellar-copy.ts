@@ -29,6 +29,11 @@ export function describeStellarStage(stage: StellarFlowStage): string {
 }
 
 const RULES: [RegExp, string][] = [
+  // The network's own refusals of a send (Transaction send failed: <code>): THIS transaction did not
+  // reach the chain. An earlier step of the same flow may have (the first of the two account setup
+  // transactions), and a retry builds only the missing step, so the copy is scoped to this one.
+  [/\btxTooLate\b/, 'The approval took too long and the network refused it. This transaction was not sent. Try again.'],
+  [/\btxBadSeq\b/, 'Another transaction from this wallet went through first. This transaction was not sent. Try again.'],
   [/network.*mismatch|StellarWalletNetworkMismatch/i, 'Freighter is on another network. Switch it to Testnet and try again.'],
   [/not installed|StellarWalletNotAvailable/i, 'Freighter is not available in this browser.'],
   [/locked|not connected/i, 'Unlock Freighter and try again.'],

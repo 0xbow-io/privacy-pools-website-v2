@@ -21,6 +21,8 @@ export type StellarSentClaim = {
   /** Base units, decimal string. */
   amount: string;
   notes: StellarClaimNote[];
+  /** Set for a blind deposit FOR the recipient (DEV-499); absent for a one-time send. */
+  kind?: 'deposit';
   /** Null until the transfer is confirmed (or matched by its outputs). */
   txHash: string | null;
   createdAt: number;

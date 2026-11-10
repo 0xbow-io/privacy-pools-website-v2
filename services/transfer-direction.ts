@@ -178,6 +178,22 @@ export function classifyTransfer(
 }
 
 /**
+ * What a claimed payment added to the balance: the claimed value less what the
+ * claim cost (relayer fee, gas top-up, registration). A Transfer In row shows
+ * this net, so it agrees with the balance; the detail names the claim fee and
+ * the amount sent (DEV-621). Any other row, or an unreadable cost, is unchanged.
+ */
+export function claimedNetAmount(tx: Pick<Transaction, 'claimTxHash' | 'claimCostRaw'>, raw: bigint | null): bigint | null {
+  if (raw === null || !tx.claimTxHash || !tx.claimCostRaw) return raw;
+  try {
+    const cost = BigInt(tx.claimCostRaw);
+    return cost > 0n && cost < raw ? raw - cost : raw;
+  } catch {
+    return raw;
+  }
+}
+
+/**
  * Best-effort raw amount (in token-smallest-units) for a Transfer
  * the user is involved in.
  *

@@ -1,3 +1,5 @@
+import { tokenUsd } from '@/services/fee-warning';
+
 // The Swap tab's "~ what you receive" asks LiFi for an exact-in estimate. A
 // yield share (ppUSDC, ppUSDT, ppETH) has no market of its own: the swap
 // redeems it to its underlying first and deposits the output back as a share.
@@ -37,4 +39,9 @@ export function previewIsIdentity(
   toChainId: number,
 ): boolean {
   return fromChainId === toChainId && fromFunding.toLowerCase() === toFunding.toLowerCase();
+}
+
+/** Preview outputs are funding-token units, even when the destination is a share pool. */
+export function previewOutputUsd(amountWei: bigint, underlyingDecimals: number, underlyingUsd: number | null): number | null {
+  return tokenUsd(amountWei, underlyingDecimals, underlyingUsd);
 }
