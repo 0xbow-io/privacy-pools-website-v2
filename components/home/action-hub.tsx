@@ -84,7 +84,7 @@ import { fiatEntryAvailable, formatUsdLabel, sanitizeUsdInput, shieldDestination
 import { getUiParam, pushUiParamEntry, retireUiParamEntry, rebaseUiParamEntry, subscribeUiUrl } from '@/components/ui-url-events';
 import { useShareYield } from '@/hooks/use-share-yield';
 import { useYieldVaultProbeVersion } from '@/hooks/use-yield-vault-probe';
-import { displayTokenSymbol, isShareSymbol, presetChipLabel, shareRedemptionDisclosure, tokenAmountLabel } from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol, presetChipLabel, shareRedemptionDisclosure } from '@/services/share-display';
 import { amountInputDisplay, compactAmountLabel, formatCopyAmount, formatTokenBalance, groupThousands, isStablecoin, LOADING_FIGURE, stripAmountSeparators } from '@/services/token-format';
 import { conversionFundingToken, targetAcceptsConversion } from '@/config/intent-targets';
 import { getYieldShareToken } from '@/services/share-yield';
@@ -249,7 +249,7 @@ export function ActionHub({
   const {
     openRequestPaymentModal, closePaymentRequestModal,
     inlineActive: requestInline, isOpen: requestIsOpen,
-    requestToken, requestAmount, requestCreated,
+    requestToken, requestAmount, requestCreated, requestRateLoading,
     syncInlineRequestForm: syncRequestForm,
   } = usePaymentRequestModal();
   // Desktop web runs every operation INSIDE this card (modal-less); the
@@ -1434,6 +1434,10 @@ export function ActionHub({
   // same approximation the rest of the surface makes.
   const fiatAsset = action === 'shield' ? payMeta.symbol : action === 'request' ? requestToken.symbol : tokenMeta.symbol;
   const fiatSymbol = displayTokenSymbol(fiatAsset);
+  // The Request figure is an amount of the COIN (the provider converts it to
+  // shares at creation), so it is priced as the coin; the spend tabs hold share
+  // counts and price those through the share.
+  const fiatAmountAsset = action === 'request' ? fiatSymbol : fiatAsset;
   const fiatDecimals = action === 'shield' ? payMeta.decimals : action === 'request' ? requestToken.decimals : tokenMeta.decimals;
   // THE one the gate caught: as a query this was `enabled: action !== 'shield'`,
   // and shield is the landing tab, so the flag flipped the instant the user
@@ -1467,9 +1471,9 @@ export function ActionHub({
     if (fiatDerived.current?.amount === activeAmountText && fiatDerived.current.price === fiatPrice) return;
     fiatDerived.current = null;
     setUsdInput(isShareSymbol(fiatAsset)
-      ? tokenToUsdText(String(balanceDisplay(activeAmountText || '0', fiatAsset, chainId).usd), 1)
+      ? tokenToUsdText(String(balanceDisplay(activeAmountText || '0', fiatAmountAsset, chainId).usd), 1)
       : tokenToUsdText(activeAmountText, fiatPrice));
-  }, [activeAmountText, fiatPrice, fiatAsset, chainId, balanceDisplay]);
+  }, [activeAmountText, fiatPrice, fiatAsset, fiatAmountAsset, chainId, balanceDisplay]);
   const { openSeedDerivationModal } = useSeedDerivationModal();
   // A wallet identity whose keystore is not derived yet. An account-key identity
   // initializes itself, so it is never "locked" in this sense.
@@ -3220,7 +3224,7 @@ export function ActionHub({
     const fiatTokenLine = a === 'shield'
       ? `${amount || '0'} ${displayTokenSymbol(payMeta.symbol)}`
       : a === 'request'
-        ? tokenAmountLabel(requestAmount || '0', requestToken.symbol)
+        ? `${requestAmount || '0'} ${displayTokenSymbol(requestToken.symbol)}`
         : `${amountField.value || '0'} ${amountField.unitLabel}`;
     // A created request is frozen into its payload and its pay link: the figure
     // stays visible but inert. The PILL stays live — switching the token is the
@@ -3516,7 +3520,10 @@ export function ActionHub({
           ) : null}
           {/* A share amount set (MAX, a preset) before the rate is in: the
               field waits with the shimmer, never the count (DEV-621). */}
-          {!zoneFiatEntry && !isRequestCard && amountField.loading && !amountField.value && (parseFloat(amount) || 0) > 0 ? (
+          {/* Request on a yield pool: the typed coin amount converts to shares at
+              creation, so the field waits for the rate the same way. */}
+          {!zoneFiatEntry && ((!isRequestCard && amountField.loading && !amountField.value && (parseFloat(amount) || 0) > 0)
+            || (isRequestCard && requestRateLoading && !requestFrozen)) ? (
             <View testID="hub-amount-loading" className="min-w-0 flex-1 py-[10px]">
               <Skeleton width={140} height={tight ? 30 : 38} radius={8} />
             </View>
@@ -3685,7 +3692,7 @@ export function ActionHub({
               <Text className="font-pp-mono text-[13px] text-text-muted">
                 {/* A held position's dollar line is the balance header's figure, rounded DOWN (DEV-621). */}
                 {zoneFiatEntry ? fiatTokenLine : isShareSymbol(fiatAsset)
-                  ? formatUsdBalance(shareFiatEntry ? parseFloat(amountField.usdValue) || 0 : balanceDisplay(activeAmountText || '0', fiatAsset, chainId).usd)
+                  ? formatUsdBalance(shareFiatEntry ? parseFloat(amountField.usdValue) || 0 : balanceDisplay(activeAmountText || '0', fiatAmountAsset, chainId).usd)
                   : formatUsdLabel(usdInput)}
               </Text>
               {/* nw-keep(data-color): swap glyph colour is a runtime theme token (vector-icon sink) */}
