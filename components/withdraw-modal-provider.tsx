@@ -217,15 +217,15 @@ import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { FeeWarning } from '@/components/fee-warning';
 import { buildFeeBreakdown, gasCostUsd, quoteGas, splitRelayerFee, swapLossUsd, type FeeGasReading } from '@/services/fee-warning';
 import { AddressAutocomplete } from '@/components/contacts/address-autocomplete';
+import { confirmedRegistration } from '@/services/keystore-registry-events';
+import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
+import { shareNumberAsUnderlying } from '@/services/share-rates';
 
 /** Recipient shapes for the confirm paths (same as altRecipientPattern). */
 const STELLAR_RECIPIENT_RE = /^G[A-Z2-7]{55}$/;
 const SUI_RECIPIENT_RE = /^0x[0-9a-fA-F]{64}$/;
 /** Every withdrawal path records the recipient in the legacy store AND the recipient history (backed up, feeds the autocomplete). */
 const recordWithdrawRecipientEverywhere = (e: WithdrawRecipient) => recordWithdrawRecipientAndHistory(e, recordWithdrawRecipient as (e: never) => void);
-import { confirmedRegistration } from '@/services/keystore-registry-events';
-import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
-import { shareNumberAsUnderlying } from '@/services/share-rates';
 
 const WITHDRAW_RELAY_METHOD = /^relay(Withdrawal|RegisterAndWithdrawal|WithAnnounce)$/;
 const SWAP_EXIT_PENDING_MESSAGE = 'The relayer accepted this withdrawal, but it has not been included in a block yet. It has not failed and can still land, so these funds are held for it. Your balance and history update on their own once it settles; if it is still pending after 10 minutes, report it from the pending notice.';
