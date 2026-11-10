@@ -4,7 +4,8 @@
 //     address chip at ~1039px" regression.
 //  2. drawer — My balances / Pools / Activity must be BOTTOM sheets on desktop
 //     (flush to the viewport bottom), not centred dialogs.
-import { chromium, type Page } from 'playwright';
+import { type Page } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 import { installEvmWallet, loadDevAccount } from './evm-wallet';
 
 const BASE = process.env.PROBE_URL ?? 'http://localhost:8081';
@@ -57,7 +58,7 @@ function overlaps(a: Rect, b: Rect) {
 }
 
 async function run(connected: boolean, theme: string) {
-  const browser = await chromium.launch({ args: ['--no-sandbox'] });
+  const browser = await launchChrome();
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, reducedMotion: 'reduce' });
   await context.addInitScript(() => localStorage.setItem('ppv2_smartwallet_skipped_v1', '1'));
   const page = await context.newPage();
@@ -91,7 +92,7 @@ async function run(connected: boolean, theme: string) {
 }
 
 async function drawerProbe() {
-  const browser = await chromium.launch({ args: ['--no-sandbox'] });
+  const browser = await launchChrome();
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, reducedMotion: 'reduce' });
   await context.addInitScript(() => localStorage.setItem('ppv2_smartwallet_skipped_v1', '1'));
   const page = await context.newPage();

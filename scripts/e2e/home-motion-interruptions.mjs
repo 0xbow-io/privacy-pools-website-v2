@@ -1,9 +1,9 @@
 // PROBE_URL=http://localhost:8081 node scripts/e2e/home-motion-interruptions.mjs
 // Exercise interrupted motion, not just settled layouts. No wallet or signing.
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 
-const browser = await chromium.launch({ headless: true });
+const browser = await launchChrome({ headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = [];

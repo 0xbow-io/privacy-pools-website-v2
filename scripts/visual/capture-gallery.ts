@@ -37,8 +37,8 @@ import * as path from 'node:path';
 import type { Page } from 'playwright';
 import { BASELINE_DIR, FIXTURE_DIR } from './config';
 import { openFixtureStore, type FixtureMode } from './fixtures';
-import { assertOrUpdateBaselineManifest } from './baseline-manifest';
-import { launchBrowser, newDeterministicContext, openSurface, stableScreenshot } from './harness';
+import { assertOrUpdateBaselineManifest, writeCaptureBrowser } from './baseline-manifest';
+import { captureBrowserLabel, launchBrowser, newDeterministicContext, openSurface, stableScreenshot } from './harness';
 import { decodePng, diffPng, type DecodedPng } from './png';
 
 const GALLERY_BASE_URL = process.env.PPV2_GALLERY_BASE_URL ?? 'http://127.0.0.1:8082';
@@ -117,8 +117,10 @@ async function main(): Promise<void> {
     else if (args[i] === '--refresh-baselines') refreshBaselines = true;
   }
   fs.mkdirSync(outDir, { recursive: true });
+  const browserLabel = await captureBrowserLabel();
+  writeCaptureBrowser(outDir, browserLabel);
   if (outDir === BASELINE_DIR) {
-    assertOrUpdateBaselineManifest({ allowRefresh: refreshBaselines, ...(commit ? { commit } : {}) });
+    assertOrUpdateBaselineManifest({ browser: browserLabel, allowRefresh: refreshBaselines, ...(commit ? { commit } : {}) });
   }
 
   const store = openFixtureStore(FIXTURE_DIR, mode);

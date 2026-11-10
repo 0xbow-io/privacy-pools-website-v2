@@ -2,12 +2,12 @@
 // Public directory only; no wallet, transactions, or authenticated fixtures.
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 
 const baseURL = process.env.E2E_BASE_URL || 'http://localhost:8081';
 const output = '.pwcheck/ecosystem';
 await mkdir(output, { recursive: true });
-const browser = await chromium.launch({ headless: true });
+const browser = await launchChrome({ headless: true });
 const page = await browser.newPage();
 const errors = [];
 page.on('pageerror', (error) => errors.push(error.message));

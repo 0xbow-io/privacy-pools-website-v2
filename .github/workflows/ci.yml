@@ -63,7 +63,7 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
-      - run: bunx playwright install --with-deps chromium
+      - run: bunx playwright install --with-deps chrome
       # The dev server refuses to start without them, and the page imports them
       # even though this smoke proves nothing.
       - name: Build the proving workers
