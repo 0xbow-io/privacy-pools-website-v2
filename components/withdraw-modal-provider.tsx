@@ -12,6 +12,7 @@ import { formatUsdBalance } from '@/services/format-fiat';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { BalanceAmount } from '@/components/pools/balance-amount';
+import { getCachedNullifyingKeyHash } from '@/services/nullifying-key-hash-cache';
 import { FigureText } from '@/components/ui/share-figure';
 import { compactPhoneLayout } from '@/services/header-nav';
 import { HoverHint } from '@/components/ui/hover-hint';
@@ -222,6 +223,7 @@ const STELLAR_RECIPIENT_RE = /^G[A-Z2-7]{55}$/;
 const SUI_RECIPIENT_RE = /^0x[0-9a-fA-F]{64}$/;
 /** Every withdrawal path records the recipient in the legacy store AND the recipient history (backed up, feeds the autocomplete). */
 const recordWithdrawRecipientEverywhere = (e: WithdrawRecipient) => recordWithdrawRecipientAndHistory(e, recordWithdrawRecipient as (e: never) => void);
+import { confirmedRegistration } from '@/services/keystore-registry-events';
 import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
 import { shareNumberAsUnderlying } from '@/services/share-rates';
 
@@ -3520,7 +3522,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         keystoreSyncFromBlock,
       );
       const keystoreLeaves = await keystoreInteractor.getKeystoreLeaves();
-      const onChainNullifyingKeyHash = await keystoreInteractor.getNullifyingKeyHash(connectedAddress as `0x${string}`);
+      // Bulk ASP registry copy, never a per-account RPC read (write-once, so a hit is current).
+      const onChainNullifyingKeyHash = getCachedNullifyingKeyHash(chainId, connectedAddress, chainKeystoreAddress);
       const privateNullifyingKey = keystoreManager.getPrivateNullifyingKey();
       const privateRevocableKey = keystoreManager.getPrivateRevocableKey();
       const nullifyingKeyHash = hashService.hash([privateNullifyingKey]);
@@ -3545,7 +3548,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
 
       if (!keystoreLeafFound) {
         throw new Error(
-          onChainNullifyingKeyHash.toLowerCase() !== nullifyingKeyHash.toLowerCase()
+          onChainNullifyingKeyHash != null && BigInt(onChainNullifyingKeyHash) !== BigInt(nullifyingKeyHash)
             ? 'Current wallet-derived keys do not match the registered keystore for this account.'
             : 'Current auth policy leaf is not present in the keystore tree.',
         );
@@ -4629,6 +4632,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         }
         markRegistered(connectedAddress, chainId);
         // registerAndRelay sets no viewing key, so the account is only partially set up.
+        confirmedRegistration(connectedAddress, chainId, false);
         setReceiveSetup(connectedAddress, chainId, 'partial', 'local');
       }
 

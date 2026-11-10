@@ -1,4 +1,5 @@
 import { formatUnits } from 'viem';
+import { ownRegistrationRefusal } from '@/services/keystore-identity-status';
 // RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
 // amounts, validation, quotes, relayer and on-chain values stay in shares
 // (exact strings/bigints). Never convert an amount to underlying and back,
@@ -492,6 +493,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     ensureInitialized, noteManager, refreshNotes, keysReady, identityMode, sessionAddress,
     createReshieldCrosschainSessions,
     sessionForChain,
+    keystoreStatusForChain,
     keystoreManager,
   } = usePoolSession();
   // The identity whose NOTES fund the swap: the SDK session owner (wallet or
@@ -1671,6 +1673,16 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         });
         return 'handled';
       }
+      // Registered there, but under which keys? The live read above is a
+      // nonzero check. The reshield mints the far note under this session's
+      // keys, so the bulk registry must confirm they are the registered ones
+      // (local read, waits for the grid, never fetches).
+      const refusal = ownRegistrationRefusal(await keystoreStatusForChain(destinationChainId, { chainFallback: true }), true);
+      if (!args.isCurrent()) return 'handled';
+      if (refusal) {
+        setSwapError(refusal);
+        return 'handled';
+      }
     }
 
     // Bind the quote (LiFi fromAddress) and the proof to the deployed
@@ -1701,7 +1713,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     const relayer = relayers.find((r: { status?: string }) => r.status === 'active') ?? relayers[0];
     if (!relayer) throw new Error('No relayer is available for swaps right now.');
     return { session, relayer };
-  }, [ensureInitialized, identityMode, openKeystoreRegistrationModal, chainId, crossChainReshield, swapSend, destinationChainId, sessionForChain, hideForRegistration]);
+  }, [ensureInitialized, identityMode, openKeystoreRegistrationModal, chainId, crossChainReshield, swapSend, destinationChainId, sessionForChain, keystoreStatusForChain, hideForRegistration]);
 
   // --- Quote (input → review) ---
 
