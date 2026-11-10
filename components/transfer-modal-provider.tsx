@@ -7,7 +7,7 @@ import { useShareAmountField } from '@/hooks/use-share-amount-field';
 // only in the (i) hint, in fields labelled with the share symbol, or while the
 // rate is unknown. Never print a share count under the underlying symbol.
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
-import { sharesForUnderlyingCeil, underlyingOfSentShares, type ConvertedAtRate } from '@/services/underlying-amount-entry';
+import { sharesForUnderlyingCeil, underlyingOfSent, type ConvertedAtRate, type SentReadBack } from '@/services/underlying-amount-entry';
 import { preparedAmountData } from '@/services/prepared-amount-data';
 import { BalanceAmount } from '@/components/pools/balance-amount';
 import { crossFlowsEnabled } from '@/config/intent-lockdown';
@@ -841,13 +841,19 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     setAmount(sanitizeAmountInput(pendingUnderlying.text, meta.decimals));
   }, [pendingUnderlying, isSui, amount, sourceHoldings, sourceTokens, selectedToken, activeEvmChainId, shareRateFor, reportTransferError]);
   // What a sent amount (the pool's units) is worth in the coin, for the opener's
-  // paid-row check. Null while a share's rate is unknown. A ref, so the confirm
-  // callback reads the current rate without a new dependency.
-  const underlyingOfSentRef = useRef<(units: string) => string | null>(() => null);
-  underlyingOfSentRef.current = (units: string) => {
-    if (isSui || !isShareSymbol(selectedSymbol)) return units;
-    const liveRate = shareRateFor(activeEvmChainId, getTokenMetadataBySymbol(selectedSymbol, activeEvmChainId)?.address);
-    return underlyingOfSentShares({ units, liveRate, converted: convertedAtRef.current });
+  // paid-row check: the inputs of that read-back as they are NOW. The confirm
+  // callback takes this snapshot once, when its send starts, and every onSent of
+  // that run (including a relay found on chain after the modal moved on to
+  // another row, token or rate) reads with it. A ref, so the callback reads the
+  // current values without a new dependency.
+  const sentReadBackRef = useRef<() => SentReadBack>(() => ({ share: false, liveRate: null, converted: null }));
+  sentReadBackRef.current = () => {
+    const share = !isSui && isShareSymbol(selectedSymbol);
+    return {
+      share,
+      liveRate: share ? shareRateFor(activeEvmChainId, getTokenMetadataBySymbol(selectedSymbol, activeEvmChainId)?.address) : null,
+      converted: convertedAtRef.current,
+    };
   };
   // The note being sent, for sdkErrorText: a transfer's figures (fees, the
   // value the selected notes hold) are all in it. A ref, so the confirm
@@ -1716,6 +1722,8 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
       disclosures: SentNoteDisclosure[];
       /** The relayer's quoted fee, once the relayed branch has it. */
       feeWei?: bigint;
+      /** The coin read-back inputs as they were when this send started. */
+      readBack: SentReadBack;
     } | null = null;
     // DEV-413: the pre-broadcast one-time receipt record, until re-keyed.
     let provisionalAuditKey: string | null = null;
@@ -2154,6 +2162,9 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
       // fee returns as one owned change note per label. This amount is display
       // state only; the SDK receives zero and applies the final fee itself.
       let sendAmountWei = enteredAmountWei;
+      // This run's coin read-back, fixed now: a late-landed relay reads with it,
+      // not with whatever row, token or rate the modal shows by then.
+      const sentReadBack = sentReadBackRef.current();
       // Send-exact: the typed amount is the whole debit, so what the recipient
       // gets is it MINUS the fresh fee budget (the same padded figure the form
       // displayed). Computed from this quote, not the form's older one, so the
@@ -2334,6 +2345,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         inputs: verifiedInputCommitments,
         outputs: expectedOutputs,
         amountHex,
+        readBack: sentReadBack,
         tokenId: inputTokenId,
         disclosures: result.recipientDisclosures.map((d) => ({
           chainId,
@@ -3055,7 +3067,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
       if (live()) setStep('success');
       // Notify any opener (e.g. Payroll) only once the transfer is confirmed —
       // with what was ACTUALLY sent, so the caller can verify it matches its row.
-      try { onSent?.(hash, { chainId, tokenSymbol: selectedSymbol, amount, recipient: recipientAddress, underlyingAmount: underlyingOfSentRef.current(formatUnits(sendAmountWei, selectedDecimals)) }); } finally { if (transferOnSentRef.current === onSent) transferOnSentRef.current = null; }
+      try { onSent?.(hash, { chainId, tokenSymbol: selectedSymbol, amount, recipient: recipientAddress, underlyingAmount: underlyingOfSent(sentReadBack, formatUnits(sendAmountWei, selectedDecimals)) }); } finally { if (transferOnSentRef.current === onSent) transferOnSentRef.current = null; }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log('error', 'Transfer', 'Transfer failed', { err: message });
@@ -3172,7 +3184,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           try { await exportAccount(); } catch { /* the next discovery pass persists it */ }
         }
         refetchNotes();
-        try { onSent?.(landedHash, { chainId, tokenSymbol: selectedSymbol, amount, recipient: recipientAddress, underlyingAmount: underlyingOfSentRef.current(formatUnits(BigInt(run.amountHex), selectedDecimals)) }); } finally { if (transferOnSentRef.current === onSent) transferOnSentRef.current = null; }
+        try { onSent?.(landedHash, { chainId, tokenSymbol: selectedSymbol, amount, recipient: recipientAddress, underlyingAmount: underlyingOfSent(run.readBack, formatUnits(BigInt(run.amountHex), selectedDecimals)) }); } finally { if (transferOnSentRef.current === onSent) transferOnSentRef.current = null; }
       };
       if (!broadcastAttempted || knownRejection || confirmedRevert || relayerRefused || relayerOutOfGas || pendingBlocked || relayerInFlight) {
         setReceiptLifecycle('none');
@@ -3502,6 +3514,8 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     const coinPrefill = prefill?.amountUnits === 'underlying' && prefill.amount && prefill.tokenSymbol && !isSui
       ? { text: prefill.amount, coin: displayTokenSymbol(prefill.tokenSymbol).toUpperCase() } : null;
     setPendingUnderlying(coinPrefill);
+    // A conversion belongs to the open that made it: never carried into the next.
+    convertedAtRef.current = null;
     setAmount(prefill?.amountUnits === 'underlying' ? '' : prefill?.amount ?? '');
     // Back from a private swap-send that did not settle: the form returns as it
     // was handed off, recipient and "receive as" included. Never a fresh form
@@ -3584,6 +3598,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     opEpochRef.current += 1;
     setReceiveSelectorOpen(false);
     setPendingUnderlying(null);
+    convertedAtRef.current = null;
     setIsOpen(false);
     setInlinePreferred(false);
     // Secured receipt → drop the sensitive payload from memory. An UNSECURED
