@@ -17,7 +17,8 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 import { KeySourceChangedError } from '@/components/sdk-provider';
 import { truncateAddress } from '@/services/hex-format';
 import { isSessionInitTimeout } from '@/services/session-init-timeout';
-import { tokenAmountLabel, displayTokenSymbol, isShareSymbol } from '@/services/share-display';
+import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, plainTokenFigure } from '@/services/share-display';
+import { noteFigureText } from '@/services/note-figure';
 import { reportErrorReport } from '@/services/error-reports';
 import { classifyFailure } from '@/services/error-reports-cause';
 import { stellarErrorReportStage, type ErrorReportStage } from '@/services/error-reports-failure';
@@ -123,7 +124,7 @@ import { useSwapPreview } from '@/hooks/use-swap-preview';
 import { formatSwapExitEstimate } from '@/services/swap-exit-estimate';
 import { resolveEffectiveReceiveExact } from '@/services/withdraw-quotes';
 import { formatShortfallAmount } from '@/services/relayed-payment-shortfall';
-import { capText, feeMovedUp, feeOverflowsCap, overCapReason, stableSendMax } from '@/services/send-amount-rules';
+import { feeMovedUp, feeOverflowsCap, overCapReason, stableSendMax } from '@/services/send-amount-rules';
 import { previewNoteReceiptUrl } from '@/services/note-receipt-preview';
 import { TokenSelectSheet } from '@/components/ui/token-select-sheet';
 import { TokenMark } from '@/components/ui/token-network-icon';
@@ -140,8 +141,8 @@ import { relayedSpendBreakdown } from '@/services/fee-warning';
 import { AddressAutocomplete } from '@/components/contacts/address-autocomplete';
 import { SHIELDED_TRANSFER_GAS } from '@/services/transfer-fee-estimate';
 import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
-import { costShareText, feeShareText, shareWeiText, type ShareRate } from '@/services/share-rates';
-import { formatTokenBalanceDown } from '@/services/token-format';
+import { costShareText, relayFeeText, shareWeiText, type ShareRate } from '@/services/share-rates';
+import { formatTokenBalanceDown, isStablecoin } from '@/services/token-format';
 
 /** Every send path records the payee in the sent-transfers store AND the recipient history (backed up, feeds the autocomplete). */
 function recordSentTransfer(tx: SentTransfer): void {
@@ -1506,14 +1507,10 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   const selectedRate = isSui || isStellar ? undefined : rateFor(activeEvmChainId, selectedTokenId);
   const fieldDisplay = amountField.display;
   const noteFigure = useCallback((wei: bigint, cap?: { enteredWei: bigint }) => (
-    (isShareSymbol(selectedSymbol) ? fieldDisplay(formatUnits(wei, selectedDecimals)) : null) ?? shareWeiText(
-      wei,
-      { symbol: selectedSymbol, decimals: selectedDecimals },
-      selectedRate,
-      cap
-        ? (v, d) => (d === selectedDecimals ? capText(v, cap.enteredWei, d) : capText(v, v + 1n, d))
-        : undefined,
-    )
+    noteFigureText(wei, { symbol: selectedSymbol, decimals: selectedDecimals }, selectedRate, {
+      shareFigure: isShareSymbol(selectedSymbol) ? fieldDisplay : undefined,
+      cap,
+    })
   ), [selectedSymbol, selectedDecimals, selectedRate, fieldDisplay]);
   // An estimate ("~"), unless the figure already says so or is still loading.
   const noteFigureAbout = useCallback((wei: bigint) => {
@@ -1522,11 +1519,10 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   }, [noteFigure]);
   // A FEE never reads low: a share fee is converted rounding UP and written with
   // the cost formatter (formatShortfallAmount, up), not the field's rounded-down
-  // writer. A plain token keeps its exact figure, which is never low either.
+  // writer.
   const feeFigure = useCallback((wei: bigint) => (
-    isShareSymbol(selectedSymbol)
-      ? feeShareText(wei, { symbol: selectedSymbol, decimals: selectedDecimals }, selectedRate)
-      : noteFigureAbout(wei)
+    // A plain stablecoin fee is 2 decimals rounded up too (DEV-621); another plain token keeps its exact figure.
+    relayFeeText(wei, { symbol: selectedSymbol, decimals: selectedDecimals }, selectedRate, noteFigureAbout)
   ), [selectedSymbol, selectedDecimals, selectedRate, noteFigureAbout]);
 
   const amountError = useMemo(() => {
@@ -3607,7 +3603,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     // known at relay time; the marker says so (codex #1/#2).
     ? `${sendExactActive ? '~' : ''}${sentUnits
       // Rounded down, like the field, at the rate latched with the send.
-      ? shareWeiText(sentAmountWei, sentUnits, sentUnits.rate, isShareSymbol(sentUnits.symbol) ? (v, d, sym) => formatTokenBalanceDown(formatUnits(v, d), sym) : undefined)
+      ? shareWeiText(sentAmountWei, sentUnits, sentUnits.rate, isShareSymbol(sentUnits.symbol) || isStablecoin(sentUnits.symbol) ? (v, d, sym) => formatTokenBalanceDown(formatUnits(v, d), sym) : undefined)
       : noteFigure(sentAmountWei)}`
     : sendExactActive
       ? noteFigure(recipientAmountWei)
@@ -4302,7 +4298,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                       <Text className="text-[14px] text-[#737373] font-pp-regular">
                         {(isSui ? suiChosen.sum : totalSelectedValue) - enteredAmountWei >= 0n
                           ? noteFigure((isSui ? suiChosen.sum : totalSelectedValue) - enteredAmountWei)
-                          : tokenAmountLabel(formatUnits((isSui ? suiChosen.sum : totalSelectedValue) - enteredAmountWei, selectedDecimals), selectedSymbol)}
+                          : tokenAmountLabel(plainTokenFigure(formatUnits((isSui ? suiChosen.sum : totalSelectedValue) - enteredAmountWei, selectedDecimals), selectedSymbol), selectedSymbol)}
                       </Text>
                     </Text>
                   )}

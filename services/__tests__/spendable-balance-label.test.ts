@@ -31,6 +31,6 @@ test('plain ceiling and Send shortfall fallbacks preserve their previous exact/f
   const send = read('components/transfer-modal-provider.tsx');
   expect(send).toContain(': tokenAmountLabel(formatShortfallAmount(v, selectedDecimals, up, selectedSymbol), selectedSymbol)');
   // The floored cap goes through noteFigure (capText inside), at the live rate for a share.
-  expect(send).toContain('capText(v, cap.enteredWei, d)');
+  expect(read('services/note-figure.ts')).toContain('capText(v, cap.enteredWei, d)');
   expect(send).toContain('noteFigure(maxSpendableWei, { enteredWei: enteredAmountWei })');
 });
