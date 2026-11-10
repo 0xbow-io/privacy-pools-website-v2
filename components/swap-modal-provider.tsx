@@ -591,6 +591,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
   // amountField below (editAmount). Every caller that hands an amount in
   // (initialAmount, the hub's syncInlineForm) hands shares.
   const [amount, setAmount] = useState('');
+  // Bumped on every open and close: the amount field's draft belongs to one
+  // session of the form and never converts into the next (see amountField).
+  const [formSession, setFormSession] = useState(0);
   const [recipient, setRecipient] = useState('');
   // The recipient is YOUR wallet by default and the field stays hidden — a
   // swap-to-self is the overwhelmingly common case, and an always-visible
@@ -818,6 +821,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     onAmountResolved: setAmount,
     underlyingEntry: !isSui,
     clampToMax: false,
+    // A draft typed while the rate was missing dies with its session: reopening
+    // must not convert it into an amount nobody typed in the new one.
+    sessionKey: formSession,
   });
   /**
    * Units for any SDK error that interpolates raw wei, BOTH sides of it.
@@ -1184,6 +1190,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     // on this network" for an asset that swaps fine (Mike and Pat, 2026-09-22).
     const requestedUnavailable = handoffRefused(request, chainInputs);
     opEpochRef.current += 1;
+    setFormSession((n) => n + 1);
     submittedRef.current = false;
     guardRef.current.invalidate();
     setQuotedNet(null);
@@ -1418,6 +1425,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     if (step === 'executing') return; // a relayed swap can't be abandoned mid-proof
     guardClaimLeave(() => {
       opEpochRef.current += 1;
+      setFormSession((n) => n + 1);
       invalidateQuoteRequests();
       setIsOpen(false);
     });

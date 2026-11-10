@@ -35,6 +35,7 @@ function swapField(rate: ShareRate | null) {
   let effects: (() => void)[] = [];
   let amount = '';
   let currentRate = rate;
+  let session = 0;
   const source = read('hooks/use-share-amount-field.ts').replace(/^import .*;$/gm, '').replace('export function', 'function');
   const body = new (globalThis as unknown as BunGlobal).Bun.Transpiler({ loader: 'ts' }).transformSync(source);
   const dependencies = {
@@ -53,7 +54,7 @@ function swapField(rate: ShareRate | null) {
     cursor = 0; effects = [];
     // A fresh account: balance known and zero, as on the smoke's wallet.
     const field = useField({ amount, symbol: 'ppUSDC', chainId: 1, maxSharesExact: '0', capKnown: true,
-      onAmountResolved: (shares: string) => { amount = shares; }, underlyingEntry: true, clampToMax: false });
+      onAmountResolved: (shares: string) => { amount = shares; }, underlyingEntry: true, clampToMax: false, sessionKey: session });
     for (const effect of effects) effect();
     return field;
   };
@@ -63,6 +64,8 @@ function swapField(rate: ShareRate | null) {
     // editAmount: the typed text crosses through toShares, then the swap's own sanitizer.
     type: (text: string) => { amount = sanitizeAmountInput(render().toShares(text), 18); return render(); },
     rateArrives: (r: ShareRate) => { currentRate = r; render(); return render(); },
+    // closeSwapModal / openSwapModal (resetState): a new session, an empty amount.
+    reopen: () => { session += 1; amount = ''; return render(); },
   };
 }
 
@@ -92,6 +95,17 @@ describe('Swap: the typed coin is converted to shares before it is prepared', ()
     expect(f.amount()).toBe(expectedShares('5'));
   });
 
+  test('a draft typed before the rate does not outlive the modal (close, reopen, then the rate lands)', () => {
+    const f = swapField(null);
+    f.type('5');
+    expect(f.amount()).toBe('');
+    const reopened = f.reopen();
+    expect(reopened.value).toBe('');
+    f.rateArrives(RATE);
+    expect(f.amount()).toBe('');
+    expect(f.render().value).toBe('');
+  });
+
   test('the field shows the coin back, not the share count', () => {
     const f = swapField(RATE);
     f.type('5');
@@ -113,11 +127,17 @@ describe('Swap modal wiring (source guard)', () => {
   };
 
   test('the modal uses the shared share-amount field, unclamped, converting on EVM', () => {
-    const call = slice('const amountField = useShareAmountField({', 400);
+    const call = slice('const amountField = useShareAmountField({', 700);
     expect(call).toContain('symbol: fromToken.symbol');
     expect(call).toContain('onAmountResolved: setAmount');
     expect(call).toContain('underlyingEntry: !isSui');
     expect(call).toContain('clampToMax: false');
+    expect(call).toContain('sessionKey: formSession');
+  });
+
+  test('every open and every close starts a new field session', () => {
+    expect(slice('const resetState = useCallback(', 1600)).toContain('setFormSession((n) => n + 1)');
+    expect(slice('const closeSwapModal = useCallback(', 400)).toContain('setFormSession((n) => n + 1)');
   });
 
   test('typing goes through toShares and the field shows the coin', () => {
