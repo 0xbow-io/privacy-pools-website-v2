@@ -6,7 +6,6 @@ All notable changes to the Privacy Pools v2 web app are documented in this file.
 
 ### Added
 - Stellar testnet: relayed Send, /pay links and claim links, a claim link when you deposit for an unregistered account, and the relayer fee shown before you send (#70).
-- Yield deposit pause per chain, with a pause banner (#48).
 - Ecosystem directory aligned with the app design, plus Nymis and Casberi (#40, #65).
 - Turnstile loader served from our own origin and pinned by hash.
 - Faster builds: circuit artifacts served from their own origin, with a reload notice when a cached file goes stale.
@@ -36,6 +35,14 @@ All notable changes to the Privacy Pools v2 web app are documented in this file.
 - Stellar: protocol-30 ledger headers, claimed notes can be spent, relayed sends keep the recipient's note secrets, Freighter signing windows, and no EVM unlock on a Stellar landing.
 - Sepolia e2e journeys use the keys its verifiers hold (#74).
 - Dependency audit findings fixed, with a bun audit CI gate (#58).
+
+## [1.3.0] - 2026-10-29
+
+### Added
+- A notice at the top of the app that deposits are paused for yield assets on Ethereum and Base because of Aave's reserve freeze, with a link to Aave's announcement. Withdrawals, Send and Portfolio are not affected.
+
+### Changed
+- An opt-in setting can pause new deposits into the yield vaults per chain, off by default. When it is on, those assets show "Deposits paused" and Shield, swaps and pool pages refuse the deposit before anything is signed.
 
 ## [1.2.1] - 2026-10-23
 

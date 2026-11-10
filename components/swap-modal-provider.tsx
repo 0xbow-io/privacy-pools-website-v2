@@ -153,6 +153,7 @@ import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { FeeWarning } from '@/components/fee-warning';
 import { buildFeeBreakdown, gasCostUsd, quoteGas, splitRelayerFee, swapLossUsd, tokenUsd, type FeeGasReading } from '@/services/fee-warning';
 import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
+import { useTorOperation } from '@/hooks/use-tor-operation';
 import type { ShareRate } from '@/services/share-rates';
 
 // Intent swap (withdraw-and-swap): a private note leaves the pool, swaps
@@ -434,6 +435,7 @@ async function assertReshieldCap(noteValueWei: bigint, token: { symbol: string; 
 
 export function SwapModalProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
+  useTorOperation(isOpen);
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const { width } = useWindowDimensions();

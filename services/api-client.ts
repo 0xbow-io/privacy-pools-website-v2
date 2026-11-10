@@ -32,6 +32,7 @@ import { ASP_URL, LEGACY_CONFIG } from '@/config/env';
 import { EgressRefusedError, type EgressIntent } from '@/services/egress-policy';
 import { policedFetch } from '@/services/egress-fetch';
 import { AspBackoffError } from '@/services/asp-backoff';
+import { rpcTimeoutMs } from '@/services/tor-fetch';
 
 class APIError extends Error {
   constructor(
@@ -91,7 +92,10 @@ function aspEntrypoint(entrypoint: string | undefined): string | undefined {
 
 // Ceiling on a single ASP request, including reading its body. Generous enough
 // for the largest feed this client pulls on a slow connection, and short enough
-// that a stalled connection surfaces as an error the flow can report.
+// that a stalled connection surfaces as an error the flow can report. Over Tor
+// it is raised as an RPC call's is (rpcTimeoutMs): the clock starts when the
+// request is made, the page's first requests wait for the Tor client to start,
+// and on Android Chrome that took 45 s, so they were aborted just after sending.
 const ASP_REQUEST_TIMEOUT_MS = 45_000;
 
 class APIClient {
@@ -133,7 +137,7 @@ class APIClient {
     // request here becomes a transfer stuck on "Syncing latest pool state..."
     // forever. The relayer client already does this (services/egress-http-client).
     const abort = new AbortController();
-    const abortTimer = setTimeout(() => abort.abort(), ASP_REQUEST_TIMEOUT_MS);
+    const abortTimer = setTimeout(() => abort.abort(), rpcTimeoutMs(ASP_REQUEST_TIMEOUT_MS));
     if (init?.signal) {
       if (init.signal.aborted) abort.abort();
       else init.signal.addEventListener('abort', () => abort.abort(), { once: true });

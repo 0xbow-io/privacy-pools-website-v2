@@ -212,6 +212,7 @@ import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { FeeWarning } from '@/components/fee-warning';
 import { buildFeeBreakdown, gasCostUsd, quoteGas, splitRelayerFee, swapLossUsd, type FeeGasReading } from '@/services/fee-warning';
 import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
+import { useTorOperation } from '@/hooks/use-tor-operation';
 import { shareNumberAsUnderlying } from '@/services/share-rates';
 
 const WITHDRAW_RELAY_METHOD = /^relay(Withdrawal|RegisterAndWithdrawal|WithAnnounce)$/;
@@ -539,6 +540,7 @@ function quoteFailureMessage(message: string, shown: string = message): string {
 
 export function WithdrawModalProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
+  useTorOperation(isOpen);
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const isDark = colorScheme === 'dark';

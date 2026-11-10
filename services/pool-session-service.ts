@@ -44,6 +44,8 @@ import { getSwapProcessorAddress, INTENT_SWAPS_ENABLED, LIFI_API_KEY } from '@/c
 import { getSdkStorageService, migratePaymentRequestStateToOwner, migratePaymentRequestStateToV2Shape } from '@/services/sdk-storage';
 import { swapDepositSlippage } from '@/services/swap-flows';
 import { installNativeDeliveryBridgeDeny } from '@/services/lifi-native-delivery';
+import { routedFetch } from '@/services/tor-fetch';
+import { lifiStatusSubject } from '@/services/tor-groups';
 
 /**
  * Test-only bridge allowlist for cross-chain LiFi quotes, from
@@ -336,6 +338,11 @@ export async function createPoolSession(params: CreatePoolSessionParams) {
       // e2e only: pins cross-chain quotes to the listed bridges. Empty in real
       // builds, so users get LiFi's own bridge choice.
       ...(LIFI_CROSS_CHAIN_BRIDGES?.length ? { allowBridges: LIFI_CROSS_CHAIN_BRIDGES } : {}),
+    }, {
+      // Over anon-rpc when Tor is in force: quotes with the operation, and a
+      // status query over the group of the transaction it names, which a
+      // poll that outlives its flow keeps.
+      fetch: routedFetch('lifi', lifiStatusSubject),
     })
     : undefined;
   if (lifiProvider) {
