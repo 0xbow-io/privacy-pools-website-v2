@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { afterAll, describe, expect, mock, test } from 'bun:test';
 
 mock.module('react-native', () => ({
   Platform: { OS: 'web', select: (o: Record<string, unknown>) => o.web ?? o.default },
@@ -11,6 +11,8 @@ const mem = new Map<string, string>();
   setItem: (k: string, v: string) => { mem.set(k, v); },
   removeItem: (k: string) => { mem.delete(k); },
 };
+// bun runs every test file in one process: leave no fake behind for the next file.
+afterAll(() => { delete (globalThis as { localStorage?: unknown }).localStorage; });
 
 const { contactsStorageKey, readContacts, writeContacts, subscribeContacts, getContactsVersion } = await import('../address-book-store');
 const { setContactName } = await import('../address-book-core');

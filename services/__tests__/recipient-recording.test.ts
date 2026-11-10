@@ -1,6 +1,6 @@
 // Every confirmed withdrawal and send records its recipient in the recipient
 // history (the store that is backed up and feeds the autocomplete).
-import { describe, expect, mock, test } from 'bun:test';
+import { afterAll, describe, expect, mock, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -12,6 +12,8 @@ const mem = new Map<string, string>();
   setItem: (k: string, v: string) => { mem.set(k, v); },
   removeItem: (k: string) => { mem.delete(k); },
 };
+// bun runs every test file in one process: leave no fake behind for the next file.
+afterAll(() => { delete (globalThis as { localStorage?: unknown }).localStorage; });
 const store = await import('../address-book-store');
 
 const root = join(new URL('.', import.meta.url).pathname, '..', '..');
