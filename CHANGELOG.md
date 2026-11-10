@@ -35,6 +35,8 @@ All notable changes to the Privacy Pools v2 web app are documented in this file.
 - Stellar: protocol-30 ledger headers, claimed notes can be spent, relayed sends keep the recipient's note secrets, Freighter signing windows, and no EVM unlock on a Stellar landing.
 - Sepolia e2e journeys use the keys its verifiers hold (#74).
 - Dependency audit findings fixed, with a bun audit CI gate (#58).
+- Send, payment request and claim flows no longer show share names (#29).
+- The share-name guard no longer flags the gasless-registration refusal (#83).
 
 ## [1.3.0] - 2026-10-29
 
