@@ -37,6 +37,7 @@ All notable changes to the Privacy Pools v2 web app are documented in this file.
 - Dependency audit findings fixed, with a bun audit CI gate (#58).
 - Send, payment request and claim flows no longer show share names (#29).
 - The share-name guard no longer flags the gasless-registration refusal (#83).
+- The Swap tab no longer shows share names, and the first swap no longer wrongly says the note is not approved (#26).
 
 ## [1.3.0] - 2026-10-29
 
