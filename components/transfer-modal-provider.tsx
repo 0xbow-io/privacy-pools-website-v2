@@ -114,6 +114,7 @@ import { sdkErrorText, type ErrorUnits } from '@/services/sdk-error-amounts';
 import { isSwapSendSelection, sameAssetAddressesFor } from '@/services/intent-swaps';
 import { getConfiguredYieldDeploymentForAsset } from '@/config/yield';
 import { preferredReceiveAsset } from '@/services/receive-asset-pick';
+import { isUnknownKeystoreRoot, keystoreRootRefreshingMessage } from '@/services/keystore-root-error';
 import { isConfirmedRevert, isKnownRejection, isRelayerNullifierInFlight, isRelayerOutOfGas, isRelayerRateLimited, isRelayerRefusal, isRelayerUnreachable, isRelayWaitTimeout, relayerOutOfGasMessage, relayerRateLimitedMessage, relayInFlightMessage } from '@/services/transfer-outcome';
 import { isPendingRelayBlocked, landedTxHash, PENDING_RELAY_TTL_MS } from '@/services/pending-relays-core';
 import { onPendingRelaySettled, type PendingRelayResolution } from '@/services/pending-relays-store';
@@ -3341,7 +3342,11 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         if (live()) {
           setStep('review');
           reportTransferError(
-            `The relayer would not submit this transfer: ${message.split('\n')[0]}. Nothing was sent, no note was spent, and your balance is unchanged. Review again to build a fresh proof.`,
+            // The incident's HTTP 400 is a relayer refusal too: say the data is
+            // refreshing, not the raw contract error.
+            isUnknownKeystoreRoot(message)
+              ? keystoreRootRefreshingMessage('transfer')
+              : `The relayer would not submit this transfer: ${message.split('\n')[0]}. Nothing was sent, no note was spent, and your balance is unchanged. Review again to build a fresh proof.`,
           );
         }
         return;
@@ -3380,7 +3385,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
       }
 
       if (live()) {
-        reportTransferError(`Transfer failed: ${shownError(err)}`, err, 'relay');
+        reportTransferError(isUnknownKeystoreRoot(String((err as Error)?.message ?? err)) ? keystoreRootRefreshingMessage('transfer') : `Transfer failed: ${shownError(err)}`, err, 'relay');
         setStep('review');
       }
     } finally {
