@@ -187,6 +187,7 @@ import { CopyIconButton } from '@/components/ui/copy-address';
 import { OpShell } from '@/components/op-shell';
 import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 import { useInlineOpsCapable } from '@/hooks/use-inline-ops-capable';
+import { isUnknownKeystoreRoot, keystoreRootRefreshingMessage } from '@/services/keystore-root-error';
 import { isRelayerNullifierInFlight, isRelayerOutOfGas, isRelayerRateLimited, isRelayerUnreachable, isRelayWaitTimeout, relayerOutOfGasMessage, relayerRateLimitedMessage, relayInFlightMessage, timedOutRelayTxHash } from '@/services/transfer-outcome';
 import { aspBusyMessage } from '@/services/asp-backoff';
 import { aspBackoff } from '@/services/egress-fetch';
@@ -4641,6 +4642,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       // nothing about whose problem it was or whether funds moved.
       reportWithdrawError(
         isRelayerOutOfGas(message) ? relayerOutOfGasMessage('withdrawal')
+          : isUnknownKeystoreRoot(message) ? keystoreRootRefreshingMessage('withdrawal')
           : isPendingRelayBlocked(message) ? message
             : isRelayerNullifierInFlight(message) ? relayInFlightMessage('withdrawal')
               : message === WITHDRAW_PENDING_MESSAGE ? message

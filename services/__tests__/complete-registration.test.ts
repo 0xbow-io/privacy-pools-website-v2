@@ -377,7 +377,8 @@ describe('viewing-key affordability parity', () => {
     expect(probe).toContain('decideViewingKeyPath(');
     expect(probe).not.toContain('gasLimit: mode === \'top-up\' ? VIEWING_KEY_GAS_LIMIT');
     // DEV-542: the publish step checks the exact planned reserve it sends.
-    expect(publish).toContain('affordable: plan.fees === null ? true : balanceWei >= plan.costWei');
+    // DEV-589 review: through walletTxAffordable, so BNB (no fee fields) is still checked.
+    expect(publish).toContain('affordable: walletTxAffordable({ plan, balanceWei, chainId })');
     expect(publish).not.toMatch(/cost\.balanceWei < cost\.costWei/);
   });
 });

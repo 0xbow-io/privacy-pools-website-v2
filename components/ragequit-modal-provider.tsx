@@ -62,6 +62,7 @@ import { getTokenMetadata } from '@/config/tokens';
 import { useBackHandler } from '@/hooks/use-back-handler';
 import { useNativeMockBlock } from '@/hooks/use-native-mock-block';
 import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
+import { isUnknownKeystoreRoot, keystoreRootRefreshingMessage } from '@/services/keystore-root-error';
 
 const NATIVE_ASSET_ADDRESS = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 
@@ -662,7 +663,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
         return;
       }
 
-      setErrorMessage(`Ragequit failed: ${message}`);
+      setErrorMessage(isUnknownKeystoreRoot(message) ? keystoreRootRefreshingMessage('exit') : `Ragequit failed: ${message}`);
       setStep('confirm');
     } finally {
       releaseTx();

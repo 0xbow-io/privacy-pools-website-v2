@@ -79,6 +79,7 @@ import {
   refreshPoolEventSnapshot,
   refreshPoolLeaves,
 } from '@/services/snapshot-source';
+import { feedKeystoreRoot, KEYSTORE_ROOT_INTERVAL_MS, refreshKeystoreRoot } from '@/services/keystore-root-feed';
 import { FULL_RESYNC_INTERVAL_MS, refreshViewingKeyRegistry, type SyncOutcome } from '@/services/viewing-key-cache';
 import { ASP_URL, LEGACY_CONFIG } from '@/config/env';
 import {
@@ -232,6 +233,19 @@ export function startPublicFeeds(): void {
           key: feedPoolLeaves(chainId),
           intervalMs: POOL_LEAVES_INTERVAL_MS,
           fetch: async () => (await refreshPoolLeaves(chainId)).snapshotBlockNumber,
+        });
+      }
+      // The keystore-root health check: does the keystore leaf set a proof
+      // would be built from reproduce the chain's Keystore.currentRoot()? If
+      // the ASP's copy is behind, the leaves are rebuilt from chain events and
+      // held (services/keystore-root-guard.ts). Public, argument-free reads on
+      // the grid, so neither the check nor the repair is ever timed by a
+      // withdrawal or an exit.
+      if (!LEGACY_CONFIG) {
+        publicFeeds.register<string>({
+          key: feedKeystoreRoot(chainId),
+          intervalMs: KEYSTORE_ROOT_INTERVAL_MS,
+          fetch: () => refreshKeystoreRoot(chainId),
         });
       }
       // The ASP's rejected / poi-required decisions. On the grid because the
