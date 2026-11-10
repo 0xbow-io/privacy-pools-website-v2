@@ -10,6 +10,11 @@ import { deliveredMatchesExpected } from '@/services/underlying-amount-entry';
 import { relayFeeText, type ShareRate } from '@/services/share-rates';
 import { ceilFeeToDisplayGrain } from '@/services/relay-fee-split';
 
+/** Payroll salaries use coin units; plain tokens and their vault shares are one currency. */
+export function payrollCurrencyOptions(tokens: readonly { symbol: string }[]): string[] {
+  return [...new Set(tokens.map((token) => displayTokenSymbol(token.symbol)))];
+}
+
 // Chain/token resolution is INJECTED (type-only imports above keep this
 // module bun-testable — a runtime import of payroll-store pulls
 // config/chains → react-native into the module graph).
@@ -103,7 +108,8 @@ export function resolvePayrollTransferParams(item: PayrollRunItem, deps: Payroll
   if (chainId === undefined) {
     return { refusal: `Unknown network "${item.network}". Edit the employee's network before paying.` };
   }
-  const token = deps.getToken(item.currency, chainId);
+  const currency = displayTokenSymbol(item.currency);
+  const token = deps.getToken(currency, chainId);
   if (!token) {
     return { refusal: `${item.currency} is not available on ${item.network}. Edit the employee's currency before paying.` };
   }
@@ -118,7 +124,7 @@ export function resolvePayrollTransferParams(item: PayrollRunItem, deps: Payroll
   if (frac.length > token.decimals) {
     return { refusal: `${item.currency} supports ${token.decimals} decimal places. Edit the salary (${amount} has ${frac.length}).` };
   }
-  return { recipient: item.walletAddress, amount, tokenSymbol: item.currency, amountUnits: 'underlying', decimals: token.decimals };
+  return { recipient: item.walletAddress, amount, tokenSymbol: currency, amountUnits: 'underlying', decimals: token.decimals };
 }
 
 /**

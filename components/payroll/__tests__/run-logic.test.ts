@@ -3,7 +3,7 @@ import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { buildRunItems, resolvePayrollTransferParams, applyMarkPaid, buildRunsCsv, payrollSentMatchesRow } from '@/components/payroll/io';
+import { payrollCurrencyOptions, buildRunItems, resolvePayrollTransferParams, applyMarkPaid, buildRunsCsv, payrollSentMatchesRow } from '@/components/payroll/io';
 import { sharesForUnderlyingCeil, underlyingForSharesFloor } from '@/services/underlying-amount-entry';
 import type { Employee, PayrollRun, PayrollRunItem } from '@/services/payroll-store';
 
@@ -38,6 +38,19 @@ function item(over: Partial<PayrollRunItem> = {}): PayrollRunItem {
 function run(items: PayrollRunItem[], status: PayrollRun['status'] = 'pending'): PayrollRun {
   return { id: 'run1', date: 0, periodLabel: 'July 2026', items, status };
 }
+
+describe('payroll currencies', () => {
+  test('offers each mainnet coin once, including when a share precedes its coin', () => {
+    const tokens = ['ppETH', 'ETH', 'USDC', 'USDT', 'ppUSDC', 'ppUSDT'].map((symbol) => ({ symbol }));
+    expect(payrollCurrencyOptions(tokens)).toEqual(['ETH', 'USDC', 'USDT']);
+  });
+
+  test('keeps the selected network currencies without adding mainnet assets', () => {
+    expect(payrollCurrencyOptions([{ symbol: 'cBTC' }])).toEqual(['cBTC']);
+    expect(payrollCurrencyOptions([{ symbol: 'BNB' }, { symbol: 'FDUSD' }])).toEqual(['BNB', 'FDUSD']);
+    expect(payrollCurrencyOptions([])).toEqual([]);
+  });
+});
 
 describe('buildRunItems', () => {
   test('includes only active employees, mapped to pending items', () => {
@@ -101,6 +114,18 @@ describe('resolvePayrollTransferParams', () => {
     expect(ok(resolvePayrollTransferParams(item({ currency: 'ETH' }), deps)).tokenSymbol).toBe('ETH');
     expect(ok(resolvePayrollTransferParams(item({ currency: 'USDT' }), deps)).tokenSymbol).toBe('USDT');
     expect(ok(resolvePayrollTransferParams(item({ currency: 'USDC' }), deps)).tokenSymbol).toBe('USDC');
+  });
+
+  test('existing share-denominated rows resolve in coin units and coin precision', () => {
+    for (const currency of ['ppETH', 'ppUSDC', 'ppUSDT']) {
+      const params = ok(resolvePayrollTransferParams(item({ currency, amountText: '1000' }), deps));
+      expect(params.tokenSymbol).toBe(currency.slice(2));
+      expect(params.amount).toBe('1000');
+      expect(params.amountUnits).toBe('underlying');
+      expect(params.decimals).toBe(currency === 'ppETH' ? 18 : 6);
+    }
+    const result = resolvePayrollTransferParams(item({ currency: 'ppUSDC', amountText: '1.0000001' }), deps);
+    expect('refusal' in result && /6 decimal places/.test(result.refusal)).toBe(true);
   });
 
   // codex round 3: the old fallback silently substituted USDC for any
