@@ -12,14 +12,14 @@ import {
   type PayrollRun, type PayrollRunItem,
 } from '@/services/payroll-store';
 import { PCard, PBadge, PButton, CardTitle, CardEmptyState, shortAddr, fmtToken, cx } from '@/components/payroll/ui';
-import { buildRunItems, resolvePayrollTransferParams, applyMarkPaid, payrollSentMatchesRow } from '@/components/payroll/io';
+import { buildRunItems, resolvePayrollTransferParams, applyMarkPaid, payrollSentMatchesRow, payrollFeePreviewText } from '@/components/payroll/io';
+import { useShareRates } from '@/hooks/use-share-rates';
 import { networkChainId } from '@/services/payroll-store';
 import { useActiveEvmChain } from '@/hooks/use-active-evm-chain';
 import { useTransferFeeEstimate } from '@/hooks/use-transfer-fee-estimate';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { getKnownTokenMetadata } from '@/config/tokens';
 import { getConfiguredYieldDeploymentForAsset } from '@/config/yield';
-import { ceilFeeToDisplayGrain } from '@/services/relay-fee-split';
 import { formatUnits } from 'viem';
 
 const usdRate = (cur: string, eth: number) => (cur.toUpperCase() === 'ETH' ? eth : isStablecoin(cur) ? 1 : 0);
@@ -52,12 +52,15 @@ export function PayrollRunView() {
   // for the pool token a payment of that coin is spent from.
   const feeFor = useTransferFeeEstimate(activeEvmChainId);
   const feeDisplay = useBalanceDisplay(activeEvmChainId);
+  const { rateFor } = useShareRates();
   const feePreview = byCurrency.map(([cur]) => {
     const meta = getTokenMetadataBySymbol(cur, activeEvmChainId);
     if (!meta) return null;
     const pool = getKnownTokenMetadata(getConfiguredYieldDeploymentForAsset(activeEvmChainId, meta.address)?.ppUSDC ?? meta.address, activeEvmChainId) ?? meta;
     const fee = feeFor(pool.address);
-    return fee == null ? null : feeDisplay(formatUnits(ceilFeeToDisplayGrain(fee, pool.decimals), pool.decimals), pool.symbol, activeEvmChainId, pool.address).text;
+    // Send's own fee formatter (rounds up), so the same fee reads the same here.
+    return fee == null ? null : payrollFeePreviewText(fee, { symbol: pool.symbol, decimals: pool.decimals }, rateFor(activeEvmChainId, pool.address),
+      (wei) => `~${feeDisplay(formatUnits(wei, pool.decimals), pool.symbol, activeEvmChainId, pool.address).text}`);
   }).filter((t): t is string => !!t).join('  ·  ');
 
   const startRun = () => {
@@ -181,7 +184,7 @@ export function PayrollRunView() {
           </View>
 
           <Text className="font-pp-sans text-[12px] leading-[18px] text-text-secondary">
-            Each payment is a private transfer you sign from your Privacy Pools balance, and each pays the full salary amount.{feePreview ? ` Relayer fee ~${feePreview} per transfer, on top of the salary.` : ' The relayer fee is shown when you pay, on top of the salary.'}
+            Each payment is a private transfer you sign from your Privacy Pools balance, and each pays the full salary amount.{feePreview ? ` Relayer fee ${feePreview} per transfer, on top of the salary.` : ' The relayer fee is shown when you pay, on top of the salary.'}
           </Text>
         </PCard>
 

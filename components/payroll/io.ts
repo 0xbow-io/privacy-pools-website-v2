@@ -7,6 +7,8 @@
 import type { Employee, PayrollRun, PayrollRunItem } from '@/services/payroll-store';
 import { displayTokenSymbol } from '@/services/share-display';
 import { deliveredMatchesExpected } from '@/services/underlying-amount-entry';
+import { relayFeeText, type ShareRate } from '@/services/share-rates';
+import { ceilFeeToDisplayGrain } from '@/services/relay-fee-split';
 
 // Chain/token resolution is INJECTED (type-only imports above keep this
 // module bun-testable — a runtime import of payroll-store pulls
@@ -117,6 +119,22 @@ export function resolvePayrollTransferParams(item: PayrollRunItem, deps: Payroll
     return { refusal: `${item.currency} supports ${token.decimals} decimal places. Edit the salary (${amount} has ${frac.length}).` };
   }
   return { recipient: item.walletAddress, amount, tokenSymbol: item.currency, amountUnits: 'underlying', decimals: token.decimals };
+}
+
+/**
+ * The payroll page's per-transfer relayer fee, written by the SAME formatter the
+ * Send form uses for its fee line (relayFeeText over the display-grain ceiled
+ * fee): rounded up, so one fee never reads 0.07 here and 0.08 in Send (#78
+ * review). `exact` writes a plain non-stable token, as Send's noteFigureAbout
+ * does. The fee calculation itself is untouched.
+ */
+export function payrollFeePreviewText(
+  feeWei: bigint,
+  units: { symbol: string; decimals: number },
+  rate: ShareRate | undefined,
+  exact: (wei: bigint) => string,
+): string {
+  return relayFeeText(ceilFeeToDisplayGrain(feeWei, units.decimals), units, rate, exact);
 }
 
 /** What the transfer modal reports once a send is confirmed (TransferPrefill.onSent). */

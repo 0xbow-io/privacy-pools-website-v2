@@ -125,7 +125,7 @@ import { useSwapPreview } from '@/hooks/use-swap-preview';
 import { formatSwapExitEstimate } from '@/services/swap-exit-estimate';
 import { resolveEffectiveReceiveExact } from '@/services/withdraw-quotes';
 import { formatShortfallAmount } from '@/services/relayed-payment-shortfall';
-import { feeMovedUp, feeOverflowsCap, overCapReason, stableSendMax } from '@/services/send-amount-rules';
+import { feeMovedUp, overCapReason, sendFeeMode, stableSendMax } from '@/services/send-amount-rules';
 import { previewNoteReceiptUrl } from '@/services/note-receipt-preview';
 import { TokenSelectSheet } from '@/components/ui/token-select-sheet';
 import { TokenMark } from '@/components/ui/token-network-icon';
@@ -808,6 +808,10 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   // form stays empty meanwhile; a figure is never read as a share count.
   const [pendingUnderlying, setPendingUnderlying] = useState<{ text: string; coin: string } | null>(null);
   const convertedAtRef = useRef<ConvertedAtRate | null>(null);
+  // The amount as the opener's coin figure became it (payroll's salary in the
+  // pool's units). While the field still holds exactly this, the fee rides on
+  // top of it (sendFeeMode); any edit or a new open clears the hold.
+  const [callerAmount, setCallerAmount] = useState<string | null>(null);
   useEffect(() => {
     if (!pendingUnderlying) return;
     if (isSui) { setPendingUnderlying(null); return; }
@@ -833,12 +837,14 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
       setPendingUnderlying(null);
       // Keep the rate the shares were fixed at: the paid-row check reads them back at it.
       convertedAtRef.current = shares ? { shares, rate } : null;
-      if (shares) setAmount(shares);
+      if (shares) { setAmount(shares); setCallerAmount(shares); }
       else reportTransferError(`${pendingUnderlying.text} ${pendingUnderlying.coin} is not an amount this pool can send.`);
       return;
     }
     setPendingUnderlying(null);
-    setAmount(sanitizeAmountInput(pendingUnderlying.text, meta.decimals));
+    const plain = sanitizeAmountInput(pendingUnderlying.text, meta.decimals);
+    setAmount(plain);
+    setCallerAmount(plain);
   }, [pendingUnderlying, isSui, amount, sourceHoldings, sourceTokens, selectedToken, activeEvmChainId, shareRateFor, reportTransferError]);
   // What a sent amount (the pool's units) is worth in the coin, for the opener's
   // paid-row check: the inputs of that read-back as they are NOW. The confirm
@@ -1423,16 +1429,21 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   // has no room for a fee on top, so the fee comes out of it and the form
   // says so with the figure the recipient gets. Not silent: the line under
   // the amount replaces the checkbox while this holds.
-  const maxGrossIntent = !isSui && enteredAmountWei > 0n && (
-    enteredAmountWei === maxSpendableWei
-    || (hideAddress && !isSwapSend && feeOverflowsCap(enteredAmountWei, relayFeeCeiled, maxSpendableWei))
-  );
-  const effectiveReceiveExact = !maxGrossIntent && resolveEffectiveReceiveExact({
-    requestedReceiveExact: receiveExact,
+  // DEV-622 review (#78): a payroll salary nobody edited is what the payee is
+  // owed, so with the box ticked the fee stays on top and a short balance gets
+  // the insufficient-balance error rather than a payment short by the fee.
+  const callerAmountUntouched = callerAmount !== null && amount === callerAmount;
+  const feeMode = sendFeeMode({
     enteredWei: enteredAmountWei,
-    totalBalanceWei: maxSpendableWei,
-    singleProofCapWei: maxSpendableWei,
+    capWei: maxSpendableWei,
+    feeWei: relayFeeCeiled,
+    requestedReceiveExact: receiveExact,
+    callerAmountUntouched,
+    relayedSend: hideAddress && !isSwapSend,
+    resolveReceiveExact: resolveEffectiveReceiveExact,
   });
+  const maxGrossIntent = !isSui && feeMode.maxGrossIntent;
+  const effectiveReceiveExact = !maxGrossIntent && feeMode.effectiveReceiveExact;
   const sendExactActive = !isConsolidating && !isSui && hideAddress && !isSwapSend && !effectiveReceiveExact;
   // "~ what lands in your account" for a swap-send, before Review (same
   // estimate the Withdraw tab shows for a receive-as exit).
@@ -3516,6 +3527,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     setPendingUnderlying(coinPrefill);
     // A conversion belongs to the open that made it: never carried into the next.
     convertedAtRef.current = null;
+    setCallerAmount(null);
     setAmount(prefill?.amountUnits === 'underlying' ? '' : prefill?.amount ?? '');
     // Back from a private swap-send that did not settle: the form returns as it
     // was handed off, recipient and "receive as" included. Never a fresh form
@@ -3599,6 +3611,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     setReceiveSelectorOpen(false);
     setPendingUnderlying(null);
     convertedAtRef.current = null;
+    setCallerAmount(null);
     setIsOpen(false);
     setInlinePreferred(false);
     // Secured receipt → drop the sensitive payload from memory. An UNSECURED

@@ -76,6 +76,6 @@ describe('transfer modal wiring (source guard)', () => {
 
   test('a conversion record does not outlive the open that made it', () => {
     expect(slice('setPendingUnderlying(coinPrefill);', 200)).toContain('convertedAtRef.current = null;');
-    expect(modal).toContain('setPendingUnderlying(null);\n    convertedAtRef.current = null;\n    setIsOpen(false);');
+    expect(modal).toContain('setPendingUnderlying(null);\n    convertedAtRef.current = null;\n    setCallerAmount(null);\n    setIsOpen(false);');
   });
 });
