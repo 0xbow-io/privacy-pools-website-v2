@@ -166,9 +166,11 @@ import {
   resolveDisplayAvailableWei,
   resolveEffectiveReceiveExact,
   resolveSingleProofMaxInputWei,
+  resolveWithdrawMaxWei,
   resolveWithdrawPercentSelection,
   resolveWithdrawMode,
   reviewContextMatches,
+  routeCanBatch,
   type WithdrawReviewContext,
 } from '@/services/withdraw-quotes';
 import { floorToDisplayPrecision } from '@/services/swap-flows';
@@ -195,7 +197,7 @@ import { aspBackoff } from '@/services/egress-fetch';
 import { onRelayedTxHash } from '@/services/relayed-receipt';
 import { isPendingRelayBlocked, landedTxHash } from '@/services/pending-relays-core';
 import { assertNoPendingRelay, createPendingRelaySettleWatch, recordPendingRelay, settlePendingRelayByReceipt } from '@/services/pending-relays-store';
-import { classifyDirectReceipt, directPendingMessage, isDirectPendingMessage, releasesSubmitGuard, SELF_WITHDRAW_METHOD } from '@/services/self-withdrawal-pending';
+import { classifyDirectReceipt, directCancelledMessage, directPendingMessage, isDirectPendingMessage, releasesSubmitGuard, SELF_WITHDRAW_METHOD, waitForDirectWithdrawal } from '@/services/self-withdrawal-pending';
 import { PendingRelayNotice } from '@/components/pending-relay-notice';
 import { getYieldDeploymentForAsset } from '@/config/yield';
 import { recordOwnAction } from '@/services/own-actions-store';
@@ -1267,16 +1269,20 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     return Array.from(byLabel.values()).filter((entry) => entry.totalValue > 0n);
   }, [notes, selectedToken, spendableCommitments, isSui, altSymbol, chainId]);
 
-  const activeNotesForSelectedToken = useMemo(() => {
+  const spendableActiveNotesFor = useCallback((tokenSymbol: string) => {
     return notes.filter((note) => {
       const status = String(note.status);
       const isActive = status === 'active' || status === 'ACTIVE' || note.status === NoteStatus.ACTIVE;
       if (!isActive) return false;
       if (BigInt(note.value) === 0n) return false;
       const tokenAddr = String(note.tokenId || '');
-      return spendableCommitments?.has(note.commitment) && (isSui ? altSymbol : resolveTokenSymbol(tokenAddr, chainId)) === selectedToken;
+      return spendableCommitments?.has(note.commitment) && (isSui ? altSymbol : resolveTokenSymbol(tokenAddr, chainId)) === tokenSymbol;
     });
-  }, [notes, selectedToken, spendableCommitments, isSui, altSymbol, chainId]);
+  }, [notes, spendableCommitments, isSui, altSymbol, chainId]);
+  const activeNotesForSelectedToken = useMemo(
+    () => spendableActiveNotesFor(selectedToken),
+    [spendableActiveNotesFor, selectedToken],
+  );
 
   const preferredWithdrawNote = useMemo(
     () => resolvePreferredWithdrawNote(activeNotesForSelectedToken, preferredTransaction),
@@ -1475,9 +1481,17 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     if (spendabilityBlocked) return null;
     if (isSui) return tokenSymbol === altSymbol ? suiSpendability.maxSingleWei : 0n;
     // EVM inline Max is the full spendable balance: the plain 100% route keeps
-    // its existing batch semantics when one proof cannot carry everything.
-    return tokenBalances.get(tokenSymbol)?.active ?? 0n;
-  }, [isSui, altSymbol, spendabilityBlocked, suiSpendability.maxSingleWei, tokenBalances]);
+    // its existing batch semantics when one proof cannot carry everything. An
+    // own-wallet withdrawal is one proof, so its Max (the action hub's too) is
+    // the single-proof cap for that token.
+    return resolveWithdrawMaxWei({
+      isDirect: directMode,
+      spendableWei: tokenBalances.get(tokenSymbol)?.active ?? 0n,
+      singleProofCapWei: directMode
+        ? topNAcrossLabels(spendableActiveNotesFor(tokenSymbol), WITHDRAW_MAX_INPUTS)
+        : 0n,
+    });
+  }, [isSui, altSymbol, spendabilityBlocked, suiSpendability.maxSingleWei, tokenBalances, directMode, spendableActiveNotesFor]);
 
   // Keep BOTH caps materialized. `availableWei` is the current route's
   // single-proof cap, while route-change handlers need the destination route's
@@ -1724,6 +1738,10 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // prepareBatchWithdraw and paid ppUSDC under a USDC label (codex P1 on
   // d6abfcd). Until batch redemption exists, a share is single-proof only.
   const batchEnabled = BATCH_WITHDRAWALS_ENABLED && !isSui && !selectedIsShare;
+  // What the CURRENT route may batch. The own-wallet withdrawal is one proof
+  // and Confirm spends at most WITHDRAW_MAX_INPUTS notes, so its 100%, Max and
+  // Review stop at the single-proof cap exactly like the swap exit.
+  const routeBatchEnabled = routeCanBatch({ batchEnabled, isDirect: directMode });
   // A full-balance withdrawal needs batching only when its exact note topology
   // spans more than one proof (one lineage of >5 notes, or several lineages).
   // Derived from note counts, never float amounts.
@@ -1742,7 +1760,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // so the batch bypass below must not admit an amount the swap route will
   // deterministically fail to select.
   const fullBalanceRequested =
-    batchEnabled &&
+    routeBatchEnabled &&
     !isSwapExit &&
     fullWithdrawGroupCount > 1 &&
     isFullBalanceRequest({
@@ -1823,7 +1841,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     : tokenBalanceNum(
         resolveDisplayAvailableWei({
           isSwapExit,
-          batchEnabled,
+          batchEnabled: routeBatchEnabled,
           spendableWei: currentBalance.active,
           singleProofCapWei: availableWei,
         }),
@@ -2447,6 +2465,15 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         reportWithdrawError('Connect the wallet that will send this withdrawal.');
         return;
       }
+      // One proof, no batch: Review admits only what Confirm can select.
+      const directDecimals = withdrawTokenDecimals(selectedToken, chainId, false);
+      let directReviewWei = 0n;
+      try { directReviewWei = parseTokenAmount(amount, directDecimals); } catch { directReviewWei = 0n; }
+      if (directReviewWei > availableWei) {
+        const directMax = formatUnits(availableWei, directDecimals);
+        reportWithdrawError(`That's more than one transaction can carry. Enter at most ${isShareSymbol(selectedToken) ? balanceDisplay(directMax, selectedToken, chainId).text : tokenAmountLabel(directMax, selectedToken)} (up to ${WITHDRAW_MAX_INPUTS} notes per proof).`);
+        return;
+      }
       setBatchPlan(null);
       setSwapSnapshot(null);
       setColdStartClaim(null);
@@ -2879,18 +2906,22 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // inputs spent and add the change note the way the router redemption does.
   // Bookkeeping after a CONFIRMED spend: a failure here is logged and the next
   // sync re-derives it. Shared by Confirm and the pending screen's re-check.
+  // `minedHash` differs from `flight.hash` when the wallet sped the transaction
+  // up: the pending record (keyed by the sent hash) is cleared and everything
+  // recorded from here on names the hash that mined.
   const finishDirectWithdrawal = useCallback(async (
     flight: DirectWithdrawalInFlight,
     blockNumber: bigint,
+    minedHash: `0x${string}`,
     session: PoolSession,
     live: () => boolean,
   ) => {
-    settlePendingRelayByReceipt(flight.hash, true);
+    settlePendingRelayByReceipt(flight.hash, true, minedHash);
     try {
       const spentAtBlock = `0x${blockNumber.toString(16)}` as `0x${string}`;
       await session.markNotesSpent(flight.inputs.map((n) => ({ commitment: n.commitment as `0x${string}`, spentAtBlock })));
       if (flight.changePendingNotes.length > 0) {
-        await session.addNotes(flight.changePendingNotes.map((pendingNote) => ({ pendingNote, txHash: flight.hash })));
+        await session.addNotes(flight.changePendingNotes.map((pendingNote) => ({ pendingNote, txHash: minedHash })));
       }
     } catch (persistErr) {
       log('warn', 'Withdraw', 'Persisting notes after an own-wallet withdrawal failed; the next sync reconciles', { err: persistErr });
@@ -2902,7 +2933,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     try {
       recordOwnWithdrawal({
         chainId,
-        txHash: flight.hash,
+        txHash: minedHash,
         recipient: flight.sender,
         tokenAddress: flight.tokenAddress,
         feeAmount: null,
@@ -2915,7 +2946,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     setWithdrawPending(false);
     if (live()) {
       reportWithdrawError(null);
-      setTxHash(flight.hash);
+      setTxHash(minedHash);
       setTxChainId(chainId);
       setStep('success');
     }
@@ -2929,21 +2960,23 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     setDirectRechecking(true);
     const epoch = modalEpochRef.current;
     try {
-      let receipt: { status: 'success' | 'reverted'; blockNumber: bigint } | null = null;
+      let receipt: { transactionHash: `0x${string}`; status: 'success' | 'reverted'; blockNumber: bigint } | null = null;
       let failed = !publicClient;
       if (publicClient) {
         try {
           receipt = await publicClient.getTransactionReceipt({ hash: flight.hash });
         } catch {
-          // Not mined yet (or the RPC could not answer): still pending.
+          // Not mined yet (or the RPC could not answer): still pending. A sped
+          // up or cancelled copy never mines under this hash, so it stays here
+          // until the nullifier sync settles the record.
           failed = true;
         }
       }
-      const outcome = classifyDirectReceipt(receipt, failed);
+      const outcome = classifyDirectReceipt({ submittedHash: flight.hash, receipt, replacement: null, failed });
       if (outcome.kind === 'confirmed') {
         const session = sdkReady && poolSession ? poolSession : await ensureInitialized();
         if (!session) throw new Error('SDK initialization did not complete.');
-        await finishDirectWithdrawal(flight, outcome.blockNumber, session, () => modalEpochRef.current === epoch);
+        await finishDirectWithdrawal(flight, outcome.blockNumber, outcome.minedHash, session, () => modalEpochRef.current === epoch);
       } else if (outcome.kind === 'reverted') {
         settlePendingRelayByReceipt(flight.hash, false);
         directPendingRef.current = null;
@@ -4203,17 +4236,13 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         // already seen the hash arrive from this client: the receipt is the
         // answer, revert included (the relayed path avoids this poll because
         // there the hash is the relayer's and naming it would link this client).
-        let directReceipt: { status: 'success' | 'reverted'; blockNumber: bigint } | null = null;
-        let directWaitFailed = !publicClient;
-        if (publicClient) {
-          try {
-            directReceipt = await publicClient.waitForTransactionReceipt({ hash: directHash });
-          } catch (waitErr) {
-            directWaitFailed = true;
-            log('warn', 'Withdraw', 'Own-wallet receipt wait failed; keeping the withdrawal pending', { err: waitErr instanceof Error ? waitErr.message : String(waitErr) });
-          }
+        // A wallet speed-up or cancel resolves with the REPLACEMENT's receipt,
+        // and a cancel succeeds on chain, so the receipt status alone is not
+        // the answer: waitForDirectWithdrawal reads viem's replacement signal.
+        const { outcome: directOutcome, error: directWaitErr } = await waitForDirectWithdrawal(publicClient, directHash);
+        if (directWaitErr) {
+          log('warn', 'Withdraw', 'Own-wallet receipt wait failed; keeping the withdrawal pending', { err: directWaitErr instanceof Error ? directWaitErr.message : String(directWaitErr) });
         }
-        const directOutcome = classifyDirectReceipt(directReceipt, directWaitFailed);
         if (directOutcome.kind === 'sent-unconfirmed') {
           // NOT a failure and never retryable: the transaction can still land.
           // The pending screen names the hash and offers a re-check instead of
@@ -4227,7 +4256,16 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           directPendingRef.current = null;
           throw new Error('Withdrawal transaction reverted on-chain. Your notes were NOT spent.');
         }
-        await finishDirectWithdrawal(directFlight, directOutcome.blockNumber, session, isSameOperation);
+        if (directOutcome.kind === 'cancelled') {
+          // The cancel mined and the withdrawal never ran: release the inputs.
+          log('info', 'Withdraw', 'Own-wallet withdrawal cancelled in the wallet', { txHash: directHash, replacementHash: directOutcome.replacementHash });
+          settlePendingRelayByReceipt(directHash, false);
+          directPendingRef.current = null;
+          setTxHash(null);
+          setTxChainId(null);
+          throw new Error(directCancelledMessage());
+        }
+        await finishDirectWithdrawal(directFlight, directOutcome.blockNumber, directOutcome.minedHash, session, isSameOperation);
         return;
       }
 
@@ -5233,11 +5271,12 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     tab: string,
     nextIsSwapExit: boolean,
     nextSingleProofCapWei: bigint,
+    nextIsDirect: boolean = directMode,
   ) => {
     const selection = resolveWithdrawPercentSelection({
       pct: parseInt(tab, 10),
       isSwapExit: nextIsSwapExit,
-      batchEnabled,
+      batchEnabled: routeCanBatch({ batchEnabled, isDirect: nextIsDirect }),
       spendableWei: currentBalance.active,
       singleProofCapWei: nextSingleProofCapWei,
     });
@@ -5296,6 +5335,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // the connected wallet sends and receives), so a review made under the other
   // choice is dropped, exactly like the gas and net-vs-gross toggles.
   const handleSelfWithdrawToggle = () => {
+    const nextDirect = selfWithdrawSupported && !selfWithdrawChecked;
     setSelfWithdrawChecked((value) => !value);
     setGasTokenChecked(false);
     invalidateQuoteRequests();
@@ -5304,6 +5344,10 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     setBatchPlan(null);
     setReviewContext(null);
     resetQuote();
+    // A selected percentage belongs to the route's cap: 100% batches on the
+    // relayed route and stops at one proof on the own-wallet route.
+    const percentTab = isSui ? null : selectedTab ?? (maxSelected ? '100%' : null);
+    if (percentTab) applyEvmPercentForRoute(percentTab, isSwapExit, mixedLabelCapWei, nextDirect);
     bumpSelection();
     if (stepRef.current === 'review') setStep('withdraw');
   };
@@ -5511,9 +5555,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                               ? 'Loading shielded balance…'
                               : spendabilityError
                                 ? 'Shielded balance unavailable'
-                                : `Available: ${groupThousands(spendableLabel(isSui ? String(displayAvailableNum) : formatUnits(resolveDisplayAvailableWei({ isSwapExit, batchEnabled, spendableWei: currentBalance.active, singleProofCapWei: availableWei }), selectedTokenDecimals), selectedToken, chainId))}`}
+                                : `Available: ${groupThousands(spendableLabel(isSui ? String(displayAvailableNum) : formatUnits(resolveDisplayAvailableWei({ isSwapExit, batchEnabled: routeBatchEnabled, spendableWei: currentBalance.active, singleProofCapWei: availableWei }), selectedTokenDecimals), selectedToken, chainId))}`}
                           </Text>
-                          <ShareCountHint hint={balanceDisplay(isSui ? String(displayAvailableNum) : formatUnits(resolveDisplayAvailableWei({ isSwapExit, batchEnabled, spendableWei: currentBalance.active, singleProofCapWei: availableWei }), selectedTokenDecimals), selectedToken, chainId).hint} />
+                          <ShareCountHint hint={balanceDisplay(isSui ? String(displayAvailableNum) : formatUnits(resolveDisplayAvailableWei({ isSwapExit, batchEnabled: routeBatchEnabled, spendableWei: currentBalance.active, singleProofCapWei: availableWei }), selectedTokenDecimals), selectedToken, chainId).hint} />
                           <ModalInfoIcon color="#999999" />
                         </View>
                         <View className="flex-row gap-[2px] flex-wrap justify-end max-w-[188px]">

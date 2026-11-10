@@ -215,12 +215,15 @@ export function overridePendingRelay(id: string): void {
   withStorageLock(() => { writeAll(overrideRelay(readAll(), id, Date.now())); });
 }
 
-/** The relayed transaction mined: spent its nullifiers (true) or reverted (false). */
-export function settlePendingRelayByReceipt(txHash: string, status: boolean): void {
+/**
+ * The relayed transaction mined: spent its nullifiers (true) or reverted
+ * (false). `minedHash` names a wallet speed-up that mined under a new hash.
+ */
+export function settlePendingRelayByReceipt(txHash: string, status: boolean, minedHash?: string): void {
   withStorageLock(() => {
     const current = readAll();
     if (current.length === 0) return;
-    const { kept, settled } = settleByReceipt(current, txHash, status);
+    const { kept, settled } = settleByReceipt(current, txHash, status, minedHash);
     if (settled.length === 0) return;
     writeAll(kept);
     publishSettled(settled);

@@ -165,6 +165,29 @@ export function resolveDisplayAvailableWei(params: {
 }
 
 /**
+ * Whether the current EVM withdraw route may batch several proofs. The
+ * own-wallet ("direct") withdrawal is one proof that Confirm caps at five
+ * inputs, so it never batches even with batching enabled.
+ */
+export function routeCanBatch(params: { batchEnabled: boolean; isDirect: boolean }): boolean {
+  return params.batchEnabled && !params.isDirect;
+}
+
+/**
+ * What the EVM Max control fills. The relayed route keeps the whole spendable
+ * balance (the 100% route batches when one proof cannot carry it). The
+ * own-wallet route is the single-proof cap.
+ */
+export function resolveWithdrawMaxWei(params: {
+  isDirect: boolean;
+  spendableWei: bigint;
+  singleProofCapWei: bigint;
+}): bigint {
+  if (!params.isDirect) return params.spendableWei;
+  return params.singleProofCapWei < params.spendableWei ? params.singleProofCapWei : params.spendableWei;
+}
+
+/**
  * The per-transaction cap for MIXED-LABEL single-proof withdrawals: the sum of
  * the largest `maxInputs` notes regardless of label. The transact circuit
  * takes mixed labels natively (labels are per-input signals; conservation is
