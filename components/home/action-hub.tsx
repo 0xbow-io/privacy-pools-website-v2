@@ -4,6 +4,7 @@ import { DEPOSIT_FAQ_URL } from '@/config/support';
 import { spendableBalanceLabel } from '@/services/spendable-balance-label';
 import { pendingPoolReopenStep, type PendingPoolReopen } from '@/services/pool-pick-reopen';
 import { useShareAmountField } from '@/hooks/use-share-amount-field';
+import { quotedNetFigure } from '@/services/swap-quoted-net';
 import { formatUsdBalance } from '@/services/format-fiat';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
@@ -84,7 +85,7 @@ import { getUiParam, pushUiParamEntry, retireUiParamEntry, rebaseUiParamEntry, s
 import { useShareYield } from '@/hooks/use-share-yield';
 import { useYieldVaultProbeVersion } from '@/hooks/use-yield-vault-probe';
 import { displayTokenSymbol, isShareSymbol, presetChipLabel } from '@/services/share-display';
-import { amountInputDisplay, compactAmountLabel, formatCopyAmount, formatTokenBalance, groupThousands, isStablecoin, stripAmountSeparators } from '@/services/token-format';
+import { amountInputDisplay, compactAmountLabel, formatCopyAmount, formatTokenBalance, groupThousands, isStablecoin, LOADING_FIGURE, stripAmountSeparators } from '@/services/token-format';
 import { conversionFundingToken, targetAcceptsConversion } from '@/config/intent-targets';
 import { getYieldShareToken } from '@/services/share-yield';
 import { compactPhoneLayout } from '@/services/header-nav';
@@ -245,7 +246,7 @@ export function ActionHub({
   const outCard = tight ? 'gap-[6px] px-[16px] py-[12px]' : 'gap-[12px] px-[16px] py-[20px]';
   const { openWithdrawModal, closeWithdrawModal, inlineActive: withdrawInline, isOpen: withdrawIsOpen, inlineStep: withdrawStep, syncInlineAmount: syncWithdrawAmount, inlineAmount: withdrawAmount, inlineToken: withdrawToken, syncInlineToken: syncWithdrawToken, spendabilityLoading: withdrawSpendabilityLoading, spendabilityError: withdrawSpendabilityError, retrySpendability, getSpendableBalanceWei: getWithdrawSpendableBalanceWei, getWithdrawMaxWei } = useWithdrawModal();
   const { openTransferModal, closeTransferModal, inlineActive: transferInline, isOpen: transferIsOpen, syncInlineAmount: syncTransferAmount, getTransferMaxWei, inlineStep: transferStep, inlineAmount: transferAmount, inlineToken: transferToken, syncInlineToken: syncTransferToken } = useTransferModal();
-  const { openSwapModal, closeSwapModal, isOpen: swapIsOpen, inlineActive: swapInline, inlineStep: swapStep, inlineSend: swapInlineSend, inlineRecipientRegistration: swapRecipientRegistration, syncInlineForm: syncSwapForm } = useSwapModal();
+  const { openSwapModal, closeSwapModal, isOpen: swapIsOpen, inlineActive: swapInline, inlineStep: swapStep, inlineSend: swapInlineSend, inlineRecipientRegistration: swapRecipientRegistration, syncInlineForm: syncSwapForm, inlineQuotedNet: swapQuotedNetRaw } = useSwapModal();
   const {
     openRequestPaymentModal, closePaymentRequestModal,
     inlineActive: requestInline, isOpen: requestIsOpen,
@@ -1048,8 +1049,28 @@ export function ActionHub({
     // that call, net of its bridge fee, not the cheapest plain bridge.
     destinationCall: swapCrossChain,
   });
+  // A Review press refused below the pool minimum carries the net deposit it
+  // was priced at (relayer and swap fees out). While the form still asks for
+  // that same swap, the headline IS that figure, printed as the refusal prints
+  // it, so the two never disagree (Pat's QA on #26: "~10.04 USDT" beside
+  // "about 9.6391 USDT, below the pool's minimum"). From the press's own
+  // quote: nothing is fetched for it.
+  const swapQuotedNet = swapQuotedNetRaw && swapOutToken
+    && swapQuotedNetRaw.grossWei === swapAmountWei
+    && swapQuotedNetRaw.inputToken.toLowerCase() === swapFromAddress.toLowerCase()
+    && swapQuotedNetRaw.outputToken.toLowerCase() === swapOutToken.address.toLowerCase()
+    && swapQuotedNetRaw.destinationChainId === swapDestChainId
+    ? swapQuotedNetRaw.wei
+    : null;
+  // A share output is a share count: converted at the scheduled rate, shimmer until it lands.
+  const swapQuotedFigure = swapQuotedNet !== null && swapOutToken
+    ? quotedNetFigure(swapQuotedNet, swapOutToken, shareRateFor(swapDestChainId, swapOutToken.address))
+    : null;
+  const swapQuotedLoading = swapQuotedFigure?.status === 'loading';
   const swapPreviewText = !swapOutUnits
     ? null
+    : swapQuotedFigure
+      ? (swapQuotedFigure.status === 'loading' ? LOADING_FIGURE : swapQuotedFigure.text)
     : swapPreviewIdentity && swapPreviewInWei !== null && swapPreviewInWei > 0n
       ? `~${formatSwapExitEstimate(swapPreviewInWei, swapOutUnits.decimals, swapOutUnits.symbol)}`
       : swapPreview.status === 'ok'
@@ -2548,7 +2569,15 @@ export function ActionHub({
       setAmount(shares);
       if (withdrawInline) pushWithdrawAmount(shares);
       else if (transferInline) pushTransferAmount(shares);
-    }, underlyingEntry: action === 'withdraw' || action === 'send' });
+    }, underlyingEntry: action === 'withdraw' || action === 'send' || action === 'swap',
+    // Swap converts what was typed and never cuts it to the balance: the flow's own
+    // insufficient-balance message answers an amount above it.
+    clampToMax: action !== 'swap' });
+  // Swap reads the field in the coin it names (review on #26: "10 USDC" must not
+  // be spent as 10 shares). The typed coin amount is converted to exact shares at
+  // the scheduled rate (the same boundary as Withdraw) but never cut to the
+  // balance, so the flow's own insufficient-balance message answers an amount
+  // above it. An untouched MAX keeps its exact share string.
   const fillMax = () => {
     // Withdraw's max is the shielded balance, and while the association set is
     // still loading that figure is not yet provable — filling it would seed the
@@ -3670,7 +3699,7 @@ export function ActionHub({
               <Ionicons name="swap-vertical" size={12} color={colors.textMuted} />
             </Pressable>
           ) : null}
-          {a === action && (a === 'withdraw' || a === 'send') && amountField.error ? (
+          {a === action && (a === 'withdraw' || a === 'send' || a === 'swap') && amountField.error ? (
             <Text className="font-pp-sans text-[12px] text-danger">{shareText(amountField.error)}</Text>
           ) : null}
           {/* flex-NOwrap + min-w-0 on the right text: wrapping would grow the
@@ -3739,7 +3768,7 @@ export function ActionHub({
               // hover/press hint on the Shielded figure instead, flagged by a
               // small amber dot so there is something to hover.
               <HoverHint
-                hint={!poolsLoading ? [pageBalanceView.hint, pageShielded.pending > 0 ? `+${pagePendingView.text} pending. ${pagePendingView.hint ?? ''}` : null].filter(Boolean).join(' ') || null : null}
+                hint={!poolsLoading ? [pageBalanceView.hint, pageShielded.pending > 0 ? (pagePendingView.loading ? 'Pending.' : `+${pagePendingView.text} pending. ${pagePendingView.hint ?? ''}`) : null].filter(Boolean).join(' ') || null : null}
                 testID="hub-shielded-pending-hint"
               >
                 <Text
@@ -3768,7 +3797,7 @@ export function ActionHub({
               </HoverHint>
             ) : pageShielded.pending > 0 ? (
               <View className="flex-row items-center gap-[4px]">
-                <Pill tone="warning" label={`+${groupThousands(pagePendingView.text)} pending`} />
+                <Pill tone="warning" label={pagePendingView.loading ? 'Pending' : `+${groupThousands(pagePendingView.text)} pending`} />
                 <ShareCountHint hint={pagePendingView.hint} />
               </View>
             ) : null}
@@ -4173,9 +4202,15 @@ export function ActionHub({
             <View className="flex-row items-center justify-between gap-[8px]">
               {/* A LiFi estimate on the typed amount, labelled as one; a dash
                   until it lands. The binding figure is Review's quote. */}
-              <Text className={`min-w-0 flex-1 py-[2px] font-pp-sans-bold ${outText} tracking-[-1px] text-text-muted`} numberOfLines={1} adjustsFontSizeToFit>
-                {swapPreviewText ?? '—'}
-              </Text>
+              {swapQuotedLoading ? (
+                <View testID="hub-swap-quoted-loading" className="min-w-0 flex-1 py-[6px]">
+                  <Skeleton width={120} height={tight ? 26 : 32} radius={8} />
+                </View>
+              ) : (
+                <Text className={`min-w-0 flex-1 py-[2px] font-pp-sans-bold ${outText} tracking-[-1px] text-text-muted`} numberOfLines={1} adjustsFontSizeToFit>
+                  {swapPreviewText ?? '—'}
+                </Text>
+              )}
               <Pressable
                 onPress={() => { if (swapDeliverableDestinations.length > 0) setSwapOutSheetOpen(true); }}
                 disabled={swapDeliverableDestinations.length === 0}
@@ -4224,23 +4259,30 @@ export function ActionHub({
             </View>
 
             {swapOutToken && swapOutUnits && swapPreviewText && (() => {
-              const output = swapPreviewIdentity ? swapPreviewInWei : swapPreview.status === 'ok' ? swapPreview.toAmount : null;
+              const output = swapQuotedNet !== null ? null : swapPreviewIdentity ? swapPreviewInWei : swapPreview.status === 'ok' ? swapPreview.toAmount : null;
               const label = output == null ? null : estimatedUsdLabel(previewOutputUsd(output, swapOutUnits.decimals, feePricing.tokenUsdOf(swapDestChainId, swapToFunding, swapOutUnits.symbol)) ?? 0);
               return label ? <Text className="font-pp-sans text-[12px] text-text-secondary" testID="hub-swap-output-usd">{label}</Text> : null;
             })()}
             <View className="flex-row flex-wrap items-center gap-[6px]">
               {(() => {
-                const note = swapPreviewText
+                // The relayer fee is only known from the relayer's quote at
+                // review (a request the press makes), so the figure above is
+                // BEFORE it, and the pool minimum is checked on what is left.
+                // Pat's QA: "~10.04 USDT" here, then "about 9.61 USDT, below
+                // the pool's minimum of 10" at review.
+                const note = swapQuotedNet !== null
+                  ? 'After relayer and swap fees, from the review quote. The pool minimum applies to this amount.'
+                  : swapPreviewText
                   ? swapBridgeFeeText
-                    ? `Estimate, after a ~$${swapBridgeFeeText} bridge fee. The exact rate is quoted at review.`
-                    : 'Estimate. The exact rate is quoted at review; relayer and swap fees come out of the amount you swap.'
-                  : 'Quoted at review, once the route is priced. Relayer and swap fees come out of the amount you swap.';
+                    ? `Estimate after a ~$${swapBridgeFeeText} bridge fee, before relayer fees. Review shows the exact amount, and the pool minimum applies to what is left.`
+                    : 'Estimate before relayer fees. Review shows the exact amount, and the pool minimum applies to what is left.'
+                  : 'Quoted at review, once the route is priced. Relayer and swap fees come out of the amount you swap, and the pool minimum applies to what is left.';
                 // Phone web: the long note folds into a hint behind a short label.
                 return tight ? (
                   <HoverHint hint={note} wrap testID="hub-swap-quote-hint">
                     <View className="flex-row items-center gap-[4px]">
                       <Text className="font-pp-sans text-[12.5px] text-text-secondary">{swapPreviewText
-                        ? swapBridgeFeeText ? `Estimate, after a ~$${swapBridgeFeeText} bridge fee` : 'Estimate, after fees'
+                        ? swapQuotedNet !== null ? 'After fees, from the review quote' : 'Estimate, before relayer fees'
                         : 'Quoted at review, after fees'}</Text>
                       {/* nw-keep(data-color): glyph colour is a runtime theme token (vector-icon sink) */}
                       <Ionicons name="information-circle-outline" size={12} color={colors.textMuted} />

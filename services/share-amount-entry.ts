@@ -13,6 +13,12 @@ type ShareEntryArgs = {
   displayedMax: string;
   denomination?: 'underlying' | 'usd';
   usdPriceExact?: string;
+  /**
+   * Default true: an entry above the cap is cut to the cap (Withdraw, Send).
+   * Swap passes false: it must convert what was typed and let its own
+   * insufficient-balance error say so, never spend less than the figure asked.
+   */
+  clamp?: boolean;
 };
 
 type ShareEntryPreview = { shares: string; exceedsMax: boolean };
@@ -52,5 +58,6 @@ export function shareAmountFromUnderlying(args: ShareEntryArgs & { preview?: boo
   if (assets === 0n) return result('0');
   if (isDisplayedMax) return result(formatUnits(cap, rate.shareDecimals));
   const shares = assets * 10n ** BigInt(rate.shareDecimals) / rate.assetsPerShare;
-  return result(formatUnits(shares > cap ? cap : shares, rate.shareDecimals), shares > cap);
+  const kept = args.clamp === false || shares <= cap ? shares : cap;
+  return result(formatUnits(kept, rate.shareDecimals), shares > cap);
 }
