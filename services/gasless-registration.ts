@@ -519,6 +519,8 @@ export function describeRegistrationError(
   chainName: string,
   options?: { detail?: string; nativeSymbol?: string },
 ): string {
+  // The chain's gas coin, never a share: a bare name the symbol guard accepts.
+  const nativeSymbol = options?.nativeSymbol ?? 'gas';
   switch (classifyRegistrationError(message, sentUnconfirmed, options?.detail)) {
     case 'rejected': return 'Transaction cancelled in your wallet.';
     case 'pending': return REGISTRATION_TX_PENDING_MESSAGE;
@@ -526,7 +528,7 @@ export function describeRegistrationError(
     // Neutral on purpose: one leg may already have landed. A retry re-reads
     // what is registered and sends only what is missing.
     case 'reverted': return 'The registration transaction failed onchain. Try again to finish.';
-    case 'insufficient-gas': return `You need ${options?.nativeSymbol ?? 'gas'} on ${chainName} to pay the network fee. Add some, then register again.`;
+    case 'insufficient-gas': return `You need ${nativeSymbol} on ${chainName} to pay the network fee. Add some, then register again.`;
     case 'fee-refused': return `${chainName} refused the network fee your wallet set. Try again.`;
     case 'network': return `Could not reach ${chainName}. Check your connection and try again.`;
     case 'raw': return WALLET_SEND_FAILED_MESSAGE;
