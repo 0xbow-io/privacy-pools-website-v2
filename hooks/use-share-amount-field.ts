@@ -15,8 +15,8 @@ import { underlyingFeedPrice } from '@/services/share-rates';
 // kept and converted once the rate arrives.
 // Only explicit Withdraw/Send edits cross the tested entry boundary, including
 // USD edits using an exact decimal price snapshot. Untouched MAX stays shares.
-export function useShareAmountField(args: { amount: string; symbol: string; chainId: number; maxSharesExact: string; capKnown: boolean; onAmountResolved: (shares: string) => void; underlyingEntry?: boolean }) {
-  const { amount, symbol, chainId, maxSharesExact, capKnown, onAmountResolved, underlyingEntry = true } = args;
+export function useShareAmountField(args: { amount: string; symbol: string; chainId: number; maxSharesExact: string; capKnown: boolean; onAmountResolved: (shares: string) => void; underlyingEntry?: boolean; clampToMax?: boolean }) {
+  const { amount, symbol, chainId, maxSharesExact, capKnown, onAmountResolved, underlyingEntry = true, clampToMax = true } = args;
   const { rateFor } = useShareRates();
   const prices = useAllChainsPriceMap(chainId);
   const rate = underlyingEntry && isShareSymbol(symbol) ? rateFor(chainId, getTokenMetadataBySymbol(symbol, chainId)?.address) : undefined;
@@ -55,7 +55,7 @@ export function useShareAmountField(args: { amount: string; symbol: string; chai
         fieldKey, maxSharesExact, capKnown, pending: true });
       return amount;
     }
-    const shares = cleaned ? shareAmountFromUnderlying({ text: cleaned, rate, maxSharesExact, displayedMax: denomination === 'usd' ? usdDisplay(maxSharesExact) : numericDisplay(maxSharesExact), denomination, usdPriceExact: priceExact }) : '';
+    const shares = cleaned ? shareAmountFromUnderlying({ text: cleaned, rate, maxSharesExact, displayedMax: denomination === 'usd' ? usdDisplay(maxSharesExact) : numericDisplay(maxSharesExact), denomination, usdPriceExact: priceExact, clamp: clampToMax }) : '';
     const cap = formatUnits(parseTokenAmount(maxSharesExact, rate.shareDecimals), rate.shareDecimals);
     const clampedText = denomination === 'usd' ? usdDisplay(maxSharesExact) : numericDisplay(maxSharesExact);
     setEdit({ shares, text: shares && shares === cap && cap !== '0' ? clampedText : cleaned, rateKey, priceExact, denomination,
