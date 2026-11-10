@@ -2,6 +2,41 @@
 
 All notable changes to the Privacy Pools v2 web app are documented in this file.
 
+## [1.4.0] - 2026-11-10
+
+### Added
+- Stellar testnet: relayed Send, /pay links and claim links, a claim link when you deposit for an unregistered account, and the relayer fee shown before you send (#70).
+- Yield deposit pause per chain, with a pause banner (#48).
+- Ecosystem directory aligned with the app design, plus Nymis and Casberi (#40, #65).
+- Turnstile loader served from our own origin and pinned by hash.
+- Faster builds: circuit artifacts served from their own origin, with a reload notice when a cached file goes stale.
+- Release PRs cut automatically from main with release-please (#28).
+
+### Changed
+- Share pool names no longer reach the screen (#72).
+- Mobile bottom bar is now Shield, Portfolio, Explore and More, with activity inside Portfolio (#32).
+- Explore pool cards show their stats on one grid with a consistent pool size (#35).
+- Portfolio shows yield earned on every chain, and the tile shows the known total (#67).
+- Large recommended amounts read 10k, 100k and 1M (#61).
+- Withdraw shows thousands separators on every figure and the redeemed amount in the receive preview.
+- The Swap tab is pinned to BNB Chain on prod, with an explanation of the swap value cap (#24).
+- The wallet prices BNB Chain transactions, and a refused send says why (#25).
+- Connection settings and privacy disclosures are clearer.
+- Staging is the only environment on test.privacypools.com, with no environment switch there.
+
+### Fixed
+- Exit rebuilds keystore leaves from the chain when the ASP list is behind (#77).
+- A root mismatch re-syncs once before it is shown (#62).
+- A throttled relayer read no longer blocks a yield shield (#59).
+- A failed wallet type check no longer blocks sign-in (#30), and the wallet unlock can use another passkey without silently creating one (#63).
+- Account unlock checks and note recovery are hardened (#22).
+- A crash in the Swap tab or a modal no longer takes the whole page down (#56).
+- Error reports carry a placeholder location (#57), refuse token and chain names by registry, and read Firefox anonymous frames.
+- The footer Support link opens the support Telegram instead of a 404 (#64).
+- Stellar: protocol-30 ledger headers, claimed notes can be spent, relayed sends keep the recipient's note secrets, Freighter signing windows, and no EVM unlock on a Stellar landing.
+- Sepolia e2e journeys use the keys its verifiers hold (#74).
+- Dependency audit findings fixed, with a bun audit CI gate (#58).
+
 ## [1.2.1] - 2026-10-23
 
 ### Fixed
