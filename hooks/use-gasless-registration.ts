@@ -479,6 +479,9 @@ export function useGaslessRegistration(options?: {
 
     // === From here the wallet is genuinely stuck: walletCanPay is false ======
 
+    // Some BNB, but below the requirement: the warning must not say it has none.
+    const balanceLow = decision.reason === 'insufficient-balance';
+
     // A proof built by a session on one chain cannot carry a fee commitment
     // quoted on another, and the notes that would pay the fee are the session
     // chain's. (The wallet sitting on an UNSUPPORTED chain does not land here —
@@ -488,6 +491,7 @@ export function useGaslessRegistration(options?: {
       return {
         kind: 'ineligible',
         blocker: 'other-chain',
+        balanceLow,
         detail: `Registering on chain ${chainId}; the live session is on chain ${sessionTarget?.chainId ?? sessionChainId}.`,
         walletCanPay: false,
       };
@@ -507,7 +511,7 @@ export function useGaslessRegistration(options?: {
         chainId,
         relay: withdrawalProcessorAddress,
       });
-      return { kind: 'ineligible', blocker: 'chain-unsupported', walletCanPay: false };
+      return { kind: 'ineligible', blocker: 'chain-unsupported', walletCanPay: false, balanceLow };
     }
 
     let approvedNotes: Note[];
@@ -519,11 +523,12 @@ export function useGaslessRegistration(options?: {
         blocker: 'probe-failed',
         detail: `Association-set check failed: ${err instanceof Error ? err.message : String(err)}`,
         walletCanPay: false,
+        balanceLow,
       };
     }
     const candidates = selectFeeNoteCandidates(approvedNotes);
     if (candidates.length === 0) {
-      return { kind: 'ineligible', blocker: 'no-notes', walletCanPay: false };
+      return { kind: 'ineligible', blocker: 'no-notes', walletCanPay: false, balanceLow };
     }
     // Whether the fee actually FITS is not answerable here — only the relayer
     // can price its own work, and asking costs the user their privacy. The
@@ -534,7 +539,7 @@ export function useGaslessRegistration(options?: {
       reason: decision.reason,
       candidates: candidates.length,
     });
-    return { kind: 'eligible', mode, candidates };
+    return { kind: 'eligible', mode, candidates, balanceLow };
   }, [
     keysReady,
     poolSession,
