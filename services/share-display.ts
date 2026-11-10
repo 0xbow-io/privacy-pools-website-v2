@@ -16,7 +16,7 @@
 // UI amounts use the converted value when available; otherwise the figure is
 // loading until the rate is known.
 
-import { displayFractionDigits, formatTokenBalance, isStablecoin, LOADING_FIGURE } from '@/services/token-format';
+import { displayFractionDigits, formatTokenBalance, formatTokenBalanceDown, isStablecoin, LOADING_FIGURE } from '@/services/token-format';
 
 /** Share symbol (upper-cased) → the underlying it is denominated in. */
 const SHARE_UNDERLYING: Record<string, string> = {
@@ -222,6 +222,16 @@ function shareCountFigure(figure: string): string {
  * 1:1: a share count is not shown at all, the figure reads as loading
  * ("… USDC"). Convert first where a rate is available.
  */
+/**
+ * An exact decimal in a PLAIN token as a figure to show: a stablecoin reads like
+ * money, two decimals cut down ("1.00", "2.99"); every other token, and any
+ * share symbol, is returned untouched (DEV-621). Display only, the exact amount
+ * is kept by the caller.
+ */
+export function plainTokenFigure(exact: string, symbol: string): string {
+  return !isShareSymbol(symbol) && isStablecoin(symbol) ? formatTokenBalanceDown(exact, displayTokenSymbol(symbol)) : exact;
+}
+
 export function tokenAmountLabel(amount: string, symbol: string): string {
   return `${isShareSymbol(symbol) ? shareCountFigure(amount.trim()) : amount} ${displayTokenSymbol(symbol)}`;
 }

@@ -24,7 +24,8 @@ test('MAX and submitted units remain the original exact share state', () => {
   expect(read('components/transfer-modal-provider.tsx')).toContain('amount ? parseUnits(amount, selectedDecimals) : 0n');
   expect(read('components/withdraw-modal-provider.tsx')).toContain('parseTokenAmount(amount, tokenDecimalsForDisplay)');
   expect(read('components/swap-modal-provider.tsx')).toContain('parseTokenAmount(amount, fromToken.decimals)');
-  expect(read('components/payment-request-modal-provider.tsx')).toContain('parseUnits(amountInput, selectedToken.decimals)');
+  // Request: the typed coin converts to exact shares once at creation (requestAmountInPoolUnits, rounded up); what is encoded is that exact share string.
+  expect(read('components/payment-request-modal-provider.tsx')).toContain('parseUnits(requested.units, selectedToken.decimals)');
   expect(hub).not.toMatch(/setAmount\([^\n]*(?:pageBalanceView|pagePendingView|\.usd)/);
 });
 
