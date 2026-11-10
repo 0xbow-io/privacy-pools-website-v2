@@ -5,6 +5,15 @@
 // web.
 
 import type { Employee, PayrollRun, PayrollRunItem } from '@/services/payroll-store';
+import { displayTokenSymbol } from '@/services/share-display';
+import { deliveredMatchesExpected } from '@/services/underlying-amount-entry';
+import { relayFeeText, type ShareRate } from '@/services/share-rates';
+import { ceilFeeToDisplayGrain } from '@/services/relay-fee-split';
+
+/** Payroll salaries use coin units; plain tokens and their vault shares are one currency. */
+export function payrollCurrencyOptions(tokens: readonly { symbol: string }[]): string[] {
+  return [...new Set(tokens.map((token) => displayTokenSymbol(token.symbol)))];
+}
 
 // Chain/token resolution is INJECTED (type-only imports above keep this
 // module bun-testable — a runtime import of payroll-store pulls
@@ -82,14 +91,25 @@ export function buildRunItems(employees: Employee[], resolveChainId?: PayrollCha
  */
 export function resolvePayrollTransferParams(item: PayrollRunItem, deps: PayrollChainDeps): {
   recipient: string;
+  /** The salary, in the COIN (never a pool-unit count). */
   amount: string;
   tokenSymbol: string;
+  /**
+   * Always 'underlying' (DEV-622): the Send form holds its amount in the pool's
+   * units, which for a yield pool are vault shares worth more than one coin each.
+   * A payroll amount is a salary in the coin, so the form converts it at send
+   * time instead of reading it as a share count.
+   */
+  amountUnits: 'underlying';
+  /** The coin's decimals, for the paid-row check. */
+  decimals: number;
 } | { refusal: string } {
   const chainId = item.chainId ?? deps.resolveChainId(item.network);
   if (chainId === undefined) {
     return { refusal: `Unknown network "${item.network}". Edit the employee's network before paying.` };
   }
-  const token = deps.getToken(item.currency, chainId);
+  const currency = displayTokenSymbol(item.currency);
+  const token = deps.getToken(currency, chainId);
   if (!token) {
     return { refusal: `${item.currency} is not available on ${item.network}. Edit the employee's currency before paying.` };
   }
@@ -104,7 +124,54 @@ export function resolvePayrollTransferParams(item: PayrollRunItem, deps: Payroll
   if (frac.length > token.decimals) {
     return { refusal: `${item.currency} supports ${token.decimals} decimal places. Edit the salary (${amount} has ${frac.length}).` };
   }
-  return { recipient: item.walletAddress, amount, tokenSymbol: item.currency };
+  return { recipient: item.walletAddress, amount, tokenSymbol: currency, amountUnits: 'underlying', decimals: token.decimals };
+}
+
+/**
+ * The payroll page's per-transfer relayer fee, written by the SAME formatter the
+ * Send form uses for its fee line (relayFeeText over the display-grain ceiled
+ * fee): rounded up, so one fee never reads 0.07 here and 0.08 in Send (#78
+ * review). `exact` writes a plain non-stable token, as Send's noteFigureAbout
+ * does. The fee calculation itself is untouched.
+ */
+export function payrollFeePreviewText(
+  feeWei: bigint,
+  units: { symbol: string; decimals: number },
+  rate: ShareRate | undefined,
+  exact: (wei: bigint) => string,
+): string {
+  return relayFeeText(ceilFeeToDisplayGrain(feeWei, units.decimals), units, rate, exact);
+}
+
+/** What the transfer modal reports once a send is confirmed (TransferPrefill.onSent). */
+export type PayrollSentDetails = {
+  chainId: number;
+  tokenSymbol: string;
+  recipient: string;
+  /** What the recipient's note is worth in the COIN; null when the rate was unknown. */
+  underlyingAmount: string | null;
+};
+
+/**
+ * Does what was actually sent match this payroll row? A row is marked paid ONLY
+ * when it does. The amount is compared in the COIN, as value delivered to the
+ * recipient (never the pool-unit count: a vault share is worth more than one
+ * coin), and the pool token is compared by the coin it is denominated in
+ * (a share of USDT pays out USDT).
+ */
+export function payrollSentMatchesRow(args: {
+  details: PayrollSentDetails;
+  recipient: string;
+  amount: string;
+  tokenSymbol: string;
+  decimals: number;
+  expectedChainId?: number;
+}): boolean {
+  const { details, expectedChainId } = args;
+  return (expectedChainId === undefined || details.chainId === expectedChainId)
+    && displayTokenSymbol(details.tokenSymbol).toUpperCase() === displayTokenSymbol(args.tokenSymbol).toUpperCase()
+    && deliveredMatchesExpected({ delivered: details.underlyingAmount, expected: args.amount, decimals: args.decimals })
+    && details.recipient.toLowerCase() === args.recipient.toLowerCase();
 }
 
 /**
