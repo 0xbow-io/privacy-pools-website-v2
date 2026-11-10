@@ -60,6 +60,16 @@
 
 import { formatUnits } from 'viem';
 
+/**
+ * A fee estimate ceiled to the 6-decimal display grain (never understated). The
+ * one rounding every Send surface and the Payroll preview apply before showing a
+ * fee, so they cannot disagree (DEV-622).
+ */
+export function ceilFeeToDisplayGrain(feeWei: bigint, decimals: number): bigint {
+  const grain = decimals > 6 ? 10n ** BigInt(decimals - 6) : 1n;
+  return ((feeWei + grain - 1n) / grain) * grain;
+}
+
 /** Fee plus the 25% headroom the input-selection budget also reserves. */
 export function relayFeeReserve(feeWei: bigint): bigint {
   return feeWei + feeWei / 4n;

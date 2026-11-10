@@ -206,6 +206,21 @@ export function feeShareText(wei: bigint, units: { symbol: string; decimals: num
 }
 
 /**
+ * The relayer fee line of a Send. A share and a plain STABLECOIN are written by
+ * the cost formatter: converted rounding up, and a stablecoin with exactly two
+ * decimals ("~0.03 USDC", never "~0.021003 USDC"), rounded UP so the fee is not
+ * under-reported (DEV-621). Any other plain token keeps `exact`, its own figure.
+ */
+export function relayFeeText(
+  wei: bigint,
+  units: { symbol: string; decimals: number },
+  rate: ShareRate | undefined,
+  exact: (wei: bigint) => string,
+): string {
+  return isShareSymbol(units.symbol) || isStablecoin(units.symbol) ? feeShareText(wei, units, rate) : exact(wei);
+}
+
+/**
  * A COST in `units` as display text ("This payment needs 1.0042 ETH"), never
  * read low: feeShareText without the estimate mark. A share with its rate is
  * converted rounding UP and written rounding up; without a rate it reads as

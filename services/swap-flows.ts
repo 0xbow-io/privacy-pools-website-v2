@@ -30,7 +30,7 @@ import {
   isLifiExecutor,
   lifiAddressesKnownForChain,
 } from '@/config/lifi-addresses';
-import { displayTokenSymbol, isShareSymbol, tokenAmountLabel, approxUnderlyingText } from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol, tokenAmountLabel } from '@/services/share-display';
 import type { Address, Hash, Hex, SwapStatusLike } from '@/services/sdk-types';
 import { prepareSizedAgain } from '@/services/yield-sizing-race';
 
@@ -1721,7 +1721,7 @@ export function assertReshieldRelayAmount(
   /** Units of the FROM token, so a refusal reads as an amount, not as raw base units on the Review screen. */
   units?: { decimals: number; symbol: string },
 ): void {
-  const show = (wei: bigint) => (units ? approxUnderlyingText(`${formatUnitsText(wei, units.decimals)} ${units.symbol}`, units.symbol) : wei.toString());
+  const show = (wei: bigint) => (units ? tokenAmountLabel(formatUnitsText(wei, units.decimals), units.symbol) : wei.toString());
   const net = hexToBigInt(quote.netAmount);
   const fee = hexToBigInt(quote.feeAmount || '0');
   if (net <= 0n) {

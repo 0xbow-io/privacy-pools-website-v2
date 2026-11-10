@@ -229,10 +229,19 @@ export async function textUntil(page: Page, settled: (text: string) => boolean, 
   }
 }
 
+// Which document of a page is current: bumped by every open(). hold() uses it to
+// tell a held request of the page on screen from one of a document already left.
+const documentOf = new WeakMap<Page, number>();
+
 /** Open a prod-world URL and wait for the app to have rendered. */
 export async function open(page: Page, path: string): Promise<string> {
-  const sep = path.includes('?') ? '&' : '?';
-  await page.goto(`${BASE}${path}${sep}env=prod`, { waitUntil: 'domcontentloaded' });
+  documentOf.set(page, (documentOf.get(page) ?? 0) + 1);
+  // The query goes before a #fragment: a pay link carries its payload there.
+  const hashAt = path.indexOf('#');
+  const route = hashAt < 0 ? path : path.slice(0, hashAt);
+  const hash = hashAt < 0 ? '' : path.slice(hashAt);
+  const sep = route.includes('?') ? '&' : '?';
+  await page.goto(`${BASE}${route}${sep}env=prod${hash}`, { waitUntil: 'domcontentloaded' });
   return textUntil(page, (t) => /Ethereum|BNB|Citrea|Shield|Portfolio/i.test(t) && t.length > 200, 240_000);
 }
 
@@ -289,24 +298,124 @@ export async function hubTab(page: Page, key: 'shield' | 'withdraw' | 'send' | '
  * Hold every request whose body or URL matches until `release()`. Used to pin
  * the state BEFORE a feed has answered (the share rate, the yield inputs),
  * which on a fast machine otherwise lasts a few milliseconds.
+ *
+ * Only requests of the page's CURRENT document are let through on release. A
+ * smoke that opens several pages while holding (the payer step opens a pay link
+ * and two claim links before releasing) parks hundreds of rate reads from
+ * documents that are already gone (997 in the CI run of 2026-11-09). Letting
+ * those all fly at once on release queued the current page's own rate read behind
+ * a burst of stale ones, on a rate-limited public RPC, so the step after
+ * `release()` stalled. Their callers are gone, so they are aborted instead.
  */
 export async function hold(page: Page, matches: (url: string, body: string) => boolean): Promise<{ held: () => number; release: () => void }> {
   let released = false;
   let held = 0;
-  const waiting: (() => void)[] = [];
+  const waiting: { generation: number; go: (current: boolean) => void }[] = [];
   await page.route('**/*', async (route) => {
     const req = route.request();
     const body = req.method() === 'POST' ? req.postData() || '' : '';
     if (released || !matches(req.url(), body)) return route.fallback();
     held += 1;
-    await new Promise<void>((r) => waiting.push(r));
-    return route.fallback();
+    const generation = documentOf.get(page) ?? 0;
+    const current = await new Promise<boolean>((go) => waiting.push({ generation, go }));
+    // A route of a page that moved on or closed meanwhile may refuse to continue: nothing waits for it.
+    try { await (current ? route.fallback() : route.abort('aborted')); } catch { /* gone with its document */ }
   });
   return {
     held: () => held,
-    release: () => { released = true; waiting.splice(0).forEach((r) => r()); },
+    release: () => { released = true; waiting.splice(0).forEach((w) => w.go(w.generation === (documentOf.get(page) ?? 0))); },
   };
+}
+
+/**
+ * Run one smoke step with a hard deadline and a log line, so a step that stalls
+ * fails with ITS name instead of silently eating the runner's 15 minutes.
+ */
+export async function within<T>(label: string, ms: number, step: () => Promise<T>): Promise<T> {
+  console.log(`step: ${label}`);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      step(),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`step "${label}" took over ${Math.round(ms / 1000)}s`)), ms); }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /** A JSON-RPC body that reads an ERC-4626 share rate (convertToAssets). */
 export const isShareRateRead = (_url: string, body: string) => body.includes('07a2d13a');
+
+/**
+ * The share rates the PAGE itself received, read off its own convertToAssets
+ * answers (never assumed): vault address (lower-case) to the underlying base
+ * units one whole share is worth, `assets / shares * 10^shareDecimals`.
+ * Install before the page loads; the latest answer per vault wins.
+ */
+export function trackShareRates(page: Page): { rateOf: (vault: string) => bigint | undefined; seen: () => number } {
+  const rates = new Map<string, bigint>();
+  page.on('response', async (res) => {
+    const req = res.request();
+    if (req.method() !== 'POST') return;
+    const body = req.postData() || '';
+    if (!isShareRateRead(res.url(), body)) return;
+    try {
+      const calls = [].concat(JSON.parse(body));
+      const answers = [].concat(await res.json());
+      for (const call of calls) {
+        const arg = call?.params?.[0];
+        const data: string = String(arg?.data ?? arg?.input ?? '');
+        if (call?.method !== 'eth_call' || !data.toLowerCase().startsWith('0x07a2d13a')) continue;
+        const answer = answers.find((a: any) => a?.id === call.id);
+        if (!answer?.result || answer.result === '0x') continue;
+        const shares = BigInt(`0x${data.slice(10)}`);
+        const assets = BigInt(answer.result);
+        // The app asks for one whole share, so the answer IS assets per share.
+        if (shares > 0n && assets > 0n) rates.set(String(arg.to).toLowerCase(), assets);
+      }
+    } catch { /* a body that is not a rate answer is not a rate */ }
+  });
+  return { rateOf: (vault) => rates.get(vault.toLowerCase()), seen: () => rates.size };
+}
+
+/**
+ * The figure the app must print for `sharesWei` of a yield share (DEV-621):
+ * the UNDERLYING it is worth at `assetsPerShare`, in integers, rounded up to
+ * the next base unit (a typed amount was floored into shares) and then cut
+ * DOWN for display, with no share symbol. Stablecoins show exactly 2 decimals;
+ * any other coin 5 decimals, trailing zeros dropped but never below 2.
+ */
+export function expectedUnderlyingLabel(sharesWei: bigint, assetsPerShare: bigint, shareDecimals: number, coin: { symbol: string; decimals: number; stable: boolean }): string {
+  const unit = 10n ** BigInt(shareDecimals);
+  const product = sharesWei * assetsPerShare;
+  const wei = product / unit + (product % unit > 0n ? 1n : 0n);
+  const digits = coin.stable ? 2 : 5;
+  const base = 10n ** BigInt(coin.decimals);
+  const whole = wei / base;
+  const frac = (wei % base).toString().padStart(coin.decimals, '0').slice(0, digits).padEnd(digits, '0');
+  const trimmed = coin.stable ? frac : frac.replace(/0+$/, '').padEnd(2, '0');
+  return `${whole}.${trimmed} ${coin.symbol}`;
+}
+
+/** Every line of the page text that is exactly an amount ("5.00 USDC", "… USDC"). */
+export function amountLines(text: string): string[] {
+  return text.split('\n').map((l) => l.trim()).filter((l) => /^(?:[\d,]+(?:\.\d+)?|…|<0\.01)\s+[A-Za-z]{2,6}$/.test(l));
+}
+
+/**
+ * Poll the page until `label()` (re-read each poll, it may wait on a rate) is shown as a whole line (the payment or receipt
+ * amount), up to `budgetMs`. Returns the amount lines last seen, so a failure
+ * says what the page printed instead.
+ */
+export async function amountShown(page: Page, label: () => string | undefined, budgetMs = 60_000): Promise<{ ok: boolean; lines: string[] }> {
+  const deadline = Date.now() + budgetMs;
+  for (;;) {
+    const text = (await page.evaluate(() => document.body.innerText).catch(() => '')) ?? '';
+    const lines = amountLines(text);
+    const want = label();
+    if (want && lines.includes(want)) return { ok: true, lines };
+    if (Date.now() >= deadline) return { ok: false, lines };
+    await sleep(500);
+  }
+}
