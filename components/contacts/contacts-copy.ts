@@ -4,4 +4,4 @@
 // would import as undefined there.
 export const EMPTY_TITLE = 'No saved addresses yet';
 export const LOADING_TITLE = 'Looking through your activity…';
-export const EMPTY_HINT = 'Paste an address. It is remembered after you withdraw or send to it.';
+export const EMPTY_HINT = "Paste an address and it'll appear here after you send or withdraw.";
