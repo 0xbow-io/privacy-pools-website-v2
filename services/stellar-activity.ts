@@ -297,9 +297,8 @@ export function deriveStellarActivity(
   originsOrNull: StellarNoteOrigins | null,
   ctx: StellarActivityContext,
 ): StellarActivity {
-  // No index read yet: nothing is proven, so only the claimed-link rows (which
-  // read Pending until indexed) can appear. An empty incomplete index makes
-  // every other section produce nothing.
+  // Before the first index read, imported claims remain Pending. Confirmed
+  // outgoing blind deposits can already appear from their saved receipts.
   const origins: StellarNoteOrigins = originsOrNull ?? { byCommitment: {}, complete: false };
 
   const depositForTx = new Set((ctx.depositsFor ?? []).map((d) => canonicalTx(d.txHash)));
@@ -450,9 +449,11 @@ export function deriveStellarActivity(
       ...eventRow(d.txHash, '', raw, d.time, ctx),
       address: shortAddress(ctx.ownAddress),
       fullAddress: ctx.ownAddress,
-      id: `stellar-deposit-for-${d.txHash}`,
+      id: `stellar-deposit-for-${canonicalTx(d.txHash)}`,
       type: 'Deposit',
       depositFor: true,
+      // Keep Recover claim link available when this replaces a saved blind-deposit row.
+      direction: 'out',
       // The recipient's note carries the review; the payer claims no verdict.
       reviewStatus: '',
       status: 'completed',
@@ -493,7 +494,7 @@ export function deriveStellarActivity(
       ...eventRow(d.txHash, d.tokenId, raw, Math.floor(d.createdAt / 1000), ctx),
       address: shortAddress(d.recipient),
       fullAddress: d.recipient,
-      id: `stellar-deposit-for-${d.txHash}`,
+      id: `stellar-deposit-for-${canonicalTx(d.txHash)}`,
       type: 'Deposit',
       direction: 'out',
       reviewStatus: '',
