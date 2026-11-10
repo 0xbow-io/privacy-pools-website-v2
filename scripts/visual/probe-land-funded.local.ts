@@ -3,7 +3,7 @@
 // (0xD358... has 13 snapshot deposits) and watch every PP-LAND line from boot.
 // Signing still uses the dev key — the session stays locked, which is exactly
 // the user's scenario (redirect must fire on public deposits alone).
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 import { installEvmWallet, loadDevAccount } from './evm-wallet';
 
 const FUNDED = '0xD3581763f41FC0763a49E9ab53F2D3D425870a3D';
@@ -14,7 +14,7 @@ const spoofed = new Proxy(dev, {
   get: (t, p) => (p === 'address' ? FUNDED : (t as never)[p as keyof typeof t]),
 }) as typeof dev;
 
-const browser = await chromium.launch({ args: ['--no-sandbox'] });
+const browser = await launchChrome();
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
 await context.addInitScript(() => localStorage.setItem('ppv2_smartwallet_skipped_v1', '1'));
 const page = await context.newPage();

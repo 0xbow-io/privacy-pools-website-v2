@@ -3,9 +3,9 @@
 // translateX every ~25ms. A flicker = an early jump to (or towards) the
 // destination followed by a snap back near the origin. PASS = motion is
 // monotonic (within jitter) from origin to destination.
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 
-const browser = await chromium.launch({ args: ['--no-sandbox'] });
+const browser = await launchChrome();
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 await context.addInitScript(() => localStorage.setItem('ppv2_smartwallet_skipped_v1', '1'));
 const page = await context.newPage();

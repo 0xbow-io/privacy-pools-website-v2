@@ -42,6 +42,8 @@ export interface GlobalEvent {
   reviewStatus?: 'pending' | 'approved' | 'declined' | 'poi_required';
   aspRoot?: string;
   label?: string;
+  /** asp-v2#165, OPTIONAL, withdrawal rows only: the payout recipient, or null when not known. */
+  recipient?: string | null;
   /** Deposits: who funded it. 'bridged_pool' is a swap out of a pool on
    *  another network; 'pool' a swap out of a pool on this one; 'wallet' and
    *  'bridged_wallet' a wallet, possibly through a LI.FI route. */
@@ -243,6 +245,12 @@ export interface SnapshotTransact {
   blockNumber: string | null;
   blockTimestamp: string;
   asset: string;
+  /**
+   * asp-v2#165, OPTIONAL: the payout recipient of a relayed withdrawal (EIP-55).
+   * Absent before that ASP deploy, null where it is not known (transfers,
+   * RelaySwaps, direct calls, some processors, rows not yet resynced).
+   */
+  recipient?: string | null;
 }
 
 export interface SnapshotRagequit {

@@ -3,12 +3,12 @@
 // 2) /?intro=true shows the marketing front page while CONNECTED; engaging
 //    the widget removes it and strips the param.
 // 3) Receive-payment modal shows the transience warning (claim flow UI).
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 import { mnemonicToAccount } from 'viem/accounts';
 import { installEvmWallet } from './evm-wallet';
 
 const account = mnemonicToAccount(process.env.TEST_PHRASE.trim());
-const browser = await chromium.launch({ args: ['--no-sandbox'] });
+const browser = await launchChrome();
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 await context.addInitScript(() => localStorage.setItem('ppv2_smartwallet_skipped_v1', '1'));
 const page = await context.newPage();

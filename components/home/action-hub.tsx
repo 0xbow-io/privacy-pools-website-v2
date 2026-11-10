@@ -84,7 +84,7 @@ import { fiatEntryAvailable, formatUsdLabel, sanitizeUsdInput, shieldDestination
 import { getUiParam, pushUiParamEntry, retireUiParamEntry, rebaseUiParamEntry, subscribeUiUrl } from '@/components/ui-url-events';
 import { useShareYield } from '@/hooks/use-share-yield';
 import { useYieldVaultProbeVersion } from '@/hooks/use-yield-vault-probe';
-import { displayTokenSymbol, isShareSymbol, presetChipLabel, shareRedemptionDisclosure } from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol, presetChipLabel } from '@/services/share-display';
 import { amountInputDisplay, compactAmountLabel, formatCopyAmount, formatTokenBalance, groupThousands, isStablecoin, LOADING_FIGURE, stripAmountSeparators } from '@/services/token-format';
 import { conversionFundingToken, targetAcceptsConversion } from '@/config/intent-targets';
 import { getYieldShareToken } from '@/services/share-yield';
@@ -128,6 +128,7 @@ import { ShieldElsewherePanel } from '@/components/home/shield-elsewhere-panel';
 import { SHIELD_GAS_UNITS } from '@/config/fee-warnings';
 import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { buildFeeBreakdown, gasCostUsd, type FeeGasReading } from '@/services/fee-warning';
+import { AddressAutocomplete } from '@/components/contacts/address-autocomplete';
 import { shieldElsewhere } from '@/services/shield-elsewhere';
 
 // Shared content-zone floor = the tallest tab's natural height, so every tab
@@ -3337,10 +3338,9 @@ export function ActionHub({
                 </View>
               ) : null}
               {depositFlow.stellarLabelRetry ? <StellarLabelRetryNotice retry={depositFlow.stellarLabelRetry.retry} /> : null}
-              {/* No redemption line here. It describes what happens at WITHDRAW
-                  time, which is where the withdraw card already says it
-                  (shareRedemptionDisclosure), and on a deposit receipt it read
-                  as a condition on the deposit (Nathaniel, QA 2026-09-21). */}
+              {/* No redemption line here: on a deposit receipt it read as a condition
+                  on the deposit (Nathaniel, QA 2026-09-21), and the withdraw flow
+                  no longer shows one either (Mike, PR #37). */}
               {/* Live bridge state, polled from LiFi. Without it the card above
                   is the last word the user ever gets on a transfer that takes
                   minutes. */}
@@ -4005,7 +4005,10 @@ export function ActionHub({
             </Pressable>
           </View>
           {shieldRecipientOpen ? (
+            <AddressAutocomplete value={shieldRecipient} onSelect={setShieldRecipient} formats={isStellar ? ['stellar'] : ['evm']} testID="hub-shield-recipient">
+            {(bind) => (
             <TextInput
+              {...bind}
               className={`w-full rounded-control border px-[14px] py-[11px] font-pp-regular text-[14px] text-text ${shieldRecipient && (isStellar ? !isStellarAccountAddress(shieldRecipient.trim()) : !SWAP_ADDRESS_RE.test(shieldRecipient.trim())) ? 'border-danger' : 'border-border-light'}`}
               // nw-keep(platform-css): web-only outlineStyle:'none' removes the focus ring — no className path; empty on native
               style={WEB_NO_OUTLINE}
@@ -4020,6 +4023,8 @@ export function ActionHub({
               autoCorrect={false}
               testID="hub-shield-recipient-input"
             />
+            )}
+            </AddressAutocomplete>
           ) : null}
           {/* DEV-570: no ENS on any recipient field (never looked up). */}
           {shieldRecipientOpen && !isStellar && isPotentialEnsName(shieldRecipient) ? (
@@ -4165,22 +4170,6 @@ export function ActionHub({
           showDisclosure={!tight && (!landing || walletConnected)}
           compact={tight}
         />
-      )}
-      {/* Withdrawing a share note ALWAYS redeems through the PPRouter (share
-          in, underlying out); when the route is unavailable the flow refuses
-          rather than paying the share, so this can promise the underlying
-          (Pat, 2026-09-05). */}
-      {a === 'withdraw' && !isSui && isShareSymbol(pageTargetSymbol) && (
-        /* pb-[22px]: the receive card that follows is seamed to the card above
-           by PairArrow, whose -28 top margin reaches 16px past the 12px gap
-           and into whatever sits here. With this line in the seam the globe
-           chip landed on the word "vault" (Nathaniel, QA 2026-09-21). The
-           padding is inside the text box, so the chip overlaps empty space
-           instead of glyphs, at every width and however many lines it wraps
-           to. */
-        <Text className="pb-[22px] font-pp-sans text-[12px] leading-[17px] text-text-secondary">
-          {shareRedemptionDisclosure(pageTargetSymbol)}
-        </Text>
       )}
       {/* The "Pending until approved" explainer box lived here until QA
           2026-08-17 — removed as noise; the pending state itself still shows
@@ -4333,7 +4322,10 @@ export function ActionHub({
               </Pressable>
             </View>
             {swapRecipientOpen ? (
+              <AddressAutocomplete value={swapRecipient} onSelect={setSwapRecipient} formats={['evm']} testID="hub-swap-recipient">
+              {(bind) => (
               <TextInput
+                {...bind}
                 className={`w-full rounded-control border px-[14px] py-[11px] font-pp-regular text-[14px] text-text ${swapRecipient && swapRecipientRoute.kind === 'invalid' ? 'border-danger' : 'border-border-light'}`}
                 // nw-keep(platform-css): web-only outlineStyle:'none' removes the focus ring — no className path; empty on native
                 style={WEB_NO_OUTLINE}
@@ -4346,6 +4338,8 @@ export function ActionHub({
                 autoCorrect={false}
                 testID="hub-swap-recipient-input"
               />
+              )}
+              </AddressAutocomplete>
             ) : null}
             {/* DEV-570: no ENS on any recipient field (never looked up). */}
             {swapRecipientOpen && isPotentialEnsName(swapRecipient) ? (

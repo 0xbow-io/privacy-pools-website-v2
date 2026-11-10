@@ -16,7 +16,7 @@ import { serve } from 'bun';
 import assert from 'node:assert/strict';
 import { gzipSync } from 'node:zlib';
 import { toFunctionSelector } from 'viem';
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 import { startNetworkCapture } from './network-capture.ts';
 import { collectJourneySecrets, resolveHosts, runNetworkPrivacyGate } from './privacy-gate.ts';
 import { recordPublicState } from './public-state-fixture.mjs';
@@ -82,11 +82,7 @@ const origin = server.url.origin;
 // which is the strictest policy and exactly what we want for a stranger.
 const hosts = resolveHosts({ aspUrl: origin, ownOrigin: 'http://127.0.0.1:1' });
 
-const browser = await chromium.launch({
-  headless: true,
-  args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  ...(process.env.PW_EXECUTABLE_PATH ? { executablePath: process.env.PW_EXECUTABLE_PATH } : {}),
-});
+const browser = await launchChrome({ headless: true });
 
 try {
   const context = await browser.newContext({ serviceWorkers: 'block' });
