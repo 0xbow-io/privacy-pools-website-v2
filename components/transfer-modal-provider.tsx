@@ -8,6 +8,7 @@ import { useShareAmountField } from '@/hooks/use-share-amount-field';
 // rate is unknown. Never print a share count under the underlying symbol.
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { sharesForUnderlyingCeil, underlyingOfSentShares, type ConvertedAtRate } from '@/services/underlying-amount-entry';
+import { preparedAmountData } from '@/services/prepared-amount-data';
 import { BalanceAmount } from '@/components/pools/balance-amount';
 import { crossFlowsEnabled } from '@/config/intent-lockdown';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
@@ -3859,6 +3860,10 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                       placeholderTextColor="#999999"
                       onChangeText={(text) => setAmount(sanitizeAmountInput(amountField.toShares(text), selectedDecimals))}
                       keyboardType="numeric"
+                      testID="transfer-amount-input"
+                      // The exact amount the send prepares (shares for a share),
+                      // for the browser smoke to check against the rate. Web only.
+                      {...preparedAmountData(amount)}
                     />
                     <Text className="text-[14px] ml-[8px] text-[#737373] font-pp-medium">
                       {amountField.unitLabel}
