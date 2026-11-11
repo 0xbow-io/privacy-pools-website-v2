@@ -417,3 +417,29 @@ describe('Stellar incoming row fund actions', () => {
     }
   });
 });
+
+describe('indexed Stellar incoming status', () => {
+  test('registered and claimed receipts stay pending until the local note is active', () => {
+    for (const claimed of [false, true]) {
+      for (const [status, outcome, review, funds] of [
+        ['PENDING', 'pending', 'pending', undefined],
+        ['INACTIVE', 'pending', 'pending', undefined],
+        ['ACTIVE', 'completed', 'approved', 'ready'],
+        ['SPENT', 'completed', 'approved', undefined],
+        ['REJECTED', 'completed', '', 'at_risk'],
+        ['EXIT_PENDING', 'completed', '', undefined],
+        ['EXITED', 'completed', '', undefined],
+      ] as const) {
+        const n = note(1, { status, value: '1000000000' });
+        const origins = buildStellarNoteOrigins({ notes: [n], deposits: [{ txHash: n.txHash, outputCommitment: n.commitment, depositor: OTHER }], transacts: [], logs: [] });
+        const ctx = { ...CTX, claimed: claimed ? [{ commitment: n.commitment, txHash: n.txHash, claimedAt: 1 }] : [] };
+        const { rows, receivedCount, depositCount } = deriveStellarActivity([n], origins, ctx);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({ type: 'Transfer', direction: 'in', rawAmount: '1000000000', noteStatus: status, status: outcome, reviewStatus: review });
+        expect(rows[0].fundsState).toBe(funds);
+        expect(receivedCount).toBe(1);
+        expect(depositCount).toBe(0);
+      }
+    }
+  });
+});

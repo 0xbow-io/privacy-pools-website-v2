@@ -29,7 +29,7 @@
  */
 import { STELLAR_TESTNET_ID } from '@/config/stellar-deployment';
 import type { Transaction } from '@/components/pools-provider';
-import { depositRowOutcome, projectDepositFunds, projectReceivedFunds, reviewOutcome, type FundsProjection } from '@/services/funds-state';
+import { depositRowOutcome, noteOutcome, projectDepositFunds, projectReceivedFunds, reviewOutcome, type FundsProjection } from '@/services/funds-state';
 import { formatUsd } from '@/services/format-fiat';
 import { reconstructUserSpends } from '@/services/outgoing-transfers';
 import type { Hex, Secret } from '@/services/sdk-types';
@@ -396,9 +396,10 @@ export function deriveStellarActivity(
         id: `stellar-in-${note.commitment}`,
         type: 'Transfer',
         direction: 'in',
-        // The ASP reviewed the sender's deposit, not this receipt.
-        reviewStatus: 'approved',
-        status: 'completed',
+        // An indexed receipt can still await ASP approval. Use the same local
+        // note state as balances; indexing alone proves no approval.
+        reviewStatus: stellarDepositReview(note.status),
+        status: noteOutcome(note.status, 'completed'),
         ...fundsFields(projectReceivedFunds({
           noteStatus: String(note.status),
           leafReady: false,
