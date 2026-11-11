@@ -23,6 +23,7 @@ import { STELLAR_TESTNET_ID, getExplorerTxUrl } from '@/config/chains';
 import { STELLAR_XLM, stellarTransferRelayFee } from '@/config/stellar-deployment';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { useStellarSession } from '@/hooks/use-stellar-session';
+import { useStellarTransferFeeEstimate } from '@/hooks/use-stellar-fee-estimate';
 import { toStellarSdkPaymentRequest } from '@/services/payment-request-codec';
 import { describeStellarStage, stellarErrorMessage, stellarActionError } from '@/services/stellar/stellar-copy';
 import { decodeStellarPayLink, isStellarRequestExpired, type DecodedStellarRequest } from '@/services/stellar/stellar-request';
@@ -57,8 +58,17 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
   const amountText = stroops !== null ? formatUnits(stroops, STELLAR_XLM.decimals) : null;
   const amountLabel = amountText ? `${amountText} XLM` : null;
   // Paid through the relayer: its fee comes on top of the amount.
-  const relayFee = stellarTransferRelayFee();
-  const totalLabel = stroops !== null ? `up to ${formatUnits(stroops + relayFee, STELLAR_XLM.decimals)} XLM` : null;
+  // Use the same input count and fee reserve as submission.
+  const feeSelection = useMemo(() => selectGreedyTransferInputs(
+    stellarSession.spendableNotes as unknown as UiNote[],
+    stroops !== null ? stroops + stellarTransferRelayFee() : 0n,
+    TRANSFER_MAX_INPUTS,
+    TRANSFER_MAX_LABELS,
+  ), [stellarSession.spendableNotes, stroops]);
+  const relayFee = useStellarTransferFeeEstimate(stroops !== null && feeSelection.covered ? feeSelection.selectedNotes.length : 0);
+  const totalLabel = stroops !== null && relayFee !== null
+    ? `~${formatUnits(stroops + relayFee, STELLAR_XLM.decimals)} XLM`
+    : 'Estimate unavailable';
   const paymentCode = link
     ? short(link.format === 'blind' ? link.request.paymentId.replace(/^0x/, '') : link.request.requestId.replace(/-/g, ''))
     : '';
@@ -213,7 +223,7 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
             </View>
             <View className="flex-row items-center justify-between gap-[12px]">
               <Text className="font-pp-medium text-[14px] text-text">Relayer fee</Text>
-              <Text className="font-pp-semi-bold text-[14px] text-text" testID="stellar-pay-fee">up to {formatUnits(relayFee, STELLAR_XLM.decimals)} XLM</Text>
+              <Text className="font-pp-semi-bold text-[14px] text-text" testID="stellar-pay-fee">{relayFee === null ? 'Estimate unavailable' : `~${formatUnits(relayFee, STELLAR_XLM.decimals)} XLM`}</Text>
             </View>
 
             <View className="border-t border-dashed border-border-light" />

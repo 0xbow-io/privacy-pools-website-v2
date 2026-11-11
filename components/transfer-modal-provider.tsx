@@ -99,7 +99,7 @@ import { ConsolidationShell } from '@/components/consolidation-shell';
 import { ConsolidationAssetList } from '@/components/consolidation-asset-list';
 import { ConsolidationPanel, ConsolidationSummary, ConsolidationGroupSummary } from '@/components/consolidation-panel';
 import { useInlineOpsCapable } from '@/hooks/use-inline-ops-capable';
-import { useStellarTransferFeeEstimate } from '@/hooks/use-stellar-transfer-fee-estimate';
+import { useStellarTransferFeeEstimate } from '@/hooks/use-stellar-fee-estimate';
 import { useTransferFeeEstimate } from '@/hooks/use-transfer-fee-estimate';
 import { consolidationSelectionError, consolidationGroups, consolidationNet, planConsolidation, resolveForcedInputs, unavailableConsolidationCommitments } from '@/services/consolidate-notes';
 import {

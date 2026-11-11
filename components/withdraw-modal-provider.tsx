@@ -59,6 +59,7 @@ import { useAllChainsPriceMap } from '@/hooks/use-all-chains-price-map';
 import { getChainConfig, getExplorerName, getExplorerTxUrl, STELLAR_TESTNET_ID, SUI_TESTNET_ID } from '@/config/chains';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { estimateStellarRelayFee, maxStellarWithdrawForInputs } from '@/config/stellar-deployment';
+import { useStellarWithdrawalFeeEstimate } from '@/hooks/use-stellar-fee-estimate';
 import { describeStellarStage, stellarActionError } from '@/services/stellar/stellar-copy';
 import { SUI_TESTNET_RELAYER_URL } from '@/config/sui-deployment';
 import { useChainRouter } from '@/hooks/use-chain-router';
@@ -1740,7 +1741,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // review can never accept an amount the submit path must reject, and so the
   // change display matches what will actually be spent.
   const suiWithdraw = useMemo(() => {
-    if (!isSui) return { want: 0n, selection: null as SuiNoteSelection | null, activeTotal: 0n, maxSingle: 0n };
+    if (!isSui) return { inputCount: 0, want: 0n, selection: null as SuiNoteSelection | null, activeTotal: 0n, maxSingle: 0n };
     let want = 0n;
     try { want = parseTokenAmount(amount, altDecimals); } catch { want = 0n; }
     if (isStellar) {
@@ -1753,6 +1754,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         : null;
       return {
         want,
+        inputCount: picked && picked.total >= gross ? picked.notes.length : 0,
         selection: picked && picked.total >= gross ? ({} as SuiNoteSelection) : null,
         activeTotal: suiSpendability.totalWei,
         maxSingle: suiSpendability.maxSingleWei,
@@ -1761,6 +1763,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     const { approvedNotes } = partitionSuiWithdrawNotes(suiSpendability.storedNotes);
     return {
       want,
+      inputCount: 0,
       selection: want > 0n ? selectSuiNotes(approvedNotes, want) : null,
       activeTotal: suiSpendability.totalWei,
       maxSingle: suiSpendability.maxSingleWei,
@@ -1768,7 +1771,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   }, [amount, isSui, isStellar, altDecimals, notes, suiSpendability.maxSingleWei, suiSpendability.storedNotes, suiSpendability.totalWei]);
   // Stellar: the relayer fee leaves the pool on top of the amount, so Review's
   // "Unshielding" and "left after" figures include it.
-  const stellarFeeWei = isStellar && suiWithdraw.want > 0n ? estimateStellarRelayFee(suiWithdraw.want) : 0n;
+  const stellarFeeWei = useStellarWithdrawalFeeEstimate(suiWithdraw.inputCount, suiWithdraw.want);
   const suiAmountError = useMemo(() => {
     if (!isSui || suiWithdraw.want <= 0n || suiWithdraw.selection) return null;
     if (suiWithdraw.want > suiWithdraw.activeTotal) {
@@ -1785,9 +1788,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // Remaining means the WHOLE approved shielded balance, not just the selected
   // inputs' change. With mixed labels (or notes beyond the five-input cap),
   // subtracting from `availableWei` hid untouched notes on Review.
-  const remainingAmount = tokenBalanceNum(resolveRemainingBalanceWei({
+  const remainingAmount = isStellar && stellarFeeWei === null ? null : tokenBalanceNum(resolveRemainingBalanceWei({
     totalBalanceWei: currentBalance.active,
-    grossLeavingWei: isSui ? suiWithdraw.want + stellarFeeWei : grossLeavingWei,
+    grossLeavingWei: isSui ? suiWithdraw.want + (stellarFeeWei ?? 0n) : grossLeavingWei,
   }), selectedTokenDecimals);
   // What one Sui withdrawal can actually move: the largest single active note
   // (single-input transact cap). EVM: route-specific (codex P2) — the swap
@@ -1834,11 +1837,11 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   const batchFeeNum = batchPlan ? Number(batchPlan.totalFeeWei) / 10 ** tokenDecimalsForDisplay : 0;
   const reviewGross = batchPlan
     ? batchGrossNum
-    : isStellar ? grossWithdrawn + Number(stellarFeeWei) / altScale : grossWithdrawn;
+    : isStellar ? (stellarFeeWei === null ? null : grossWithdrawn + Number(stellarFeeWei) / altScale) : grossWithdrawn;
   const reviewNet = batchPlan ? Math.max(0, batchGrossNum - batchFeeNum) : netReceived;
   // Stellar bypasses the EVM quote, so its fee comes from the relay estimate
   // that the total above already includes.
-  const reviewFee = batchPlan ? batchFeeNum : isStellar ? Number(stellarFeeWei) / altScale : relayerFee;
+  const reviewFee = batchPlan ? batchFeeNum : isStellar ? (stellarFeeWei === null ? null : Number(stellarFeeWei) / altScale) : relayerFee;
   // A share's net figure is a SHARE count; what arrives is the vault's
   // previewRedeem of those shares (the router pays that, the relayer fee
   // already taken out in shares). Read it for the review/success headline so
@@ -1925,7 +1928,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // Every relayed EVM withdrawal: the relayer fee split into the gas it
   // re-bills and its margin, plus what a "Receive as" swap loses on the way.
   const withdrawFeeBreakdown = useMemo(() => {
-    if (isSui || isStellar || (!relayerQuote && !swapSnapshot && !batchPlan)) return null;
+    if (isSui || isStellar || reviewGross === null || reviewFee === null || (!relayerQuote && !swapSnapshot && !batchPlan)) return null;
     const poolChain = swapSnapshot?.poolChainId ?? chainId;
     // A yield share is priced through its vault rate; the price map alone reads it as $0.
     const inputUsd = swapSnapshot
@@ -5608,7 +5611,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
               const outSym = swapSnapshot ? swapSnapshot.outputToken.symbol : shareUnderlyingSymbol;
               const outHue = TokenHues[colorScheme][outSym.toUpperCase()] ?? TokenHues[colorScheme].ETH;
               const grossNum = swapSnapshot ? swapReviewGrossNum : reviewGross;
-              const grossUsd = balanceDisplay(swapSnapshot ? formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals) : String(reviewGross), swapSnapshot ? swapReviewInputSymbol : selectedToken, swapSnapshot?.poolChainId ?? chainId).usd;
+              const grossUsd = grossNum === null ? null : balanceDisplay(swapSnapshot ? formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals) : String(reviewGross), swapSnapshot ? swapReviewInputSymbol : selectedToken, swapSnapshot?.poolChainId ?? chainId).usd;
               const netLabel = swapSnapshot
                 ? `~${balanceDisplay(swapSnapshot.display.estimatedOutput, outSym, swapSnapshot.destinationChainId).text}`
                 : reviewNetLabel;
@@ -5627,12 +5630,12 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     <View className="flex-1 gap-[1px]">
                       <Text className="font-pp-sans-medium text-[13px] text-text" numberOfLines={1}>Unshielding</Text>
                       <Text className="font-pp-sans text-[11.5px] text-text-muted" numberOfLines={1}>
-                        {poolName} · {groupThousands(balanceDisplay(batchPlan ? 0 : remainingAmount, selectedToken, chainId).text)} left after
+                        {poolName} · {remainingAmount === null ? 'Estimate unavailable' : `${groupThousands(balanceDisplay(batchPlan ? 0 : remainingAmount, selectedToken, chainId).text)} left after`}
                       </Text>
                     </View>
                     <View className="items-end gap-[1px]">
-                      <Text className="font-pp-mono text-[13px] text-text">{groupThousands(balanceDisplay(swapSnapshot ? formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals) : String(grossNum), swapSnapshot ? swapReviewInputSymbol : selectedToken, swapSnapshot?.poolChainId ?? chainId).text)}</Text>
-                      <Text className="font-pp-sans text-[11.5px] text-text-muted">${grossUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}</Text>
+                      <Text className="font-pp-mono text-[13px] text-text">{grossNum === null ? 'Estimate unavailable' : groupThousands(balanceDisplay(swapSnapshot ? formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals) : String(grossNum), swapSnapshot ? swapReviewInputSymbol : selectedToken, swapSnapshot?.poolChainId ?? chainId).text)}</Text>
+                      {grossUsd !== null && <Text className="font-pp-sans text-[11.5px] text-text-muted">${grossUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}</Text>}
                     </View>
                   </View>
                   <View className="h-[1px] self-stretch bg-border-light" />
@@ -5661,16 +5664,15 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     </View>
                   </View>
                   <View className="h-[1px] self-stretch bg-border-light" />
-                  {/* Fee · relayer · quote countdown, one quiet line. Stellar has
-                      no relayer yet: the withdrawal is sent from this account. */}
+                  {/* Fee, relayer and quote countdown. */}
                   {isStellar ? (
                     <Text className="py-[9px] font-pp-sans text-[11.5px] text-text-muted">
-                      {`Relayer fee up to ${formatUnits(estimateStellarRelayFee(parseTokenAmount(amount, altDecimals)), altDecimals)} XLM (0.5% plus network cost), added on top; any unused part returns as change. Sent by the testnet relayer, not your account.`}
+                      Relayer fee {stellarFeeWei === null ? 'Estimate unavailable' : `~${formatUnits(stellarFeeWei, altDecimals)} XLM`}
                     </Text>
                   ) : (
                   <View className="flex-row flex-wrap items-center justify-between gap-[6px] py-[9px]">
                     <Text className="font-pp-sans text-[11.5px] text-text-muted">
-                      Relayer fee {groupThousands(swapSnapshot ? `${balanceDisplay(swapSnapshot.display.relayerFee, swapReviewInputSymbol, swapSnapshot.poolChainId).text}` : (batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text)} (~${groupThousands(balanceDisplay(swapSnapshot ? swapSnapshot.display.relayerFee : String(reviewFee), swapSnapshot ? swapReviewInputSymbol : (batchPlan || isStellar) ? selectedToken : resolvedFee.symbol, swapSnapshot?.poolChainId ?? chainId).usd.toFixed(2))})
+                      Relayer fee {reviewFee === null ? 'Estimate unavailable' : <>{groupThousands(swapSnapshot ? `${balanceDisplay(swapSnapshot.display.relayerFee, swapReviewInputSymbol, swapSnapshot.poolChainId).text}` : (batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text)} (~${groupThousands(balanceDisplay(swapSnapshot ? swapSnapshot.display.relayerFee : String(reviewFee), swapSnapshot ? swapReviewInputSymbol : (batchPlan || isStellar) ? selectedToken : resolvedFee.symbol, swapSnapshot?.poolChainId ?? chainId).usd.toFixed(2))})</>}
                     </Text>
                     <View className="flex-row items-center gap-[10px]">
                       <Pressable className="flex-row items-center gap-[3px]" onPress={() => setRelayerSelectorOpen((v) => !v)}>
@@ -5699,7 +5701,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       {/* nw-keep(data-color): bolt glyph tint token (vector-icon color prop) */}
                       <Ionicons name="flash-outline" size={13} color={colors.tint} />
                       <Text className="flex-1 font-pp-sans text-[11px] leading-[16px] text-text-secondary">
-                        {describeRelayedClaim((batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text)}
+                        {reviewFee === null ? 'Estimate unavailable' : describeRelayedClaim((batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text)}
                       </Text>
                     </View>
                   )}
@@ -5799,16 +5801,16 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       Total Withdrawn
                     </Text>
                     <Text className="text-text">
-                      <Text className="text-[20px] font-pp-regular">~</Text>
+                      <Text className="text-[20px] font-pp-regular">{reviewGross === null ? '' : '~'}</Text>
                       <Text className="text-[20px] font-pp-bold">
                         {swapSnapshot
                           ? `${balanceDisplay(formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals), swapReviewInputSymbol, swapSnapshot.poolChainId).text}`
-                          : balanceDisplay(reviewGross, selectedToken, chainId).text}
+                          : reviewGross === null ? 'Estimate unavailable' : balanceDisplay(reviewGross, selectedToken, chainId).text}
                       </Text>
                     </Text>
-                    <Text className="text-[14px] text-text font-pp-regular">
+                    {reviewGross !== null && <Text className="text-[14px] text-text font-pp-regular">
                       ${(balanceDisplay(swapSnapshot ? formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals) : String(reviewGross), swapSnapshot ? swapReviewInputSymbol : selectedToken, swapSnapshot?.poolChainId ?? chainId).usd).toLocaleString('en-US', { maximumFractionDigits: 2 })}
-                    </Text>
+                    </Text>}
                   </View>
                   {/* Vertical Divider */}
                   <View className="w-[1px] self-stretch bg-border-light" />
@@ -5940,13 +5942,13 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       {/* The fee's OWN asset and decimals (services/relayer-fee.ts),
                           not the withdrawn token's. When they differ the symbol
                           says so instead of relabelling one asset as another. */}
-                      Relayer fee: {groupThousands(swapSnapshot ? `${balanceDisplay(swapSnapshot.display.relayerFee, swapReviewInputSymbol, swapSnapshot.poolChainId).text}` : (batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text)} (~${groupThousands(balanceDisplay(swapSnapshot ? swapSnapshot.display.relayerFee : String(reviewFee), swapSnapshot ? swapReviewInputSymbol : (batchPlan || isStellar) ? selectedToken : resolvedFee.symbol, swapSnapshot?.poolChainId ?? chainId).usd.toFixed(2))})
+                      Relayer fee: {reviewFee === null ? 'Estimate unavailable' : <>{groupThousands(swapSnapshot ? `${balanceDisplay(swapSnapshot.display.relayerFee, swapReviewInputSymbol, swapSnapshot.poolChainId).text}` : (batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text)} (~${groupThousands(balanceDisplay(swapSnapshot ? swapSnapshot.display.relayerFee : String(reviewFee), swapSnapshot ? swapReviewInputSymbol : (batchPlan || isStellar) ? selectedToken : resolvedFee.symbol, swapSnapshot?.poolChainId ?? chainId).usd.toFixed(2))})</>}
                     </Text>
                   </View>
                   <FeeWarning breakdown={withdrawFeeBreakdown} testID="withdraw-fee-warning" />
                   {coldStartClaim && (
                     <Text className="text-[13px] leading-[19px] text-[#737373] font-pp-regular">
-                      {describeRelayedClaim((batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text)}
+                      {reviewFee === null ? 'Estimate unavailable' : describeRelayedClaim((batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text)}
                     </Text>
                   )}
                   {gasTopUp && (
@@ -6003,7 +6005,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     <Text className="font-pp-bold">{poolName}</Text>
                   </Text>
                   <Text className="text-[20px] text-text font-pp-regular">
-                    {balanceDisplay(batchPlan ? 0 : remainingAmount, selectedToken, chainId).text}
+                    {remainingAmount === null ? 'Estimate unavailable' : balanceDisplay(batchPlan ? 0 : remainingAmount, selectedToken, chainId).text}
                   </Text>
                 </View>
 
