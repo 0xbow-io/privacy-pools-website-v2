@@ -19,6 +19,9 @@ concurrency:
 
 jobs:
   tag:
+    # A manual run on another branch must not tag that branch's commit: the
+    # later push to main would find the tag and leave it on the wrong commit.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       # actions/checkout v4.2.2, pinned by commit

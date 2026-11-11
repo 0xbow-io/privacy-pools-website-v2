@@ -24,7 +24,8 @@ Semver, from the PR titles since the last release:
 
 ## The tag workflow
 
-- It runs on every push to `main` and by hand (`workflow_dispatch`).
+- It runs on every push to `main` and by hand (`workflow_dispatch`). A manual run on
+  any other branch is skipped, so an unmerged release branch is never tagged.
 - If `vX.Y.Z` for the `package.json` version already exists it does nothing, so a
   re-run or a push that did not bump the version is harmless.
 - If the CHANGELOG has no notes for that version the run fails and nothing is

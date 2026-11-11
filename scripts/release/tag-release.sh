@@ -10,6 +10,7 @@
 #
 # Env:
 #   GITHUB_SHA          commit to tag (required unless dry run)
+#   GITHUB_REF          must be refs/heads/main (unless dry run)
 #   GH_TOKEN            token for the gh CLI (required unless dry run)
 #   TAG_RELEASE_DRY_RUN 1: print what would be created, create nothing
 #   TAG_RELEASE_REMOTE  remote to look the tag up on (default: origin)
@@ -19,6 +20,14 @@ set -euo pipefail
 root="${TAG_RELEASE_ROOT:-.}"
 remote="${TAG_RELEASE_REMOTE:-origin}"
 dry_run="${TAG_RELEASE_DRY_RUN:-0}"
+
+# Only main is released. A manual run left on a release branch would otherwise
+# tag the unmerged commit, and the later push to main would see the tag and
+# leave it there.
+if [ "$dry_run" != "1" ] && [ "${GITHUB_REF:-}" != "refs/heads/main" ]; then
+  echo "::error::releases are tagged from main only (GITHUB_REF is '${GITHUB_REF:-}')" >&2
+  exit 1
+fi
 
 version="$(jq -r '.version // empty' "$root/package.json")"
 if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then

@@ -103,6 +103,19 @@ describe('tag-release.sh', () => {
     expect(r.stdout).not.toContain('would create');
   });
 
+  test('a real run off main refuses before touching anything', () => {
+    const { rootDir, remote } = fixture('2.1.0');
+    for (const ref of ['refs/heads/release/v2.1.0', '']) {
+      const r = spawnSync('bash', [SCRIPT], {
+        cwd: rootDir, encoding: 'utf8',
+        // No dry run and no gh token: reaching gh would fail differently.
+        env: scriptEnv({ TAG_RELEASE_ROOT: rootDir, TAG_RELEASE_REMOTE: remote, GITHUB_SHA: 'abc123', GITHUB_REF: ref }),
+      });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('tagged from main only');
+    }
+  });
+
   test('a version that is not X.Y.Z fails', () => {
     expect(run('2.1').code).toBe(1);
   });
@@ -115,6 +128,8 @@ describe('the workflow and the old flow', () => {
     expect(wf).toContain('workflow_dispatch:');
     expect(wf).toMatch(/permissions:\n {2}contents: write\n\n/);
     expect(wf).toContain('run: bash scripts/release/tag-release.sh');
+    // A manual run on another branch never reaches the script.
+    expect(wf).toContain("if: github.ref == 'refs/heads/main'");
   });
   test('every action is pinned by commit', () => {
     for (const uses of wf.match(/uses: \S+/g) ?? []) expect(uses).toMatch(/@[0-9a-f]{40}$/);
