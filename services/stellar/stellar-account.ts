@@ -101,7 +101,7 @@ import { findSentClaim, readSentClaims, saveSentClaim, SENT_CLAIMS_BASE_KEY, set
 import { isStellarAccountAddress, requestStates, type StellarRequestState } from '@/services/stellar/stellar-request';
 import type { StellarSdkPaymentRequest } from '@/services/payment-request-codec';
 import { envScopedStorageKey } from '@/config/app-environment';
-import { buildStellarNoteOrigins, reconstructStellarSpends, type StellarNoteOrigins } from '@/services/stellar-activity';
+import { buildStellarNoteOrigins, canonicalCommitment, reconstructStellarSpends, type StellarNoteOrigins } from '@/services/stellar-activity';
 import { withSigningWindow } from '@/services/stellar/stellar-signing-window';
 
 export type { StellarRequestState };
@@ -123,7 +123,7 @@ export interface StellarAccountSnapshot {
   /**
    * Where each of these notes came from on chain (deposit + depositor, or a
    * transact output) and when, read from the pool's event history in bulk on
-   * the sync clock. Null until the first sync reads it. Local derivation input
+   * the sync clock, or from our own confirmed deposit receipt. Local derivation input
    * for the activity rows (services/stellar-activity.ts).
    */
   noteOrigins: StellarNoteOrigins | null;
@@ -527,7 +527,7 @@ class StellarAccount {
           // it, so how many notes discovery finds changes no request.
           const rpc = this.rpc;
           const pass = <T,>(fn: () => Promise<T>) => (rpc ? rpc.withEventPage(fn) : fn());
-          const { exported, registered, noteOrigins } = await pass(async () => {
+          const { registered, noteOrigins } = await pass(async () => {
             await session.discoverNotes();
             if (address) await this.persist(session, address);
             const [exportedNow, registeredNow] = await Promise.all([
@@ -541,9 +541,17 @@ class StellarAccount {
               console.warn('[stellar] could not read the pool event history for activity', error);
               return null;
             });
-            return { exported: exportedNow, registered: registeredNow, noteOrigins: origins };
+            return { registered: registeredNow, noteOrigins: origins };
           });
+          // A deposit may finish while the event history is being read. Export
+          // again locally so this sync cannot replace its note with an older view.
+          const exported = await session.exportAccount();
           if (this.snapshot.address !== address) return;
+          if (noteOrigins) {
+            // Confirmed origins are immutable; a lagging index must not erase
+            // a receipt we already have. Indexed entries supply canonical times.
+            noteOrigins.byCommitment = { ...this.snapshot.noteOrigins?.byCommitment, ...noteOrigins.byCommitment };
+          }
           this.set({
             notes: exported.notes,
             paymentRequests: requestStates(exported),
@@ -682,6 +690,22 @@ class StellarAccount {
       if (claim) setSentClaimTx(sentClaimsStorage(), SENT_CLAIMS_KEY, claim.id, txHash);
       onStage?.('syncing');
       await this.refreshLocal(session, address);
+      if (!params.recipient && this.generation === generation) {
+        const closedAt = Date.parse(receipt.logs[0]?.ledgerClosedAt ?? '');
+        const previous = this.snapshot.noteOrigins;
+        this.set({ noteOrigins: {
+          ...previous,
+          complete: previous?.complete ?? false,
+          byCommitment: {
+            ...previous?.byCommitment,
+            [canonicalCommitment(prepared.pendingNote.commitment)]: {
+              kind: 'deposit', depositor: address, txHash,
+              ledger: Number(BigInt(receipt.blockNumber)),
+              time: Number.isFinite(closedAt) ? Math.floor(closedAt / 1000) : 0,
+            },
+          },
+        } });
+      }
       return {
         txHash,
         claimNotes: claim ? claim.notes.map((n) => ({ ...n, txHash })) : null,
