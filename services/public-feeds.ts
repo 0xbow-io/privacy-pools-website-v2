@@ -101,6 +101,9 @@ import {
   fetchLifiVerifiedTokens,
   LIFI_VERIFIED_TOKENS_INTERVAL_MS,
 } from '@/services/lifi-token-list';
+import { STELLAR_TESTNET_ID } from '@/config/stellar-deployment';
+import { fetchStellarTransferFees } from '@/services/stellar/stellar-fee-feed';
+import { FEED_STELLAR_TRANSFER_FEES, STELLAR_FEE_INTERVAL_MS } from '@/services/stellar-transfer-fee-estimate';
 import { fetchGasPrice } from '@/services/gas-price';
 import { POINTS_ENABLED } from '@/config/points';
 import { feedPointsEpochs, fetchPointsFeed, POINTS_FEED_INTERVAL_MS, type PointsFeedValue } from '@/services/points-feed';
@@ -198,6 +201,14 @@ export function startPublicFeeds(): void {
       retryMs: ASP_PUBLIC_KEY_RETRY_MS,
       fetch: fetchAspPublicKey,
     });
+    // Build configuration only: never gate on Stellar opt-in or wallet state.
+    if (getChainConfig(STELLAR_TESTNET_ID)) {
+      publicFeeds.register({
+        key: FEED_STELLAR_TRANSFER_FEES,
+        intervalMs: STELLAR_FEE_INTERVAL_MS,
+        fetch: fetchStellarTransferFees,
+      });
+    }
     // Register a fixed scope set so chain selection never starts a new feed.
     // Raw and mapped views share the same cached, in-flight price response.
     for (const chainId of supportedEvmChainIds) {

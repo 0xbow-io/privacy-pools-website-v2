@@ -19,7 +19,7 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 import { KeySourceChangedError } from '@/components/sdk-provider';
 import { truncateAddress } from '@/services/hex-format';
 import { isSessionInitTimeout } from '@/services/session-init-timeout';
-import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, plainTokenFigure } from '@/services/share-display';
+import { tokenAmountLabel, displayTokenSymbol, isShareSymbol } from '@/services/share-display';
 import { noteFigureText } from '@/services/note-figure';
 import { reportErrorReport } from '@/services/error-reports';
 import { classifyFailure } from '@/services/error-reports-cause';
@@ -99,6 +99,7 @@ import { ConsolidationShell } from '@/components/consolidation-shell';
 import { ConsolidationAssetList } from '@/components/consolidation-asset-list';
 import { ConsolidationPanel, ConsolidationSummary, ConsolidationGroupSummary } from '@/components/consolidation-panel';
 import { useInlineOpsCapable } from '@/hooks/use-inline-ops-capable';
+import { useStellarTransferFeeEstimate } from '@/hooks/use-stellar-transfer-fee-estimate';
 import { useTransferFeeEstimate } from '@/hooks/use-transfer-fee-estimate';
 import { consolidationSelectionError, consolidationGroups, consolidationNet, planConsolidation, resolveForcedInputs, unavailableConsolidationCommitments } from '@/services/consolidate-notes';
 import {
@@ -1399,6 +1400,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   // The relayer fee estimated from the gas-price and price feeds. Reading it
   // cannot trigger a request when a token, amount or modal changes; the binding
   // quote is requested at Confirm, right before the relay.
+  const stellarFeeEstimate = useStellarTransferFeeEstimate(suiChosen.count);
   const transferFeeFor = useTransferFeeEstimate(chainId);
   const relayFeeEstimate = !isSui && hideAddress ? transferFeeFor(selectedTokenId) : null;
   const feePricing = useFeePricing(chainId);
@@ -1477,6 +1479,9 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     grain: feeDisplayGrain,
     sendExact: sendExactActive,
   });
+  // Stellar's displayed remainder uses the estimate; selection still reserves the ceiling.
+  const reviewDebitWei = isStellar ? (stellarFeeEstimate === null ? null : enteredAmountWei + stellarFeeEstimate) : enteredAmountWei;
+  const reviewRemainingWei = reviewDebitWei === null ? null : (isSui ? suiChosen.sum : totalSelectedValue) - reviewDebitWei;
   const relayFeeReserveWei = feeSplit.reserveWei;
   /** What the recipient actually receives (send-exact nets the fee out of it). */
   const recipientAmountWei = feeSplit.recipientWei;
@@ -4394,22 +4399,20 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                     <Text className="text-[14px] leading-[24px]">
                       <Text className="text-[14px] text-[#737373] font-pp-bold">Relayer fee: </Text>
                       <Text className="text-[14px] text-[#737373] font-pp-regular" testID="stellar-transfer-fee">
-                        up to {formatUnits(stellarSendFee, altDecimals)} {altSymbol}, added on top
+                        {stellarFeeEstimate === null ? 'Estimate unavailable' : `~${formatUnits(stellarFeeEstimate, altDecimals)} ${altSymbol}`}
                       </Text>
                     </Text>
                   )}
                   {/* DEV-368: the "Notes: 1 input note" line lived here. Dropped
                       on Mike's call: the note count is UTXO-model internals the
                       user has no use for while confirming a transfer. */}
-                  {(isSui ? enteredAmountWei < suiChosen.sum : enteredAmountWei < totalSelectedValue) && (
+                  {(reviewRemainingWei === null || reviewRemainingWei > 0n) && (
                     <Text className="text-[14px] leading-[24px]">
                       {/* DEV-368: "Remaining", not "Change" — the latter reads
                           as either cash-register change or an edit action. */}
                       <Text className="text-[14px] text-[#737373] font-pp-bold">Remaining: </Text>
                       <Text className="text-[14px] text-[#737373] font-pp-regular">
-                        {(isSui ? suiChosen.sum : totalSelectedValue) - enteredAmountWei >= 0n
-                          ? noteFigure((isSui ? suiChosen.sum : totalSelectedValue) - enteredAmountWei)
-                          : tokenAmountLabel(plainTokenFigure(formatUnits((isSui ? suiChosen.sum : totalSelectedValue) - enteredAmountWei, selectedDecimals), selectedSymbol), selectedSymbol)}
+                        {reviewRemainingWei === null ? 'Estimate unavailable' : noteFigure(reviewRemainingWei)}
                       </Text>
                     </Text>
                   )}

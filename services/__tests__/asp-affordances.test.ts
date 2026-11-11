@@ -200,7 +200,7 @@ test('public price and gas price feeds register every build-supported EVM chain 
   const code = feeds.statements.filter((n) => !ts.isImportDeclaration(n))
     .map((n) => n.getText(feeds).replace(/^export /, '')).join('\n');
   const registrations: { key: string; fetch: () => unknown; maxAgeMs?: number; retryMs?: number; retryOnError?: boolean; enabled?: unknown }[] = [];
-  const env = (pointsEnabled: boolean, target: typeof registrations): Record<string, unknown> => ({
+  const env = (pointsEnabled: boolean, target: typeof registrations, stellarEnabled = false): Record<string, unknown> => ({
     supportedEvmChainIds: [1, 10, 11155111], apiClient: {},
     fetchGasPrice: async (chain: number) => BigInt(chain),
     feedGasPrice: (chain: number) => `gas-price:${chain}`,
@@ -242,7 +242,9 @@ test('public price and gas price feeds register every build-supported EVM chain 
     NULLIFYING_KEY_HASH_RETRY_MS: 30_000,
     NULLIFYING_KEY_HASH_MAX_AGE_MS: 660_000,
     syncNullifyingKeyHashes: async (chain: number) => ({ ok: true, appliedEntries: 0, lastSyncedId: `nullifying-key-hash-sync:${chain}` }),
-    getChainConfig: () => undefined,
+    STELLAR_TESTNET_ID: 202, FEED_STELLAR_TRANSFER_FEES: 'stellar-transfer-fees:202',
+    STELLAR_FEE_INTERVAL_MS: 60_000, fetchStellarTransferFees: () => 'stellar-fees-fetch',
+    getChainConfig: (chain: number) => stellarEnabled && chain === 202 ? {} : undefined,
     LEGACY_CONFIG: undefined,
     feedYieldDeposits: (chain: number | string) => `yield-deposits:${chain}`,
     feedYieldRateHistory: (chain: number | string, share: string) => `yield-rate-history:${chain}:${share.toLowerCase()}`,
@@ -346,6 +348,14 @@ test('public price and gas price feeds register every build-supported EVM chain 
     ['lifi-verified-tokens:1', 'lifi-verified-fetch:1'],
     ['lifi-verified-tokens:56', 'lifi-verified-fetch:56'],
   ]);
+
+  // Stellar registration follows only build support, even without opt-in/wallet state.
+  expect(registrations.filter((f) => f.key === 'stellar-transfer-fees:202')).toEqual([]);
+  const stellar: typeof registrations = [];
+  const startStellar = evaluate(`${code}; return startPublicFeeds;`, env(true, stellar, true));
+  startStellar(); startStellar();
+  expect(stellar.filter((f) => f.key === 'stellar-transfer-fees:202').map((f) => f.fetch()))
+    .toEqual(['stellar-fees-fetch']);
 
   // With points disabled, no chain registers a points feed.
   const disabled: typeof registrations = [];

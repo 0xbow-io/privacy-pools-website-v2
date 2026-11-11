@@ -41,7 +41,14 @@ declare module 'bun:test' {
     mockResolvedValue(value: Awaited<ReturnType<T>>): Mock<T>;
   };
 
-  export function spyOn<T, K extends keyof T>(object: T, key: K): Mock<Extract<T[K], (...args: never[]) => unknown>>;
+  export type Spy<T extends (...args: never[]) => unknown> = Mock<T> & {
+    mockImplementation(fn: T): Spy<T>;
+    mockResolvedValue(value: Awaited<ReturnType<T>>): Spy<T>;
+    mockRestore(): void;
+  };
+
+  export function spyOn<T, K extends keyof T>(object: T, key: K):
+    T[K] extends (...args: never[]) => unknown ? Spy<T[K]> : never;
 
   /**
    * `mock(fn)` wraps a function with call bookkeeping; `mock.module(...)`
