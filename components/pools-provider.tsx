@@ -44,7 +44,8 @@ import { readClaimedInputMap } from '@/services/claim-records-store';
 import type { NoteCounts } from '@/services/self-transfer-row';
 import { findOwnActionIn, noteTimeMs, ownDepositBridgeAllowed } from '@/services/own-actions-core';
 import { deriveStellarActivity, stellarSentRecipientLookup, type StellarActivityNote } from '@/services/stellar-activity';
-import { listStellarSentDeposits } from '@/services/stellar/stellar-account';
+import { listStellarSentDeposits, readStellarClaimedNotes, readStellarDepositsFor } from '@/services/stellar/stellar-account';
+import { getStellarActivityRecordsVersion, subscribeStellarActivityRecords } from '@/services/stellar/stellar-activity-records';
 import { buildOwnHistoryEvents, ownDepositReviewStatus, type ActivityEvent } from '@/services/own-history-rows';
 import { useLabelDecisionsByChain } from '@/hooks/use-label-decisions-by-chain';
 import {
@@ -276,6 +277,9 @@ export type Transaction = {
    *  event. They're personal (only meaningful in the 'mine' scope) and are kept
    *  out of the global 'all' feed. */
   isLineageSynthetic?: boolean;
+  /** A Stellar deposit this account made FOR another account, from this
+   *  device's own record (DEV-501). Authored, not owned; names no recipient. */
+  depositFor?: boolean;
 };
 
 export type PoolsData = {
@@ -894,6 +898,13 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
   // The Stellar account's on-chain note origins (read on its own sync clock),
   // for the activity rows below. Null until the account has synced.
   const { noteOrigins: stellarNoteOrigins } = useStellarSession();
+  // This device's deposit-for and claimed-link records: a new one re-derives
+  // the activity at once, not on the next unrelated change.
+  const stellarRecordsVersion = useSyncExternalStore(
+    subscribeStellarActivityRecords,
+    getStellarActivityRecordsVersion,
+    getStellarActivityRecordsVersion,
+  );
   const { data: stellarWalletBalance } = useStellarBalance(
     isStellarActive && stellarWallet.isConnected ? stellarWallet.address : null,
   );
@@ -1965,6 +1976,8 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
               txHash: c.txHash, recipient: c.recipient, amount: c.amount, tokenId: c.notes[0]?.tokenId ?? '', createdAt: c.createdAt,
             }))
             : [],
+          depositsFor: stellarWallet.isConnected && stellarWallet.address ? readStellarDepositsFor(stellarWallet.address) : [],
+          claimed: stellarWallet.isConnected && stellarWallet.address ? readStellarClaimedNotes(stellarWallet.address) : [],
         })
       : null;
     {
@@ -2953,6 +2966,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
     stellarWallet.isConnected,
     stellarWallet.address,
     stellarNoteOrigins,
+    stellarRecordsVersion,
     defaultChain.displayName,
     defaultChain.id,
     defaultChain.nativeCurrency.symbol,
