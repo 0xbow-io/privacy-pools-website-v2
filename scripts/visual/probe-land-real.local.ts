@@ -2,7 +2,7 @@
 // REAL end-to-end landing test: the TEST_PHRASE account (real Sepolia deposits,
 // real signatures) connects on '/', must land on /?panel=balances, sign in via
 // the auto-opened modal, and show synced balances. Screenshots along the way.
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 import { mnemonicToAccount } from 'viem/accounts';
 import { installEvmWallet } from './evm-wallet';
 
@@ -14,7 +14,7 @@ console.log('test account:', account.address);
 const BASE = 'http://localhost:8080';
 const SHOT = (n: string) => `/tmp/ppv2-nativewind/scripts/visual/reports/real-land-${n}.png`;
 
-const browser = await chromium.launch({ args: ['--no-sandbox'] });
+const browser = await launchChrome();
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce', deviceScaleFactor: 1 });
 await context.addInitScript(() => localStorage.setItem('ppv2_smartwallet_skipped_v1', '1'));
 const page = await context.newPage();

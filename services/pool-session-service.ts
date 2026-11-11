@@ -34,6 +34,8 @@ import {
 } from '@/services/sdk-setup';
 import { getChainConfig } from '@/config/chains';
 import { recordingNoteEventReads } from '@/services/note-ciphertexts';
+import { routeOwnKeystoreReads } from '@/services/keystore-registry-reads';
+import { keystoreScopeAddress } from '@/services/keystore-scope';
 import { createSdkConsoleLogger } from '@/services/sdk-logger';
 import { buildReshieldDestinationKeys } from '@/services/reshield-destination';
 import { createPublicClient, fallback } from 'viem';
@@ -194,6 +196,13 @@ export async function createPoolSession(params: CreatePoolSessionParams) {
     poolVaultInteractor.getNoteEvents.bind(poolVaultInteractor),
   );
   const keystoreInteractor = createKeystoreInteractor(rpc, keystoreAddress, keystoreSyncFromBlock);
+  // The SDK reads the session account's own nullifyingKeys / viewingKeys
+  // entries before every deposit, registration and spend. Those reads are
+  // answered from the bulk ASP registries instead of naming the account to
+  // the RPC (services/keystore-registry-reads.ts). Other accounts (recipients)
+  // still go to the chain.
+  // Scoped the way the grid and the identity check scope the registries.
+  routeOwnKeystoreReads(keystoreInteractor, { chainId, keystoreAddress: keystoreScopeAddress(chainId) ?? keystoreAddress, ownerAddress });
 
   // Persistent payment-request store. Default PoolSessionFactory wiring
   // uses InMemoryStorageService → records vanish on refresh, taking the
@@ -447,5 +456,7 @@ export async function createPoolSession(params: CreatePoolSessionParams) {
   };
 
   // Forward the SDK's own warnings/errors to the console (see services/sdk-logger.ts).
+  // Own-account keystore reads ask the registries first, then the chain; never wait
+  // (services/keystore-registry-reads.ts).
   return createEvmPoolSession(config, { logger: createSdkConsoleLogger() });
 }

@@ -249,6 +249,29 @@ describe('a feed its consumers cannot do without retries on a shorter grid until
     expect(at).toEqual([0, 60_000, 120_000]);
   });
 
+  test('retryOnError: a failed refresh retries on the retry grid, then rejoins its own', async () => {
+    const f = fakeClock();
+    const s = new PublicFeedScheduler(f.clock);
+    const at: number[] = [];
+    let n = 0;
+    s.register({
+      key: 'k',
+      intervalMs: 60_000,
+      retryMs: 15_000,
+      retryOnError: true,
+      fetch: async () => {
+        at.push(f.now());
+        n += 1;
+        if (n === 2) throw new Error('502 Bad Gateway');
+        return n;
+      },
+    });
+    s.start();
+    await f.advance(180_000);
+    s.stop();
+    expect(at).toEqual([0, 60_000, 75_000, 120_000, 180_000]);
+  });
+
   test('a retry grid that is not a divisor of the period is refused', () => {
     const s = new PublicFeedScheduler();
     expect(() => s.register({ key: 'a', intervalMs: 60_000, retryMs: 25_000, fetch: async () => 1 })).toThrow();

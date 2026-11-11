@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { approxUnderlyingText, displayTokenSymbol, isShareSymbol, previewReceiveFigure, shareAmountText, shareRedemptionDisclosure, shareSubtitle, wrapsIntoShareSubtitle } from '@/services/share-display';
+import { approxUnderlyingText, displayTokenSymbol, isShareSymbol, previewReceiveFigure, shareAmountText, shareSubtitle, wrapsIntoShareSubtitle } from '@/services/share-display';
 
 describe('share display', () => {
   test('a share is headlined by its underlying; everything else keeps its symbol', () => {
@@ -38,23 +38,12 @@ describe('share display', () => {
     expect(wrapsIntoShareSubtitle(undefined)).toBeNull();
     expect(wrapsIntoShareSubtitle('')).toBeNull();
   });
-  test('a share withdrawal promises the underlying, with no fallback clause', () => {
-    // The flow refuses rather than paying the share when the router route is
-    // unavailable, so the line may promise the underlying outright.
-    expect(shareRedemptionDisclosure('ppUSDT')).toBe(
-      'You receive USDT, redeemed at the vault on the way out.',
-    );
-    expect(shareRedemptionDisclosure('USDT')).toBeNull();
-  });
   test('Ameen via Pat, 2026-09-12: the share name appears in NO user-facing sentence', () => {
     for (const line of [
       shareSubtitle('ppUSDC', 2.88),
       shareSubtitle('ppUSDT', null),
       wrapsIntoShareSubtitle('ppUSDC'),
-      shareRedemptionDisclosure('ppUSDC'),
-      shareRedemptionDisclosure('ppUSDT'),
       shareSubtitle('ppETH', 1.18),
-      shareRedemptionDisclosure('ppETH'),
     ]) {
       expect(line).not.toMatch(/\bpp(usdc|usdt|eth)\b/i);
     }

@@ -48,6 +48,7 @@ function guardHarness(readStatus: () => Promise<string>) {
   const env = {
     committedSessionRef, chainId: 8453, getSdkSetup: async () => ({}),
     resolveKeystoreIdentityStatus: readStatus, setKeystoreIdentityStatus() {}, assertDepositUnlock,
+    REGISTRY_WAIT_MS: 15_000, RegistrySyncingError: class extends Error { constructor() { super('Still syncing account registrations. Try again in a moment.'); } },
   };
   const guard = new Function(...Object.keys(env), ts.transpileModule(`return (${callback.getText(providerSource)});`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
@@ -56,7 +57,7 @@ function guardHarness(readStatus: () => Promise<string>) {
 }
 
 test('the actual deposit callback refuses a failed registration lookup', async () => {
-  await expect(guardHarness(async () => 'unknown').guard(8453)).rejects.toThrow('Could not verify');
+  await expect(guardHarness(async () => 'unknown').guard(8453)).rejects.toThrow('Still syncing');
 });
 
 test('the actual deposit callback retains first-registration and compatible flows', async () => {

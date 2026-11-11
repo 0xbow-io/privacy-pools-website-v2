@@ -973,11 +973,15 @@ export function TransactionDetailModal({ tx, onClose, onCloseForAction, actions 
   }
   if (claimFeeText) detailRows.push({ label: tx.withRegistration ? 'Claim and registration fee' : 'Claim fee', value: claimFeeText });
   if (showReconciled && reconciledLabel && reconciledText) detailRows.push({ label: reconciledLabel, value: reconciledText });
-  // Two transactions when a cross-chain swap has delivered, one otherwise.
+  // Keep the payment link alongside its claim or cross-chain delivery links.
   const receiveTx = swap?.swapOut.deliveryTxHash;
   if (tx.txHash) {
     detailRows.push({ label: receiveTx ? 'Swap transaction' : 'Transaction', value: tx.txHash, mono: true, singleLine: true, href: getExplorerTxUrl(tx.chainId, tx.txHash), explorerName: getExplorerName(tx.chainId) });
   }
+  const claimTxHashes = tx.claimTxHashes ?? (tx.claimTxHash ? [tx.claimTxHash] : []);
+  claimTxHashes.forEach((hash, i) => {
+    detailRows.push({ label: claimTxHashes.length > 1 ? `Claim transaction ${i + 1}` : 'Claim transaction', value: hash, mono: true, singleLine: true, href: getExplorerTxUrl(tx.chainId, hash), explorerName: getExplorerName(tx.chainId) });
+  });
   if (swap && receiveTx) {
     detailRows.push({ label: 'Receive transaction', value: receiveTx, mono: true, singleLine: true, href: getExplorerTxUrl(swap.swapOut.chainId, receiveTx), explorerName: getExplorerName(swap.swapOut.chainId) });
   }

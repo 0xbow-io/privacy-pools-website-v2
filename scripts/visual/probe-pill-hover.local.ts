@@ -2,9 +2,9 @@
 // Real-mouse variant: click the Send tab with an actual pointer and KEEP the
 // cursor hovering it (playwright leaves the mouse where it clicked). Sample
 // the pill transform; then move the mouse away and sample again.
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 
-const browser = await chromium.launch({ args: ['--no-sandbox'] });
+const browser = await launchChrome();
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 await context.addInitScript(() => localStorage.setItem('ppv2_smartwallet_skipped_v1', '1'));
 const page = await context.newPage();
