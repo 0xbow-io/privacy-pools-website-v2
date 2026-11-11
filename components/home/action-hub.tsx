@@ -4,6 +4,7 @@ import { DEPOSIT_FAQ_URL } from '@/config/support';
 import { spendableBalanceLabel } from '@/services/spendable-balance-label';
 import { pendingPoolReopenStep, type PendingPoolReopen } from '@/services/pool-pick-reopen';
 import { useShareAmountField } from '@/hooks/use-share-amount-field';
+import { preparedAmountData } from '@/services/prepared-amount-data';
 import { quotedNetFigure } from '@/services/swap-quoted-net';
 import { formatUsdBalance } from '@/services/format-fiat';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
@@ -3566,6 +3567,9 @@ export function ActionHub({
               else if (transferInline) pushTransferAmount(shares);
             }}
             testID="hub-amount-input"
+            // The exact amount the flow prepares (shares for a share), for the
+            // browser smoke to check against the rate. Web only.
+            {...preparedAmountData(amount)}
             // React does not deliver onBlur when reconciliation REMOVES a
             // focused input (a deposit-success swap, a resize that changes
             // which pages exist). Without this the page would stay in typing
