@@ -15,7 +15,7 @@ import { useRouter } from 'expo-router';
 import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import { formatUnits } from 'viem';
 
-import { useWalletConnectModal } from '@/components/wallet-connect-modal-provider';
+import { useStellarConnectAction } from '@/hooks/use-stellar-connect-action';
 import { useStellarWallet } from '@/components/stellar-wallet-provider';
 import { STELLAR_TESTNET_ID, getExplorerTxUrl } from '@/config/chains';
 import { STELLAR_TRANSFER_RELAY_FEE_ESTIMATE, STELLAR_XLM } from '@/config/stellar-deployment';
@@ -37,7 +37,6 @@ function errorText(error: unknown): string {
 export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
   const { selectChain, activeChainId } = useChainRouter();
   const wallet = useStellarWallet();
-  const { open: openWalletPicker } = useWalletConnectModal();
   const stellar = useStellarSession();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +67,10 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
   const spendable = allHeld && held.every((n) => n.status === 'ACTIVE');
   const used = held.some((n) => n.status === 'SPENT' || n.status === 'EXITED' || n.status === 'EXIT_PENDING');
 
+  const openWalletPicker = useStellarConnectAction(encoded, () => {
+    if (isOwner && !allHeld && !used) void onClaim();
+  });
+
   // Until it is saved to the account, the claimed note lives in this tab only.
   useTabCloseGuard(allHeld && !keptTx && !used, 'Only in this tab until you save it. The link restores it.');
 
@@ -83,7 +86,7 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
     return true;
   };
 
-  const onClaim = async () => {
+  async function onClaim() {
     if (!claim) return;
     setError(null);
     if (!(await ensureReady())) return;
@@ -95,7 +98,7 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
     } finally {
       setBusy(null);
     }
-  };
+  }
 
   const onKeep = async () => {
     if (!claim) return;

@@ -20,7 +20,7 @@ export function StellarWalletOption({ className, onConnected }: { className: str
   const colors = Colors[colorScheme];
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { disconnect, isDevBurner } = wallet;
+  const { cancelConnect, isDevBurner } = wallet;
   const available = isDevBurner ? true : Platform.OS !== 'web' ? false
     : wallet.availabilityChecked ? wallet.isAvailable : null;
   const attempt = useRef({ mounted: true, pending: false });
@@ -29,9 +29,9 @@ export function StellarWalletOption({ className, onConnected }: { className: str
     current.mounted = true;
     return () => {
       current.mounted = false;
-      if (current.pending) disconnect();
+      if (current.pending) cancelConnect();
     };
-  }, [disconnect]);
+  }, [cancelConnect]);
 
   if (!enabled || (!isStellar && !wallet.isConnected)) return null;
 

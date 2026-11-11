@@ -37,6 +37,8 @@ export interface StellarWalletContextValue {
   connect: () => Promise<string | null>;
   /** Interactive connect that also says why it failed (for a toast). */
   connectDetailed: () => Promise<{ address: string | null; error: string | null }>;
+  /** Cancel an in-flight connection without forgetting the reconnect preference. */
+  cancelConnect: () => void;
   disconnect: () => void;
   /** Signer for the SDK; null until connected. */
   signer: StellarSigner | null;
@@ -282,6 +284,9 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
     writeFlag(false);
     reset();
   }, [reset]);
+  const cancelConnect = useCallback(() => {
+    if (busyRef.current) reset();
+  }, [reset]);
 
   const value = useMemo<StellarWalletContextValue>(() => ({
     address,
@@ -297,9 +302,10 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
     error,
     connect,
     connectDetailed,
+    cancelConnect,
     disconnect,
     signer,
-  }), [address, status, networkPassphrase, isAvailable, availabilityChecked, isDevBurner, error, connect, connectDetailed, disconnect, signer]);
+  }), [address, status, networkPassphrase, isAvailable, availabilityChecked, isDevBurner, error, connect, connectDetailed, cancelConnect, disconnect, signer]);
 
   return <StellarWalletContext.Provider value={value}>{children}</StellarWalletContext.Provider>;
 }
@@ -316,6 +322,7 @@ const DISCONNECTED: StellarWalletContextValue = {
   error: null,
   connect: async () => null,
   connectDetailed: async () => ({ address: null, error: null }),
+  cancelConnect: () => {},
   disconnect: () => {},
   signer: null,
 };

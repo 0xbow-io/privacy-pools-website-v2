@@ -7,14 +7,14 @@ const source = ts.createSourceFile('provider.tsx', readFileSync('components/stel
 const declaration = source.statements.find((n): n is ts.FunctionDeclaration => ts.isFunctionDeclaration(n) && n.name?.text === 'StellarWalletProvider')!;
 const js = ts.transpileModule(declaration.getText(source).replace('export ', ''), {
   compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
-}).outputText;
+}).outputText.replace(/const \[([A-Za-z]+), ([A-Za-z]+)\] = useState\(/g, 'const [$1, $2] = useState("$1", ');
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((ok) => { resolve = ok; });
   return { promise, resolve };
 }
 function fixture() {
-  const state: unknown[] = [];
+  const state: Record<string, unknown> = {};
   const effects: (() => void | (() => void))[] = [];
   let flag = false;
   let requests = 0;
@@ -31,7 +31,7 @@ function fixture() {
     React: { createElement: (_type: unknown, props: { value: unknown }) => props.value },
     StellarWalletContext: { Provider: {} },
     useRef: (current: unknown) => ({ current }),
-    useState: (initial: unknown) => { const i = state.length; state.push(initial); return [initial, (v: unknown) => { state[i] = v; }]; },
+    useState: (name: string, initial: unknown) => { state[name] = initial; return [initial, (v: unknown) => { state[name] = v; }]; },
     useCallback: (fn: unknown) => fn,
     useMemo: (fn: () => unknown) => fn(),
     useEffect: (fn: () => void | (() => void)) => effects.push(fn),
@@ -44,7 +44,7 @@ function fixture() {
     varialSigner: () => ({}),
   };
   const value = new Function(...Object.keys(context), `${js}; return StellarWalletProvider({children:null});`)(...Object.values(context)) as {
-    connect(): Promise<string | null>; disconnect(): void;
+    connect(): Promise<string | null>; disconnect(): void; cancelConnect(): void;
   };
   return { value, state, effects, replies, requests: () => requests, passiveReads: () => passiveReads,
     flag: () => flag, setFlag: () => { flag = true; }, change: () => watchCallbacks.change({ address: 'G-next', passphrase: 'other-network' }) };
@@ -58,7 +58,7 @@ describe('Stellar provider lifecycle', () => {
   test('legacy Varial flag reconnects without requesting access', async () => {
     const f = fixture(); f.setFlag(); f.effects.forEach((effect) => effect()); await flush();
     expect(f.requests()).toBe(0); expect(f.passiveReads()).toBe(1);
-    expect(f.state[1]).toBe('connected');
+    expect(f.state.status).toBe('connected');
   });
   test('disconnect cancels a pending reply and allows a new connection', async () => {
     const f = fixture(); const pending = deferred<{ address: string }>(); f.replies.push(pending.promise);
@@ -66,7 +66,7 @@ describe('Stellar provider lifecycle', () => {
     f.value.disconnect();
     expect(await f.value.connect()).toBe('G-account');
     pending.resolve({ address: 'G-old' }); await first;
-    expect(f.state[0]).toBe('G-account');
+    expect(f.state.address).toBe('G-account');
     expect(f.flag()).toBe(true);
   });
   test('duplicate clicks do not prompt twice', async () => {
@@ -78,10 +78,10 @@ describe('Stellar provider lifecycle', () => {
   test('passive reconnect recovers after unlock and follows account/network changes', async () => {
     const f = fixture(); f.setFlag(); f.replies.push(Promise.resolve({ address: '' }));
     f.effects.forEach((effect) => effect()); await flush();
-    expect(f.state[1]).toBe('disconnected');
-    f.change(); expect(f.state[0]).toBe('G-next'); expect(f.state[2]).toBe('other-network');
+    expect(f.state.status).toBe('disconnected');
+    f.change(); expect(f.state.address).toBe('G-next'); expect(f.state.networkPassphrase).toBe('other-network');
     expect(f.requests()).toBe(0);
-    f.value.disconnect(); f.change(); expect(f.state[1]).toBe('disconnected');
+    f.value.disconnect(); f.change(); expect(f.state.status).toBe('disconnected');
   });
   test('unmount discards a late connection result', async () => {
     const f = fixture(); const pending = deferred<{ address: string }>(); f.replies.push(pending.promise);
@@ -89,4 +89,24 @@ describe('Stellar provider lifecycle', () => {
     const connection = f.value.connect(); await flush(); cleanups.forEach((cleanup) => cleanup?.());
     pending.resolve({ address: 'G-old' }); expect(await connection).toBeNull(); expect(f.flag()).toBe(false);
   });
+});
+
+test('cancelling preserves a prior reconnect preference and discards the late reply', async () => {
+  const f = fixture(); f.setFlag();
+  const pending = deferred<{ address: string }>(); f.replies.push(pending.promise);
+  const connection = f.value.connect(); await flush();
+  f.value.cancelConnect();
+  expect(f.flag()).toBe(true);
+  pending.resolve({ address: 'G-late' });
+  expect(await connection).toBeNull(); expect(f.state.status).toBe('disconnected');
+  expect(await f.value.connect()).toBe('G-account');
+  f.value.cancelConnect(); expect(f.state.status).toBe('connected');
+  f.value.disconnect(); expect(f.flag()).toBe(false);
+});
+
+test('cancelling a first connection does not enable reconnect', async () => {
+  const f = fixture(); const pending = deferred<{ address: string }>(); f.replies.push(pending.promise);
+  const connection = f.value.connect(); await flush(); f.value.cancelConnect();
+  pending.resolve({ address: 'G-late' }); await connection;
+  expect(f.flag()).toBe(false); expect(f.state.address).toBeNull();
 });
