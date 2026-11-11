@@ -2,6 +2,13 @@
 
 All notable changes to the Privacy Pools v2 web app are documented in this file.
 
+## [1.4.0](https://github.com/0xbow-io/privacy-pools-website-v2/compare/v1.3.0...v1.4.0) (2026-11-11)
+
+
+### Features
+
+* **tor:** adopt anon-rpc 0.4.0-beta.1 with per-identity groups ([#33](https://github.com/0xbow-io/privacy-pools-website-v2/issues/33)) ([c48c198](https://github.com/0xbow-io/privacy-pools-website-v2/commit/c48c198d6216118a7f7483d9bd8490795b943795))
+
 ## [1.5.0] - 2026-11-10
 
 ### Added
