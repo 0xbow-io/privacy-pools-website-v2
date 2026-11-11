@@ -1441,7 +1441,7 @@ export function Transactions({
   const stellarWallet = useStellarWallet();
   const stellarWalletAddress = stellarWallet.isConnected ? stellarWallet.address ?? null : null;
   const { openSeedDerivationModal: openEvmSignIn } = useSeedDerivationModal();
-  // Stellar's locked session: same banner, Freighter unlock as the action.
+  // Stellar's locked session: same banner, Varial unlock as the action.
   const requiresWalletUnlock = evmRequiresUnlock || stellarLocked;
   const openSeedDerivationModal = stellarLocked ? unlockStellar : () => openEvmSignIn();
   const sessionLocked = requiresWalletUnlock || keyInitFailed;

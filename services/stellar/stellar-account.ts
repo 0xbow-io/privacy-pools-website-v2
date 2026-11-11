@@ -359,7 +359,7 @@ class StellarAccount {
       // Required by the config schema even with an ASP override; never fetched.
       ipfsGatewayUrl: 'http://unused.invalid',
       protocolKeys,
-      // Each transaction's validity window starts when Freighter is asked to sign it
+      // Each transaction's validity window starts when Varial is asked to sign it
       // (stellar-signing-window.ts). The key derivation above signs through the bare signer.
       walletInteractor: { type: 'freighter', provider: withSigningWindow(signer) },
       // In-memory: the account is persisted below via export/import after every
@@ -885,7 +885,7 @@ class StellarAccount {
     return this.enqueue(async () => {
       const { address, generation } = this.requireSigner();
       if (notes.some((n) => n.ownerAddress !== address)) {
-        throw new Error('This link is for another Stellar account. Switch accounts in Freighter.');
+        throw new Error('This link is for another Stellar account. Switch accounts in your wallet.');
       }
       const session = await this.ensureSession();
       this.assertStillBound(generation);
@@ -907,7 +907,7 @@ class StellarAccount {
    * Saves claimed notes to this account for good: a private transfer to
    * itself, announced to its own viewing key, so any device finds it by sync
    * and the link is no longer needed. Registers the account first if needed
-   * (Freighter pays; relayed registration is not available on Stellar).
+   * (Varial pays; relayed registration is not available on Stellar).
    */
   keepClaim(commitments: readonly Hex[], params?: { onStage?: StageListener }) {
     return this.enqueue(async () => {

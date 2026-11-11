@@ -27,8 +27,8 @@ export interface StellarContracts {
 
 export interface StellarNetwork {
   networkPassphrase: string;
-  /** Freighter's network name for this passphrase, for the mismatch message. */
-  freighterNetworkName: string;
+  /** Varial's network name for this passphrase, for the mismatch message. */
+  varialNetworkName: string;
   /** Relayer base (/api/v1/relayer/*). The ASP is the environment's (ASP_URL, config/env.ts), as for every chain. */
   relayerUrl: string;
 }
@@ -73,7 +73,7 @@ export const STELLAR_TESTNET_HORIZON_URL = env(
 
 export const STELLAR_TESTNET_NETWORK: StellarNetwork = {
   networkPassphrase: 'Test SDF Network ; September 2015',
-  freighterNetworkName: 'Testnet',
+  varialNetworkName: 'Testnet',
   // Like EXPO_PUBLIC_SUI_RELAYER_URL: the v2 relayer (packages/relayer/relayer). Without it relayed flows refuse.
   relayerUrl: process.env.EXPO_PUBLIC_STELLAR_RELAYER_URL ?? '',
 };
@@ -154,7 +154,7 @@ export function maxStellarWithdrawForInputs(inputs: bigint): bigint {
 /**
  * Private transfers (Send, /pay "Pools Payment", keeping a claimed link) are
  * relayed: the v2 relayer submits the pool's own `transact` as the gated
- * processor, so the user's Freighter account never appears on the transfer and
+ * processor, so the user's Varial account never appears on the transfer and
  * only the relayer's fee leaves the pool. One-time links stay self-submitted.
  *
  * The relayer charges its flat 0.02 XLM plus the transaction's cost for the proof shape

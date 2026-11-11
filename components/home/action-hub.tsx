@@ -54,7 +54,7 @@ import { ACTIVE_ENVIRONMENT } from '@/config/environments';
 import { cappedQuickAmounts, checkDepositCap } from '@/services/deposit-cap';
 import { useAllChainsPriceMap } from '@/hooks/use-all-chains-price-map';
 import { resolveConfiguredEntrypoint } from '@/services/pool-entrypoint';
-import { MoreWalletsButton, useWalletPicker, WalletConnectQr, WalletDeepLinkList, WalletLinksPreparing, WalletNotOpened, WalletOptionContent } from '@/components/wallet-connect-modal-provider';
+import { MoreWalletsButton, useWalletConnectModal, useWalletPicker, WalletConnectQr, WalletDeepLinkList, WalletLinksPreparing, WalletNotOpened, WalletOptionContent } from '@/components/wallet-connect-modal-provider';
 import { PasskeySignInPanel } from '@/components/passkey-sign-in-panel';
 import { usePasskeyAccount } from '@/components/passkey-account-context';
 import { AccountKeySignIn } from '@/components/account-key-sign-in';
@@ -397,6 +397,7 @@ export function ActionHub({
   // `isSuiChain` / `isStellar` explicitly.
   const isSui = isSuiChain || isStellar;
   const stellarWallet = useStellarWallet();
+  const { open: openStellarWalletPicker } = useWalletConnectModal();
   const { data: stellarBalance, refetch: refetchStellarBalance } = useStellarBalance(isStellar && stellarWallet.isConnected ? stellarWallet.address : null);
   const { toast } = useToast();
   // Full asset/network picker for the deposit form — same sheet the modal
@@ -1480,7 +1481,7 @@ export function ActionHub({
   // initializes itself, so it is never "locked" in this sense.
   // EVM session lock only: Sui and Stellar unlock inside their own flows.
   const sessionLocked = !isSui && identityMode === 'wallet' && !keysReady;
-  // Stellar: Freighter connected but the account not unlocked yet, so the
+  // Stellar: Varial connected but the account not unlocked yet, so the
   // shielded figures are not known. Say so instead of showing 0.
   const { stellarLocked, unlockStellar } = useWalletUnlockGate();
   // Cross-chain shield: the pool sits on a different chain than the wallet and
@@ -2258,7 +2259,7 @@ export function ActionHub({
     void refetchNativeBalance();
     void refetchErc20Balance();
     void refetchSuiBalance();
-    // The Freighter account's own balance after its own deposit: the network
+    // The Varial account's own balance after its own deposit: the network
     // already saw that deposit come from this account, so this read adds
     // nothing an observer did not have (same reasoning as the EVM reads).
     if (isStellar) void refetchStellarBalance();
@@ -2803,12 +2804,7 @@ export function ActionHub({
     const canLaunchWithAccountKey = !isSui && identityMode === 'key';
     if (!walletConnected && !canLaunchWithAccountKey) {
       if (isStellar) {
-        // Active Stellar chain: Freighter, or send the user to get it.
-        if (stellarWallet.isAvailable) {
-          void stellarWallet.connect();
-        } else if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          window.open('https://www.freighter.app', '_blank', 'noopener');
-        }
+        void openStellarWalletPicker();
         return;
       }
       if (isSui) {

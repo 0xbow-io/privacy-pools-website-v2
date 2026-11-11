@@ -16,6 +16,7 @@ import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
 import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import { formatUnits } from 'viem';
 
+import { useWalletConnectModal } from '@/components/wallet-connect-modal-provider';
 import { useStellarWallet } from '@/components/stellar-wallet-provider';
 import { useTransferModal } from '@/components/transfer-modal-provider';
 import { STELLAR_TESTNET_ID, getExplorerTxUrl } from '@/config/chains';
@@ -36,6 +37,7 @@ function short(value: string): string {
 export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
   const { selectChain, activeChainId } = useChainRouter();
   const wallet = useStellarWallet();
+  const { open: openWalletPicker } = useWalletConnectModal();
   const stellarSession = useStellarSession();
   const { openTransferModal } = useTransferModal();
   const [paidTx, setPaidTx] = useState<string | null>(null);
@@ -77,11 +79,8 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
       }
     }
     if (!wallet.isConnected) {
-      const connected = await wallet.connect();
-      if (!connected) {
-        setError(wallet.isAvailable ? 'Connect Freighter to pay.' : 'Install Freighter to pay.');
-        return false;
-      }
+      await openWalletPicker();
+      return false;
     }
     return true;
   };
@@ -160,7 +159,7 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
       const raw = e instanceof Error ? `${e.name} ${e.message}` : String(e);
       setError(/PaymentRequestExpired/.test(raw)
         ? 'This payment request has expired. Ask for a new link.'
-        : /reject|denied|cancel|declined/i.test(raw) ? 'Payment cancelled in Freighter.' : stellarErrorMessage(raw));
+        : /reject|denied|cancel|declined/i.test(raw) ? 'Payment cancelled in your wallet.' : stellarErrorMessage(raw));
     } finally {
       setStatus(null);
       setBusy(false);

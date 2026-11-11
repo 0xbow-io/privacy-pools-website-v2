@@ -1,11 +1,11 @@
 /**
  * /import-note page for a Stellar one-time claim link (services/stellar/stellar-claim.ts).
  *
- * Claim imports the link's notes into the connected Freighter account (local:
+ * Claim imports the link's notes into the connected Varial account (local:
  * the SDK re-derives every field and refuses another owner's note). The fixed
  * sync clock then marks them spendable. "Save to my account" makes it
  * permanent: one private transfer to itself, announced to its own viewing
- * key, so any device finds it and the link is no longer needed. Freighter pays
+ * key, so any device finds it and the link is no longer needed. Varial pays
  * for that and for registering the account first (relayed registration is not
  * available on Stellar).
  */
@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import { formatUnits } from 'viem';
 
+import { useWalletConnectModal } from '@/components/wallet-connect-modal-provider';
 import { useStellarWallet } from '@/components/stellar-wallet-provider';
 import { STELLAR_TESTNET_ID, getExplorerTxUrl } from '@/config/chains';
 import { STELLAR_TRANSFER_RELAY_FEE_ESTIMATE, STELLAR_XLM } from '@/config/stellar-deployment';
@@ -30,12 +31,13 @@ function short(value: string): string {
 
 function errorText(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
-  return /reject|denied|cancel|declined/i.test(raw) ? 'Cancelled in Freighter.' : stellarErrorMessage(raw);
+  return /reject|denied|cancel|declined/i.test(raw) ? 'Cancelled in your wallet.' : stellarErrorMessage(raw);
 }
 
 export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
   const { selectChain, activeChainId } = useChainRouter();
   const wallet = useStellarWallet();
+  const { open: openWalletPicker } = useWalletConnectModal();
   const stellar = useStellarSession();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,8 +77,8 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
       if (outcome !== 'committed') { setError('Could not switch to Stellar Testnet.'); return false; }
     }
     if (!wallet.isConnected) {
-      const connected = await wallet.connect();
-      if (!connected) { setError(wallet.isAvailable ? 'Connect Freighter to claim.' : 'Install Freighter to claim.'); return false; }
+      await openWalletPicker();
+      return false;
     }
     return true;
   };
@@ -140,7 +142,7 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
           <Text className="text-center font-pp-regular text-[13px] text-text-secondary">This payment was already used from your account.</Text>
         ) : wallet.isConnected && !isOwner ? (
           <Text className="text-center font-pp-regular text-[13px] text-warning">
-            This link is for {short(owner)}. Switch to that account in Freighter.
+            This link is for {short(owner)}. Switch to that account in your wallet.
           </Text>
         ) : allHeld ? (
           <View className="gap-[10px]">

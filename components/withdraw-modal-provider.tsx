@@ -2240,7 +2240,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     // wallet + an ASP-approved input note (enforced in handleConfirm's isSui path).
     if (isSui) {
       if (!altAccount) {
-        reportWithdrawError(isStellar ? 'Please connect Freighter first.' : 'Please connect your Sui wallet first.');
+        reportWithdrawError(isStellar ? 'Please connect a Stellar wallet first.' : 'Please connect your Sui wallet first.');
         return;
       }
       // Same selection the confirm path runs — refuse review when it would fail.
@@ -2896,7 +2896,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         if (selection.total < gross) {
           throw new Error(`Not enough to cover the amount plus the relayer fee within ${WITHDRAW_MAX_INPUTS} notes. Withdraw a smaller amount.`);
         }
-        // The reviewed recipient only, never the Freighter account.
+        // The reviewed recipient only, never the Varial account.
         const recipient = explicitRecipient(reviewContext.recipient, (a) => STELLAR_RECIPIENT_RE.test(a));
         if (!recipient) throw new Error(RECIPIENT_REQUIRED_MESSAGE);
         if (!isSameOperation()) { log('warn', 'Withdraw', 'Stale run aborted before Stellar broadcast'); return; }
