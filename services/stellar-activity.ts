@@ -27,6 +27,7 @@
  * Nothing is guessed: with no index, or an index that missed some note, only
  * the positively proven Deposit rows are produced.
  */
+import { STELLAR_TESTNET_ID } from '@/config/stellar-deployment';
 import type { Transaction } from '@/components/pools-provider';
 import { depositRowOutcome, projectDepositFunds, projectReceivedFunds, reviewOutcome, type FundsProjection } from '@/services/funds-state';
 import { formatUsd } from '@/services/format-fiat';
@@ -633,4 +634,20 @@ export function dedupeRowsById(rows: Transaction[]): Transaction[] {
     else if (row.depositFor && !kept.depositFor) byId.set(row.id, { ...kept, depositFor: true });
   }
   return [...byId.values()];
+}
+
+/** Incoming rows own a lineage too; their display type must not hide its fund actions. */
+export function stellarIncomingActions(
+  row: Pick<Transaction, 'chainId' | 'type' | 'direction' | 'label' | 'tokenAddress'>,
+  notes: readonly StellarActivityNote[],
+  owner: string | null | undefined,
+): { canWithdraw: boolean; canExit: boolean } {
+  const eligible = row.chainId === STELLAR_TESTNET_ID && row.type === 'Transfer' && row.direction === 'in' && (toBig(row.label ?? '') ?? 0n) > 0n && owner;
+  const held = eligible ? notes.filter((n) => n.isOwned !== false && sameAccount(n.ownerAddress ?? '', owner)
+    && canonicalCommitment(n.label) === canonicalCommitment(row.label!)
+    && n.tokenId === row.tokenAddress && (toBig(n.value) ?? 0n) > 0n) : [];
+  return {
+    canWithdraw: held.some((n) => n.status === 'ACTIVE'),
+    canExit: held.some((n) => ['ACTIVE', 'PENDING', 'REJECTED'].includes(n.status)),
+  };
 }

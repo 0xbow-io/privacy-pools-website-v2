@@ -7,6 +7,7 @@ import {
   dedupeRowsById,
   deriveStellarActivity,
   stellarDepositReview,
+  stellarIncomingActions,
   type StellarActivityNote,
   type StellarNoteOrigins,
 } from '@/services/stellar-activity';
@@ -379,5 +380,40 @@ describe('dedupeRowsById: one row per id whichever source lands first', () => {
   test('distinct ids are all kept, in order', () => {
     const out = dedupeRowsById([row({ id: 'a' }), row({ id: 'b' }), row({ id: 'a' })]);
     expect(out.map((r) => r.id)).toEqual(['a', 'b']);
+  });
+});
+
+describe('Stellar incoming row fund actions', () => {
+  const row = { chainId: 202, type: 'Transfer', direction: 'in' as const, label: LABEL, tokenAddress: XLM };
+  test('a received deposit uses owned note status, not the completed receipt status', () => {
+    for (const [status, canWithdraw, canExit] of [
+      ['ACTIVE', true, true], ['PENDING', false, true], ['REJECTED', false, true],
+      ['SPENT', false, false], ['EXITED', false, false], ['EXIT_PENDING', false, false], ['INACTIVE', false, false],
+    ] as const) {
+      const n = note(1, { status });
+      const origins = buildStellarNoteOrigins({ notes: [n], deposits: [{ txHash: n.txHash, outputCommitment: n.commitment, depositor: OTHER }], transacts: [], logs: [] });
+      const { rows } = deriveStellarActivity([n], origins, CTX);
+      expect(rows[0].type).toBe('Transfer');
+      expect(stellarIncomingActions(rows[0], [n], ME)).toEqual({ canWithdraw, canExit });
+    }
+  });
+  test('partial spending keeps actions through live change, but zero-value change does not', () => {
+    const spent = note(1);
+    const change = note(2, { status: 'ACTIVE', label: pad(BigInt(LABEL)) });
+    expect(stellarIncomingActions(row, [spent, change], ME)).toEqual({ canWithdraw: true, canExit: true });
+    expect(stellarIncomingActions(row, [spent, { ...change, value: '0x0' }], ME)).toEqual({ canWithdraw: false, canExit: false });
+  });
+  test('other owners, assets, lineages and unowned notes cannot enable actions', () => {
+    for (const n of [note(1, { status: 'ACTIVE', ownerAddress: OTHER }), note(1, { status: 'ACTIVE', isOwned: false }),
+      note(1, { status: 'ACTIVE', label: '0x99' }), note(1, { status: 'ACTIVE', tokenId: 'another-asset' })]) {
+      expect(stellarIncomingActions(row, [n], ME)).toEqual({ canWithdraw: false, canExit: false });
+    }
+    expect(stellarIncomingActions({ ...row, label: '0x0' }, [note(1, { status: 'ACTIVE', label: '0x0' })], ME)).toEqual({ canWithdraw: false, canExit: false });
+    expect(stellarIncomingActions(row, [note(1, { status: 'ACTIVE' })], null)).toEqual({ canWithdraw: false, canExit: false });
+  });
+  test('sender deposit-for, outgoing transfers and other chains retain their existing rules', () => {
+    for (const otherRow of [{ ...row, type: 'Deposit' }, { ...row, direction: 'out' as const }, { ...row, chainId: 1 }]) {
+      expect(stellarIncomingActions(otherRow, [note(1, { status: 'ACTIVE' })], ME)).toEqual({ canWithdraw: false, canExit: false });
+    }
   });
 });
