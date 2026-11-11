@@ -31,7 +31,13 @@ const FIELD = '[data-testid="pool-amount-input"]';
 const TABS = ['Withdraw', 'Transfer'] as const;
 const hex32 = () => `0x${randomBytes(32).toString('hex')}`;
 
-const s = await launch('pool-share-amount', { guardScope: '[role="dialog"], [role="alert"], [role="status"]' });
+// Narrower than SPLIT_MIN_WIDTH (1024): from there up the pool page drops its own
+// action panel (the shield widget in the left column carries the actions), so the
+// field this smoke reads never mounts at the harness default of 1440.
+const s = await launch('pool-share-amount', {
+  guardScope: '[role="dialog"], [role="alert"], [role="status"]',
+  viewport: { width: 960, height: 1100 },
+});
 const { page, address } = s;
 const rates = trackShareRates(page);
 
