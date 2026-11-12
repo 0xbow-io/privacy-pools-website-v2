@@ -39,7 +39,8 @@ build secret is necessary to reproduce it. This bundle is its own public build
 profile; it does not claim byte identity with an independently built Vercel deploy.
 
 The script uses at most 8 GiB memory and 1.8 CPUs per container and serializes both
-builds. `--sudo` is available locally if Docker requires it. Circuit inputs may be
+builds. `--sudo` is available locally if Docker requires it. `--host-network` is available for hosts whose Docker bridge cannot reach npm;
+it changes container networking, not build inputs. Circuit inputs may be
 recovered from the configured first-party artifact host only after checking their
 hashes against the Git LFS pointers. A digest mismatch stops the build.
 
@@ -72,7 +73,8 @@ SHA-256 and site CID. It verifies the publisher, not the correctness of the buil
 
 After the chain, registry and owner are agreed, compile/test that target with
 Solidity 0.8.24 (no via-IR), deploy through the approved multisig process and verify
-the deployed code. Then prepare a Safe Transaction Builder file offline:
+the deployed code. With repository dependencies installed (`bun install --frozen-lockfile`),
+prepare a Safe Transaction Builder file offline:
 
 ```sh
 node scripts/release/anchor-data.mjs release-manifest.json REGISTRY_ADDRESS CHAIN_ID anchor.json

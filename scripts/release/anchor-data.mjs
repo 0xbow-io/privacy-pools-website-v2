@@ -3,7 +3,7 @@ import { encodeFunctionData, isAddress } from 'viem';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { sha256 } from './static-files.mjs';
 const [manifestPath, registry, chainId, output] = process.argv.slice(2);
-if (!manifestPath || !isAddress(registry ?? '') || !/^[1-9]\d*$/.test(chainId ?? '') || !output) throw new Error('Usage: node anchor-data.mjs <release-manifest.json> <registry-address> <chain-id> <output.json>');
+if (!manifestPath || (!isAddress(registry ?? '') || /^0x0{40}$/i.test(registry)) || !/^[1-9]\d*$/.test(chainId ?? '') || !output) throw new Error('Usage: node anchor-data.mjs <release-manifest.json> <registry-address> <chain-id> <output.json>');
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
 if (!/^[0-9a-f]{40}$/.test(manifest.commit) || !/^b[a-z2-7]+$/.test(manifest.siteCid ?? '') || !/^\d+\.\d+\.\d+$/.test(manifest.version)) throw new Error('Invalid release manifest');
 const hash = await sha256(manifestPath);

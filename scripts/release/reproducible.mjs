@@ -64,7 +64,7 @@ for (const pass of ['first', 'second']) {
     SOURCE_DATE_EPOCH: String(epoch), HOME: '/tmp/release-home',
     EXPO_PUBLIC_ARTIFACTS_VERSION: '', ...environment,
   };
-  await docker(['run', '--rm', '--platform=linux/amd64', '--memory=8g', '--memory-swap=9g', '--cpus=1.8',
+  await docker(['run', '--rm', '--platform=linux/amd64', ...(process.argv.includes('--host-network') ? ['--network=host'] : []), '--memory=8g', '--memory-swap=9g', '--cpus=1.8',
     '--user', `${process.getuid()}:${process.getgid()}`, '-v', `${source}:/src`, '-v', `${artifacts}:/output`,
     ...Object.entries(env).flatMap(([key, value]) => ['-e', `${key}=${value}`]), image, 'bash', '-c',
     'umask 022 && mkdir -p "$HOME" && NODE_ENV=development bun install --frozen-lockfile && bun run build:web && node scripts/release/package-static.mjs']);
