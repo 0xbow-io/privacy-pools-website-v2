@@ -11,7 +11,7 @@ export type StellarWalletKind = 'freighter' | 'metamask';
 export const STELLAR_WALLET_KIND_KEY = 'ppv2_stellar_wallet';
 
 export const STELLAR_WALLET_NAMES: Record<StellarWalletKind, string> = {
-  freighter: 'Freighter',
+  freighter: 'Varial',
   metamask: 'MetaMask',
 };
 

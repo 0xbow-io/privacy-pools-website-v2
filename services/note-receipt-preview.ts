@@ -30,6 +30,32 @@ export function previewNoteReceiptUrl(url: string): string {
   const at = url.indexOf(marker);
   // `/import-note#<payload>`, or `/import-note/<payload>` in older links.
   const separator = url[at + marker.length];
+  if (at !== -1 && separator === '?') return previewStellarReceiptUrl(url, at + marker.length);
   if (at === -1 || (separator !== '#' && separator !== '/')) return '…';
   return `${url.slice(0, at + marker.length + 1)}…`;
+}
+
+// The only routing params a Stellar link carries (services/stellar/stellar-link.ts),
+// and the shape of a value they may hold. Anything else is not ours to echo.
+const STELLAR_ROUTING_KEYS = new Set(['stellar', 'env']);
+const ROUTING_VALUE = /^[A-Za-z0-9-]{1,32}$/;
+
+/**
+ * `/import-note?stellar=true&env=prod#<payload>`: the routing params sit
+ * between the path and the fragment. Shows everything up to and including the
+ * `#` only when every query param is a known routing key with a short plain
+ * value. Otherwise fails closed, like the rest of this file. `queryAt` is the
+ * index of the `?`.
+ */
+function previewStellarReceiptUrl(url: string, queryAt: number): string {
+  const hashAt = url.indexOf('#', queryAt);
+  if (hashAt === -1) return '…';
+  const query = url.slice(queryAt + 1, hashAt);
+  if (!query) return '…';
+  for (const pair of query.split('&')) {
+    const eq = pair.indexOf('=');
+    if (eq === -1) return '…';
+    if (!STELLAR_ROUTING_KEYS.has(pair.slice(0, eq)) || !ROUTING_VALUE.test(pair.slice(eq + 1))) return '…';
+  }
+  return `${url.slice(0, hashAt + 1)}…`;
 }

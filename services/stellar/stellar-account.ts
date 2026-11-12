@@ -102,7 +102,7 @@ import { CLAIMED_NOTES_BASE_KEY, DEPOSITS_FOR_BASE_KEY, readClaimedNotes, readDe
 import { isStellarAccountAddress, requestStates, type StellarRequestState } from '@/services/stellar/stellar-request';
 import type { StellarSdkPaymentRequest } from '@/services/payment-request-codec';
 import { envScopedStorageKey } from '@/config/app-environment';
-import { buildStellarNoteOrigins, reconstructStellarSpends, type StellarNoteOrigins } from '@/services/stellar-activity';
+import { buildStellarNoteOrigins, canonicalCommitment, reconstructStellarSpends, type StellarNoteOrigins } from '@/services/stellar-activity';
 import { withSigningWindow } from '@/services/stellar/stellar-signing-window';
 
 import { rowStatus, type RowStatus } from '@/services/registration-rows';
@@ -130,7 +130,7 @@ export interface StellarAccountSnapshot {
   /**
    * Where each of these notes came from on chain (deposit + depositor, or a
    * transact output) and when, read from the pool's event history in bulk on
-   * the sync clock. Null until the first sync reads it. Local derivation input
+   * the sync clock, or from our own confirmed deposit receipt. Local derivation input
    * for the activity rows (services/stellar-activity.ts).
    */
   noteOrigins: StellarNoteOrigins | null;
@@ -186,6 +186,8 @@ class StellarAccount {
   // Bumped whenever the bound address changes: a flow started for one account
   // refuses to submit anything after another account binds.
   private generation = 0;
+  // The generation whose registration was confirmed on chain (-1: none yet).
+  private registeredGeneration = -1;
   private registrationGuard: (() => void) | null = null;
   // Memory only, like the session's own keys: matches this account's spends
   // in the pool's Transacted events (services/stellar-activity.ts).
@@ -370,7 +372,7 @@ class StellarAccount {
       // Required by the config schema even with an ASP override; never fetched.
       ipfsGatewayUrl: 'http://unused.invalid',
       protocolKeys,
-      // Each transaction's validity window starts when Freighter is asked to sign it
+      // Each transaction's validity window starts when Varial is asked to sign it
       // (stellar-signing-window.ts). The key derivation above signs through the bare signer.
       walletInteractor: { type: 'freighter', provider: withSigningWindow({
         ...signer,
@@ -551,7 +553,7 @@ class StellarAccount {
           // it, so how many notes discovery finds changes no request.
           const rpc = this.rpc;
           const pass = <T,>(fn: () => Promise<T>) => (rpc ? rpc.withEventPage(fn) : fn());
-          const { exported, registered, noteOrigins } = await pass(async () => {
+          const { registered, noteOrigins } = await pass(async () => {
             await session.discoverNotes();
             if (address) await this.persist(session, address);
             const [exportedNow, registeredNow] = await Promise.all([
@@ -565,9 +567,17 @@ class StellarAccount {
               console.warn('[stellar] could not read the pool event history for activity', error);
               return null;
             });
-            return { exported: exportedNow, registered: registeredNow, noteOrigins: origins };
+            return { registered: registeredNow, noteOrigins: origins };
           });
+          // A deposit may finish while the event history is being read. Export
+          // again locally so this sync cannot replace its note with an older view.
+          const exported = await session.exportAccount();
           if (this.snapshot.address !== address) return;
+          if (noteOrigins) {
+            // Confirmed origins are immutable; a lagging index must not erase
+            // a receipt we already have. Indexed entries supply canonical times.
+            noteOrigins.byCommitment = { ...this.snapshot.noteOrigins?.byCommitment, ...noteOrigins.byCommitment };
+          }
           this.set({
             notes: exported.notes,
             paymentRequests: requestStates(exported),
@@ -617,6 +627,11 @@ class StellarAccount {
   }
 
   private async ensureRegistered(session: StellarPoolSession, generation: number, onStage?: StageListener, shouldContinue: () => boolean = () => true) {
+    if (this.registeredGeneration === generation && this.snapshot.registrationStatus === 'compatible') {
+      this.assertStillBound(generation);
+      if (!shouldContinue()) throw new Error('Superseded');
+      return;
+    }
     let attempted = false;
     try {
       await registerStellarAccount({
@@ -641,6 +656,7 @@ class StellarAccount {
       });
       this.assertStillBound(generation);
       if (!shouldContinue()) throw new Error('Superseded');
+      this.registeredGeneration = generation;
       this.set({ registered: true, registrationStatus: 'compatible' });
     } catch (error) {
       // Closing cannot undo a submitted step. Keep its status for the card,
@@ -752,6 +768,22 @@ class StellarAccount {
       }
       onStage?.('syncing');
       await this.refreshLocal(session, address);
+      if (!params.recipient && this.generation === generation) {
+        const closedAt = Date.parse(receipt.logs[0]?.ledgerClosedAt ?? '');
+        const previous = this.snapshot.noteOrigins;
+        this.set({ noteOrigins: {
+          ...previous,
+          complete: previous?.complete ?? false,
+          byCommitment: {
+            ...previous?.byCommitment,
+            [canonicalCommitment(prepared.pendingNote.commitment)]: {
+              kind: 'deposit', depositor: address, txHash,
+              ledger: Number(BigInt(receipt.blockNumber)),
+              time: Number.isFinite(closedAt) ? Math.floor(closedAt / 1000) : 0,
+            },
+          },
+        } });
+      }
       return {
         txHash,
         claimNotes: claim ? claim.notes.map((n) => ({ ...n, txHash })) : null,
@@ -955,7 +987,7 @@ class StellarAccount {
     return this.enqueue(async () => {
       const { address, generation } = this.requireSigner();
       if (notes.some((n) => n.ownerAddress !== address)) {
-        throw new Error('This link is for another Stellar account. Switch accounts in Freighter.');
+        throw new Error('This link is for another Stellar account. Switch accounts in your wallet.');
       }
       const session = await this.ensureSession();
       this.assertStillBound(generation);
@@ -984,7 +1016,7 @@ class StellarAccount {
    * Saves claimed notes to this account for good: a private transfer to
    * itself, announced to its own viewing key, so any device finds it by sync
    * and the link is no longer needed. Registers the account first if needed
-   * (Freighter pays; relayed registration is not available on Stellar).
+   * (Varial pays; relayed registration is not available on Stellar).
    */
   keepClaim(commitments: readonly Hex[], params?: { onStage?: StageListener; shouldContinue?: () => boolean }) {
     return this.enqueue(async () => {

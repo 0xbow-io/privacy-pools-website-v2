@@ -12,7 +12,6 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import { StellarWalletOption } from '@/components/stellar-wallet-option';
-import { useConnectStellarWallet, useStellarWallet } from '@/components/stellar-wallet-provider';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { AccountKeySignIn } from '@/components/account-key-sign-in';
 import { useMobileAccountKeys } from '@/components/mobile-account-keys-context';
@@ -574,32 +573,8 @@ export function WalletConnectModalProvider({ children }: { children: ReactNode }
   const { options, shownOptions, moreCount, moreLabel, expandMore, preparingLinks, error, wcUri, wcView, showQr, reset, isMobile, prepare, select, isOptionPending, isOptionDisabled, notOpened } = useWalletPicker(onConnected);
   const { height: windowHeight } = useWindowDimensions();
 
-  // On the Stellar chain there is nothing for the EVM picker to connect:
-  // every "Connect Wallet" goes straight to Freighter (or to get it).
-  // Read through refs so `open` keeps one identity: callers open the picker
-  // from effects keyed on it (the /modal route), and a Stellar wallet state
-  // change must not re-fire them.
   const { isStellar: activeIsStellar } = useChainRouter();
-  const connectFreighter = useConnectStellarWallet();
-  const stellarWallet = useStellarWallet();
-  const stellarRef = useRef({ activeIsStellar, connectFreighter, stellarWallet });
-  stellarRef.current = { activeIsStellar, connectFreighter, stellarWallet };
   const open = useCallback(async () => {
-    const { activeIsStellar: onStellar, connectFreighter: connectStellar, stellarWallet: freighter } = stellarRef.current;
-    if (onStellar) {
-      if (freighter.isConnected) return;
-      // A single detected wallet connects in one step; with both installed the user picks. Otherwise show the picker
-      // with the Freighter row: going straight to window.open(freighter.app)
-      // is blocked as a popup when nothing was clicked (a ?modal=connect
-      // link), and the user saw nothing at all.
-      if (freighter.availabilityChecked && freighter.isAvailable && !(freighter.walletAvailable.freighter && freighter.walletAvailable.metamask)) {
-        await connectStellar();
-        return;
-      }
-      setShowAccountKey(false);
-      setIsOpen(true);
-      return;
-    }
     reset();
     setShowAccountKey(false);
     setIsOpen(true);
@@ -671,11 +646,7 @@ export function WalletConnectModalProvider({ children }: { children: ReactNode }
                 </Pressable>
               </>
             ) : activeIsStellar ? (
-              // Stellar connects through Freighter only; the EVM wallets and
-              // the account key do not apply here.
-              <View className="gap-[8px]">
-                <StellarWalletOption className="min-h-[68px] flex-row items-center gap-[12px] rounded-[8px] border border-border-light bg-background px-[16px] py-[14px] active:opacity-[0.85]" onConnected={() => setIsOpen(false)} />
-              </View>
+              null
             ) : wcUri ? (
               wcView === 'wallets'
                 ? <WalletDeepLinkList uri={wcUri} onShowQr={showQr} onBack={reset} />
@@ -703,7 +674,6 @@ export function WalletConnectModalProvider({ children }: { children: ReactNode }
                     </Pressable>
                   ))}
                 </View>
-                <StellarWalletOption className="min-h-[68px] flex-row items-center gap-[12px] rounded-[8px] border border-border-light bg-background px-[16px] py-[14px] active:opacity-[0.85]" onConnected={() => setIsOpen(false)} />
                 <Pressable
                   onPress={() => setShowAccountKey(true)}
                   accessibilityRole="button"
@@ -740,7 +710,6 @@ export function WalletConnectModalProvider({ children }: { children: ReactNode }
                 </ScrollView>
                 {moreCount > 0 && <MoreWalletsButton label={moreLabel} onPress={expandMore} />}
                 {notOpened && <WalletNotOpened {...notOpened} />}
-                <StellarWalletOption className="min-h-[68px] flex-row items-center gap-[12px] rounded-[8px] border border-border-light bg-background px-[16px] py-[14px] active:opacity-[0.85]" onConnected={() => setIsOpen(false)} />
                 {/* Wallet-less path: sign in with an exported account key. */}
                 <Pressable onPress={() => setShowAccountKey(true)} hitSlop={8}>
                   <Text className="py-[6px] text-center font-pp-medium text-[12px] text-text-secondary underline">
@@ -749,6 +718,8 @@ export function WalletConnectModalProvider({ children }: { children: ReactNode }
                 </Pressable>
               </View>
             )}
+
+            {!showAccountKey && !wcUri && <StellarWalletOption className="min-h-[68px] flex-row items-center gap-[12px] rounded-[8px] border border-border-light bg-background px-[16px] py-[14px] active:opacity-[0.85]" onConnected={() => setIsOpen(false)} />}
 
             {/* Native app: bring an account key over from the web by QR. */}
             {mobileAccountKeys.available && !showAccountKey && !wcUri ? (

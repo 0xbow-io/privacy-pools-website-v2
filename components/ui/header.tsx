@@ -25,7 +25,8 @@ import { useTheme } from '@/components/theme-provider';
 import { Logo } from './logo';
 import { VersionSwitch } from './version-switch';
 import { ChainLogo, chainLogoChainFor, type ChainLogoChain } from './chain-logo';
-import { useConnectStellarWallet, useStellarWallet } from '@/components/stellar-wallet-provider';
+import { useWalletConnectModal } from '@/components/wallet-connect-modal-provider';
+import { useStellarWallet } from '@/components/stellar-wallet-provider';
 import { useSupportedWalletConnection } from '@/hooks/use-supported-wallet-connection';
 import { usePoolSession } from '@/hooks/use-pool-session';
 import { useChainRouter } from '@/hooks/use-chain-router';
@@ -150,7 +151,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
   // affordance below (ENS, finish-setup, account-key rows) keys off this.
   const connectedIsNonEvm = connectedIsSuiWallet || connectedIsStellar;
   const stellarWallet = useStellarWallet();
-  const connectFreighter = useConnectStellarWallet();
+  const { open: openStellarWalletPicker } = useWalletConnectModal();
   const { isConnected: evmConnected } = useAccount();
   const suiAccount = useCurrentAccount();
   const { disconnect } = useDisconnect();
@@ -409,8 +410,8 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
 
   const handleConnectWallet = () => {
     if (activeIsStellar) {
-      // Stellar: Freighter. Not installed -> send the user to get it.
-      void connectFreighter();
+      // Use the picker directly; an unrelated EVM connection must not switch chains.
+      void openStellarWalletPicker();
     } else if (activeIsSui) {
       // Sui: connect via the Wallet Standard (Slush et al). Prefer Slush when
       // several wallets are installed; if none, send the user to get Slush.
@@ -799,7 +800,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                         </Pressable>
                       )}
                       {/* A passkey session has no wallet signature to export as an account key,
-                          and neither has a Freighter session (the EVM account key
+                          and neither has a Varial session (the EVM account key
                           it would export does not exist). */}
                       {!passkeyActive && !(connectedIsStellar && !keySession) && (
                       <Pressable
@@ -813,7 +814,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                       </Pressable>
                       )}
                       {/* Only a connected EVM wallet can sign the ASP's SIWE message: a key,
-                          passkey, Sui or Freighter session has no such wallet to check. */}
+                          passkey, Sui or Varial session has no such wallet to check. */}
                       {evmConnected && !keySession && !passkeyActive && !connectedIsNonEvm && (
                       <Pressable
                         className="flex-row items-center gap-[10px] rounded-pill px-[12px] py-[10px] hover:bg-background-secondary"
@@ -829,7 +830,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                       )}
                       {/* Web only: the phone makes the code, this shows the QR.
                           exportAccountKey needs an EVM wallet or an imported key,
-                          so a Sui or Freighter wallet session gets no row. */}
+                          so a Sui or Varial wallet session gets no row. */}
                       {Platform.OS === 'web' && !passkeyActive && !(connectedIsNonEvm && !keySession) && (
                       <Pressable
                         className="flex-row items-center gap-[10px] rounded-pill px-[12px] py-[10px] hover:bg-background-secondary"
@@ -868,7 +869,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                           EVM wallet sessions bind to the wagmi address, so a
                           key-only or Sui session would export/import against
                           the wrong identity. Stellar has its own sealed backup
-                          for the Freighter account. */}
+                          for the Varial account. */}
                       {((connectedIsStellar && stellarWallet.isConnected) || (isConnected && !connectedIsNonEvm && !keySession)) && (<>
                       <Pressable
                         className="flex-row items-center gap-[10px] rounded-pill px-[12px] py-[10px] hover:bg-background-secondary"

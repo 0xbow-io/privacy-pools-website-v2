@@ -1,98 +1,114 @@
-/**
- * "Freighter · Stellar Testnet" and "MetaMask · Stellar" rows for the wallet pickers.
- *
- * The pickers list wagmi connectors, which cannot connect a Stellar wallet,
- * and unlike dapp-kit's autoConnect for Sui nothing else offers Freighter to a
- * first-time visitor. Shown where Stellar is served and selectable (debug mode
- * or ?stellar=true, the same gate as the chain selector); picking one selects the Stellar chain
- * and asks that wallet for access. The MetaMask row appears only when the
- * extension is found. MetaMask signs Stellar mainnet only, so connecting it
- * on Testnet says so (see services/stellar/metamask-stellar.ts).
- */
-import React, { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+/** Stellar extensions inside the existing wallet picker. */
+import React, { useEffect, useRef, useState } from 'react';
+import { Image, Linking, Platform, Pressable, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useStellarWallet } from '@/components/stellar-wallet-provider';
-import { useToast } from '@/components/toast-provider';
 import { useDebug } from '@/components/debug-provider';
 import { isChainSelectable, STELLAR_TESTNET_ID, supportedChainIds } from '@/config/chains';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { ChainLogo } from '@/components/ui/chain-logo';
 import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
-import type { StellarWalletKind } from '@/services/stellar/stellar-wallet-choice';
+import { STELLAR_WALLET_NAMES, type StellarWalletKind } from '@/services/stellar/stellar-wallet-choice';
+import { useToast } from '@/components/toast-provider';
 
 export function StellarWalletOption({ className, onConnected }: { className: string; onConnected?: () => void }) {
   const { isDebugEnabled } = useDebug();
+  const enabled = supportedChainIds.includes(STELLAR_TESTNET_ID) && isChainSelectable(STELLAR_TESTNET_ID, isDebugEnabled);
   const wallet = useStellarWallet();
-
-  if (!supportedChainIds.includes(STELLAR_TESTNET_ID) || !isChainSelectable(STELLAR_TESTNET_ID, isDebugEnabled)) return null;
-
-  return (
-    <>
-      <StellarWalletRow kind="freighter" className={className} onConnected={onConnected} />
-      {wallet.walletAvailable.metamask ? <StellarWalletRow kind="metamask" className={className} onConnected={onConnected} /> : null}
-    </>
-  );
+  const { selectChain, isStellar } = useChainRouter();
+  if (!enabled || (!isStellar && !wallet.isConnected)) return null;
+  return <>
+    <StellarWalletRow kind="freighter" className={className} onConnected={onConnected} />
+    {wallet.walletAvailable.metamask && !wallet.isDevBurner ? <StellarWalletRow kind="metamask" className={className} onConnected={onConnected} /> : null}
+  </>;
 }
 
 function StellarWalletRow({ kind, className, onConnected }: { kind: StellarWalletKind; className: string; onConnected?: () => void }) {
   const wallet = useStellarWallet();
-  const { toast } = useToast();
   const { selectChain } = useChainRouter();
+  const { toast } = useToast();
+  const name = STELLAR_WALLET_NAMES[kind];
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const [pending, setPending] = useState(false);
-  const [failure, setFailure] = useState<string | null>(null);
-  const isMetaMask = kind === 'metamask';
-  const available = wallet.walletAvailable[kind];
+  const [error, setError] = useState<string | null>(null);
+  const { cancelConnect, isDevBurner } = wallet;
+  const available = isDevBurner ? true : Platform.OS !== 'web' ? false
+    : wallet.availabilityChecked ? wallet.walletAvailable[kind] : null;
+  const attempt = useRef({ mounted: true, pending: false });
+  useEffect(() => {
+    const current = attempt.current;
+    current.mounted = true;
+    return () => {
+      current.mounted = false;
+      if (current.pending) cancelConnect();
+    };
+  }, [cancelConnect]);
 
   const onPress = async () => {
-    // Only a finished probe that found nothing means 'not installed'.
-    if (!isMetaMask && wallet.availabilityChecked && !available) {
-      if (typeof window !== 'undefined') window.open('https://www.freighter.app', '_blank', 'noopener');
+    if (attempt.current.pending) return;
+    if (available === false) {
+      if (kind === 'metamask') { setError('MetaMask is not available.'); return; }
+      if (Platform.OS === 'web' && typeof window !== 'undefined') window.open('https://varialwallet.com', '_blank', 'noopener,noreferrer');
+      else void Linking.openURL('https://varialwallet.com').catch(() => setError('Could not open the Varial website.'));
       return;
     }
+    attempt.current.pending = true;
     setPending(true);
+    setError(null);
     try {
       const outcome = await selectChain(STELLAR_TESTNET_ID);
-      if (outcome !== 'committed') return;
-      setFailure(null);
-      const { address, notice, error } = await wallet.connectDetailed(kind);
-      if (!address) setFailure(error);
-      if (address && notice) toast({ title: notice, variant: 'destructive' });
-      if (address) onConnected?.();
+      if (outcome !== 'committed' || !attempt.current.mounted) return;
+      const { address, error, notice } = await wallet.connectDetailed(kind);
+      if (notice && attempt.current.mounted) toast({ title: notice, variant: 'warning' });
+      if (attempt.current.mounted) setError(error);
+      attempt.current.pending = false;
+      if (address && attempt.current.mounted) onConnected?.();
+    } catch (error) {
+      if (attempt.current.mounted) setError(error instanceof Error ? error.message : `Could not connect to ${name}. Try again.`);
     } finally {
-      setPending(false);
+      attempt.current.pending = false;
+      if (attempt.current.mounted) setPending(false);
     }
   };
 
   return (
     <Pressable
       onPress={() => { void onPress(); }}
-      disabled={pending}
+      disabled={pending || wallet.status === 'connecting'}
       accessibilityRole="button"
-      accessibilityState={{ disabled: pending, busy: pending }}
+      accessibilityState={{ disabled: pending || wallet.status === 'connecting', busy: pending }}
       className={`${className} ${pending ? 'opacity-50' : 'opacity-100'}`}
     >
       <View className="h-[36px] w-[36px] items-center justify-center overflow-hidden rounded-[10px] bg-card-background">
-        {isMetaMask
-          // nw-keep(data-color): glyph color is a theme token into the vector-icon sink
-          ? <Ionicons name="wallet-outline" size={22} color={colors.textSecondary} />
-          : <ChainLogo chain="stellar-testnet" size={24} />}
+        {kind === 'metamask' ? <Ionicons name="wallet-outline" size={24} color={colors.textMuted} /> : !isDevBurner ? (
+          <Image
+            source={colorScheme === 'dark'
+              ? require('@/assets/images/wallets/varial-dark.png')
+              : require('@/assets/images/wallets/varial.png')}
+            // nw-keep(third-party-style-api): React Native Web Image's intrinsic 128px size overrides class dimensions; explicit style prevents clipping.
+            style={{ width: 28, height: 28 }}
+            resizeMode="contain"
+            accessibilityElementsHidden
+          />
+        ) : <ChainLogo chain="stellar-testnet" size={24} />}
       </View>
-      <View className="flex-1">
-        <Text className="font-pp-medium text-[15px] text-text">
-          {isMetaMask ? 'MetaMask' : wallet.isDevBurner ? 'Stellar test key' : 'Freighter'}
+      <View className="min-w-0 flex-1 gap-[2px]">
+        <Text className="font-pp-medium text-[14px] text-text" numberOfLines={1}>{wallet.isDevBurner ? 'Stellar test key' : name}</Text>
+        <Text className="font-pp-regular text-[12px] text-text-secondary" numberOfLines={1}>
+          {pending ? 'Connecting…' : kind === 'metamask' ? 'Stellar Mainnet only · Testnet unavailable' : isDevBurner ? 'Stellar Testnet' : available === false ? 'Get Varial for Stellar Testnet' : 'Browser extension · Stellar Testnet'}
         </Text>
-        <Text className="font-pp-regular text-[12px] text-text-secondary">
-          {isMetaMask ? 'Stellar mainnet only' : available ? 'Stellar Testnet' : 'Get Freighter for Stellar Testnet'}
-        </Text>
-        {failure ? <Text className="font-pp-regular text-[12px] text-[#E11D48]">{failure}</Text> : null}
+        {error ? <Text className="font-pp-regular text-[12px] text-[#E11D48]">{error}</Text> : null}
       </View>
+      {available === true && !isDevBurner && !pending && wallet.status !== 'connecting' && (
+        <View className="rounded-control bg-background-secondary px-[7px] py-[4px]">
+          <Text className="font-pp-medium text-[10px] text-text-secondary">Installed</Text>
+        </View>
+      )}
       {/* nw-keep(data-color): glyph color is a theme token into the vector-icon sink */}
-      <Ionicons name={isMetaMask || available ? 'chevron-forward' : 'open-outline'} size={16} color={colors.textSecondary} />
+      <Ionicons name="chevron-forward" size={15} color={colors.textMuted} />
     </Pressable>
   );
 }

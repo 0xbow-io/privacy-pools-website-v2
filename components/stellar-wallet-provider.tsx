@@ -1,11 +1,11 @@
 /**
- * Stellar wallet provider: Freighter or MetaMask connection state for the Stellar chain.
+ * Stellar wallet provider: Varial or MetaMask connection state for the Stellar chain.
  *
  * The Stellar counterpart of components/sui-provider.tsx (dapp-kit's
  * `WalletProvider autoConnect`): holds the connected account, reconnects
  * silently only when this browser connected before (to the wallet it used, remembered in
  * ppv2_stellar_wallet), and follows the wallet's
- * own account and network switches (services/stellar/freighter-watch.ts, metamask-stellar.ts). It exposes the account as a
+ * own account and network switches (services/stellar/varial-watch.ts, metamask-stellar.ts). It exposes the account as a
  * `StellarWalletProvider`, the bare-value signer contract the Stellar SDK's
  * `FreighterWalletInteractor` signs through (network check included).
  *
@@ -18,8 +18,8 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import type { StellarWalletProvider as StellarSigner } from '@privacy-pools-v2/stellar-sdk';
 
 import { STELLAR_TESTNET_NETWORK } from '@/config/stellar-deployment';
-import { useToast } from '@/components/toast-provider';
-import { watchFreighter, type FreighterAccount } from '@/services/stellar/freighter-watch';
+import { Platform } from 'react-native';
+import { watchVarial, type VarialAccount } from '@/services/stellar/varial-watch';
 import { metaMaskNetworkMismatchMessage, metaMaskSigner, watchMetaMask, type MetaMaskStellarApi } from '@/services/stellar/metamask-stellar';
 import {
   readStellarWalletKind,
@@ -29,7 +29,7 @@ import {
 } from '@/services/stellar/stellar-wallet-choice';
 import { setStellarCopyWallet } from '@/services/stellar/stellar-copy';
 
-type FreighterApi = typeof import('@stellar/freighter-api');
+type VarialApi = typeof import('@stellar/varial-sdk');
 
 const CONNECTED_FLAG_KEY = 'ppv2_stellar_connected';
 const WATCH_INTERVAL_MS = 3000;
@@ -57,7 +57,7 @@ export interface StellarWalletContextValue {
    * means "not known yet", not "not installed".
    */
   availabilityChecked: boolean;
-  /** Dev burner keypair in use instead of Freighter. */
+  /** Dev burner keypair in use instead of a wallet. */
   isDevBurner: boolean;
   error: string | null;
   /** `kind` defaults to the wallet used last, else the one that is installed. */
@@ -67,6 +67,7 @@ export interface StellarWalletContextValue {
    * `notice` when it connected but cannot sign for this app (network mismatch).
    */
   connectDetailed: (kind?: StellarWalletKind) => Promise<{ address: string | null; error: string | null; notice: string | null }>;
+  cancelConnect: () => void;
   disconnect: () => void;
   /** Signer for the SDK; null until connected. */
   signer: StellarSigner | null;
@@ -74,10 +75,10 @@ export interface StellarWalletContextValue {
 
 const StellarWalletContext = createContext<StellarWalletContextValue | null>(null);
 
-let freighterPromise: Promise<FreighterApi> | null = null;
-function loadFreighter(): Promise<FreighterApi> {
-  freighterPromise ??= import('@stellar/freighter-api');
-  return freighterPromise;
+let varialPromise: Promise<VarialApi> | null = null;
+function loadVarial(): Promise<VarialApi> {
+  varialPromise ??= import('@stellar/varial-sdk');
+  return varialPromise;
 }
 
 type MetaMaskModule = typeof import('@metamask/connect-stellar');
@@ -107,10 +108,10 @@ async function isMetaMaskInstalled(): Promise<boolean> {
 }
 
 /**
- * freighter-api also answers "not connected" when Freighter does not reply within 2 s (a cold
+ * The SDK also answers "not connected" when Varial does not reply within 2 s (a cold
  * extension), so ask once more before calling it not installed.
  */
-async function isFreighterInstalled(api: FreighterApi): Promise<boolean> {
+async function isVarialInstalled(api: VarialApi): Promise<boolean> {
   if ((await api.isConnected()).isConnected) return true;
   await new Promise((resolve) => setTimeout(resolve, 1_500));
   return (await api.isConnected()).isConnected;
@@ -140,13 +141,13 @@ function isLocalHost(): boolean {
 
 const DEV_SECRET = (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_STELLAR_DEV_SECRET) || '';
 
-/** The Freighter signer, adapted to the SDK contract (errors thrown, not returned). */
-function freighterSigner(api: FreighterApi): StellarSigner {
+/** Adapt Varial's returned errors to the Stellar SDK's throwing signer contract. */
+function varialSigner(api: VarialApi): StellarSigner {
   return {
     async getAddress() {
       const result = await api.getAddress();
       if (result.error) throw new Error(result.error.message);
-      if (!result.address) throw new Error('Freighter is locked or not connected');
+      if (!result.address) throw new Error('Varial is locked or not connected');
       return result.address;
     },
     async getNetworkPassphrase() {
@@ -196,6 +197,9 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
   const lastErrorRef = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [signer, setSigner] = useState<StellarSigner | null>(null);
+  const generationRef = useRef(0);
+  const busyRef = useRef(false);
+  const connectedAddressRef = useRef<string | null>(null);
   const watcherRef = useRef<{ stop: () => void } | null>(null);
 
   const stopWatching = useCallback(() => {
@@ -204,6 +208,7 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
   }, []);
 
   const adopt = useCallback((next: { address: string; passphrase: string | null; signer: StellarSigner }) => {
+    connectedAddressRef.current = next.address;
     setAddress(next.address);
     setNetworkPassphrase(next.passphrase);
     setSigner(next.signer);
@@ -212,6 +217,7 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
   }, []);
 
   const drop = useCallback(() => {
+    connectedAddressRef.current = null;
     setAddress(null);
     setNetworkPassphrase(null);
     setSigner(null);
@@ -219,67 +225,77 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
   }, []);
 
   const reset = useCallback(() => {
+    generationRef.current++;
+    busyRef.current = false;
     stopWatching();
     drop();
   }, [drop, stopWatching]);
 
-  // Follows Freighter's account and network until an explicit disconnect. An empty or slow read
-  // is not a disconnect (see services/stellar/freighter-watch.ts); a revoked site is, and watching
-  // continues so an unlock or re-allow reconnects.
-  const watch = useCallback(async (current: FreighterAccount) => {
+  // Preserve passive recovery from a locked wallet and account/network changes.
+  const watch = useCallback(async (current: VarialAccount, generation: number) => {
     if (isDevBurner) return;
     stopWatching();
-    const api = await loadFreighter();
-    const freighter = freighterSigner(api);
-    watcherRef.current = watchFreighter(api, current, {
-      change: (next) => adopt({ ...next, signer: freighter }),
-      revoked: drop,
+    const api = await loadVarial();
+    if (generation !== generationRef.current) return;
+    const signer = varialSigner(api);
+    watcherRef.current = watchVarial(api, current, {
+      change: (next) => {
+        if (generation !== generationRef.current) return;
+        adopt({ ...next, signer });
+      },
+      revoked: () => { if (generation === generationRef.current) drop(); },
     }, WATCH_INTERVAL_MS);
   }, [adopt, drop, isDevBurner, stopWatching]);
 
   // Follows MetaMask's account and network through the adapter's events (no polling).
-  const watchMetaMaskWallet = useCallback((adapter: MetaMaskStellarApi, current: { address: string | null; passphrase: string | null }) => {
+  const watchMetaMaskWallet = useCallback((adapter: MetaMaskStellarApi, current: { address: string | null; passphrase: string | null }, generation: number) => {
     stopWatching();
     const signer = metaMaskSigner(adapter);
     watcherRef.current = watchMetaMask(adapter, current, {
-      change: (next) => adopt({ ...next, signer }),
-      revoked: drop,
+      change: (next) => { if (generation === generationRef.current) adopt({ ...next, signer }); },
+      revoked: () => { if (generation === generationRef.current) drop(); },
     });
   }, [adopt, drop, stopWatching]);
 
-  const connectedAddressRef = useRef<string | null>(null);
-  connectedAddressRef.current = status === 'connected' ? address : null;
   const connectedKindRef = useRef<StellarWalletKind>('freighter');
   const noticeRef = useRef<string | null>(null);
 
-  const connectMetaMask = useCallback(async (interactive: boolean): Promise<string | null> => {
+  const connectMetaMask = useCallback(async (interactive: boolean, generation: number): Promise<string | null> => {
+    const active = () => generation === generationRef.current;
     const installed = await isMetaMaskInstalled();
+    if (!active()) return null;
     setMetaMaskAvailable(installed);
     if (!installed) throw new Error('MetaMask is not installed');
     const adapter = await getMetaMaskAdapter();
+    if (!active()) return null;
     let connectedAddress: string | null = null;
     if (interactive) {
       const access = await adapter.requestAccess();
+      if (!active()) return null;
       if (access.error) throw new Error(access.error.message);
       connectedAddress = access.address || null;
     } else {
       const allowed = await adapter.isAllowed();
+      if (!active()) return null;
       if (!allowed.error && allowed.isAllowed) {
         const read = await adapter.getAddress();
+        if (!active()) return null;
         connectedAddress = !read.error && read.address ? read.address : null;
       }
     }
     if (!connectedAddress) {
-      reset();
+      drop();
       // Silent reconnect: the adapter is still restoring its session, so watch and adopt
       // the account once it reports. Only when MetaMask still allows this site.
       if (!interactive) {
         const allowed = await adapter.isAllowed();
-        if (!allowed.error && allowed.isAllowed) watchMetaMaskWallet(adapter, { address: null, passphrase: null });
+        if (!active()) return null;
+        if (!allowed.error && allowed.isAllowed) watchMetaMaskWallet(adapter, { address: null, passphrase: null }, generation);
       }
       return null;
     }
     const net = await adapter.getNetwork();
+    if (!active()) return null;
     // Unknown (null) rather than '', which would read as a network mismatch.
     const passphrase = net.error ? null : net.networkPassphrase;
     setWalletKind('metamask');
@@ -291,9 +307,9 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
     }
     writeFlag(true);
     writeStellarWalletKind('metamask');
-    watchMetaMaskWallet(adapter, { address: connectedAddress, passphrase });
+    watchMetaMaskWallet(adapter, { address: connectedAddress, passphrase }, generation);
     return connectedAddress;
-  }, [adopt, reset, watchMetaMaskWallet]);
+  }, [adopt, drop, watchMetaMaskWallet]);
 
   const connectWith = useCallback(async (interactive: boolean, wanted?: StellarWalletKind): Promise<string | null> => {
     const kind = wanted ?? readStellarWalletKind();
@@ -303,59 +319,71 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
       if (!wanted || wanted === connectedKindRef.current) return connectedAddressRef.current;
       reset();
     }
+    if (busyRef.current) return null;
+    busyRef.current = true;
+    stopWatching();
+    const generation = ++generationRef.current;
+    const active = () => generation === generationRef.current;
     setStatus('connecting');
     setError(null);
     lastErrorRef.current = null;
     noticeRef.current = null;
     try {
-      if (kind === 'metamask' && !isDevBurner) return await connectMetaMask(interactive);
+      if (kind === 'metamask' && !isDevBurner) return await connectMetaMask(interactive, generation);
       if (isDevBurner) {
         const burner = await devBurnerSigner(DEV_SECRET);
+        if (!active()) return null;
         adopt({ address: burner.address, passphrase: STELLAR_TESTNET_NETWORK.networkPassphrase, signer: burner.signer });
         writeFlag(true);
         return burner.address;
       }
-      const api = await loadFreighter();
-      const installed = await isFreighterInstalled(api);
+      if (Platform.OS !== 'web') throw new Error('Use a browser extension to connect a Stellar wallet.');
+      const api = await loadVarial();
+      const installed = await isVarialInstalled(api);
+      if (!active()) return null;
       setAvailabilityChecked(true);
       if (!installed) {
         setFreighterAvailable(false);
-        throw new Error('Freighter is not installed');
+        throw new Error('Varial is not installed');
       }
       setFreighterAvailable(true);
       const access = interactive ? await api.requestAccess() : await api.getAddress();
+      if (!active()) return null;
       if (access.error && interactive) throw new Error(access.error.message);
       if (access.error || !access.address) {
-        reset();
-        // Silent reconnect: a locked Freighter, or one that did not answer in time, so keep
-        // watching and adopt the account once it reads.
-        if (!interactive) await watch({ address: null, passphrase: null });
+        drop();
+        if (!interactive) await watch({ address: null, passphrase: null }, generation);
         return null;
       }
       const details = await api.getNetworkDetails();
-      // Unknown (null) rather than '', which would read as a network mismatch.
+      if (!active()) return null;
       const passphrase = details.error ? null : details.networkPassphrase;
+      await watch({ address: access.address, passphrase }, generation);
+      if (!active()) return null;
       setWalletKind('freighter');
       connectedKindRef.current = 'freighter';
       setStellarCopyWallet('freighter');
-      adopt({ address: access.address, passphrase, signer: freighterSigner(api) });
+      adopt({ address: access.address, passphrase, signer: varialSigner(api) });
       writeFlag(true);
       writeStellarWalletKind('freighter');
-      await watch({ address: access.address, passphrase });
-      return access.address;
+      return active() ? access.address : null;
     } catch (caught) {
+      if (!active()) return null;
       const message = caught instanceof Error ? caught.message : String(caught);
       reset();
       lastErrorRef.current = message;
       if (interactive) setError(message);
       return null;
+    } finally {
+      if (active()) busyRef.current = false;
     }
-  }, [adopt, connectMetaMask, isDevBurner, reset, watch]);
+  }, [adopt, connectMetaMask, drop, isDevBurner, reset, stopWatching, watch]);
 
   // Availability probe + silent reconnect, once. Only reconnects when this
   // browser connected before, so a bare page load never prompts.
   useEffect(() => {
     let cancelled = false;
+    const generation = generationRef.current;
     (async () => {
       // The wallet used before is the only one a silent reconnect may go to.
       const remembered = isDevBurner ? 'freighter' : readStellarWalletKind();
@@ -364,10 +392,10 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
         const metaMask = await isMetaMaskInstalled();
         if (!cancelled) setMetaMaskAvailable(metaMask);
         if (remembered === 'metamask') {
-          if (!cancelled && metaMask && readFlag()) await connectWith(false, 'metamask');
+          if (!cancelled && generation === generationRef.current && metaMask && readFlag()) await connectWith(false, 'metamask');
           // Freighter is still offered in the picker: probe it, but never connect it.
           try {
-            const installed = await isFreighterInstalled(await loadFreighter());
+            const installed = await isVarialInstalled(await loadVarial());
             if (!cancelled) setFreighterAvailable(installed);
           } catch {
             // a failed probe proves nothing
@@ -377,9 +405,10 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
         }
       }
       if (!isDevBurner) {
+        if (Platform.OS !== 'web') return;
         try {
-          const api = await loadFreighter();
-          const installed = await isFreighterInstalled(api);
+          const api = await loadVarial();
+          const installed = await isVarialInstalled(api);
           if (!cancelled) {
             setFreighterAvailable(installed);
             setAvailabilityChecked(true);
@@ -389,18 +418,18 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
           if (!allowed.isAllowed) return;
         } catch {
           // A failed probe proves nothing: availability stays unknown, so the
-          // next click retries the connect instead of opening freighter.app.
+          // next click retries the connect instead of opening varialwallet.com.
           return;
         }
       }
-      if (!cancelled && readFlag()) await connectWith(false);
+      if (!cancelled && generation === generationRef.current && readFlag()) await connectWith(false);
     })();
     return () => {
       cancelled = true;
     };
   }, [connectWith, isDevBurner]);
 
-  useEffect(() => stopWatching, [stopWatching]);
+  useEffect(() => () => { generationRef.current++; stopWatching(); }, [stopWatching]);
 
   // No explicit choice: the wallet used last; a browser with only MetaMask installed gets MetaMask.
   const defaultKind = useCallback((): StellarWalletKind => {
@@ -421,6 +450,9 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
       void metaMaskAdapter?.disconnect({ revokeSession: false }).catch(() => {});
     }
     reset();
+  }, [reset]);
+  const cancelConnect = useCallback(() => {
+    if (busyRef.current) reset();
   }, [reset]);
 
   const value = useMemo<StellarWalletContextValue>(() => ({
@@ -446,9 +478,10 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
     error,
     connect,
     connectDetailed,
+    cancelConnect,
     disconnect,
     signer,
-  }), [address, status, networkPassphrase, freighterAvailable, metaMaskAvailable, walletKind, availabilityChecked, isDevBurner, error, connect, connectDetailed, disconnect, signer]);
+  }), [address, status, networkPassphrase, freighterAvailable, metaMaskAvailable, walletKind, availabilityChecked, isDevBurner, error, connect, connectDetailed, cancelConnect, disconnect, signer]);
 
   return <StellarWalletContext.Provider value={value}>{children}</StellarWalletContext.Provider>;
 }
@@ -468,6 +501,7 @@ const DISCONNECTED: StellarWalletContextValue = {
   error: null,
   connect: async () => null,
   connectDetailed: async () => ({ address: null, error: null, notice: null }),
+  cancelConnect: () => {},
   disconnect: () => {},
   signer: null,
 };
@@ -475,39 +509,4 @@ const DISCONNECTED: StellarWalletContextValue = {
 /** Stellar wallet state; a disconnected stub when no provider is mounted. */
 export function useStellarWallet(): StellarWalletContextValue {
   return useContext(StellarWalletContext) ?? DISCONNECTED;
-}
-
-const FREIGHTER_URL = 'https://www.freighter.app';
-
-/**
- * "Connect Wallet" on Stellar: the wallet used last (or the installed one) when it is (or may still turn out to
- * be) installed, the Freighter site when the probe found none. A failed
- * connect is always shown, never swallowed. Needs the toast provider above it.
- */
-export function useConnectStellarWallet(): () => Promise<string | null> {
-  const wallet = useStellarWallet();
-  const { toast } = useToast();
-  const walletRef = useRef(wallet);
-  walletRef.current = wallet;
-  return useCallback(async () => {
-    const current = walletRef.current;
-    if (current.isConnected) return current.address;
-    if (current.availabilityChecked && !current.isAvailable) {
-      if (typeof window !== 'undefined') window.open(FREIGHTER_URL, '_blank', 'noopener');
-      return null;
-    }
-    const { address, error, notice } = await current.connectDetailed();
-    if (address && notice) toast({ title: notice, variant: 'destructive' });
-    if (!address && error) {
-      toast({
-        title: !/not installed/i.test(error)
-          ? error
-          : /metamask/i.test(error)
-            ? 'MetaMask is not installed.'
-            : 'Freighter is not installed. Get it at freighter.app.',
-        variant: 'destructive',
-      });
-    }
-    return address;
-  }, [toast]);
 }

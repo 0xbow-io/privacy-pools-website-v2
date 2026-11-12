@@ -158,18 +158,18 @@ describe('wallet choice persistence', () => {
   });
 });
 
-describe('copy follows the connected wallet', () => {
-  test('Freighter wording is unchanged by default', () => {
-    expect(describeStellarStage('signing')).toBe('Submitting (approve in Freighter)...');
-    expect(stellarUnlockErrorTitle(new Error('User declined access'))).toBe('Sign-in cancelled in Freighter.');
-    expect(stellarErrorMessage('Freighter network mismatch')).toBe('Freighter is on another network. Switch it to Testnet and try again.');
+describe('wallet-neutral flow copy and MetaMask-specific network guidance', () => {
+  test('flow wording stays wallet-neutral by default', () => {
+    expect(describeStellarStage('signing')).toBe('Submitting (approve in your wallet)...');
+    expect(stellarUnlockErrorTitle(new Error('User declined access'))).toBe('Sign-in cancelled in your wallet.');
+    expect(stellarErrorMessage('Freighter network mismatch')).toBe('Your wallet is on another network. Switch it to Testnet and try again.');
   });
 
-  test('MetaMask names itself, and the mainnet-only throw reads as a sentence', () => {
+  test('MetaMask retains neutral flow copy and explains the mainnet-only limitation', () => {
     setStellarCopyWallet('metamask');
     try {
-      expect(describeStellarStage('signing')).toBe('Submitting (approve in MetaMask)...');
-      expect(stellarUnlockErrorTitle(new Error('User rejected'))).toBe('Sign-in cancelled in MetaMask.');
+      expect(describeStellarStage('signing')).toBe('Submitting (approve in your wallet)...');
+      expect(stellarUnlockErrorTitle(new Error('User rejected'))).toBe('Sign-in cancelled in your wallet.');
       expect(stellarErrorMessage('Unknown network passphrase: Test SDF Network ; September 2015')).toBe(
         'MetaMask supports Stellar mainnet only, this app is on Stellar Testnet.',
       );
