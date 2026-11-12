@@ -1,7 +1,7 @@
 // The route-owned headers share the same in-place highlight motion as ActionHub.
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright';
-const browser = await chromium.launch({ headless: true });
+import { launchChrome } from '../lib/chrome.mjs';
+const browser = await launchChrome({ headless: true });
 try {
   for (const reducedMotion of ['no-preference', 'reduce']) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion });

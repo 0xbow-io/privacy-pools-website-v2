@@ -45,12 +45,12 @@ export type BackupFlags = {
 export type PrfResult = {
   /** base64url credential id — discoverable, so callers usually don't need it. */
   credentialId: string;
-  /** The credential's user.id as the authenticator returned it (discoverable credentials always return it). */
-  userHandle?: Uint8Array;
   /** The PRF outputs as 0x-hex. `second` is present only if a second salt was requested. */
   prf: { first: `0x${string}`; second?: `0x${string}` };
   /** Backup/UV flags read from the authenticator data of this assertion. */
   flags: BackupFlags;
+  /** The credential's user handle (the user.id set at create), when the authenticator returns it. */
+  userHandle?: Uint8Array | null;
 };
 
 export type CreateResult = {
@@ -304,8 +304,8 @@ export async function getPasskeyPrf(opts: {
     );
   }
 
-  const userHandle = assertion.userHandle ? new Uint8Array(assertion.userHandle) : undefined;
-  return { credentialId: toBase64Url(new Uint8Array(cred.rawId)), userHandle, prf, flags };
+  const userHandle = assertion.userHandle ? new Uint8Array(assertion.userHandle) : null;
+  return { credentialId: toBase64Url(new Uint8Array(cred.rawId)), prf, flags, userHandle };
 }
 
 // --- Auth-data flag parsing ------------------------------------------------

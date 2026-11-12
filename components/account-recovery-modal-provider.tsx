@@ -23,7 +23,8 @@ import { modalCardShadow } from '@/components/ui/web-style-shims';
 
 import type { AccountExport } from '@/services/sdk-types';
 import { usePoolSession } from '@/hooks/use-pool-session';
-import { parseAccountBackup, prepareAccountBackup } from '@/services/wallet-backup-encryption';
+import { parseAccountBackup, prepareAccountBackup, type AddressBookImportResult } from '@/services/wallet-backup-encryption';
+import { withBackupDeadline } from '@/services/backup-preparation';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { STELLAR_TESTNET_ID } from '@/config/chains';
@@ -110,6 +111,27 @@ export function AccountRecoveryModalProvider({ children }: { children: React.Rea
   const [confirmPassword, setConfirmPassword] = useState('');
   const [useEncryption, setUseEncryption] = useState(true);
   const [needsPassword, setNeedsPassword] = useState(false);
+  const exportAttemptRef = useRef(0);
+  const exportBusyRef = useRef(false);
+  // Re-read after every await; an old unlock must never populate a new modal.
+  const exportContextRef = useRef({ address, chainId, poolSession });
+  exportContextRef.current = { address, chainId, poolSession };
+
+  useEffect(() => {
+    exportAttemptRef.current += 1;
+    exportBusyRef.current = false;
+    setIsPreparingExport(false);
+    setExportPayload('');
+    setExportTarget(null);
+    setIsEncryptedBackup(false);
+    setPassword('');
+    setConfirmPassword('');
+    setStatusMessage(null);
+    setErrorMessage(null);
+    setWarningMessage(null);
+  }, [address, chainId, poolSession]);
+
+  useEffect(() => () => { exportAttemptRef.current += 1; }, []);
 
   const resetMessages = useCallback(() => {
     setStatusMessage(null);
@@ -118,6 +140,11 @@ export function AccountRecoveryModalProvider({ children }: { children: React.Rea
   }, []);
 
   const closeAccountRecoveryModal = useCallback(() => {
+    exportAttemptRef.current += 1;
+    exportBusyRef.current = false;
+    setIsPreparingExport(false);
+    setExportPayload('');
+    setExportTarget(null);
     setIsOpen(false);
     setIsImporting(false);
     setPassword('');
@@ -134,84 +161,81 @@ export function AccountRecoveryModalProvider({ children }: { children: React.Rea
   }, [address, chainId, exportAccount]);
 
   const openExportNotesModal = useCallback(() => {
+    exportAttemptRef.current += 1;
+    exportBusyRef.current = false;
+    setIsPreparingExport(false);
     resetMessages();
     setMode('export');
     setExportPayload('');
+    setExportTarget(null);
     setIsEncryptedBackup(false);
     setPassword('');
     setConfirmPassword('');
     setUseEncryption(true);
+    setStatusMessage('Choose Generate Backup, then save it privately. Never send it to support.');
     setIsOpen(true);
-
-    void (async () => {
-      // Stellar: the backup is built from the unlocked session on Generate.
-      if (isStellar) {
-        if (!address) setStatusMessage('Connect Freighter to back up this account.');
-        return;
-      }
-      const data = await resolveCurrentExport();
-      if (!data || !address) {
-        setStatusMessage(
-          'No local note backup found for this wallet and chain yet. Make a deposit or import an existing backup first.',
-        );
-      }
-    })();
-  }, [address, isStellar, resetMessages, resolveCurrentExport]);
+  }, [resetMessages]);
 
   const handlePrepareExport = useCallback(async () => {
+    if (exportBusyRef.current) return;
     resetMessages();
-    if (isStellar) {
-      if (!address) { setErrorMessage('Connect Freighter first.'); return; }
-      if (password.length < 8) { setErrorMessage('Password must be at least 8 characters.'); return; }
-      if (password !== confirmPassword) { setErrorMessage('Passwords do not match.'); return; }
-      setIsPreparingExport(true);
-      try {
-        const { payload, noteCount } = await stellarExportBackup(password);
-        setExportPayload(payload);
-        setExportTarget({ address, chainId });
-        setIsEncryptedBackup(true);
-        setStatusMessage(`Password-encrypted backup ready. Save it to recover ${noteCount} note(s).`);
-      } catch (error) {
-        const raw = error instanceof Error ? error.message : String(error);
-        setErrorMessage(/reject|denied|cancel|declined/i.test(raw) ? 'Cancelled in Freighter.' : stellarErrorMessage(raw));
-      } finally {
-        setIsPreparingExport(false);
-      }
-      return;
-    }
-    const data = await resolveCurrentExport();
-    if (!data || !address) return;
-
-    if (useEncryption) {
+    if (!address) { setErrorMessage('Connect your wallet first.'); return; }
+    if (useEncryption || isStellar) {
       if (!password) { setErrorMessage('Enter a password.'); return; }
       if (password.length < 8) { setErrorMessage('Password must be at least 8 characters.'); return; }
       if (password !== confirmPassword) { setErrorMessage('Passwords do not match.'); return; }
     }
 
+    const attempt = ++exportAttemptRef.current;
+    const target = { address, chainId, poolSession };
+    const current = () => exportAttemptRef.current === attempt
+      && exportContextRef.current.address === target.address
+      && exportContextRef.current.chainId === target.chainId
+      && exportContextRef.current.poolSession === target.poolSession;
+    exportBusyRef.current = true;
     setIsPreparingExport(true);
     try {
-      const prepared = await prepareAccountBackup(address, chainId, data, useEncryption ? password : undefined);
+      const prepared = await withBackupDeadline((async () => {
+        if (isStellar) {
+          const backup = await stellarExportBackup(password);
+          return { serialized: backup.payload, encrypted: true, warning: null, noteCount: backup.noteCount };
+        }
+        const data = await resolveCurrentExport();
+        if (!current()) return null;
+        if (!data) throw new Error('No local backup for this unlock. Try your original wallet or passkey.');
+        const backup = await prepareAccountBackup(address, chainId, data, useEncryption ? password : undefined);
+        return { ...backup, noteCount: data.notes.length };
+      })(), isStellar ? 90_000 : undefined);
+      if (!current() || !prepared) return;
       setExportPayload(prepared.serialized);
-      setExportTarget(address ? { address, chainId } : null);
+      setExportTarget({ address: target.address, chainId: target.chainId });
       setIsEncryptedBackup(prepared.encrypted);
-      setStatusMessage(
-        prepared.encrypted
-          ? `Password-encrypted backup ready. Save it to recover ${data.notes.length} note(s).`
-          : `Plain backup ready. Save it to recover ${data.notes.length} note(s).`,
-      );
-      if (prepared.warning) {
-        setWarningMessage(prepared.warning);
-      }
+      setStatusMessage(`${prepared.encrypted ? 'Encrypted' : 'Plain'} backup ready: ${prepared.noteCount} note(s). Save it privately.`);
+      setWarningMessage(prepared.warning ?? (prepared.noteCount === 0
+        ? 'No notes in this backup. If funds are missing, try your original unlock.'
+        : null));
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Failed to prepare backup.');
+      if (!current()) return;
+      const raw = error instanceof Error ? error.message : String(error);
+      setErrorMessage(isStellar && /reject|denied|cancel|declined/i.test(raw) ? 'Cancelled in Freighter.'
+        : isStellar ? stellarErrorMessage(raw) : raw);
     } finally {
-      setIsPreparingExport(false);
+      if (current()) {
+        exportAttemptRef.current += 1;
+        exportBusyRef.current = false;
+        setIsPreparingExport(false);
+      }
     }
-  }, [address, chainId, confirmPassword, password, resetMessages, resolveCurrentExport, useEncryption, isStellar, stellarExportBackup]);
+  }, [address, chainId, poolSession, confirmPassword, password, resetMessages, resolveCurrentExport, useEncryption, isStellar, stellarExportBackup]);
 
   const openImportNotesModal = useCallback(() => {
+    exportAttemptRef.current += 1;
+    exportBusyRef.current = false;
+    setIsPreparingExport(false);
     resetMessages();
     setMode('import');
+    setExportPayload('');
+    setExportTarget(null);
     setImportPayload('');
     setPassword('');
     setNeedsPassword(false);
@@ -386,7 +410,8 @@ export function AccountRecoveryModalProvider({ children }: { children: React.Rea
     resetMessages();
 
     try {
-      const accountExport = await parseAccountBackup(address, chainId, importPayload, needsPassword ? password : undefined);
+      let book: AddressBookImportResult = { status: 'absent' };
+      const accountExport = await parseAccountBackup(address, chainId, importPayload, needsPassword ? password : undefined, (r) => { book = r; });
       // Re-read the LIVE session after the await: it can commit while parsing,
       // and the render-captured null would raw-save under a live session.
       const liveSession = poolSessionRef.current;
@@ -404,7 +429,15 @@ export function AccountRecoveryModalProvider({ children }: { children: React.Rea
       }
       // The "temporary until discovery lands" disclaimer is gone — discovery
       // shipped; this modal stays as a manual fallback.
-      toast({ title: `Imported ${accountExport.notes.length} note(s).` });
+      const bookResult = book as AddressBookImportResult;
+      toast({
+        title: `Imported ${accountExport.notes.length} note(s).`,
+        ...(bookResult.status === 'restored' && bookResult.added > 0
+          ? { description: `${bookResult.added} saved address${bookResult.added === 1 ? '' : 'es'} restored.` }
+          : {}),
+      });
+      // A bad address-book field never blocks the notes: say so, plainly.
+      if (bookResult.status === 'skipped') setWarningMessage(bookResult.message);
       setErrorMessage(null);
       setPassword('');
       setNeedsPassword(false);
@@ -492,6 +525,7 @@ export function AccountRecoveryModalProvider({ children }: { children: React.Rea
                       <Pressable
                         className="mb-[4px] flex-row items-center gap-[8px]"
                         onPress={() => setUseEncryption((v) => !v)}
+                        disabled={isPreparingExport}
                       >
                         <View className={`h-[18px] w-[18px] items-center justify-center rounded-control border border-border ${useEncryption ? 'bg-text' : ''}`}>
                           {useEncryption && <Text className={`text-center text-[11px] leading-[14px] ${colorScheme === 'dark' ? 'text-[#000]' : 'text-[#fff]'}`}>✓</Text>}
@@ -501,6 +535,11 @@ export function AccountRecoveryModalProvider({ children }: { children: React.Rea
                         </Text>
                       </Pressable>
                       )}
+                      {!isStellar && !useEncryption && (
+                        <Text className="font-pp-regular text-[12px] leading-[17px] text-text-muted" testID="backup-recipients-encrypted-only">
+                          Recipients are only saved in password-protected backups.
+                        </Text>
+                      )}
                       {(useEncryption || isStellar) && (
                         <>
                           <TextInput
@@ -508,6 +547,7 @@ export function AccountRecoveryModalProvider({ children }: { children: React.Rea
                             autoCapitalize="none"
                             autoCorrect={false}
                             value={password}
+                            editable={!isPreparingExport}
                             onChangeText={setPassword}
                             placeholder="Password (min 8 characters)"
                             // nw-keep(data-color): placeholder color is a TextInput sink (theme token, no className path)
@@ -519,6 +559,7 @@ export function AccountRecoveryModalProvider({ children }: { children: React.Rea
                             autoCapitalize="none"
                             autoCorrect={false}
                             value={confirmPassword}
+                            editable={!isPreparingExport}
                             onChangeText={setConfirmPassword}
                             placeholder="Confirm password"
                             // nw-keep(data-color): placeholder color is a TextInput sink (theme token, no className path)
@@ -629,7 +670,7 @@ export function AccountRecoveryModalProvider({ children }: { children: React.Rea
                       onPress={closeAccountRecoveryModal}
                     >
                     <Text className="font-pp-medium text-[14px] text-button-primary-text">
-                      {isPreparingExport ? 'Preparing...' : 'Done'}
+                      Done
                     </Text>
                   </Pressable>
                 </>

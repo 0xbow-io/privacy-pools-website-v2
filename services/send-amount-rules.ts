@@ -6,6 +6,45 @@
 import { formatUnits } from 'viem';
 
 /**
+ * Does the relayer fee come out of the typed amount (send-exact) or ride on top
+ * of it (recipient receives the amount)?
+ *
+ * The ordinary rules: a full-balance entry, or one the fee would push over the
+ * one-transfer cap, is gross (DEV-409, DEV-490), so Max and a typed balance
+ * just work.
+ *
+ * EXCEPT an amount a caller handed in that the user has not touched (a payroll
+ * salary, DEV-622 review on #78) while "Recipient receives the exact amount" is
+ * ticked: that figure is what the payee is owed, so the fee stays on top and a
+ * balance that cannot carry both gets the insufficient-balance error, instead
+ * of a payment quietly short by the fee that leaves the row unpaid. An edit of
+ * the amount or unticking the box returns to the ordinary rules.
+ */
+export function sendFeeMode(args: {
+  enteredWei: bigint;
+  capWei: bigint;
+  feeWei: bigint | null | undefined;
+  /** "Recipient receives the exact amount" is ticked. */
+  requestedReceiveExact: boolean;
+  /** The amount is still exactly what the opener handed in. */
+  callerAmountUntouched: boolean;
+  /** Relayed private send (the only path with a fee to place). */
+  relayedSend: boolean;
+  /** Same-signature resolver the Withdraw form uses (services/withdraw-quotes.ts). */
+  resolveReceiveExact: (p: { requestedReceiveExact: boolean; enteredWei: bigint; totalBalanceWei: bigint; singleProofCapWei: bigint }) => boolean;
+}): { maxGrossIntent: boolean; effectiveReceiveExact: boolean } {
+  const { enteredWei, capWei, feeWei, requestedReceiveExact, callerAmountUntouched, relayedSend } = args;
+  const owedOnTop = callerAmountUntouched && requestedReceiveExact && enteredWei > 0n;
+  const maxGrossIntent = !owedOnTop && enteredWei > 0n && (
+    enteredWei === capWei || (relayedSend && feeOverflowsCap(enteredWei, feeWei, capWei))
+  );
+  const effectiveReceiveExact = !maxGrossIntent && (owedOnTop || args.resolveReceiveExact({
+    requestedReceiveExact, enteredWei, totalBalanceWei: capWei, singleProofCapWei: capWei,
+  }));
+  return { maxGrossIntent, effectiveReceiveExact };
+}
+
+/**
  * An amount at or under the one-transfer cap that the relayer fee would push
  * OVER it is gross: the fee comes out of it, the same way an exactly-Max entry
  * already is. Before this only an entry equal to the cap was gross, so Max

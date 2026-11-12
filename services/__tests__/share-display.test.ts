@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { approxUnderlyingText, displayTokenSymbol, isShareSymbol, previewReceiveFigure, shareAmountText, shareRedemptionDisclosure, shareSubtitle, wrapsIntoShareSubtitle } from '@/services/share-display';
+import { approxUnderlyingText, displayTokenSymbol, isShareSymbol, previewReceiveFigure, shareAmountText, shareSubtitle, wrapsIntoShareSubtitle } from '@/services/share-display';
 
 describe('share display', () => {
   test('a share is headlined by its underlying; everything else keeps its symbol', () => {
@@ -38,23 +38,12 @@ describe('share display', () => {
     expect(wrapsIntoShareSubtitle(undefined)).toBeNull();
     expect(wrapsIntoShareSubtitle('')).toBeNull();
   });
-  test('a share withdrawal promises the underlying, with no fallback clause', () => {
-    // The flow refuses rather than paying the share when the router route is
-    // unavailable, so the line may promise the underlying outright.
-    expect(shareRedemptionDisclosure('ppUSDT')).toBe(
-      'You receive USDT, redeemed at the vault on the way out.',
-    );
-    expect(shareRedemptionDisclosure('USDT')).toBeNull();
-  });
   test('Ameen via Pat, 2026-09-12: the share name appears in NO user-facing sentence', () => {
     for (const line of [
       shareSubtitle('ppUSDC', 2.88),
       shareSubtitle('ppUSDT', null),
       wrapsIntoShareSubtitle('ppUSDC'),
-      shareRedemptionDisclosure('ppUSDC'),
-      shareRedemptionDisclosure('ppUSDT'),
       shareSubtitle('ppETH', 1.18),
-      shareRedemptionDisclosure('ppETH'),
     ]) {
       expect(line).not.toMatch(/\bpp(usdc|usdt|eth)\b/i);
     }
@@ -71,12 +60,14 @@ describe('a share amount uses underlying only after conversion', () => {
       .toBe('49.91384 USDC');
   });
 
-  test('without the rate it keeps the share COUNT under its own symbol', () => {
-    // Without a rate the figure is still a share count, not USDC.
+  test('without the rate it is loading under the underlying name, never the count (DEV-621)', () => {
+    // The share is never named (2026-11-07), and a count is not what the note is worth.
     const text = shareAmountText({ amount: 49.879113693, assetSymbol: 'ppUSDC', underlyingAmount: null, format: fmt });
-    expect(text).toBe('49.87911 ppUSDC');
-    expect(text).toContain('ppUSDC');
-    expect(parseFloat(text.replace('≈ ', ''))).toBeLessThan(49.913840);
+    expect(text).toBe('… USDC');
+    expect(text).not.toMatch(/\bpp(usdc|usdt)\b/i);
+    expect(text).not.toContain('49.87');
+    // Nothing held is a zero in any unit.
+    expect(shareAmountText({ amount: 0, assetSymbol: 'ppUSDC', underlyingAmount: null, format: fmt })).toBe('0.00000 USDC');
   });
 
   test('an ordinary asset is untouched: its own number under its own symbol', () => {
@@ -86,17 +77,18 @@ describe('a share amount uses underlying only after conversion', () => {
   });
 
   test('USDT shares follow the same rule, so this is not a USDC special case', () => {
-    expect(shareAmountText({ amount: 10, assetSymbol: 'ppUSDT', underlyingAmount: null, format: fmt })).toBe('10.00000 ppUSDT');
+    expect(shareAmountText({ amount: 10, assetSymbol: 'ppUSDT', underlyingAmount: null, format: fmt })).toBe('… USDT');
     expect(shareAmountText({ amount: 10, assetSymbol: 'ppUSDT', underlyingAmount: 10.007, format: fmt })).toBe('10.00700 USDT');
   });
 
-  test('a pre-formatted share fallback keeps its own units', () => {
-    expect(approxUnderlyingText('1.23K ppUSDC', 'ppUSDC')).toBe('1.23K ppUSDC');
-    expect(approxUnderlyingText('0.0000 ppUSDT', 'ppUSDT')).toBe('0.0000 ppUSDT');
+  test('a pre-formatted figure (the ASP compact string, a provider balance) is renamed, its count loading', () => {
+    expect(approxUnderlyingText('1.23K ppUSDC', 'ppUSDC')).toBe('… USDC');
+    // Zero is zero in any unit.
+    expect(approxUnderlyingText('0.0000 ppUSDT', 'ppUSDT')).toBe('0.0000 USDT');
     // Case as the ASP sends it.
-    expect(approxUnderlyingText('5 PPUSDC', 'ppUSDC')).toBe('5 PPUSDC');
-    // Idempotent: a string already marked is not marked twice.
-    expect(approxUnderlyingText('≈ 1.23K USDC', 'ppUSDC')).toBe('≈ 1.23K USDC');
+    expect(approxUnderlyingText('5 PPUSDC', 'ppUSDC')).toBe('… USDC');
+    // An old approximate mark goes with the count.
+    expect(approxUnderlyingText('≈ 1.23K USDC', 'ppUSDC')).toBe('… USDC');
     // Non-shares and empties pass straight through.
     expect(approxUnderlyingText('1.5 ETH', 'ETH')).toBe('1.5 ETH');
     expect(approxUnderlyingText('', 'ppUSDC')).toBe('');
@@ -112,14 +104,14 @@ describe('share review figures', () => {
     expect(netSharesWei(100n, 100n, false)).toBeNull();
     expect(netSharesWei(0n, 0n, true)).toBeNull();
   });
-  test('a share reads as converted USDC, estimating, or the share fallback', () => {
+  test('a share reads as USDC converted, estimating, or approximate, never as the share', () => {
     const format = (n: number) => String(n);
     const base = { isShare: true, shares: 100, shareSymbol: 'ppUSDC', underlyingSymbol: 'USDC', format };
-    expect(shareReviewHeadline({ ...base, underlying: 105.2, pending: false })).toBe('≈ 105.2 USDC');
+    expect(shareReviewHeadline({ ...base, underlying: 105.2, pending: false })).toBe('~105.2 USDC');
     expect(shareReviewHeadline({ ...base, underlying: null, pending: true })).toBe('Estimating USDC…');
-    // The read failed: the fallback is a share count, so it names the share.
-    expect(shareReviewHeadline({ ...base, underlying: null, pending: false })).toBe('100 ppUSDC');
-    expect(shareReviewHeadline({ ...base, underlying: null, pending: false })).toContain('ppUSDC');
+    // The read failed, not in flight: still the underlying's name, loading, never the count.
+    expect(shareReviewHeadline({ ...base, underlying: null, pending: false })).toBe('… USDC');
+    expect(shareReviewHeadline({ ...base, underlying: null, pending: false })).not.toMatch(/\bpp(usdc|usdt)\b/i);
     expect(shareReviewHeadline({ ...base, isShare: false, shareSymbol: 'ETH', underlyingSymbol: 'ETH', underlying: null, pending: false })).toBe('100 ETH');
   });
   test('the greyed receive preview is the redeemed underlying, never the share count', () => {

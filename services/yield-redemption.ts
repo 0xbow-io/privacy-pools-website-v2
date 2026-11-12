@@ -38,7 +38,7 @@ export function planYieldRedemption(input: {
   // agree with the signed ones or the quote is refused outright.
   const fc = quote.feeCommitment;
   if (fc.asset.toLowerCase() !== shareToken.toLowerCase()) {
-    return { refusal: `the relayer quoted ${fc.asset}, not the share ${shareToken}` };
+    return { refusal: `the relayer quoted ${fc.asset}, not the pool token ${shareToken}` };
   }
   let sent: bigint;
   let received: bigint;
@@ -57,7 +57,7 @@ export function planYieldRedemption(input: {
   // leaves the pool is request + fee. The gross is what the router receives
   // and what the SDK's `amount` / `amountOut` both take on this route.
   if (received <= 0n || received !== requestedWei) {
-    return { refusal: `the relayer would deliver ${received} shares, the user asked for ${requestedWei}` };
+    return { refusal: `the relayer would deliver ${received} units, the user asked for ${requestedWei}` };
   }
   if (fee < 0n || sent !== received + fee) {
     return { refusal: `the relayer's gross ${sent} is not recipient ${received} + fee ${fee}` };

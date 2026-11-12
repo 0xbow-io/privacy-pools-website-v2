@@ -128,3 +128,40 @@ export function toImportableNote(n: StellarClaimNote) {
     spentAtBlock: null,
   };
 }
+
+/**
+ * The SDK's refusal of a deposit-for whose recipient has no viewing key
+ * (DepositRecipientViewingKeyUnregistered). Thrown before anything is signed,
+ * so the caller can go blind instead.
+ */
+export function isUnregisteredRecipientError(error: unknown): boolean {
+  const raw = error instanceof Error ? `${error.name} ${error.constructor?.name ?? ''} ${error.message}` : String(error);
+  return /RecipientViewingKeyUnregistered|no on-chain viewing key/i.test(raw);
+}
+
+/** noteAddressHash = Poseidon(ownerField, noteSecret), as the SDK computes it. */
+export function blindNoteAddressHash(hash: { hash(inputs: `0x${string}`[]): `0x${string}` | string }, ownerField: `0x${string}`, noteSecret: `0x${string}`): `0x${string}` {
+  return `0x${BigInt(hash.hash([ownerField, noteSecret])).toString(16).padStart(64, '0')}`;
+}
+
+/** The claim note for a blind deposit, from the SDK's pending note and the minted secret. */
+export function blindClaimNote(
+  pending: { commitment: unknown; value: unknown; tokenId: unknown; label: unknown; noteAddressHash?: unknown },
+  blind: { noteAddressHash: string; noteSecret: string; recipient: string },
+): StellarClaimNote {
+  if (pending.noteAddressHash != null && BigInt(String(pending.noteAddressHash)) !== BigInt(blind.noteAddressHash)) {
+    throw new Error('The deposit could not be prepared for a claim link.');
+  }
+  const note: StellarClaimNote = {
+    commitment: String(pending.commitment),
+    noteAddressHash: `0x${BigInt(blind.noteAddressHash).toString(16).padStart(64, '0')}`,
+    noteSecret: blind.noteSecret,
+    value: String(pending.value),
+    tokenId: String(pending.tokenId),
+    label: String(pending.label),
+    ownerAddress: blind.recipient,
+    txHash: '0x0',
+  };
+  if (!noteOk(note, blind.recipient)) throw new Error('The deposit could not be prepared for a claim link.');
+  return note;
+}

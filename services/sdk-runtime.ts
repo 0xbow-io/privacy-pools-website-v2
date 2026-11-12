@@ -14,6 +14,6 @@ export { buildPoseidon, buildBabyjub } from 'circomlibjs';
 export { groth16 } from 'snarkjs';
 // Yield earned (hooks/use-yield-earned.ts): reduces the event snapshot PoolsProvider
 // already holds to the pool events the SDK's compute reads. No I/O.
-export { yieldEarnedEventsFromSnapshot } from '@privacy-pools-v2/sdk';
+export { yieldEarnedEventsFromSnapshot, computeYieldEarned, noteTimestamp } from '@privacy-pools-v2/sdk';
 // Points (hooks/use-points.ts): pure accrual over the local note set. No I/O.
 export { computePoints, epochParamsFromRateLeaves, liveEpochParams } from '@privacy-pools-v2/sdk';

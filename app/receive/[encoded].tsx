@@ -6,6 +6,7 @@
 // only in the (i) hint, in fields labelled with the share symbol, or while the
 // rate is unknown. Never print a share count under the underlying symbol.
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
+import { FigureText } from '@/components/ui/share-figure';
 
 import React, { useMemo } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
@@ -76,14 +77,14 @@ export default function ReceivePaymentScreen() {
 
             <View className="flex-row items-center justify-between gap-[12px]">
               <Text className="font-pp-medium text-[14px] text-text">1x Received private payment</Text>
-              <Text className="font-pp-semi-bold text-[14px] text-text">{amountLabel}</Text>
+              <Text className="font-pp-semi-bold text-[14px] text-text"><FigureText text={amountLabel} /></Text>
             </View>
 
             <View className="border-t border-dashed border-border-light" />
 
             <View className="flex-row items-center justify-between">
               <Text className="font-pp-bold text-[16px] text-text">Total</Text>
-              <Text className="font-pp-bold text-[16px] text-text">{amountLabel}</Text>
+              <Text className="font-pp-bold text-[16px] text-text"><FigureText text={amountLabel} /></Text>
             </View>
 
             <View className="gap-[8px]">

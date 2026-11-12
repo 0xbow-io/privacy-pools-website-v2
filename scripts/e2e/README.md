@@ -37,7 +37,9 @@ bun scripts/e2e/sepolia.ts all 0.001
 bun scripts/e2e/payment-request.ts 0.0006
 ```
 
-Ensure Git LFS circuit artifacts are present and install Chromium with `bunx playwright install chromium`. Screenshots and unregistered-payee backup downloads are saved under ignored `.e2e-shots/`.
+Ensure Git LFS circuit artifacts are present and install Chromium with `bunx playwright install chromium`.
+
+The Sepolia verifiers still hold the pre-ceremony keys, while `public/artifacts` holds the ceremony keys production uses, so a proof from the checked-out files reverts on Sepolia (`PoolVault_InvalidDepositProof`, `0x08bf478d`). Run `bun scripts/e2e/sepolia-circuits.ts` once before the journeys: it reads each Sepolia verifier and swaps the matching pinned keys (`fixtures/sepolia-circuits.json`, sha256-checked, cached in `~/.cache/e2e-sepolia-circuits`) into `public/artifacts`. `--check` only reports. Restore with `git checkout -- public/artifacts` and never commit the swapped files. CI runs it in `e2e-sepolia.yml`. It swaps nothing once Sepolia verifies with the checked-out keys. Screenshots and unregistered-payee backup downloads are saved under ignored `.e2e-shots/`.
 
 ## CI and funds
 

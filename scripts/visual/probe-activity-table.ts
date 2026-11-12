@@ -1,6 +1,7 @@
 // One-off verification probe for the consolidated Activity table.
 // Needs a dev server on :8081.
-import { chromium, type Page } from 'playwright';
+import { type Page } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 
 const BASE = process.env.PROBE_URL ?? 'http://localhost:8081';
 const R = { ok: 0, fail: 0 };
@@ -10,7 +11,7 @@ function check(label: string, pass: boolean, detail = '') {
 }
 
 async function boot(width: number, url: string) {
-  const browser = await chromium.launch({ args: ['--no-sandbox'] });
+  const browser = await launchChrome();
   const context = await browser.newContext({ viewport: { width, height: 1000 }, reducedMotion: 'reduce', deviceScaleFactor: 1 });
   await context.addInitScript(() => localStorage.setItem('ppv2_smartwallet_skipped_v1', '1'));
   const page = await context.newPage();

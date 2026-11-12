@@ -11,6 +11,7 @@ import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 // in that same boundary. No other operation converts display back.
 import { LooseShareUnwrap } from '@/components/yield/loose-share-unwrap';
 import { poolDisplayLabel } from '@/config/pool-paths';
+import { displayTokenSymbol, tokenAmountLabel } from '@/services/share-display';
 import { useMemo } from 'react';
 import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { Redirect } from 'expo-router';
@@ -20,6 +21,8 @@ import { Footer } from '@/components/ui/footer';
 import { PortfolioStats } from '@/components/portfolio/portfolio-stats';
 import { AllPositions } from '@/components/portfolio/all-positions';
 import { PointsCard } from '@/components/points/points-card';
+import { MyTransactionsSection } from '@/components/home/explore-panel';
+import { PaymentRequestsCard } from '@/components/payment-requests-card';
 import { PortfolioProvider, usePortfolio } from '@/components/portfolio-provider';
 import { usePools } from '@/components/pools-provider';
 import { useSdkContext } from '@/components/sdk-provider';
@@ -77,7 +80,7 @@ function PortfolioBody() {
   const tabClearance = useTabBarClearance();
   const { isConnected } = useAccount();
   const { sessionAddress } = useSdkContext();
-  const { positions, totalValue, totalValueFormatted, pendingValueFormatted, hasPositions, chainDisplayName, chainId, isLoading: portfolioLoading, yieldEarnedUsdFormatted } = usePortfolio();
+  const { positions, totalValue, totalValueFormatted, pendingDisplay, hasPositions, chainDisplayName, chainId, isLoading: portfolioLoading, yieldEarnedDisplay } = usePortfolio();
   // Live APY for real yield rows (feed first, env placeholder second).
   const liveApy = useResolvedYieldApy({ chainId });
   const { data: poolsData } = usePools();
@@ -102,7 +105,7 @@ function PortfolioBody() {
       return {
         color: TOKEN_BRAND_COLORS[p.tokenSymbol] || '#999999',
         percentage,
-        label: `${p.tokenSymbol} ${percentage}% of net value`,
+        label: `${displayTokenSymbol(p.tokenSymbol)} ${percentage}% of net value`,
       };
     });
   }, [positions, totalValue, hasPositions]);
@@ -119,6 +122,8 @@ function PortfolioBody() {
         myValueUsd: string;
         pendingLabel: string | null;
         earnedText?: string | null;
+        earnedLoading?: boolean;
+        earnedUnit?: string;
         venueLabel?: string | null;
         aprText?: string | null;
         withdrawEnabled: boolean;
@@ -143,7 +148,7 @@ function PortfolioBody() {
           chainId: rowChainId,
           myValueToken: p.valueUnavailable
             ? 'Value temporarily unavailable'
-            : `${p.balanceFormatted} ${p.tokenSymbol}`,
+            : tokenAmountLabel(p.balanceFormatted, p.tokenSymbol),
           myValueUsd: p.valueUnavailable ? '—' : p.valueUsdFormatted,
           shareHint: p.shareHint,
           pendingLabel: p.pendingLabel,
@@ -156,6 +161,8 @@ function PortfolioBody() {
             ? {
                 yield: true,
                 earnedText: p.earnedText ?? null,
+                earnedLoading: p.earnedLoading === true,
+                earnedUnit: p.tokenSymbol,
                 venueLabel: 'Aave v3',
                 aprText: liveApy.percent != null ? `${liveApy.percent.toFixed(2)}%` : null,
                 actionSymbol: p.shareSymbol,
@@ -177,7 +184,7 @@ function PortfolioBody() {
 
   // Only a real yield position fills the tile.
   const hasRealYield = positions.some((p) => p.isYield);
-  const yieldEarnedTile = hasRealYield ? yieldEarnedUsdFormatted : null;
+  const yieldEarnedTile = hasRealYield ? yieldEarnedDisplay : null;
 
   return (
     <View className="flex-1 bg-background">
@@ -217,11 +224,14 @@ function PortfolioBody() {
           ) : (
           <>
           <PortfolioStats
-            netValue={portfolioLoading ? '—' : totalValueFormatted}
-            pending={portfolioLoading ? '—' : pendingValueFormatted}
+            netValue={totalValueFormatted}
+            netValueLoading={portfolioLoading}
+            pending={pendingDisplay.text}
+            pendingLoading={pendingDisplay.loading}
             assetsCount={positions.length}
-            yieldEarnedUsd={portfolioLoading ? null : yieldEarnedTile}
-            assetsLabel={hasPositions ? positions.map((p) => p.tokenSymbol).join(', ') : 'No assets yet'}
+            yieldEarnedUsd={yieldEarnedTile?.text ?? null}
+            yieldEarnedLoading={yieldEarnedTile?.loading === true}
+            assetsLabel={hasPositions ? positions.map((p) => displayTokenSymbol(p.tokenSymbol)).join(', ') : 'No assets yet'}
             hasData={hasPositions}
             assets={portfolioAssets}
           />
@@ -231,11 +241,16 @@ function PortfolioBody() {
           <AllPositions
             positionsCount={mappedPositions.length}
             netValue={totalValueFormatted}
+            netValueLoading={portfolioLoading}
             isConnected={isConnected}
             hasPositions={hasPositions || mappedPositions.length > 0}
             onDeposit={() => openDepositModal()}
             positions={mappedPositions}
           />
+          {/* Activity lives here rather than in its own bar tab (Ameen, QA
+              2026-10-25): the same collapsible feed My balances carries. */}
+          <PaymentRequestsCard surface="page" hideWhenEmpty />
+          <MyTransactionsSection />
           </>
           )}
           {Platform.OS === 'web' && <Footer />}

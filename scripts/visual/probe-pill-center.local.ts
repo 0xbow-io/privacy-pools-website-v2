@@ -1,7 +1,7 @@
 // @ts-nocheck — local one-off probe
 // Measure pill-vs-selected-tab centering at several widths.
-import { chromium } from 'playwright';
-const browser = await chromium.launch({ args: ['--no-sandbox'] });
+import { launchChrome } from '../lib/chrome.mjs';
+const browser = await launchChrome();
 for (const width of [584, 900, 1440]) {
   const context = await browser.newContext({ viewport: { width, height: 900 } });
   await context.addInitScript(() => localStorage.setItem('ppv2_smartwallet_skipped_v1', '1'));

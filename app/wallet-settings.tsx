@@ -12,6 +12,7 @@ import { useWalletConnectModal } from '@/components/wallet-connect-modal-provide
 import { footerLinks, type FooterLink } from '@/components/ui/footer';
 import { NewsletterModal } from '@/components/newsletter-modal';
 import { isInternalHref } from '@/config/legal/routes';
+import { ContactsModal } from '@/components/contacts/contacts-modal';
 
 // Minimal settings for the embedded smart-wallet experience (ppv2 redesign).
 function truncate(addr?: string) {
@@ -25,6 +26,7 @@ export default function WalletSettingsScreen() {
   const { meta } = useEmbeddedWallet();
   const { disconnect } = useDisconnect();
   const { open: openWalletPicker } = useWalletConnectModal();
+  const [contactsOpen, setContactsOpen] = useState(false);
 
   const isEmbedded = connector?.id === 'pools-embedded';
   const securedBy =
@@ -58,6 +60,10 @@ export default function WalletSettingsScreen() {
             />
           </Group>
 
+          <Group label="CONTACTS">
+            <RowButton icon="people-outline" label="Contacts" hint="import, export" onPress={() => setContactsOpen(true)} colors={colors} />
+          </Group>
+
           <Group label="NETWORK">
             <Row icon="lan" label="Chain" value="Sepolia testnet" tint={colors.tint} colors={colors} />
             <Row icon="verified-user" label="Compliance" value="0xbow ASP" colors={colors} />
@@ -78,6 +84,7 @@ export default function WalletSettingsScreen() {
           )}
 
           <AboutSection colors={colors} />
+          {contactsOpen ? <ContactsModal visible onClose={() => setContactsOpen(false)} /> : null}
 
           <Text className="mt-[6px] text-center font-pp-sans text-[9px] tracking-[0.5px] text-text-muted">
             Privacy Pools v2 · passkey-secured smart wallet

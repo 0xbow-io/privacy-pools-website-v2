@@ -9,11 +9,13 @@ import { useTheme } from '@/components/theme-provider';
 import { Colors } from '@/constants/theme';
 import { usePoolSession } from '@/hooks/use-pool-session';
 import { KeySourceChangedError } from '@/components/sdk-provider';
+import { AccountUnlockHelp } from '@/components/account-unlock-help';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import {
   peekAutoSignArm, shouldAutoSignAfterConnect, subscribeAutoSignArm, takeAutoSignArm,
 } from '@/services/auto-sign-after-connect';
 import { isCoinbaseWalletIdentity, resolveWalletIdentity } from '@/services/wallet-signature-timeout';
+import { passkeySecondaryChoice, type PasskeyPick } from '@/services/passkey-unlock-plan';
 import { BASE_APP_NOTICE_BODY, BASE_APP_NOTICE_TITLE, BASE_APP_USE_ANOTHER_WALLET, isBaseAppCannotSign } from '@/services/base-app-passkey-choice';
 import { waitForReconnectSettled, walletErrorLine } from '@/services/wallet-reconnect';
 import { SecurityKeyConfirmCreateError } from '@/services/passkey-choice';
@@ -79,7 +81,7 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
   const {
     keysReady, ensureInitialized, error, passkeyActive, isInitializing, identityMode,
     isSmartWallet, smartWalletProbeSettled, passkeyPreviewEnabled, signerRefusedDerivation, sessionTarget,
-    choosePasskeyForRefusedSigner, baseAppCannotSign,
+    choosePasskeyForRefusedSigner, baseAppCannotSign, hasRememberedPasskey, passkeyTapRequests,
     passkeyKind, hasRecordedPasskey, canChooseSecurityKey, choosePasskeyKind, requestSecurityKeySetup,
   } = usePoolSession();
   const securityKeyMode = passkeyActive && passkeyKind === 'security-key';
@@ -138,6 +140,16 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
     setIsOpen(true);
   }, []);
 
+  // A flow that needs keys (opening Withdraw, a review, a send) reached the
+  // passkey unlock without a tap on a passkey button. Nothing was asked of the
+  // authenticator; show this dialog so the tap starts it (QA on PR #63).
+  const seenTapRequestsRef = useRef(passkeyTapRequests);
+  useEffect(() => {
+    if (passkeyTapRequests === seenTapRequestsRef.current) return;
+    seenTapRequestsRef.current = passkeyTapRequests;
+    if (!keysReady) openSeedDerivationModal();
+  }, [passkeyTapRequests, keysReady, openSeedDerivationModal]);
+
   // A wallet that never answers (DEV-427 style hang, a backgrounded wallet
   // app) must not trap the user behind a disabled close button forever.
   const [slowSign, setSlowSign] = useState(false);
@@ -164,7 +176,13 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
     onSignedRef.current = null;
   }, [pending, slowSign]);
 
-  const handleSign = useCallback(async () => {
+  // passkeyPick: the explicit passkey choice under the Sign in button
+  // (services/passkey-unlock-plan.ts). Passed straight through, so the tap
+  // still carries the WebAuthn prompt's user activation.
+  // tap: the call comes from a press on one of this dialog's buttons. Only then
+  // may a passkey unlock start WebAuthn; the automatic sign-in after connect
+  // never passes it (services/passkey-unlock-plan.ts 'needs-tap').
+  const handleSign = useCallback(async (passkeyPick?: PasskeyPick, opts?: { tap?: boolean }) => {
     const attempt = ++signAttemptRef.current;
     const isCurrent = () => signAttemptRef.current === attempt;
     setErrorMessage(null);
@@ -192,7 +210,7 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
         subscribe: (listener) => wagmiConfig.subscribe((state) => state.status, listener),
       });
       console.log('[SeedDerivationModal] handleSign: calling ensureInitialized');
-      await ensureInitialized();
+      await ensureInitialized(passkeyActive && opts?.tap === true ? { passkeyPick, passkeyTap: true } : undefined);
       console.log('[SeedDerivationModal] handleSign: ensureInitialized resolved, session built');
       if (!isCurrent()) {
         // Signed after the user closed a slow prompt. The keys are good; if a
@@ -315,8 +333,17 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
     setSecurityKeyConfirm(false);
     // Still in passkey mode, only the authenticator changed (a ref): this tap
     // can carry the prompt.
-    void handleSign();
+    void handleSign(undefined, { tap: true });
   }, [choosePasskeyKind, handleSign]);
+  // Passkey unlock: switch passkeys when one is remembered (the remembered one
+  // may be the wrong one or deleted), set one up when none is. The Sign in
+  // button itself never creates: with nothing remembered it lists the
+  // passkeys this device already has.
+  // Hidden while ANY unlock is in flight (another flow's ensureInitialized
+  // too): a tap then would join that promise and drop the pick.
+  const passkeySecondary = !securityKeyMode && passkeyActive && !pending && !isInitializing && !showBaseNotice
+    ? passkeySecondaryChoice(hasRememberedPasskey())
+    : null;
   const takePasskeyOffer = useCallback(() => {
     if (hasRecordedPasskey) choosePasskeyKind(passkeyKind);
     else choosePasskeyForRefusedSigner();
@@ -337,7 +364,7 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
       // Already in passkey mode (smart wallet): only the authenticator
       // changed, which the provider reads from a ref, so this tap can carry
       // the prompt.
-      void handleSign();
+      void handleSign(undefined, { tap: true });
       return;
     }
     setErrorMessage('Security key unlock is on for this wallet. Tap Sign in to continue.');
@@ -348,12 +375,12 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
   const setUpSecurityKey = useCallback(() => {
     requestSecurityKeySetup('check');
     setSecurityKeyConfirm(false);
-    void handleSign();
+    void handleSign(undefined, { tap: true });
   }, [requestSecurityKeySetup, handleSign]);
   const confirmCreateSecurityKey = useCallback(() => {
     requestSecurityKeySetup('create');
     setSecurityKeyConfirm(false);
-    void handleSign();
+    void handleSign(undefined, { tap: true });
   }, [requestSecurityKeySetup, handleSign]);
 
   return (
@@ -386,10 +413,11 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
                 ? 'Use your security key to unlock your private balances and payment history.'
                 : passkeyActive
                 ? (isSmartWallet
-                  ? 'Smart-contract wallet detected. Use a passkey on this device to unlock your private balances and payment history.'
-                  : 'Use your passkey to unlock your private balances and payment history.')
+                  ? 'Use your wallet’s passkey to unlock its private balance.'
+                  : 'Use your passkey to unlock your private balance.')
                 : 'Sign this message to decrypt your private balances and payment history.'}
             </Text>
+            {passkeyActive ? <AccountUnlockHelp /> : null}
 
             {showBaseNotice && (
               <View className="gap-[6px] rounded-control border border-border px-[12px] py-[10px]" testID="seed-derivation-base-notice">
@@ -418,7 +446,7 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
             <View className="mt-[6px] flex-row gap-[10px]">
               <Pressable
                 className={`flex-1 items-center justify-center rounded-control bg-button-primary py-[12px] ${pending ? 'opacity-60' : 'opacity-100'}`}
-                onPress={handleSign}
+                onPress={() => { void handleSign(undefined, { tap: true }); }}
                 disabled={pending}
               >
                 <Text className="font-pp-semi-bold text-[14px] text-button-primary-text">
@@ -426,6 +454,17 @@ export function SeedDerivationModalProvider({ children }: { children: React.Reac
                 </Text>
               </Pressable>
             </View>
+            )}
+
+            {passkeySecondary && (
+              <Pressable
+                className="h-[36px] items-center justify-center"
+                onPress={() => { void handleSign(passkeySecondary.pick, { tap: true }); }}
+                accessibilityRole="button"
+                testID={`seed-derivation-passkey-${passkeySecondary.pick}`}
+              >
+                <Text className="font-pp-medium text-[13px] text-text-secondary underline">{passkeySecondary.label}</Text>
+              </Pressable>
             )}
 
             {pending && slowSign && (
