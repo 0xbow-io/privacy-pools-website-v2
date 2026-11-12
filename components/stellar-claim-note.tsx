@@ -1,20 +1,21 @@
 /**
  * /import-note page for a Stellar one-time claim link (services/stellar/stellar-claim.ts).
  *
- * Claim imports the link's notes into the connected Freighter account (local:
+ * Claim imports the link's notes into the connected Varial account (local:
  * the SDK re-derives every field and refuses another owner's note). The fixed
  * sync clock then marks them spendable. "Save to my account" makes it
  * permanent: one private transfer to itself, announced to its own viewing
- * key, so any device finds it and the link is no longer needed. Freighter pays
+ * key, so any device finds it and the link is no longer needed. Varial pays
  * for that and for registering the account first (relayed registration is not
  * available on Stellar).
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
 import { useRouter } from 'expo-router';
 import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import { formatUnits } from 'viem';
 
+import { useStellarConnectAction } from '@/hooks/use-stellar-connect-action';
 import { useStellarWallet } from '@/components/stellar-wallet-provider';
 import { STELLAR_TESTNET_ID, getExplorerTxUrl } from '@/config/chains';
 import { STELLAR_TRANSFER_RELAY_FEE_ESTIMATE, STELLAR_XLM } from '@/config/stellar-deployment';
@@ -22,15 +23,10 @@ import { useChainRouter } from '@/hooks/use-chain-router';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { useTabCloseGuard } from '@/hooks/use-tab-close-guard';
 import { decodeStellarClaim, stellarClaimTotal } from '@/services/stellar/stellar-claim';
-import { describeStellarStage, stellarErrorMessage } from '@/services/stellar/stellar-copy';
+import { describeStellarStage, stellarActionError } from '@/services/stellar/stellar-copy';
 
 function short(value: string): string {
   return value.length <= 12 ? value : `${value.slice(0, 6)}…${value.slice(-6)}`;
-}
-
-function errorText(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error);
-  return /reject|denied|cancel|declined/i.test(raw) ? 'Cancelled in Freighter.' : stellarErrorMessage(raw);
 }
 
 export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
@@ -41,6 +37,12 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
   const [error, setError] = useState<string | null>(null);
   const [keptTx, setKeptTx] = useState<string | null>(null);
   const router = useRouter();
+  const keepScope = useRef({ active: true });
+  useLayoutEffect(() => {
+    const scope = { active: true };
+    keepScope.current = scope;
+    return () => { scope.active = false; };
+  }, [encoded, wallet.address, wallet.networkPassphrase, activeChainId]);
   // A result belongs to one link and one account.
   useEffect(() => { setKeptTx(null); setError(null); }, [encoded, wallet.address]);
 
@@ -66,6 +68,10 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
   const spendable = allHeld && held.every((n) => n.status === 'ACTIVE');
   const used = held.some((n) => n.status === 'SPENT' || n.status === 'EXITED' || n.status === 'EXIT_PENDING');
 
+  const openWalletPicker = useStellarConnectAction(encoded, () => {
+    if (isOwner && !allHeld && !used) void onClaim();
+  });
+
   // Until it is saved to the account, the claimed note lives in this tab only.
   useTabCloseGuard(allHeld && !keptTx && !used, 'Only in this tab until you save it. The link restores it.');
 
@@ -75,13 +81,13 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
       if (outcome !== 'committed') { setError('Could not switch to Stellar Testnet.'); return false; }
     }
     if (!wallet.isConnected) {
-      const connected = await wallet.connect();
-      if (!connected) { setError(wallet.isAvailable ? 'Connect Freighter to claim.' : 'Install Freighter to claim.'); return false; }
+      await openWalletPicker();
+      return false;
     }
     return true;
   };
 
-  const onClaim = async () => {
+  async function onClaim() {
     if (!claim) return;
     setError(null);
     if (!(await ensureReady())) return;
@@ -89,23 +95,26 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
     try {
       await stellar.claim(claim.notes);
     } catch (e) {
-      setError(errorText(e));
+      setError(stellarActionError(e, 'Cancelled in your wallet.'));
     } finally {
       setBusy(null);
     }
-  };
+  }
 
   const onKeep = async () => {
     if (!claim) return;
     setError(null);
+    if (!(await ensureReady())) return;
+    const scope = keepScope.current;
     setBusy(describeStellarStage('proving'));
     try {
       const { txHash } = await stellar.keepClaim(claim.notes.map((n) => n.commitment as `0x${string}`), {
-        onStage: (stage) => setBusy(describeStellarStage(stage)),
+        shouldContinue: () => scope.active,
+        onStage: (stage) => { if (scope.active) setBusy(describeStellarStage(stage)); },
       });
-      setKeptTx(txHash);
+      if (scope.active) setKeptTx(txHash);
     } catch (e) {
-      setError(errorText(e));
+      if (scope.active) setError(stellarActionError(e, 'Cancelled in your wallet.'));
     } finally {
       setBusy(null);
     }
@@ -140,7 +149,7 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
           <Text className="text-center font-pp-regular text-[13px] text-text-secondary">This payment was already used from your account.</Text>
         ) : wallet.isConnected && !isOwner ? (
           <Text className="text-center font-pp-regular text-[13px] text-warning">
-            This link is for {short(owner)}. Switch to that account in Freighter.
+            This link is for {short(owner)}. Switch to that account in your wallet.
           </Text>
         ) : allHeld ? (
           <View className="gap-[10px]">

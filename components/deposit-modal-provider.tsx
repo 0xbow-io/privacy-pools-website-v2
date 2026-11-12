@@ -62,7 +62,7 @@ import { getExplorerName, getExplorerTxUrl, getChainConfig, isChainSelectable, s
 import { STELLAR_TESTNET_CONTRACTS, STELLAR_XLM } from '@/config/stellar-deployment';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { useStellarBalance } from '@/hooks/use-stellar-balance';
-import { describeStellarStage, stellarErrorMessage } from '@/services/stellar/stellar-copy';
+import { describeStellarStage, stellarErrorMessage, stellarActionError } from '@/services/stellar/stellar-copy';
 import { StellarLabelRetryNotice } from '@/components/stellar-label-retry';
 import { isStellarAccountAddress } from '@/services/stellar/stellar-request';
 import type { PendingLabel } from '@/services/stellar/stellar-account';
@@ -1239,7 +1239,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     : selectedToken.isNative
       ? nativeBalance == null
       : erc20BalanceRaw == null;
-  const walletBalanceFormatted = walletBalanceLoading ? '—' : tokenAmountLabel(walletBalance.toFixed(4), displaySymbol);
+  const walletBalanceFormatted = walletBalanceLoading ? '—' : tokenAmountLabel(formatTokenBalanceDown(walletBalance, displaySymbol), displaySymbol);
 
   // --- Gas reserve (native deposits) ---
 
@@ -1630,7 +1630,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     }
     // === Stellar path ===
     // The shared Stellar account (services/stellar/stellar-account.ts) derives
-    // keys on first use, proves, submits pool.deposit via Freighter, then
+    // keys on first use, proves, submits pool.deposit via Varial, then
     // registers the label ciphertext with the ASP registry.
     if (isStellar) {
       if (!stellarOwner) {
@@ -1657,7 +1657,9 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       setStep('loading');
       reportDepositError(null);
       depositErrorReportRef.current.phase = 'wallet-connect';
-      setLoadingMessage(describeStellarStage('unlocking'));
+      // Neutral until the session says otherwise: 'unlocking' (which names
+      // Freighter) arrives through onStage only when the account is really locked.
+      setLoadingMessage('Preparing your deposit...');
       try {
         const { buildStellarClaimUrl } = await import('@/services/stellar/stellar-claim-url');
         if (!live()) return;
@@ -1687,7 +1689,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
         if (/Superseded/.test(message)) { setStep('deposit'); return; }
         if (/reject|denied|cancel|declined/i.test(message)) {
           setStep('deposit');
-          reportDepositError('Transaction was rejected.', err);
+          reportDepositError(stellarActionError(err), err);
           return;
         }
         reportDepositError(`Deposit failed: ${stellarErrorMessage(message)}`, err, 'stellar-broadcast');
@@ -4286,7 +4288,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     });
   }, [isSui, isStellar, enteredAmount, tokenPrice, feePricing, chainId, crossChainShieldActive, crossChainPoolId, crossChainVetting, selectedToken.address, selectedToken.symbol, swapDepositActive, depositVettingFeeBps, swapRoute]);
 
-  // Re-sends the registration from an explicit tap (one Freighter approval);
+  // Re-sends the registration from an explicit tap (one Varial approval);
   // the next manual Sync does the same for any deposit this card is not for.
   const retryStellarLabels = stellarSession.retryPendingLabels;
   const stellarLabelRetry = useMemo(() => (stellarLabelPending && stellarLabelPending.owner === stellarOwner ? {
@@ -4300,7 +4302,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       } catch (caught) {
         const raw = caught instanceof Error ? caught.message : String(caught);
         errorToast({
-          title: /reject|denied|cancel|declined/i.test(raw) ? 'Cancelled in Freighter.' : stellarErrorMessage(raw),
+          title: /reject|denied|cancel|declined/i.test(raw) ? 'Cancelled in your wallet.' : stellarErrorMessage(raw),
           variant: 'destructive',
         });
         return false;
@@ -4887,7 +4889,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
           chainId={chainId}
           // Non-EVM: no EVM balance reads or swap routes. Stellar shows no
           // wallet figure here (the sheet's native read is Sui's), the form
-          // below shows the Freighter balance.
+          // below shows the Varial balance.
           isSui={isSui}
           balanceMode={isStellar ? 'none' : 'wallet'}
           onSelectToken={(t) => {

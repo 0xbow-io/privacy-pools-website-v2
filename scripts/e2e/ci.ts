@@ -3,11 +3,12 @@
 //
 // Full funded Sepolia suite: bun scripts/e2e/ci.ts.
 // A funds fixtures; B pays requests. Both retain their registered keys and notes.
-// Derived accounts isolate consolidation and batch fixtures. A fresh account
+// Derived accounts isolate core, consolidation and batch fixtures. A fresh account
 // proves registration, shielding, and ragequit; cleanup returns its leftover gas.
 import { formatEther, keccak256, parseEther, stringToBytes } from 'viem';
 import { existsSync, writeFileSync } from 'node:fs';
 import { accountFromKey, client, envValue, fundAccount, mintEphemeral, paymentRequestEth, requireFunds, sweepTo } from './funding';
+import { coreFixtureKey } from './core-fixture';
 
 // 0.004 was not enough: a FIRST deposit from a brand-new key also pays for the
 // keystore-registration transaction, so the app capped the shieldable amount at
@@ -18,8 +19,8 @@ import { accountFromKey, client, envValue, fundAccount, mintEphemeral, paymentRe
 // fresh key ragequits its deposit and the sweep returns the remainder.
 const FUND_ETH = envValue('E2E_FUND_ETH') ?? '0.008';
 const FRESH_SHIELD_ETH = envValue('E2E_FRESH_SHIELD_ETH') ?? '0.001';
-// A run advances FUND_ETH to the fresh key (most of it comes back via ragequit +
-// sweep), plus the capped shield/withdraw/send and payment-request amounts and
+// A run advances FUND_ETH to both core and fresh keys (unused float comes
+// back via sweep), plus capped shield/withdraw/send and payment-request amounts and
 // the gas for its own transactions.
 const MIN_FUNDER_ETH = envValue('E2E_FUNDER_MIN_ETH') ?? '0.04';
 // A payment request under PAYMENT_REQUEST_MIN_USD (services/payment-request-bounds.ts,
@@ -47,8 +48,8 @@ const ROOT = new URL('../..', import.meta.url).pathname;
 //      ragequit), in core only, once every group has stopped proving.
 // Wallets and notes never overlap between groups:
 //   fund      A tops up B and the fixtures treasury, before any group starts.
-//   core      A: shield/withdraw/send (privacy gates), then the after phase.
-//             The only group that spends A's notes or sends from A's wallet.
+//   core      Run-specific derived wallet: shield/withdraw/send (privacy gates).
+//             A funds it, then owns the after phase's deposit-for sends.
 //   payment   B pays A's request and an unregistered payee; viewing key and
 //             pool page (read-only). Spends B's notes; A only receives.
 //   fixtures  consolidate and batch on accounts derived from a treasury that
@@ -164,6 +165,14 @@ if (GROUP === 'fund') { console.log('funding done'); process.exit(0); }
 if (GROUP === 'fixtures') await requireFunds(treasury, TREASURY_FLOOR_ETH, 'fixtures treasury (the fund job tops it up)');
 
 const outcomes: Record<string, boolean> = {};
+// Avoid making this small journey discover A's ~1500 historical notes. Slow
+// discovery/UI work can cross a feed tick or invalidate a review before the
+// Confirm click completes. Seed and spend this run's own notes.
+const coreIdentity = envValue('E2E_CORE_FIXTURE_ID')
+  ?? `${process.env.GITHUB_RUN_ID ?? Date.now()}:${process.env.GITHUB_RUN_ATTEMPT ?? '1'}`;
+const coreKey = coreFixtureKey(aKey, coreIdentity);
+const coreAccount = accountFromKey(coreKey);
+let coreFunded = false;
 const { privateKey: freshKey, account: fresh } = mintEphemeral();
 const CORE = ['scripts/e2e/sepolia.ts', 'all', '0.001'];
 const PAYMENT = ['scripts/e2e/payment-request.ts', REQUEST_ETH, '--prepare-next-payment'];
@@ -172,7 +181,12 @@ let freshFunded = false;
 try {
   // Phase 1: seed. Locally (no group) at most two fixture groups are alive per
   // wave, keeping browser memory bounded; in CI each runner has one or two.
-  if (runs('core')) await prepare('shield, withdraw and send', CORE, { E2E_PK: aKey, E2E_COUNTERPARTY: B.address });
+  if (runs('core')) {
+    console.log(`core fixture ${coreIdentity}: ${coreAccount.address} (recover from A with coreFixtureKey)`);
+    coreFunded = true;
+    await fundAccount(A, coreAccount.address, FUND_ETH);
+    await prepare('shield, withdraw and send', CORE, { E2E_PK: coreKey, E2E_COUNTERPARTY: B.address });
+  }
   if (runs('payment')) await prepare('payment request: create, pay, claim', PAYMENT, { E2E_PAYEE_PK: aKey, E2E_PAYER_PK: bKey });
   if (prepared.size) await awaitPrepared();
   if (GROUP === 'fixtures') {
@@ -186,8 +200,8 @@ try {
   await phaseGate('go-spend');
 
   // Phase 2: spend.
-  if (runs('core')) outcomes['shield/withdraw/send (fixed accounts)'] = await run('shield, withdraw and send', CORE,
-    { E2E_PK: aKey, E2E_COUNTERPARTY: B.address });
+  if (runs('core')) outcomes['shield/withdraw/send (isolated fixture)'] = await run('shield, withdraw and send', CORE,
+    { E2E_PK: coreKey, E2E_COUNTERPARTY: B.address });
   if (runs('payment')) {
     // Same fee arithmetic as the spends: the relayer fee comes out of the note
     // being spent, so the request stays well inside one.
@@ -271,6 +285,9 @@ try {
     }
   }
   await Promise.all([...prepared.values()].map(journey => journey.done));
+  // The derived key remains recoverable even after failure. Keep exit gas for
+  // its remaining note/change, return the rest of the wallet float to A.
+  if (coreFunded) await sweepTo(coreAccount, A.address, parseEther('0.0015'));
   // The deposit is only recoverable by the key that made it, and this key is
   // minted in-process and thrown away. So when the return path did not run or
   // did not work, print the key: without it a failed ragequit silently burns the
