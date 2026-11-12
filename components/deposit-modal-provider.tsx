@@ -1239,7 +1239,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     : selectedToken.isNative
       ? nativeBalance == null
       : erc20BalanceRaw == null;
-  const walletBalanceFormatted = walletBalanceLoading ? '—' : tokenAmountLabel(walletBalance.toFixed(4), displaySymbol);
+  const walletBalanceFormatted = walletBalanceLoading ? '—' : tokenAmountLabel(formatTokenBalanceDown(walletBalance, displaySymbol), displaySymbol);
 
   // --- Gas reserve (native deposits) ---
 
