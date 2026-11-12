@@ -168,6 +168,13 @@ async function settleSnapshotBackstop(p: Page): Promise<number | null> {
  * instrument the withdrawal itself.
  */
 async function measureFormTiming(p: Page, amt: string): Promise<void> {
+  // Resolve the real spending gate before freezing public responses for the
+  // timing experiment. Pinning a mid-refresh association set can otherwise
+  // preserve a loading/mismatched generation throughout the measured window.
+  if (!(await tab(p, 'Withdraw'))) throw new Error('Withdraw tab never became active before timing controls');
+  await selectToken(p, 'Withdraw');
+  await waitForShieldedBalance(p);
+  await tab(p, 'Shield');
   const restoreSnapshots = await pinPublicState();
   try {
     // This policy covers preparation, before consent to disclose a transaction.

@@ -2,7 +2,7 @@
 import { expect } from 'bun:test';
 import { launchChrome } from '../../lib/chrome.mjs';
 import { installUnlockGateHandler, unlockIfPrompted, waitForUnlockedLink } from '../unlock-gate';
-import { fillRecipient } from '../lib';
+import { fillRecipient, waitForShieldedBalance } from '../lib';
 
 const browser = await launchChrome({ headless: true });
 try {
@@ -65,6 +65,15 @@ try {
   expect(await waitForUnlockedLink(polling, '/pay#', 10_000)).toBe('http://localhost/pay#test-link');
   console.log('PASS read-only link polling clears a late gate and reads a text-only link');
   await polling.close();
+  const balance = await browser.newPage();
+  await balance.setContent('<button aria-label="Sync balances" onclick="this.dataset.clicked=\'yes\'">Sync</button><section data-testid="hub-page-withdraw"><span id="balance">Loading shielded balance…</span></section>');
+  await balance.evaluate(() => {
+    setTimeout(() => { document.querySelector('#balance')!.textContent = 'Shielded balance\n1,234.56 USDC'; }, 100);
+  });
+  expect(await waitForShieldedBalance(balance, 0.1)).toBe(1234.56);
+  expect(await balance.locator('button[aria-label="Sync balances"]').getAttribute('data-clicked')).toBeNull();
+  console.log('PASS scheduled balance resolves without repeated global Sync presses');
+  await balance.close();
   const page = await browser.newPage();
   await page.setContent('<div style="position:fixed;inset:0"><h2>Unlock your account</h2><button>Sign in</button></div>');
   await expect(unlockIfPrompted(page, 100)).rejects.toThrow('did not finish');

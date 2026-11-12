@@ -597,26 +597,24 @@ export async function forceUnlock(page: Page): Promise<boolean> {
 export async function waitForShieldedBalance(page: Page, minutes = 10): Promise<number> {
   const read = async () => {
     const text = await page.locator('[data-testid^="hub-page-"]:not([aria-hidden="true"]):visible').innerText();
-    const m = text.match(/Shielded(?: balance)?\s+([0-9.]+)/i);
-    return m ? Number(m[1]) : 0;
+    const m = text.match(/Shielded(?: balance)?\s+([0-9][0-9,.]*)/i);
+    return { text, balance: m ? Number(m[1].replaceAll(',', '')) : 0 };
   };
   let last = await read();
-  if (last > 0) { console.log(`  shielded balance: ${last}`); return last; }
-  console.log('  shielded balance is 0 - waiting for note sync / ASP snapshot');
+  if (last.balance > 0) { console.log(`  shielded balance: ${last.balance}`); return last.balance; }
+  console.log('  waiting for the scheduled feed to resolve the shielded balance');
   const deadline = Date.now() + minutes * 60_000;
   while (Date.now() < deadline) {
-    // Nudge the header sync button, which resyncs every chain.
-    await page.evaluate(() => {
-      const btn = Array.from(document.querySelectorAll('[role="button"],button'))
-        .find((b) => /sync|refresh/i.test(b.getAttribute('aria-label') || ''));
-      (btn as HTMLElement | undefined)?.click();
-    });
-    await sleep(15_000);
+    // Read only. Repeated global Sync presses restart discovery and mutate the
+    // note topology while the spendability gate is trying to resolve it.
+    await unlockIfPrompted(page);
+    await sleep(Math.min(1000, Math.max(0, deadline - Date.now())));
     last = await read();
-    if (last > 0) { console.log(`  shielded balance: ${last}`); return last; }
+    if (last.balance > 0) { console.log(`  shielded balance: ${last.balance}`); return last.balance; }
   }
-  console.log(`  shielded balance still 0 after ${minutes}m`);
-  return 0;
+  await page.screenshot({ path: `${ROOT}/.e2e-shots/shielded-balance-timeout.png` });
+  const state = last.text.match(/(?:Loading shielded balance[^\n]*|Shielded balance unavailable[^\n]*|Shielded(?: balance)?\s+[^\n]+)/i)?.[0] ?? 'balance row not found';
+  throw new Error(`Shielded balance did not become spendable after ${minutes}m: ${state}`);
 }
 
 /**
