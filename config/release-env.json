@@ -1,0 +1,5 @@
+{
+  "EXPO_PUBLIC_APP_ENV": "prod",
+  "EXPO_PUBLIC_YIELD_ENABLED": "true",
+  "EXPO_PUBLIC_YIELD_WITHDRAW_READY": "true"
+}
