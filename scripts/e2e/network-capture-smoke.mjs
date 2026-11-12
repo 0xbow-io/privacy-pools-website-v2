@@ -16,6 +16,7 @@ const server = serve({
     const url = new URL(request.url);
     if (url.pathname === '/ws' && server.upgrade(request)) return;
     observed.push({ url: request.url, method: request.method, body: await request.text() });
+    if (url.pathname === '/slow-headers') await new Promise(resolve => setTimeout(resolve, 2000));
     if (url.pathname === '/redirect') return Response.redirect(`${server.url}redirected?label=${LABEL}`, 302);
     if (request.method === 'OPTIONS') return new Response('', { status: 403 });
     return new Response('<html><body>capture smoke</body></html>', { headers: { 'content-type': 'text/html' } });
@@ -90,6 +91,21 @@ try {
     console.log('File upload: browser omitted bytes; capture rejected explicitly');
   }
   await context.close();
+  // Chromium has sent this GET, but Playwright's allHeaders waits for the
+  // response before exposing its raw-header metadata. Keep that fail-closed,
+  // and identify the exact stalled lifecycle instead of just the API origin.
+  const delayedContext = await browser.newContext({ serviceWorkers: 'block' });
+  const delayedCapture = startNetworkCapture(delayedContext, { flushTimeoutMs: 25 });
+  const delayedPage = await delayedContext.newPage();
+  await delayedCapture.attachPage(delayedPage);
+  await delayedPage.goto(String(server.url));
+  await delayedCapture.flushCapture();
+  delayedCapture.clearCapture();
+  await delayedPage.evaluate(() => { void fetch('/slow-headers'); });
+  await delayedPage.waitForTimeout(100);
+  await assert.rejects(delayedCapture.flushCapture(), /slow-headers.*awaiting response/);
+  await delayedContext.close();
+  console.log('PASS delayed-response capture: exact route/lifecycle reported, incomplete headers rejected');
   console.log(`PASS browser capture smoke: ${observed.length} server requests; navigation, cookies, gzip, multipart/file, redirect, denied preflight, beacon, dedicated worker HTTP, websocket handshake/first frames, phase cleanup`);
 } finally {
   await browser.close();
