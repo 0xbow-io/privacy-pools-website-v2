@@ -16,6 +16,7 @@ import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
 import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import { formatUnits } from 'viem';
 
+import { useStellarConnectAction } from '@/hooks/use-stellar-connect-action';
 import { useStellarWallet } from '@/components/stellar-wallet-provider';
 import { useTransferModal } from '@/components/transfer-modal-provider';
 import { STELLAR_TESTNET_ID, getExplorerTxUrl } from '@/config/chains';
@@ -68,6 +69,12 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
   // Disconnected counts too: a first press connects and signs in, the next one pays.
   const needsSignIn = link?.format === 'blind' && (!wallet.isConnected || !stellarSession.unlocked);
 
+  const openWalletPicker = useStellarConnectAction(encoded, () => {
+    if (!link || isOwnRequest || paidTx || (link.format === 'blind' && isStellarRequestExpired(link.request))) return;
+    if (link.format === 'blind') void signIn();
+    else void payByAddress();
+  });
+
   const ensureStellar = async (): Promise<boolean> => {
     if (activeChainId !== STELLAR_TESTNET_ID) {
       const outcome = await selectChain(STELLAR_TESTNET_ID);
@@ -77,16 +84,13 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
       }
     }
     if (!wallet.isConnected) {
-      const connected = await wallet.connect();
-      if (!connected) {
-        setError(wallet.isAvailable ? 'Connect Freighter to pay.' : 'Install Freighter to pay.');
-        return false;
-      }
+      await openWalletPicker();
+      return false;
     }
     return true;
   };
 
-  const payByAddress = async () => {
+  async function payByAddress() {
     if (link?.format !== 'address' || !amountText) return;
     const request = link.request;
     setError(null);
@@ -101,10 +105,10 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
         if (details && details.recipient === request.recipient && details.amount === amountText) setPaidTx(txHash);
       },
     });
-  };
+  }
 
   // Explicit user action: unlock and sync, so the balance below is current.
-  const signIn = async () => {
+  async function signIn() {
     setError(null);
     setBusy(true);
     try {
@@ -117,7 +121,7 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
       setStatus(null);
       setBusy(false);
     }
-  };
+  }
 
   const payBlind = async () => {
     if (link?.format !== 'blind' || stroops === null || busy) return;
@@ -160,7 +164,7 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
       const raw = e instanceof Error ? `${e.name} ${e.message}` : String(e);
       setError(/PaymentRequestExpired/.test(raw)
         ? 'This payment request has expired. Ask for a new link.'
-        : stellarActionError(e, 'Payment cancelled in Freighter.'));
+        : stellarActionError(e, 'Payment cancelled in your wallet.'));
     } finally {
       setStatus(null);
       setBusy(false);

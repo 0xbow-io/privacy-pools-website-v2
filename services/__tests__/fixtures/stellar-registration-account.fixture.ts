@@ -22,13 +22,14 @@ let opened: ReturnType<typeof deferred<void>>;
 let visible: boolean;
 let broadcasts: number;
 let failRead: boolean;
+let registrationReads: number;
 let detach: () => void;
 
 beforeEach(async () => {
   state = { alreadyRegistered: false, keystoreCalldata: {}, viewingKeyCalldata: {} };
-  signed = deferred(); signing = deferred(); opened = deferred(); broadcasts = 0; failRead = false;
+  signed = deferred(); signing = deferred(); opened = deferred(); broadcasts = 0; failRead = false; registrationReads = 0;
   const session = {
-    prepareRegisterKeystore: async () => { if (failRead) throw new Error('RPC unavailable'); return state; },
+    prepareRegisterKeystore: async () => { registrationReads++; if (failRead) throw new Error('RPC unavailable'); return state; },
     executeRegisterKeystore: async () => {
       await provider.signTransaction(xdr, { networkPassphrase: Networks.TESTNET });
       broadcasts++;
@@ -95,4 +96,23 @@ test('status reads reflect partial setup and retain it when RPC fails', async ()
   expect(account.getSnapshot().registrationStatus).toBe('partial');
   expect(broadcasts).toBe(0);
   expect(visible).toBe(false);
+});
+
+
+test('a compatible registration is reused, but cancellation and another account still refuse', async () => {
+  state = { alreadyRegistered: true, keystoreCalldata: null, viewingKeyCalldata: null };
+  await account.ensureCanReceive();
+  const readsAfterConfirmation = registrationReads;
+  await account.ensureCanReceive();
+  expect(registrationReads).toBe(readsAfterConfirmation);
+  await expect(account.ensureCanReceive({ shouldContinue: () => false })).rejects.toThrow('Superseded');
+  const other = Keypair.random().publicKey();
+  account.bind(other, {
+    getAddress: async () => other,
+    getNetworkPassphrase: async () => Networks.TESTNET,
+    signTransaction: async () => { throw new Error('must not sign'); },
+  } as StellarWalletProvider);
+  failRead = true;
+  await expect(account.ensureCanReceive()).rejects.toThrow('RPC unavailable');
+  expect(broadcasts).toBe(0);
 });

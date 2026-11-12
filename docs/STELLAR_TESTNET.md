@@ -10,7 +10,7 @@ withdraw, transfer and exit modals. Stellar is one more network in the selector,
 |---|---|
 | Contracts | `config/stellar-deployment.ts` (redeployed 2026-10-29 with the ceremony keys) |
 | SDK | `@privacy-pools-v2/stellar-sdk`, vendored as `vendor/privacy-pools-v2-stellar-sdk-*.tgz` |
-| Wallet | Freighter (`components/stellar-wallet-provider.tsx`) |
+| Wallet | Varial (`components/stellar-wallet-provider.tsx`) |
 | ASP + event history | asp-v2, the environment's ASP like every other chain (`EXPO_PUBLIC_ASP_URL`, the dev asp-v2 in staging): `/association-set/{root,leaves}`, `/labels/{rejected,poi-required}`, `/public-key` and `GET /202/public/events`, scoped to chain 202 and the pool |
 | Relayer | the v2 relayer (v2-monorepo `packages/relayer/relayer`), Stellar testnet only, at `EXPO_PUBLIC_STELLAR_RELAYER_URL` (`/v1/details\|quote\|relay/stellar/1/…`), via `services/stellar/stellar-relayer.ts` |
 | Circuits | the EVM set in `public/artifacts`, reused unchanged by the Stellar verifier |
@@ -43,7 +43,7 @@ max relay fee). The app keeps a 1 XLM deposit floor.
    without it withdrawals and sends refuse.
 
 3. Start the app and open it with `?stellar=true`, pick **Stellar Testnet** in the chain
-   selector, and connect Freighter (set to Testnet, account funded with friendbot).
+   selector, and connect Varial (set to Testnet, account funded with friendbot).
 
    ```bash
    bun run web
@@ -60,20 +60,20 @@ allows the website origins. Use the branch preview URL with `?env=staging&stella
 
 ## How a deposit becomes spendable
 
-1. The first action asks Freighter to sign a never-submitted key-derivation
+1. The first action asks Varial to sign a never-submitted key-derivation
    transaction. Keys are derived from that signature (SDK `StellarCryptoService`,
    app identifier `privacy-pools/stellar/account-seed:v1`) and kept in memory only.
 2. The deposit proof is built in the browser and `pool.deposit` is submitted.
 3. The deposit's ASP ciphertext is posted with `asp_registry.register_label`. The
    SDK builds this ciphertext but the Stellar entrypoint adapter discards it
-   (`_aspCiphertext`), so the app submits it itself. That is a second Freighter
+   (`_aspCiphertext`), so the app submits it itself. That is a second Varial
    approval. This is a gap in the SDK, which should do this step itself.
 4. asp-v2 decrypts it and recomputes label and commitment, checks that commitment
    against the `deposited` event, approves the label if the depositor is whitelisted
    for this pool, then publishes the new root.
 5. The next sync promotes the note to ACTIVE and it can be withdrawn or sent.
 
-The first deposit registers the keystore first (two more Freighter approvals, once per
+The first deposit registers the keystore first (two more Varial approvals, once per
 account), like EVM and Sui. The deposit already names the account, so this reveals nothing
 new; registering at the first withdrawal instead would put the registration seconds before
 the relayed withdrawal and link the two. An account that holds notes but is not registered
@@ -100,7 +100,7 @@ app environment, plaintext like the EVM request store), and making a request dow
 request backup file (`ppv2-stellar-request-backup`, no password, like the EVM one). A new
 tab restores the records into the session, so a payment is still found after a reload.
 The account modal and Import Payment Requests restore the file. Signing out or switching
-Freighter accounts removes the records the user is proven to hold a backup of: the save-file
+Varial accounts removes the records the user is proven to hold a backup of: the save-file
 picker wrote the file (the Download button, where the browser has the picker), or an imported
 backup holds the same recovery data. The automatic download and a plain download prove
 nothing, so those requests are kept (same model as the EVM purge, PR #209).

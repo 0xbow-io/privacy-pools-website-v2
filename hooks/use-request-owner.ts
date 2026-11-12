@@ -9,7 +9,7 @@ import { useStellarWallet } from '@/components/stellar-wallet-provider';
  * the list card, the backup modal, backup filenames, and storage-adapter
  * calls so they can never disagree:
  *
- *  - On Stellar, the connected Freighter account: Stellar requests name it
+ *  - On Stellar, the connected Varial account: Stellar requests name it
  *    and are listed under it (services/session-payment-requests.ts).
  *  - An active account-key session IS the owner. A connected wallet is then
  *    only the payer and must never replace the key identity (exporting the
