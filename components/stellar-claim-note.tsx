@@ -5,9 +5,9 @@
  * the SDK re-derives every field and refuses another owner's note). The fixed
  * sync clock then marks them spendable. "Save to my account" makes it
  * permanent: one private transfer to itself, announced to its own viewing
- * key, so any device finds it and the link is no longer needed. Varial pays
- * for that and for registering the account first (relayed registration is not
- * available on Stellar).
+ * key, so any device finds it and the link is no longer needed. That transfer
+ * is relayed; Varial only signs the account's registration first, if needed
+ * (relayed registration is not available on Stellar).
  */
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';

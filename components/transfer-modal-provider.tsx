@@ -1876,7 +1876,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         const raw = err instanceof Error ? err.message : String(err);
         log('error', 'Transfer', `Stellar transfer failed: ${raw}`, err);
         const declined = /reject|denied|cancel|declined/i.test(raw);
-        // A one-time link was armed for this send. Declined in Varial: the
+        // A one-time link was armed for this send. Refused by the relayer: the
         // transfer never happened, so the link is dropped. Anything else after
         // that point may have landed: keep the link on screen, framed as an
         // unknown outcome (the sender also has the saved copy).
@@ -4399,7 +4399,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                   {relayFeeCeiled != null && (
                     <FeeWarning breakdown={relayedFeeBreakdown(enteredAmountWei, relayFeeEstimate)} testID="transfer-fee-warning" />
                   )}
-                  {/* Stellar: the relayer's fee comes on top of the amount (none on a self-submitted one-time link). */}
+                  {/* Stellar: the relayer's fee comes on top of the amount. */}
                   {isStellar && stellarSendFee > 0n && (
                     <Text className="text-[14px] leading-[24px]">
                       <Text className="text-[14px] text-[#737373] font-pp-bold">Relayer fee: </Text>

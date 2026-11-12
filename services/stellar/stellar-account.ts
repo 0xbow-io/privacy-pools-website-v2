@@ -353,17 +353,23 @@ class StellarAccount {
     )) as unknown as TransferResult<StellarAddress, StellarLog>;
   }
 
-  /** Relays the first quoted option; refuses a receipt that did not spend this transfer's notes. */
-  private async relayPreparedTransfer(
-    session: StellarPoolSession,
-    prepared: Awaited<ReturnType<StellarPoolSession['prepareTransfer']>>,
-  ): Promise<TransferResult<StellarAddress, StellarLog>> {
+  /** The first quoted option, bounded by the fee reserved in the form. */
+  private quotedRelayOption(prepared: Awaited<ReturnType<StellarPoolSession['prepareTransfer']>>) {
     const option = prepared.relayOptions[0];
     if (!option) throw new Error('The relayer did not return a quote.');
     // Note selection and the UI reserve the estimate; a higher signed fee would come out of the slack.
     if (BigInt(option.selectedQuote.quote.feeCommitment.feeAmount) > STELLAR_TRANSFER_RELAY_FEE_ESTIMATE) {
       throw new Error('The relayer asks for more than the fee shown. Try again later.');
     }
+    return option;
+  }
+
+  /** Relays the first quoted option; refuses a receipt that did not spend this transfer's notes. */
+  private async relayPreparedTransfer(
+    session: StellarPoolSession,
+    prepared: Awaited<ReturnType<StellarPoolSession['prepareTransfer']>>,
+  ): Promise<TransferResult<StellarAddress, StellarLog>> {
+    const option = this.quotedRelayOption(prepared);
     // The recipient's noteSecretsMap must stay: relayTransfer builds the note data itself, and without
     // the map it encodes blind (secretless) notes the recipient can neither discover nor spend.
     const result = await session.relayTransfer(option);
@@ -926,7 +932,8 @@ class StellarAccount {
    * announces the note, so its secret goes to the recipient in a one-time link
    * (services/stellar/stellar-claim.ts). The notes are saved for the sender
    * (stellar-sent-claims.ts) BEFORE the transfer is submitted; if that save
-   * fails nothing is sent.
+   * fails nothing is sent. Relayed like any send, so Varial only signs
+   * the registration, if any.
    */
   sendOneTime(params: {
     amount: bigint;
