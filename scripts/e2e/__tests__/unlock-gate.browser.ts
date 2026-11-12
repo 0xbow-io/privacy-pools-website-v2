@@ -1,5 +1,6 @@
 // Local browser regression; no RPC, wallet key, application server or spending.
 import { expect } from 'bun:test';
+import { confirmConsolidation } from '../consolidation-confirm';
 import { launchChrome } from '../../lib/chrome.mjs';
 import { installUnlockGateHandler, unlockIfPrompted, waitForUnlockedLink } from '../unlock-gate';
 import { clickWhenReady, fillRecipient, registerKeystoreIfPrompted, waitForShieldedBalance } from '../lib';
@@ -107,6 +108,37 @@ try {
   expect(await delayed.locator('body').getAttribute('data-clicks')).toBe('1');
   console.log('PASS delayed sign-in becomes enabled and is clicked only once');
   await delayed.close();
+  for (const outcome of ['success', 'unknown', 'fee-loop']) {
+    const consolidation = await browser.newPage();
+    await consolidation.setContent('<div id="stage"></div>');
+    await consolidation.evaluate((mode) => {
+      let clicks = 0;
+      const root = document.querySelector('#stage')!;
+      const review = () => {
+        root.innerHTML = '<div data-testid="consolidation-confirmation"><button data-testid="consolidation-confirm">Consolidate notes</button><button id="back">Back</button></div>';
+        document.querySelector('#back')!.addEventListener('click', () => {
+          root.innerHTML = '<div data-testid="consolidation-select"><button data-testid="consolidation-review">Review</button></div>';
+          document.querySelector('button')!.addEventListener('click', review);
+        });
+        document.querySelector('[data-testid="consolidation-confirm"]')!.addEventListener('click', () => {
+          document.body.dataset.clicks = String(++clicks);
+          if (mode === 'unknown') root.innerHTML = 'Consolidation outcome unknown';
+          else if (mode === 'success' && clicks > 1) root.innerHTML = 'Consolidation complete';
+          else {
+            const error = document.createElement('p');
+            error.textContent = 'Transfer failed: The relayer fee increased. Review the updated quote before trying again. Nothing was sent.';
+            root.append(error);
+          }
+        });
+      };
+      review();
+    }, outcome);
+    const terminal = await confirmConsolidation(consolidation);
+    expect(await consolidation.locator('body').getAttribute('data-clicks')).toBe(outcome === 'success' ? '2' : outcome === 'unknown' ? '1' : '3');
+    expect(terminal).toContain(outcome === 'success' ? 'Consolidation complete' : outcome === 'unknown' ? 'outcome unknown' : 'Nothing was sent');
+    console.log(`PASS consolidation ${outcome}: retry is bounded and unknown outcomes are never retried`);
+    await consolidation.close();
+  }
   const page = await browser.newPage();
   await page.setContent('<div style="position:fixed;inset:0"><h2>Unlock your account</h2><button>Sign in</button></div>');
   await expect(unlockIfPrompted(page, 100)).rejects.toThrow('did not finish');
