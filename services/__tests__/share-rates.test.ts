@@ -21,17 +21,18 @@ describe('share rates', () => {
     expect(formatShareAsUnderlying(shareExactAsUnderlying('38.1', RATE)!, RATE)).toBe('38.10 USDC');
     expect(formatShareAsUnderlying(shareExactAsUnderlying('109.59', RATE)!, RATE)).toBe('109.60 USDC');
     // integer math: full-precision strings and dust survive
-    expect(shareExactAsUnderlying('0.000000000000000001', RATE)).toBe(0);
+    // display takes the product up to the next base unit, so dust never reads as nothing
+    expect(shareExactAsUnderlying('0.000000000000000001', RATE)).toBe(0.000001);
     expect(shareExactAsUnderlying('', RATE)).toBe(0);
     // not a decimal string: null, so the row keeps its share count instead of a false 0.00
     expect(shareExactAsUnderlying('not a number', RATE)).toBeNull();
     expect(shareExactAsUnderlying('1e3', RATE)).toBeNull();
     // full formatUnits precision round-trips
-    expect(shareExactAsUnderlying('1.234567890123456789', RATE)).toBeCloseTo(1.234695, 6);
+    expect(shareExactAsUnderlying('1.234567890123456789', RATE)).toBe(1.234696); // 1.2346950...: up to the next base unit
   });
   test('the activity rows convert their numeric share amounts the same way', () => {
     expect(shareNumberAsUnderlying(30, RATE)).toBeCloseTo(30.00309, 5);
-    expect(formatShareAsUnderlying(shareNumberAsUnderlying(29.9969, RATE), RATE)).toBe('30 USDC');
+    expect(formatShareAsUnderlying(shareNumberAsUnderlying(29.9969, RATE), RATE)).toBe('29.99 USDC'); // 29.99999: rounded down, two decimals (DEV-621)
     expect(shareNumberAsUnderlying(Number.NaN, RATE)).toBe(0);
   });
   test('keys are chain-scoped and case-insensitive', () => {
@@ -43,8 +44,8 @@ describe('the dollar figure follows the converted amount', () => {
   test('amount and USD agree at a cent boundary', () => {
     const converted = shareExactAsUnderlying('109.59', RATE)!;
     expect(formatShareAsUnderlying(converted, RATE)).toBe('109.60 USDC');
-    // the dollar column prints whole dollars above $100, like every other row
-    expect(formatUsd(converted * underlyingPriceFor(RATE, { usdc: 1 }))).toBe(formatUsd(109.5999));
+    // the dollar column prints the same cents as the amount (DEV-621)
+    expect(formatUsd(converted * underlyingPriceFor(RATE, { usdc: 1 }))).toBe('$109.60');
   });
   test('the underlying price comes from the map by address, then symbol, then $1 for a stablecoin', () => {
     expect(underlyingPriceFor(RATE, { [RATE.underlying]: 0.999 })).toBe(0.999);

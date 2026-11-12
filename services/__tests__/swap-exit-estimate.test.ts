@@ -38,6 +38,20 @@ describe('formatSwapExitEstimate', () => {
     expect(formatSwapExitEstimate(1n, 18)).toBe('0.000000000000000001');
   });
 
+  test('a stablecoin has exactly two decimals, cut down (DEV-621)', () => {
+    expect(formatSwapExitEstimate(1_004_384n, 6, 'USDT')).toBe('1.00');
+    expect(formatSwapExitEstimate(1_004_373n, 6, 'USDC')).toBe('1.00');
+    expect(formatSwapExitEstimate(1_999_999n, 6, 'USDC')).toBe('1.99');
+    expect(formatSwapExitEstimate(1_500_000n, 6, 'USDC')).toBe('1.50');
+    expect(formatSwapExitEstimate(2_000_000n, 6, 'USDT')).toBe('2.00');
+    expect(formatSwapExitEstimate(1_234_567_891_234_567_890n, 18, 'DAI')).toBe('1.23');
+    expect(formatSwapExitEstimate(5_000n, 6, 'USDC')).toBe('<0.01');
+  });
+
+  test('a non-stablecoin keeps its precision when a symbol is given', () => {
+    expect(formatSwapExitEstimate(1_234_567_891_234_567_890n, 18, 'ETH')).toBe('1.234567');
+  });
+
   test('zero is zero', () => {
     expect(formatSwapExitEstimate(0n, 6)).toBe('0');
   });

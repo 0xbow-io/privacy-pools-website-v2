@@ -6,7 +6,7 @@ import { createServer } from 'node:http';
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 import ts from 'typescript';
 import { MerkleService, PoseidonHashService } from '@privacy-pools-v2/sdk';
 import { buildBabyjub, buildPoseidon } from 'circomlibjs';
@@ -64,7 +64,7 @@ const server = createServer((request, response) => {
   response.setHeader('Content-Type', type).end(readFileSync(file));
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-const browser = await chromium.launch({ headless: true });
+const browser = await launchChrome({ headless: true });
 try {
   const page = await browser.newPage();
   const errors = [];

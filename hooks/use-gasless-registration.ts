@@ -37,6 +37,7 @@ import { NoteStatus } from '@/services/sdk-types';
 import type { Address as SdkAddress, Hash, Hex, Note, TxReceiptLike } from '@/services/sdk-types';
 import { recordOwnAction } from '@/services/own-actions-store';
 import { recordWithdrawFee } from '@/services/withdraw-fees-store';
+import { confirmedRegistration } from '@/services/keystore-registry-events';
 
 /**
  * In-app gasless keystore registration, for a wallet that has funds in the pool
@@ -427,8 +428,8 @@ export function useGaslessRegistration(options?: {
     // Auth set without a viewing key is not "already registered": it needs a top-up.
     let mode: GaslessRegistrationMode;
     try {
-      const status = await keystoreStatusForChain(chainId);
-      if (status === 'unknown') throw new Error(`Registration on chain ${chainId} could not be read.`);
+      const status = await keystoreStatusForChain(chainId, { chainFallback: true });
+      if (status === 'unknown') throw new Error(`Registration on chain ${chainId} is still syncing. Try again in a moment.`);
       setReceiveSetup(sessionAddress ?? owner, chainId, receiveSetupFromIdentity(status), 'onchain');
       // 'incompatible' is registered under another unlock: nothing to register or finish.
       if (status === 'compatible' || status === 'incompatible') {
@@ -479,6 +480,9 @@ export function useGaslessRegistration(options?: {
 
     // === From here the wallet is genuinely stuck: walletCanPay is false ======
 
+    // Some BNB, but below the requirement: the warning must not say it has none.
+    const balanceLow = decision.reason === 'insufficient-balance';
+
     // A proof built by a session on one chain cannot carry a fee commitment
     // quoted on another, and the notes that would pay the fee are the session
     // chain's. (The wallet sitting on an UNSUPPORTED chain does not land here —
@@ -488,6 +492,7 @@ export function useGaslessRegistration(options?: {
       return {
         kind: 'ineligible',
         blocker: 'other-chain',
+        balanceLow,
         detail: `Registering on chain ${chainId}; the live session is on chain ${sessionTarget?.chainId ?? sessionChainId}.`,
         walletCanPay: false,
       };
@@ -507,7 +512,7 @@ export function useGaslessRegistration(options?: {
         chainId,
         relay: withdrawalProcessorAddress,
       });
-      return { kind: 'ineligible', blocker: 'chain-unsupported', walletCanPay: false };
+      return { kind: 'ineligible', blocker: 'chain-unsupported', walletCanPay: false, balanceLow };
     }
 
     let approvedNotes: Note[];
@@ -519,11 +524,12 @@ export function useGaslessRegistration(options?: {
         blocker: 'probe-failed',
         detail: `Association-set check failed: ${err instanceof Error ? err.message : String(err)}`,
         walletCanPay: false,
+        balanceLow,
       };
     }
     const candidates = selectFeeNoteCandidates(approvedNotes);
     if (candidates.length === 0) {
-      return { kind: 'ineligible', blocker: 'no-notes', walletCanPay: false };
+      return { kind: 'ineligible', blocker: 'no-notes', walletCanPay: false, balanceLow };
     }
     // Whether the fee actually FITS is not answerable here — only the relayer
     // can price its own work, and asking costs the user their privacy. The
@@ -534,7 +540,7 @@ export function useGaslessRegistration(options?: {
       reason: decision.reason,
       candidates: candidates.length,
     });
-    return { kind: 'eligible', mode, candidates };
+    return { kind: 'eligible', mode, candidates, balanceLow };
   }, [
     keysReady,
     poolSession,
@@ -557,7 +563,7 @@ export function useGaslessRegistration(options?: {
 
   /** Re-checks onchain that the plan's mode still matches the account's state. */
   const assertModeStillApplies = useCallback(async (mode: GaslessRegistrationMode) => {
-    const status = await keystoreStatusForChain(chainId);
+    const status = await keystoreStatusForChain(chainId, { chainFallback: true });
     if (status === 'unknown') {
       throw new Error('Could not read this wallet\'s registration just now. Nothing was sent. Retry in a moment.');
     }
@@ -1037,6 +1043,8 @@ export function useGaslessRegistration(options?: {
         : 'The registration was submitted but could not be confirmed. Check back in a moment before retrying — it may already have landed.');
     }
 
+    // registerAndRelay confirmed: the auth policy is on-chain (no viewing key). A top-up sets none.
+    if (!topUpOnly) confirmedRegistration(sessionAddress ?? owner, chainId, false);
     setReceiveSetup(sessionAddress ?? owner, chainId, 'partial', 'local');
 
     // Name this spend for what it was in the activity list (DEV-574) and keep

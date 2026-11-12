@@ -208,7 +208,7 @@ describe('feed -> SDK input mapping', () => {
     const entry = toYieldEarnedEntry(result, rateSeries!.assetDecimals);
     // 100 shares held at 1.01, bought for exactly 100 USDC.
     expect(entry).toMatchObject({ status: 'ok', earnedTotal: 1_000_000n, assetDecimals: 6 });
-    expect(yieldEarnedDisplay(entry, 'USDC')?.text).toBe('+1 USDC');
+    expect(yieldEarnedDisplay(entry, 'USDC')?.text).toBe('+1.00 USDC');
   });
 
   test('an own deposit the feed has not indexed yet is no figure, not a guess', () => {
@@ -244,15 +244,15 @@ describe('display threshold', () => {
 
   test('figures in the underlying, "—" (null) when there is none or the bound shows', () => {
     expect(yieldEarnedDisplay(ok(1_234_567n, 2n), 'USDC')).toEqual({ text: '+1.23 USDC', amount: 1.234567 });
-    expect(yieldEarnedDisplay(ok(3_000n, 2n), 'USDT')).toEqual({ text: '+0.003 USDT', amount: 0.003 });
-    expect(yieldEarnedDisplay(ok(0n, 0n), 'USDC')).toEqual({ text: '0 USDC', amount: 0 });
+    expect(yieldEarnedDisplay(ok(3_000n, 2n), 'USDT')).toEqual({ text: '<0.01 USDT', amount: 0.003 });
+    expect(yieldEarnedDisplay(ok(0n, 0n), 'USDC')).toEqual({ text: '0.00 USDC', amount: 0 });
     // Negative only within the bound: printed as zero, never red.
-    expect(yieldEarnedDisplay(ok(-2n, 3n), 'USDC')).toEqual({ text: '0 USDC', amount: 0 });
+    expect(yieldEarnedDisplay(ok(-2n, 3n), 'USDC')).toEqual({ text: '0.00 USDC', amount: 0 });
     expect(yieldEarnedDisplay(ok(12_345_000_000_000_000n, 3n, 18), 'ETH')).toEqual({ text: '+0.01235 ETH', amount: 0.012345 });
     // A bound that shows at display precision: the floor of the range, marked as one.
-    expect(yieldEarnedDisplay(ok(5_009_999n, 10_000n), 'USDC')).toEqual({ text: '+5+ USDC', amount: 5, lowerBound: true });
+    expect(yieldEarnedDisplay(ok(5_009_999n, 10_000n), 'USDC')).toEqual({ text: '+5.00+ USDC', amount: 5, lowerBound: true });
     expect(yieldEarnedDisplay(ok(1_239_999n, 7_048n), 'USDC')).toEqual({ text: '+1.23+ USDC', amount: 1.23, lowerBound: true });
-    expect(yieldEarnedDisplay(ok(4_000n, 7_048n), 'USDC')).toEqual({ text: '0+ USDC', amount: 0, lowerBound: true });
+    expect(yieldEarnedDisplay(ok(4_000n, 7_048n), 'USDC')).toEqual({ text: '0.00+ USDC', amount: 0, lowerBound: true });
     expect(yieldEarnedDisplay({ status: 'unavailable', reason: 'no-rate-series' }, 'USDC')).toBeNull();
     expect(yieldEarnedDisplay(undefined, 'USDC')).toBeNull();
   });
@@ -364,12 +364,12 @@ describe('loading is not zero, and neither is unavailable', () => {
     // The row holds 967 USDC worth of shares, so that 0 is "not yet".
     expect(yieldEarnedRow(entry, 'USDC', true)).toEqual({ state: 'loading' });
     // A row with nothing held left (all withdrawn) keeps a real 0.
-    expect(yieldEarnedRow(entry, 'USDC', false)).toEqual({ state: 'ok', display: { text: '0 USDC', amount: 0 } });
+    expect(yieldEarnedRow(entry, 'USDC', false)).toEqual({ state: 'ok', display: { text: '0.00 USDC', amount: 0 } });
   });
 
   test('a computed 0 over held shares (a deposit minutes old) is a real 0', () => {
     expect(yieldEarnedRow(okEntry(0n, 967n * 10n ** 18n), 'USDC', true))
-      .toEqual({ state: 'ok', display: { text: '0 USDC', amount: 0 } });
+      .toEqual({ state: 'ok', display: { text: '0.00 USDC', amount: 0 } });
     expect(yieldEarnedRow(okEntry(1_234_567n, 10n ** 18n), 'USDC', true))
       .toEqual({ state: 'ok', display: { text: '+1.23 USDC', amount: 1.234567 } });
   });

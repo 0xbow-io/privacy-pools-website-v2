@@ -1,10 +1,10 @@
 // PROBE_URL=http://localhost:8081 node scripts/e2e/landing-wallet-state.mjs
 // A disposable wallet fixture: no keys, signing, or transaction submission.
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 import { installLandingWallet } from './fixtures/landing-wallet.mjs';
 
-const browser = await chromium.launch({ headless: true });
+const browser = await launchChrome({ headless: true });
 try {
   for (const [width, reducedMotion] of [
     [1440, 'no-preference'], [390, 'no-preference'],

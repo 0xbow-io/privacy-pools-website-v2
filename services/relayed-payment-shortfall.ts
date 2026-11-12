@@ -1,5 +1,7 @@
 import { formatUnits } from 'viem';
 import { isStablecoin } from '@/services/token-format';
+import { displayTokenSymbol, isShareSymbol, tokenAmountLabel } from '@/services/share-display';
+import type { ShareRate } from '@/services/share-rates';
 
 /** Significant digits shown for an amount in a shortfall message. */
 const SIG_DIGITS = 4;
@@ -14,15 +16,20 @@ const STABLE_FRACTION_DIGITS = 2;
  * number they act on is never too small; reachable balances round down.
  */
 export function formatShortfallAmount(value: bigint, decimals: number, up: boolean, symbol?: string): string {
-  if (value <= 0n) return '0';
+  const stable = isStablecoin(symbol);
+  if (value <= 0n) return stable ? '0.00' : '0';
   const digits = value.toString().length;
-  const drop = isStablecoin(symbol)
+  const drop = stable
     ? Math.max(0, decimals - STABLE_FRACTION_DIGITS)
     : Math.max(0, Math.min(decimals, digits - SIG_DIGITS));
   const unit = 10n ** BigInt(drop);
   let rounded = (value / unit) * unit;
   if (up && rounded < value) rounded += unit;
-  return formatUnits(rounded, decimals);
+  const text = formatUnits(rounded, decimals);
+  if (!stable) return text;
+  // Exactly two decimals for a stablecoin, like money (DEV-621): "5.00", not "5".
+  const [whole, frac = ''] = text.split('.');
+  return `${whole}.${frac.padEnd(STABLE_FRACTION_DIGITS, '0')}`;
 }
 
 /**
@@ -59,9 +66,28 @@ export function formatRelayedPaymentShortfall(params: {
   maxLabels: number;
   /** Smallest SINGLE new deposit that makes this payable. */
   singleDepositTopUp: bigint;
+  /**
+   * Live rate when `tokenSymbol` is a share (the feed grid's, never a request):
+   * every figure then reads as the underlying it is worth. Without it a share
+   * figure is its count under the underlying's name, marked approximate.
+   * Display only: nothing here sizes the payment.
+   */
+  rate?: ShareRate;
 }): string {
-  const up = (v: bigint) => `${formatShortfallAmount(v, params.decimals, true, params.tokenSymbol)} ${params.tokenSymbol}`;
-  const down = (v: bigint) => `${formatShortfallAmount(v, params.decimals, false, params.tokenSymbol)} ${params.tokenSymbol}`;
+  const rate = params.rate && isShareSymbol(params.tokenSymbol) && params.rate.shareDecimals === params.decimals
+    ? params.rate
+    : undefined;
+  const text = (v: bigint, roundUp: boolean) => {
+    if (!rate) return tokenAmountLabel(formatShortfallAmount(v, params.decimals, roundUp, params.tokenSymbol), params.tokenSymbol);
+    // Rounded the same way as the figure: up for what must be provided, down for what is reachable.
+    const one = 10n ** BigInt(rate.shareDecimals);
+    const product = v * rate.assetsPerShare;
+    const assets = product / one + (roundUp && product % one > 0n ? 1n : 0n);
+    const symbol = displayTokenSymbol(rate.underlyingSymbol);
+    return `${formatShortfallAmount(assets, rate.underlyingDecimals, roundUp, symbol)} ${symbol}`;
+  };
+  const up = (v: bigint) => text(v, true);
+  const down = (v: bigint) => text(v, false);
   if (params.relayerFee === null) {
     return `Could not get a relayer fee quote. You can pay up to ${down(params.reachableAmount)} privately, before the fee. Try again in a moment.`;
   }

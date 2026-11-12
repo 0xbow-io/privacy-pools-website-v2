@@ -107,9 +107,10 @@ declare module 'playwright' {
       isMobile?: boolean;
     }): Promise<BrowserContext>;
     newPage(options?: { viewport?: { width: number; height: number } }): Promise<Page>;
+    version(): string;
     close(): Promise<void>;
   }
   export const chromium: {
-    launch(options?: { headless?: boolean; executablePath?: string; args?: string[] }): Promise<Browser>;
+    launch(options?: { headless?: boolean; channel?: string; chromiumSandbox?: boolean; executablePath?: string; args?: string[] }): Promise<Browser>;
   };
 }

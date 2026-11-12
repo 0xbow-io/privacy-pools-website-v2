@@ -46,7 +46,7 @@ import { getKnownTokenMetadata, getTokenMetadata, isStablecoin } from '@/config/
 import { getChainConfig, STELLAR_TESTNET_ID } from '@/config/chains';
 import { STELLAR_XLM } from '@/config/stellar-deployment';
 import { PAY_URL_BASE } from '@/config/env';
-import { isShareSymbol} from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol } from '@/services/share-display';
 import { formatUsd } from '@/services/format-fiat';
 import { priceFromMap } from '@/services/price-map-merge';
 import { shareNumberAsUnderlying, underlyingPriceFor } from '@/services/share-rates';
@@ -458,7 +458,7 @@ export function PaymentRequestsCard({
                       <View className="min-w-0 flex-1 flex-row items-center gap-[10px]">
                         {/* The chain rides the icon's badge, as on Activity rows; the
                             testnet pill is what tells Sepolia from Ethereum. */}
-                        <View accessible accessibilityRole="image" accessibilityLabel={`${r.assetSymbol} on ${r.chainName}`}>
+                        <View accessible accessibilityRole="image" accessibilityLabel={`${displayTokenSymbol(r.assetSymbol)} on ${r.chainName}`}>
                           <TokenNetworkIcon symbol={r.assetSymbol} chainId={r.chainId} size={28} badgeSize={14} />
                         </View>
                         <View className="min-w-0 flex-1 gap-[3px]">

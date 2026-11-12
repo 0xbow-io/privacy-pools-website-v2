@@ -16,8 +16,8 @@ import {
   surfaceUrl,
 } from './config';
 import { openFixtureStore, type FixtureMode } from './fixtures';
-import { assertOrUpdateBaselineManifest } from './baseline-manifest';
-import { launchBrowser, newDeterministicContext, openSurface, stableScreenshot } from './harness';
+import { assertOrUpdateBaselineManifest, writeCaptureBrowser } from './baseline-manifest';
+import { captureBrowserLabel, launchBrowser, newDeterministicContext, openSurface, stableScreenshot } from './harness';
 
 export interface CaptureOptions {
   mode: FixtureMode;
@@ -103,8 +103,10 @@ async function main(): Promise<void> {
   }
   // Ground-truth writes must match (or deliberately refresh) the recorded
   // fixture digest — see baseline-manifest.ts (GATES-01).
+  const browserLabel = await captureBrowserLabel();
+  writeCaptureBrowser(outDir, browserLabel);
   if (outDir === BASELINE_DIR) {
-    assertOrUpdateBaselineManifest({ allowRefresh: refreshBaselines, ...(commit ? { commit } : {}) });
+    assertOrUpdateBaselineManifest({ browser: browserLabel, allowRefresh: refreshBaselines, ...(commit ? { commit } : {}) });
   }
   const result = await captureAll({ mode, outDir, only });
   console.log(`\ncaptured ${result.captured.length}, failed ${result.failed.length}, fixture misses ${result.fixtureMisses.length}`);

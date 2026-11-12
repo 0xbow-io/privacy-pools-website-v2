@@ -172,7 +172,7 @@ export type GaslessRegistrationEligibility =
    * the note groups worth pricing — best first. NOT a promise that the fee
    * fits: that question belongs to the quoting stage.
    */
-  | { kind: 'eligible'; mode: GaslessRegistrationMode; candidates: FeeNoteCandidate[] }
+  | { kind: 'eligible'; mode: GaslessRegistrationMode; candidates: FeeNoteCandidate[]; balanceLow?: boolean }
   | {
     kind: 'ineligible';
     blocker: GaslessRegistrationBlocker;
@@ -186,6 +186,8 @@ export type GaslessRegistrationEligibility =
      * differently to a funded wallet than to an empty one.
      */
     walletCanPay: boolean | null;
+    /** The wallet holds some gas token, just below what registration needs. */
+    balanceLow?: boolean;
   };
 
 /** Parse a note's hex value; `null` for anything unparseable. */
@@ -330,6 +332,11 @@ export function narrowFeeNotes(
   return null;
 }
 
+/** A wallet with some gas token, below the registration requirement (not "none"). */
+function lowBalanceMessage(nativeSymbol: string): string {
+  return `Your ${nativeSymbol} balance is below the amount needed for registration. Send a little ${nativeSymbol} here, then try again.`;
+}
+
 /**
  * User-facing sentence for a wallet that CANNOT pay its own registration gas
  * and cannot be carried either — the honest dead end, rather than a button that
@@ -344,6 +351,7 @@ export function describeGaslessRegistrationBlocker(
 ): string | null {
   if (eligibility.kind === 'eligible') return null;
   if (eligibility.walletCanPay !== false) return null;
+  if (eligibility.balanceLow && eligibility.blocker !== 'probe-failed') return lowBalanceMessage(nativeSymbol);
   switch (eligibility.blocker) {
     case 'no-notes':
       return `This wallet has no ${nativeSymbol} for gas and nothing in its shielded balance to pay a relayer with. Send a little ${nativeSymbol} here, then register.`;
@@ -379,9 +387,25 @@ export function describeUnpayableWallet(
   if (!eligibility) return null;
   if (eligibility.kind === 'eligible') {
     if (options.gaslessAllowed) return null;
+    if (eligibility.balanceLow) return lowBalanceMessage(nativeSymbol);
     return `This wallet has no ${nativeSymbol} for gas, and this step needs the wallet to pay for itself. Send a little ${nativeSymbol} here, then try again.`;
   }
   return describeGaslessRegistrationBlocker(eligibility, nativeSymbol);
+}
+
+/**
+ * Whether Register is off because of that warning (QA on DEV-589). With no
+ * gas and nobody to carry the wallet, the press could only open a wallet
+ * prompt that fails, on every chain alike. Not for `probe-failed`: that is
+ * "could not tell", and the funded path stays the fallback there.
+ */
+export function registrationBlockedByGas(
+  eligibility: GaslessRegistrationEligibility | null,
+  options: { gaslessAllowed: boolean },
+): boolean {
+  if (!eligibility) return false;
+  if (eligibility.kind === 'ineligible' && eligibility.blocker === 'probe-failed') return false;
+  return describeUnpayableWallet(eligibility, 'gas', options) !== null;
 }
 
 /**
@@ -398,9 +422,7 @@ export function describeInsufficientGas(
   nativeSymbol: string,
   chainName: string,
 ): string | null {
-  const isInsufficient = /insufficient funds|enough .{0,12} in your account|exceeds the balance|insufficient balance/i
-    .test(message);
-  if (!isInsufficient) return null;
+  if (!INSUFFICIENT_GAS.test(message)) return null;
   return `You need ${nativeSymbol} on ${chainName} to pay the network fee. Add some, then register again.`;
 }
 
@@ -447,32 +469,68 @@ export function collectErrorText(err: unknown): string {
   return parts.join('\n');
 }
 
-export type RegistrationErrorKind = 'rejected' | 'pending' | 'chain-mismatch' | 'reverted' | 'raw' | 'plain';
+export type RegistrationErrorKind =
+  | 'rejected'
+  | 'pending'
+  | 'chain-mismatch'
+  | 'reverted'
+  | 'insufficient-gas'
+  | 'fee-refused'
+  | 'network'
+  | 'raw'
+  | 'plain';
+
+/**
+ * The node refused the fee the wallet signed with (DEV-589). Not "intrinsic
+ * gas too low": that is the gas LIMIT, a retry at the same limit fails the
+ * same way, so the fee line would loop (review of DEV-589).
+ */
+const FEE_REFUSED = /underpriced|gas price (is )?(too low|below)|fee too low|max ?fee per gas less than block base fee|minimum gas price/i;
+/** The wallet could not reach its node, or the node failed the request. */
+const NETWORK_FAILURE = /HTTP request failed|Failed to fetch|fetch failed|network ?error|network request failed|could not connect|ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up|request timed out|rate limit|too many requests|\b(429|502|503|504)\b/i;
+const INSUFFICIENT_GAS = /insufficient funds|enough .{0,12} in your account|exceeds the balance|insufficient balance/i;
 
 /**
  * Sorts a registration failure so only a genuine, unknown pre-send failure
  * gets the generic "try again" line. Order matters: a tx that was sent and is
  * unconfirmed is pending whatever the error says, so a retry never duplicates it.
+ *
+ * `detail` is the whole error chain (`collectErrorText`): wallets put the
+ * reason in `cause`/`details`, not always in `message`. It is matched, never shown.
  */
-export function classifyRegistrationError(message: string, sentUnconfirmed: boolean): RegistrationErrorKind {
-  if (/user rejected|user denied|user cancel/i.test(message)) return 'rejected';
-  if (sentUnconfirmed || /WaitForTransactionReceiptTimeout|Timed out while waiting for transaction/i.test(message)) return 'pending';
-  if (/ChainMismatch|current chain of the wallet|does not match the target chain|chain mismatch/i.test(message)) return 'chain-mismatch';
+export function classifyRegistrationError(message: string, sentUnconfirmed: boolean, detail = ''): RegistrationErrorKind {
+  const text = detail ? `${message}\n${detail}` : message;
+  if (/user rejected|user denied|user cancel|rejected by (the )?user|cancell?ed by (the )?user/i.test(text)) return 'rejected';
+  if (sentUnconfirmed || /WaitForTransactionReceiptTimeout|Timed out while waiting for transaction/i.test(text)) return 'pending';
+  if (/ChainMismatch|current chain of the wallet|does not match the target chain|chain mismatch/i.test(text)) return 'chain-mismatch';
   // Only a receipt-confirmed revert (our own message). A wallet preflight
   // "execution reverted" is a pre-send failure and gets the generic line.
   if (/reverted on-chain/i.test(message)) return 'reverted';
+  if (INSUFFICIENT_GAS.test(text)) return 'insufficient-gas';
+  if (FEE_REFUSED.test(text)) return 'fee-refused';
+  if (NETWORK_FAILURE.test(text)) return 'network';
   return isRawWalletError(message) ? 'raw' : 'plain';
 }
 
 /** The one line shown for a registration failure. */
-export function describeRegistrationError(message: string, sentUnconfirmed: boolean, chainName: string): string {
-  switch (classifyRegistrationError(message, sentUnconfirmed)) {
+export function describeRegistrationError(
+  message: string,
+  sentUnconfirmed: boolean,
+  chainName: string,
+  options?: { detail?: string; nativeSymbol?: string },
+): string {
+  // The chain's gas coin, never a share: a bare name the symbol guard accepts.
+  const nativeSymbol = options?.nativeSymbol ?? 'gas';
+  switch (classifyRegistrationError(message, sentUnconfirmed, options?.detail)) {
     case 'rejected': return 'Transaction cancelled in your wallet.';
     case 'pending': return REGISTRATION_TX_PENDING_MESSAGE;
     case 'chain-mismatch': return `Switch your wallet to ${chainName} and try again.`;
     // Neutral on purpose: one leg may already have landed. A retry re-reads
     // what is registered and sends only what is missing.
     case 'reverted': return 'The registration transaction failed onchain. Try again to finish.';
+    case 'insufficient-gas': return `You need ${nativeSymbol} on ${chainName} to pay the network fee. Add some, then register again.`;
+    case 'fee-refused': return `${chainName} refused the network fee your wallet set. Try again.`;
+    case 'network': return `Could not reach ${chainName}. Check your connection and try again.`;
     case 'raw': return WALLET_SEND_FAILED_MESSAGE;
     default: return message;
   }
