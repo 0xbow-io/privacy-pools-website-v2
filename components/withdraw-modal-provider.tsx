@@ -2883,9 +2883,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     setLoadingMessage('Preparing withdrawal proof...');
 
     // === Stellar path ===
-    // Self-submitted withdrawal through the shared Stellar account: the same
-    // mixed-label, five-input selection the EVM path uses, then the SDK's own
-    // withdraw (change note back to self, processor = this account).
+    // Relayed withdrawal through the shared Stellar account: the same
+    // mixed-label, five-input selection the EVM path uses, then the SDK's
+    // relayed withdraw (change note back to self, processor = the relay contract).
     if (reviewContext?.mode === 'sui' && reviewContext.poolChainId === STELLAR_TESTNET_ID) {
       try {
         const amountOut = parseTokenAmount(amount, altDecimals);

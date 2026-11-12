@@ -1313,14 +1313,14 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     () => (isStellar ? (stellarSession.spendableNotes as unknown as StellarUiNote[]) : []),
     [isStellar, stellarSession.spendableNotes],
   );
-  // The user confirmed a one-time link for exactly this recipient (self-submitted, so no relayer fee).
+  // The user confirmed a one-time link for exactly this recipient.
   // Case-insensitive: the shared check may hold a lowercased copy (a G address is uppercase only).
   const stellarOneTime = isStellar
     && recipientRegistrationCheck?.registered === false
     && recipientRegistrationCheck.chainId === STELLAR_TESTNET_ID
     && recipientRegistrationCheck.recipientAddress.toUpperCase() === recipientAddress.trim().toUpperCase();
-  // A relayed Stellar send pays the relayer fee from the same notes.
-  const stellarSendFee = isStellar ? stellarTransferRelayFee({ oneTime: stellarOneTime }) : 0n;
+  // A relayed Stellar send (one-time links too) pays the relayer fee from the same notes.
+  const stellarSendFee = isStellar ? stellarTransferRelayFee() : 0n;
   const suiActiveTotal = useMemo(
     () => (isStellar
       ? maxStellarTransferForInputs(stellarActiveNotes.reduce((a, n) => a + BigInt(n.value), 0n), stellarSendFee)
@@ -1876,7 +1876,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         const raw = err instanceof Error ? err.message : String(err);
         log('error', 'Transfer', `Stellar transfer failed: ${raw}`, err);
         const declined = /reject|denied|cancel|declined/i.test(raw);
-        // A one-time link was armed for this send. Declined in Varial: the
+        // A one-time link was armed for this send. Refused by the relayer: the
         // transfer never happened, so the link is dropped. Anything else after
         // that point may have landed: keep the link on screen, framed as an
         // unknown outcome (the sender also has the saved copy).
@@ -4399,20 +4399,13 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                   {relayFeeCeiled != null && (
                     <FeeWarning breakdown={relayedFeeBreakdown(enteredAmountWei, relayFeeEstimate)} testID="transfer-fee-warning" />
                   )}
-                  {/* Stellar: the relayer's fee comes on top of the amount (none on a self-submitted one-time link). */}
+                  {/* Stellar: the relayer's fee comes on top of the amount. */}
                   {isStellar && stellarSendFee > 0n && (
                     <Text className="text-[14px] leading-[24px]">
                       <Text className="text-[14px] text-[#737373] font-pp-bold">Relayer fee: </Text>
                       <Text className="text-[14px] text-[#737373] font-pp-regular" testID="stellar-transfer-fee">
                         up to {formatUnits(stellarSendFee, altDecimals)} {altSymbol}, added on top
                       </Text>
-                    </Text>
-                  )}
-                  {/* Stellar sends are relayed, but one-time links are self-signed,
-                      so the chain shows this account as sender. */}
-                  {stellarOneTime && (
-                    <Text className="text-[12px] leading-[18px] text-[#B45309] font-pp-regular" testID="stellar-transfer-linkable">
-                      Sent from your Stellar wallet account, so this send is publicly linked to it.
                     </Text>
                   )}
                   {/* DEV-368: the "Notes: 1 input note" line lived here. Dropped

@@ -79,4 +79,3 @@ export async function unlockIfPrompted(page: Page, maxWaitMs = 120_000): Promise
   console.log(`  unlock gate: STILL on screen after ${Math.round(maxWaitMs / 1000)}s`);
   throw new Error('Account unlock did not finish before the e2e deadline');
 }
-

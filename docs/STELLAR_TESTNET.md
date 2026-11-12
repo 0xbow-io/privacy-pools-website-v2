@@ -121,7 +121,7 @@ whole-history pool read in the pass, and the activity index's, is answered from 
 The relayer is the v2 relayer (`packages/relayer/relayer`), built from the same
 `stellar/audit-readiness` commit as the contracts and the SDK, run by us for testnet with a
 Stellar-only config. A withdrawal is proved against the relay contract as processor and a
-send (Send, `/pay`, keeping a claimed link) against the relayer itself as the pool's gated
+send (Send, a one-time link, `/pay`, keeping a claimed link) against the relayer itself as the pool's gated
 processor; the relayer submits both, so the user's account never appears on them. The
 withdrawal fee is 50 bps plus the transaction's cost for its proof shape, a send's is 0.02 XLM
 plus that cost, both capped at XLM's on-chain `max_relay_fee` (0.5 XLM on the 2026-10-29
@@ -149,9 +149,8 @@ sync fails rather than silently scanning a clamped RPC window.
 
 ## Not done yet
 
-- Private transfers are still self-submitted (the pool sees the sender's account as
-  processor): the Stellar SDK refuses to relay a transfer. Withdrawals are relayed. The
-  Send review says so. Exits (ragequit) are public by design, as on EVM.
+- Freighter still signs deposits, the keystore registration and exits (ragequit, public by
+  design, as on EVM). Every send and withdrawal is relayed.
 - Sending names the recipient to the Soroban RPC once, inside the SDK's own
   `transfer()` (it reads the recipient's viewing key to encrypt to it). The app makes no
   separate lookup, but that one read is upstream and stays until the SDK can take a
