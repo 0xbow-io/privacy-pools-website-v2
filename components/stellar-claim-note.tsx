@@ -9,7 +9,7 @@
  * for that and for registering the account first (relayed registration is not
  * available on Stellar).
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
 import { useRouter } from 'expo-router';
 import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
@@ -41,6 +41,12 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
   const [error, setError] = useState<string | null>(null);
   const [keptTx, setKeptTx] = useState<string | null>(null);
   const router = useRouter();
+  const keepScope = useRef({ active: true });
+  useLayoutEffect(() => {
+    const scope = { active: true };
+    keepScope.current = scope;
+    return () => { scope.active = false; };
+  }, [encoded, wallet.address, wallet.networkPassphrase, activeChainId]);
   // A result belongs to one link and one account.
   useEffect(() => { setKeptTx(null); setError(null); }, [encoded, wallet.address]);
 
@@ -97,15 +103,17 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
 
   const onKeep = async () => {
     if (!claim) return;
+    const scope = keepScope.current;
     setError(null);
     setBusy(describeStellarStage('proving'));
     try {
       const { txHash } = await stellar.keepClaim(claim.notes.map((n) => n.commitment as `0x${string}`), {
-        onStage: (stage) => setBusy(describeStellarStage(stage)),
+        shouldContinue: () => scope.active,
+        onStage: (stage) => { if (scope.active) setBusy(describeStellarStage(stage)); },
       });
-      setKeptTx(txHash);
+      if (scope.active) setKeptTx(txHash);
     } catch (e) {
-      setError(errorText(e));
+      if (scope.active) setError(errorText(e));
     } finally {
       setBusy(null);
     }

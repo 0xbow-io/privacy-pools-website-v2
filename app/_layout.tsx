@@ -57,6 +57,7 @@ import { StaleAssetsNotifier } from '@/components/stale-assets-notifier';
 import { WalletConnectModalProvider } from '@/components/wallet-connect-modal-provider';
 import { MobileAccountKeysProvider } from '@/components/mobile-account-keys-provider';
 import { SeedDerivationModalProvider } from '@/components/seed-derivation-modal-provider';
+import { StellarRegistrationModal } from '@/components/stellar-registration-modal';
 import { KeystoreRegistrationModalProvider } from '@/components/keystore-registration-modal-provider';
 import { ImportNoteModalProvider } from '@/components/import-note-modal-provider';
 import { CustomRpcModalProvider } from '@/components/custom-rpc-modal-provider';
@@ -312,6 +313,7 @@ export default function RootLayout() {
                   <CustomRpcModalProvider>
                   <SeedDerivationModalProvider>
                    <KeystoreRegistrationModalProvider>
+                    <StellarRegistrationModal />
                     {/* Below the registration provider: a claim that registers
                         the wallet marks it registered there. */}
                     <ImportNoteModalProvider>

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Text } from 'react-native';
 import { ChainRow, RegistrationCardFrame } from '@/components/home/registration-card-frame';
+import { StellarRegistrationStatusCard } from '@/components/home/stellar-registration-status-card';
 
 import { usePoolSession } from '@/hooks/use-pool-session';
 import { useKeystoreRegistrationModal } from '@/components/keystore-registration-modal-provider';
@@ -44,10 +45,11 @@ import { AccountUnlockNotice } from '@/components/account-unlock-help';
 // but can't receive privately. When the active chain is in it the card opens
 // itself without reading anything; other chains are only read on a press.
 
-/** EVM keystore registration only: Sui and Stellar register inside their own flows. */
+/** Shared registration UI, backed by the active chain family. */
 export function RegistrationStatusCard() {
   const { isSui, isStellar } = useChainRouter();
-  if (isSui || isStellar) return null;
+  if (isSui) return null;
+  if (isStellar) return <StellarRegistrationStatusCard />;
   return <EvmRegistrationStatusCard />;
 }
 
