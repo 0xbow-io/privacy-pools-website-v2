@@ -9,7 +9,7 @@
  * for that and for registering the account first (relayed registration is not
  * available on Stellar).
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
 import { useRouter } from 'expo-router';
 import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
@@ -22,15 +22,10 @@ import { useChainRouter } from '@/hooks/use-chain-router';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { useTabCloseGuard } from '@/hooks/use-tab-close-guard';
 import { decodeStellarClaim, stellarClaimTotal } from '@/services/stellar/stellar-claim';
-import { describeStellarStage, stellarErrorMessage } from '@/services/stellar/stellar-copy';
+import { describeStellarStage, stellarActionError } from '@/services/stellar/stellar-copy';
 
 function short(value: string): string {
   return value.length <= 12 ? value : `${value.slice(0, 6)}…${value.slice(-6)}`;
-}
-
-function errorText(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error);
-  return /reject|denied|cancel|declined/i.test(raw) ? 'Cancelled in Freighter.' : stellarErrorMessage(raw);
 }
 
 export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
@@ -41,6 +36,12 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
   const [error, setError] = useState<string | null>(null);
   const [keptTx, setKeptTx] = useState<string | null>(null);
   const router = useRouter();
+  const keepScope = useRef({ active: true });
+  useLayoutEffect(() => {
+    const scope = { active: true };
+    keepScope.current = scope;
+    return () => { scope.active = false; };
+  }, [encoded, wallet.address, wallet.networkPassphrase, activeChainId]);
   // A result belongs to one link and one account.
   useEffect(() => { setKeptTx(null); setError(null); }, [encoded, wallet.address]);
 
@@ -89,7 +90,7 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
     try {
       await stellar.claim(claim.notes);
     } catch (e) {
-      setError(errorText(e));
+      setError(stellarActionError(e, 'Cancelled in Freighter.'));
     } finally {
       setBusy(null);
     }
@@ -98,14 +99,17 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
   const onKeep = async () => {
     if (!claim) return;
     setError(null);
+    if (!(await ensureReady())) return;
+    const scope = keepScope.current;
     setBusy(describeStellarStage('proving'));
     try {
       const { txHash } = await stellar.keepClaim(claim.notes.map((n) => n.commitment as `0x${string}`), {
-        onStage: (stage) => setBusy(describeStellarStage(stage)),
+        shouldContinue: () => scope.active,
+        onStage: (stage) => { if (scope.active) setBusy(describeStellarStage(stage)); },
       });
-      setKeptTx(txHash);
+      if (scope.active) setKeptTx(txHash);
     } catch (e) {
-      setError(errorText(e));
+      if (scope.active) setError(stellarActionError(e, 'Cancelled in Freighter.'));
     } finally {
       setBusy(null);
     }

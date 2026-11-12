@@ -1,9 +1,9 @@
 // @ts-nocheck — local one-off probe
 // Split-screen + tab click: /?action=shield&panel=balances then click the
 // Withdraw tab. The panel param must survive (split view stays), action=withdraw.
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 
-const browser = await chromium.launch({ args: ['--no-sandbox'] });
+const browser = await launchChrome();
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 await context.addInitScript(() => localStorage.setItem('ppv2_smartwallet_skipped_v1', '1'));
 const page = await context.newPage();

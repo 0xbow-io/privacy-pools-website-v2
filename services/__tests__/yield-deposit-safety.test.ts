@@ -65,7 +65,7 @@ describe('exact router allowance plan', () => {
 
 test('yield exit disclosure names the share on both sides of the withdrawal', () => {
   expect(yieldExitDisclosure('USDC')).toBe(
-    'You will hold USDC in the yield pool. Withdrawing pays out USDC plus the yield earned, redeemed at the vault.',
+    'You will hold USDC in the yield pool. Withdrawing pays out USDC plus the yield earned.',
   );
 });
 

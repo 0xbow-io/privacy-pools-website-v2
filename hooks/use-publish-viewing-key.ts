@@ -8,6 +8,8 @@ import { useDebug } from '@/components/debug-provider';
 import { isSupportedEvmChainId } from '@/config/chains';
 import { isSessionInitTimeout, withSessionInitTimeout } from '@/services/session-init-timeout';
 import { setReceiveSetup, viewingKeyTxPlan } from '@/services/receive-setup';
+import { ownRegistrationResultRefusal } from '@/services/keystore-scope';
+import { confirmedRegistration } from '@/services/keystore-registry-events';
 import { sendWalletTransaction } from '@/services/wallet-send-refusal';
 import { minPriorityFeeFor, readFeeMarket, walletPricedFeeFloorFor, walletTxAffordable, type FeeReadClient } from '@/services/wallet-tx-fees';
 
@@ -123,6 +125,10 @@ export function usePublishViewingKey(chainId: number) {
       await new Promise((resolve) => setTimeout(resolve, AUTH_LAG_RETRY_MS));
       registration = await session.prepareRegisterKeystore();
     }
+    // SDK 1.0.2: "already registered" / a viewing-key-only plan means SOME auth
+    // policy, not this unlock's. Never mark it complete or publish onto it.
+    const refusal = ownRegistrationResultRefusal(chainId, sessionAddress ?? address, registration);
+    if (refusal) throw new Error(refusal);
     if (registration.alreadyRegistered) {
       setReceiveSetup(sessionAddress ?? address, chainId, 'complete', 'onchain');
       return { kind: 'already' };
@@ -173,6 +179,7 @@ export function usePublishViewingKey(chainId: number) {
     if (receipt.status !== 'success') {
       throw new Error(`Publishing the viewing key reverted onchain (tx ${hash}).`);
     }
+    confirmedRegistration(sessionAddress ?? address, chainId, true);
     setReceiveSetup(sessionAddress ?? address, chainId, 'complete', 'onchain');
     log('info', 'PublishViewingKey', 'Viewing key published', { chainId, txHash: hash });
     return { kind: 'published', txHash: hash };

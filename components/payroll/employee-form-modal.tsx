@@ -3,11 +3,11 @@ import { View, Text } from 'react-native';
 
 import { PModal, PInput, PChip, FormField, PButton } from '@/components/payroll/ui';
 import {
-  upsertEmployee, newId, supportedNetworks, defaultNetwork, networkChainId, SOON_NETWORKS,
+  upsertEmployee, newId, supportedNetworks, defaultNetwork, networkChainId,
   type Employee, type EmployeeStatus,
 } from '@/services/payroll-store';
 import { getActionableTokens, getTokenMetadataBySymbol } from '@/config/tokens';
-import { safeDecimalString } from '@/components/payroll/io';
+import { safeDecimalString, payrollCurrencyOptions } from '@/components/payroll/io';
 import { displayTokenSymbol } from '@/services/share-display';
 
 // (Replaced by the per-network list below — a static list offered assets
@@ -42,7 +42,7 @@ export function EmployeeFormModal({ visible, employee, onClose }: {
       setWalletAddress(employee?.walletAddress ?? '');
       setNetwork(employee?.network ?? defaultNetwork());
       setSalary(employee?.salaryText ?? (employee?.salary ? safeDecimalString(employee.salary) : ''));
-      setCurrency(employee?.currency ?? 'USDC');
+      setCurrency(displayTokenSymbol(employee?.currency ?? 'USDC'));
       setStatus(employee?.status ?? 'active');
       setError(null);
     }
@@ -53,7 +53,7 @@ export function EmployeeFormModal({ visible, employee, onClose }: {
   // select currencies that resolve to nothing at pay time.
   const formChainId = networkChainId(network);
   const currencyOptions = formChainId !== undefined
-    ? getActionableTokens(formChainId).map((t) => t.symbol)
+    ? payrollCurrencyOptions(getActionableTokens(formChainId))
     : ['USDC'];
 
   const save = () => {
@@ -112,12 +112,6 @@ export function EmployeeFormModal({ visible, employee, onClose }: {
         <View className="flex-row flex-wrap gap-[8px]">
           {supportedNetworks().map((n) => (
             <PChip key={n} label={n} selected={n === network} onPress={() => setNetwork(n)} />
-          ))}
-          {SOON_NETWORKS.map((n) => (
-            <View key={n} className="flex-row items-center gap-[6px] rounded-control border border-border-light px-[13px] py-[7px] opacity-[0.55]">
-              <Text className="font-pp-sans-medium text-[12px] text-text-muted">{n}</Text>
-              <Text className="font-pp-regular text-[9px] uppercase tracking-[0.5px] text-text-muted">soon</Text>
-            </View>
           ))}
         </View>
       </FormField>

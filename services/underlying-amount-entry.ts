@@ -76,3 +76,24 @@ export function underlyingOfSentShares(args: { units: string; liveRate: ShareRat
   const rate = converted && converted.shares === units ? converted.rate : liveRate;
   return rate ? underlyingForSharesFloor(units, rate) : null;
 }
+
+/**
+ * Everything the coin read-back of a send depends on, taken ONCE when the send
+ * starts. A send whose outcome is only learned later (a relay found on chain
+ * after the modal moved on to another payroll row, another token, or a newer
+ * rate) must be read back with the values of ITS run, never the form's current
+ * ones, or a correctly paid row reads as a mismatch and may be paid twice.
+ */
+export type SentReadBack = {
+  /** The token sent is a yield share (its units are not the coin). */
+  share: boolean;
+  /** The share rate when the send started (null/undefined while unknown). */
+  liveRate: ShareRate | null | undefined;
+  /** The coin-to-shares conversion this run's amount came from, if any. */
+  converted: ConvertedAtRate | null;
+};
+
+/** What `units` of the sent token are worth in the coin, read with the run's own snapshot. */
+export function underlyingOfSent(readBack: SentReadBack, units: string): string | null {
+  return readBack.share ? underlyingOfSentShares({ units, liveRate: readBack.liveRate, converted: readBack.converted }) : units;
+}

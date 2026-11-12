@@ -2,8 +2,8 @@ import { approxUnderlyingText } from '@/services/share-display';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useActiveEvmChain } from '@/hooks/use-active-evm-chain';
 import { useOpLock } from '@/hooks/use-op-lock';
-import { Pressable, Text, View, useWindowDimensions } from 'react-native';
-import { Modal } from '@/components/ui/modal';
+import { Pressable, Text, View } from 'react-native';
+import { RegistrationModalFrame, REGISTRATION_TITLE as DEFAULT_TITLE, REGISTRATION_BODY as DEFAULT_BODY, REGISTRATION_PRIMARY as DEFAULT_PRIMARY } from '@/components/ui/registration-modal-frame';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAccount, useConfig, usePublicClient, useSwitchChain } from 'wagmi';
 import { getAccount, getConnectorClient } from 'wagmi/actions';
@@ -64,6 +64,9 @@ import {
   VIEWING_KEY_GAS_LIMIT,
 } from '@/services/receive-setup';
 import { priceWalletTx, registrationOwnerUnchanged, walletTxFields, type FeeReadClient } from '@/services/wallet-tx-fees';
+import { ownRegistrationResultRefusal } from '@/services/keystore-scope';
+import { confirmedRegistration } from '@/services/keystore-registry-events';
+import { REGISTRATION_INCOMPATIBLE_MESSAGE } from '@/services/keystore-identity-status';
 import { sendWalletTransaction } from '@/services/wallet-send-refusal';
 import { clearRegistrationBatch, hasPendingRegistrationBatch, RegistrationBatchPendingError, submitRegistrationBatch } from '@/services/registration-batch';
 
@@ -167,11 +170,6 @@ type OpenOptions = {
 /** `gasTopUpWei`: from the signed commitment; null when no top-up was delivered. */
 type PublishStep = { gasTopUpWei: bigint | null };
 
-const DEFAULT_TITLE = 'Register your wallet';
-const DEFAULT_BODY =
-  'A one-time on-chain setup lets others send you private payments and lets you spend what you receive. You only do this once per wallet.';
-const DEFAULT_PRIMARY = 'Register now';
-
 /**
  * How long the modal waits on a wallet that has been handed a transaction.
  *
@@ -233,8 +231,6 @@ export function useKeystoreRegistrationModal() {
 export function KeystoreRegistrationModalProvider({ children }: { children: React.ReactNode }) {
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
-  const { width: windowWidth } = useWindowDimensions();
-  const isMobileSheet = windowWidth <= 540;
   const { address } = useAccount();
   // The chain this flow ACTS ON — the app's selection, not the wallet's.
   //
@@ -377,8 +373,8 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
     try {
       // Reads the named chain's keystore, not the active session's. Also the
       // only load-time viewing-key read the receive prompts rely on.
-      const identity = await keystoreStatusForChain(chainId);
-      if (identity === 'unknown') throw new Error(`Registration on chain ${chainId} could not be read.`);
+      const identity = await keystoreStatusForChain(chainId, { chainFallback: true });
+      if (identity === 'unknown') throw new Error(`Registration on chain ${chainId} is still syncing. Try again in a moment.`);
       setReceiveSetup(sessionAddress ?? address, chainId, receiveSetupFromIdentity(identity), 'onchain');
       // 'partial' and 'incompatible' both have an auth policy.
       const registered = identity !== 'unregistered';
@@ -765,7 +761,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
           // re-read rather than assume complete.
           setErrorMessage(null);
           try {
-            const identity = await keystoreStatusForChain(chainId);
+            const identity = await keystoreStatusForChain(chainId, { chainFallback: true });
             // The read follows the CURRENT identity: only store it under the
             // captured owner if that is still who it read.
             if (stillBound()) setReceiveSetup(owner, chainId, receiveSetupFromIdentity(identity), 'onchain');
@@ -874,9 +870,23 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
         await new Promise((resolve) => setTimeout(resolve, AUTH_LAG_RETRY_MS));
         registration = await session.prepareRegisterKeystore();
       }
+      // SDK 1.0.2 answers "already registered" (or plans only the viewing key)
+      // for ANY auth policy on the address, never comparing it with these
+      // keys. Marking that 'complete' mirrored another unlock's registration
+      // as ours and let a deposit through under the wrong keys. Only go on
+      // when the hash the SDK's own check just read is this session's.
+      const refuseIfNotOurs = (result: typeof registration) => {
+        const refusal = ownRegistrationResultRefusal(chainId, sessionAddress ?? address, result);
+        if (!refusal) return;
+        if (refusal === REGISTRATION_INCOMPATIBLE_MESSAGE) {
+          setReceiveSetup(sessionAddress ?? address, chainId, 'incompatible', 'onchain');
+        }
+        throw new Error(refusal);
+      };
+      refuseIfNotOurs(registration);
       const finishAlreadyRegistered = async () => {
+        // Race / external registration, confirmed ours above: mark and exit.
         if (address) clearRegistrationBatch(address, chainId);
-        // Race / external registration: mark and exit cleanly.
         setReceiveSetup(sessionAddress ?? address, chainId, 'complete', 'onchain');
         setStatus('registered');
         const home = await returnHome();
@@ -993,6 +1003,9 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
           registrationLegSent = false;
           const fresh = await session.prepareRegisterKeystore();
           viewingKeyCalldata = fresh.alreadyRegistered ? null : fresh.viewingKeyCalldata;
+          // The wallet says a policy is set, so check it as one even if this
+          // read still plans the auth leg.
+          refuseIfNotOurs({ ...fresh, keystoreCalldata: null });
           if (!viewingKeyCalldata) {
             await finishAlreadyRegistered();
             return;
@@ -1025,6 +1038,10 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
       } catch {
         // SDK already has it; duplicate marker calls are harmless.
       }
+      // Every leg above was confirmed by a successful receipt (or a successful
+      // batch): record it so a deposit resumed right after this does not wait
+      // for the ASP to index the registration.
+      confirmedRegistration(sessionAddress ?? address, chainId, true);
       setReceiveSetup(sessionAddress ?? address, chainId, 'complete', 'onchain');
       setStatus('registered');
       // Back on the app's chain before the caller resumes.
@@ -1043,7 +1060,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
         // useReceiveSetup is left at a stale 'unknown'/'partial' while this
         // caller resumes as if setup finished.
         try {
-          const identity = await keystoreStatusForChain(chainId);
+          const identity = await keystoreStatusForChain(chainId, { chainFallback: true });
           setReceiveSetup(sessionAddress ?? address, chainId, receiveSetupFromIdentity(identity), 'onchain');
         } catch (readErr) {
           console.warn('[KeystoreRegistration] post-race identity re-read failed', readErr instanceof Error ? readErr.message : String(readErr));
@@ -1144,29 +1161,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
   return (
     <KeystoreRegistrationModalContext.Provider value={value}>
       {children}
-      <Modal animationType={isMobileSheet ? 'slide' : 'fade'} transparent visible={isOpen} onRequestClose={closeKeystoreRegistrationModal}>
-        <View className={`flex-1 items-center bg-[rgba(0,0,0,0.5)] ${isMobileSheet ? 'justify-end p-0' : 'justify-center p-[20px]'}`}>
-          <View className={`w-full gap-[14px] border border-border bg-card-background p-[24px] ${isMobileSheet ? 'max-w-full max-h-[94%] rounded-t-card rounded-b-none border-b-0 pt-[26px]' : 'max-w-[460px] rounded-card'}`}>
-            {/* nw-keep(data-color): sheet grabber fill is a runtime theme token (no class value) */}
-            {isMobileSheet && <View className="absolute top-[10px] z-[10] h-[4px] w-[44px] self-center rounded-[2px]" style={{ backgroundColor: colors.border }} />}
-            <View className="flex-row items-start justify-between gap-[12px]">
-              <View className="flex-1 gap-[6px]">
-                <Text className="font-pp-medium text-[11px] tracking-[2px] text-text-muted">PRIVACY POOLS V2</Text>
-                <Text className="font-pp-bold text-[22px] leading-[26px] text-text">{copy.title}</Text>
-              </View>
-              {/* NEVER disabled. A wallet that cannot sign leaves this modal
-                  pending forever, and a close button that does nothing is how
-                  QA ended up trapped under "Registering…". */}
-              <Pressable
-                className="h-[36px] w-[36px] items-center justify-center rounded-control border border-border-light"
-                onPress={closeKeystoreRegistrationModal}
-                accessibilityLabel="Close"
-              >
-                {/* nw-keep(data-color): close glyph color is the text theme token into the vector-icon sink */}
-                <Ionicons name="close" size={18} color={colors.text} />
-              </Pressable>
-            </View>
-
+      <RegistrationModalFrame visible={isOpen} title={copy.title} onClose={closeKeystoreRegistrationModal}>
             {/* Suppressed on the gasless path: every caller's body describes a
                 transaction the user pays for, which is exactly what is NOT
                 about to happen. The notice below says the whole thing instead. */}
@@ -1331,9 +1326,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
                 </Text>
               </Pressable>
             </View>
-          </View>
-        </View>
-      </Modal>
+      </RegistrationModalFrame>
     </KeystoreRegistrationModalContext.Provider>
   );
 }
