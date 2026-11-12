@@ -316,7 +316,7 @@ export async function loadTransferRecipientDeps(
     // EVM's AddressFieldConverter is the identity for addresses and token ids.
     noteAddressHash: (evmAddress, secret) => noteComputation.computeNoteAddressHash(evmAddress, secret) as Hash,
     commitment: (note) => noteComputation.computeFullCommitment(note) as Hash,
-    // A registry hit answers with no request; otherwise the chain, never a wait.
+    // Missing session-account data throws; only other recipients reach the chain.
     getViewingKey: async (evmAddress) => (await keystore.getViewingKey(evmAddress)) as Hex,
     errors: {
       unregistered: (evmAddress) => new sdk.RecipientViewingKeyUnregistered(evmAddress),

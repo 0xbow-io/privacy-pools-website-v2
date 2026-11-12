@@ -85,31 +85,42 @@ describe('own-account reads never reach the chain when the registries answer', (
     expect(calls).toEqual([]);
   });
 
-  test('missing data is NOT unregistered: the chain answers at once, no wait, no refusal', async () => {
+  test('missing data refuses both reads without asking even a healthy RPC', async () => {
     const { interactor, calls } = fakeChain({ hash: MINE, viewingKey: VK });
     routeOwnKeystoreReads(interactor, { chainId: CHAIN, ownerAddress: OWNER });
-    const started = Date.now();
-    expect(await sdkIsRegistered(interactor)).toBe(true);
-    expect(await sdkIsViewingKeySet(interactor)).toBe(true);
-    expect(Date.now() - started).toBeLessThan(1_000);
-    expect(calls.map((c) => c.method)).toEqual(['getNullifyingKeyHash', 'getViewingKey']);
+    await expect(sdkIsRegistered(interactor)).rejects.toThrow(REGISTRY_SYNCING_MESSAGE);
+    await expect(sdkIsViewingKeySet(interactor)).rejects.toThrow(REGISTRY_SYNCING_MESSAGE);
+    expect(calls).toEqual([]);
   });
 
-  test('missing data with an unregistered chain reads as unregistered only because the CHAIN said so', async () => {
+  test('missing data never becomes unregistered from an RPC zero answer', async () => {
     const { interactor, calls } = fakeChain();
     routeOwnKeystoreReads(interactor, { chainId: CHAIN, ownerAddress: OWNER });
-    expect(await sdkIsRegistered(interactor)).toBe(false);
-    expect(calls.length).toBe(1);
+    await expect(sdkIsRegistered(interactor)).rejects.toThrow(REGISTRY_SYNCING_MESSAGE);
+    expect(calls).toEqual([]);
   });
 
-  test('a failed chain read stays a failure, never "unregistered"', async () => {
-    const interactor = {
-      getNullifyingKeyHash: async () => { throw new Error('rpc down'); },
-      getViewingKey: async () => { throw new Error('rpc down'); },
-    };
+  test('a stale viewing-key hit cannot answer because keys can rotate', async () => {
+    store.set(envScopedStorageKey(`ppv2_viewing_keys_v1_${CHAIN}`), JSON.stringify({
+      byAccount: { [OWNER]: VK }, lastSyncedId: '1',
+      lastSyncedAt: Date.now() - 24 * 3600_000, lastFullSyncedAt: Date.now() - 24 * 3600_000,
+    }));
+    const { interactor, calls } = fakeChain({ viewingKey: VK });
     routeOwnKeystoreReads(interactor, { chainId: CHAIN, ownerAddress: OWNER });
-    await expect(sdkIsRegistered(interactor)).rejects.toThrow('rpc down');
-    await expect(sdkIsViewingKeySet(interactor)).rejects.toThrow('rpc down');
+    await expect(sdkIsViewingKeySet(interactor)).rejects.toThrow(REGISTRY_SYNCING_MESSAGE);
+    expect(calls).toEqual([]);
+  });
+
+  test('a cold registry recovers after the background bulk feed seeds it', async () => {
+    const { interactor, calls } = fakeChain();
+    routeOwnKeystoreReads(interactor, { chainId: CHAIN, ownerAddress: OWNER });
+    await expect(sdkIsRegistered(interactor)).rejects.toThrow(REGISTRY_SYNCING_MESSAGE);
+    const outcome = await cache.syncNullifyingKeyHashes(CHAIN, undefined, async () => new Response(JSON.stringify({
+      entries: [{ account: OWNER, nullifyingKeyHash: MINE }], lastSyncedId: '1', hasMore: false,
+    })), async () => undefined);
+    expect(outcome.ok).toBe(true);
+    expect(await sdkIsRegistered(interactor)).toBe(true);
+    expect(calls).toEqual([]);
   });
 
   test('a stale registry still answers a write-once hash hit, but not a miss', async () => {
@@ -182,7 +193,7 @@ describe('a registration confirmed by a receipt lets register-then-deposit proce
   });
 });
 
-describe('one policy for every own-account read: registry first, then the chain, never a wait', () => {
+describe('one policy for every session-account read: registry only', () => {
   /** Every own-account path the SDK walks, over one interactor. */
   const paths = (interactor: Parameters<typeof sdkIsRegistered>[0] & Parameters<typeof sdkIsViewingKeySet>[0]) => ({
     deposit: () => sdkIsRegistered(interactor),
@@ -192,19 +203,21 @@ describe('one policy for every own-account read: registry first, then the chain,
     exit: () => sdkIsRegistered(interactor),
   });
 
-  test('stale or empty registry: every path goes to the chain and succeeds at once', async () => {
-    const { interactor, calls } = fakeChain({ hash: MINE, viewingKey: VK });
-    routeOwnKeystoreReads(interactor, { chainId: CHAIN, ownerAddress: OWNER });
-    const started = Date.now();
-    const p = paths(interactor);
-    expect(await p.deposit()).toBe(true);
-    expect(await p.registration()).toEqual([true, true]);
-    expect(await p.paymentRequest()).toBe(true);
-    expect(await p.spend()).toBe(true);
-    expect(await p.exit()).toBe(true);
-    expect(Date.now() - started).toBeLessThan(1_000);
-    expect(calls.length).toBe(6);
-  });
+  for (const stale of [false, true]) {
+    test(`${stale ? 'stale' : 'empty'} registry: every path refuses without RPC`, async () => {
+      if (stale) {
+        store.set(envScopedStorageKey(`ppv2_nullifying_key_hashes_v1_${CHAIN}`), JSON.stringify({
+          byAccount: {}, lastSyncedId: '1', lastSyncedAt: Date.now() - 24 * 3600_000,
+        }));
+      }
+      const { interactor, calls } = fakeChain({ hash: MINE, viewingKey: VK });
+      routeOwnKeystoreReads(interactor, { chainId: CHAIN, ownerAddress: OWNER });
+      for (const read of Object.values(paths(interactor))) {
+        await expect(read()).rejects.toThrow(REGISTRY_SYNCING_MESSAGE);
+      }
+      expect(calls).toEqual([]);
+    });
+  }
 
   test('registry hit: ZERO account-keyed reads on every own-account path', async () => {
     seedCurrentRegistries({ [OWNER]: MINE }, { [OWNER]: VK });
@@ -219,7 +232,7 @@ describe('one policy for every own-account read: registry first, then the chain,
     expect(calls).toEqual([]);
   });
 
-  test('concurrent reads do not influence each other: a hit stays local while a miss goes to the chain', async () => {
+  test('concurrent reads do not influence each other: a hit stays local while an unknown read refuses', async () => {
     // Only the hash registry is current: B's viewing read has no answer locally.
     store.set(envScopedStorageKey(`ppv2_nullifying_key_hashes_v1_${CHAIN}`), JSON.stringify({ byAccount: { [OWNER]: MINE }, lastSyncedId: '1', lastSyncedAt: Date.now() }));
     const a = fakeChain({ hash: MINE });
@@ -232,13 +245,12 @@ describe('one policy for every own-account read: registry first, then the chain,
     const gate = new Promise<void>((r) => { release = r; });
     // A long spend in flight on A (proofs take seconds) while B reads.
     const spend = (async () => { await gate; return a.interactor.getNullifyingKeyHash(OWNER); })();
-    const viewing = await b.interactor.getViewingKey(OTHER_OWNER);
+    await expect(b.interactor.getViewingKey(OTHER_OWNER)).rejects.toThrow(REGISTRY_SYNCING_MESSAGE);
     release();
     expect(await spend).toBe(MINE);
-    expect(viewing).toBe(`0x${'0'.repeat(64)}`);
-    // A answered from the registry (no read), B asked the chain once.
+    // A answered locally and B refused; neither session sent an RPC read.
     expect(a.calls).toEqual([]);
-    expect(b.calls.map((c) => c.method)).toEqual(['getViewingKey']);
+    expect(b.calls).toEqual([]);
   });
 
   test('there is no shared mutable scope left, and every wrapper is gone', () => {

@@ -1,26 +1,10 @@
-import { readRegistryView } from '@/services/nullifying-key-hash-cache';
+import { readRegistryView, REGISTRY_SYNCING_MESSAGE } from '@/services/nullifying-key-hash-cache';
 
-// The session's keystore interactor answers the SDK's reads of THIS session's
-// own account (nullifyingKeys[account], viewingKeys[account]) from the bulk
-// ASP registries first, so no chain request names the user's account while the
-// registries have the answer. They used to reach the RPC on every deposit,
-// registration and spend precheck.
-//
-// Three answers, kept distinct:
-//   a registry (or own confirmed) hit        -> the value, no request
-//   a current registry with no entry         -> zero ("not registered"), no request
-//   no current data (not loaded, ASP down)   -> NOT zero: ask the chain, as the
-//     session did before the registries existed. Never a wait, never a refusal.
-//
-// There is no mutable scope here: the rule is the same for every own-account
-// read (deposit, registration, payment request, spend, exit), so a read in
-// flight cannot change what an unrelated read does. The chain read is the only
-// path that names the account, and it is kept for this release until the
-// registry feed is proven.
-//
-// Any other account (a recipient, a payment-request counterparty) goes to the
-// chain exactly as before: its answer must stay authoritative for the SDK's
-// recipient resolution, and this file does not change recipient behavior.
+// SDK reads of the session account use only the bulk ASP registries and
+// confirmed registration records. A current miss means unregistered; missing
+// or stale data throws instead of naming the account to RPC. The background
+// feed owns refreshes, so these reads cannot disclose operation timing.
+// Recipient and counterparty reads retain their existing chain behavior.
 
 const ZERO_WORD = `0x${'0'.repeat(64)}`;
 
@@ -53,7 +37,7 @@ export function routeOwnKeystoreReads<T extends KeystoreReads>(
     if (!isOwn(account)) return chain(account);
     const now = answer(account, read);
     if (now !== null) return now;
-    return chain(account);
+    throw new Error(REGISTRY_SYNCING_MESSAGE);
   };
 
   interactor.getNullifyingKeyHash = routed('hash', readChainHash);
