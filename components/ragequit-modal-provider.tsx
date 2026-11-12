@@ -44,7 +44,7 @@ import { useSeedDerivationModal } from '@/components/seed-derivation-modal-provi
 import { useNotes } from '@/hooks/use-notes';
 import { getExplorerTxUrl, getExplorerName, getChainConfig, STELLAR_TESTNET_ID, SUI_TESTNET_ID } from '@/config/chains';
 import { useStellarSession } from '@/hooks/use-stellar-session';
-import { describeStellarStage, stellarErrorMessage } from '@/services/stellar/stellar-copy';
+import { describeStellarStage, stellarActionError } from '@/services/stellar/stellar-copy';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { useSuiSession } from '@/hooks/use-sui-session';
 import type { Transaction } from '@/components/pools-provider';
@@ -413,7 +413,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
         } catch (err) {
           const raw = err instanceof Error ? err.message : String(err);
           if (/Superseded/.test(raw)) return;
-          throw new Error(/reject|denied|cancel|declined/i.test(raw) ? 'Transaction was rejected.' : stellarErrorMessage(raw));
+          throw new Error(stellarActionError(err));
         }
         return;
       }

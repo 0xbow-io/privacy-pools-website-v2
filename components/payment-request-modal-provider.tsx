@@ -1442,7 +1442,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
     // the payment through it. No viewing key has to be published.
     if (isStellar) {
       const stellarAddress = stellarSession.wallet.isConnected ? stellarSession.wallet.address : null;
-      if (!stellarAddress) { setErrorMessage('Connect Freighter first.'); return; }
+      if (!stellarAddress) { setErrorMessage('Connect a Stellar wallet first.'); return; }
       if (!amountInput.trim()) { setErrorMessage('Enter an amount first.'); return; }
       setIsBusy(true); setStatusMessage(null); setWarningMessage(null); setErrorMessage(null);
       try {
@@ -1493,7 +1493,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
       } catch (error) {
         setStatusMessage(null);
         const raw = error instanceof Error ? error.message : String(error);
-        setErrorMessage(/reject|denied|cancel|declined/i.test(raw) ? 'Request cancelled in Freighter.' : stellarErrorMessage(raw));
+        setErrorMessage(/reject|denied|cancel|declined/i.test(raw) ? 'Request cancelled in your wallet.' : stellarErrorMessage(raw));
       } finally {
         setIsBusy(false);
       }

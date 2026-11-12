@@ -17,10 +17,12 @@ export type GridKeepOut = {
   periodMs: number;
   /** No instant may fall this long before the action window starts. */
   beforeMs: number;
+  /** Slack for awaited UI actions and timer delivery at the window's end. */
+  afterMs?: number;
 };
 
 /** Five-minute price feeds: a single quick request at the instant. */
-export const PRICE_GRID: GridKeepOut = { name: 'price tick', periodMs: 5 * 60_000, beforeMs: 5_000 };
+export const PRICE_GRID: GridKeepOut = { name: 'price tick', periodMs: 5 * 60_000, beforeMs: 5_000, afterMs: 10_000 };
 
 /**
  * The background discovery pass (components/sdk-provider.tsx) runs each time
@@ -29,7 +31,7 @@ export const PRICE_GRID: GridKeepOut = { name: 'price tick', periodMs: 5 * 60_00
  * eth_getLogs bodies name new blocks every pass and no control can budget them.
  * A pass took ~8s on CI (run 38272204833); 30s of headroom before the window.
  */
-export const DISCOVERY_GRID: GridKeepOut = { name: 'discovery pass', periodMs: 2 * 60_000, beforeMs: 30_000 };
+export const DISCOVERY_GRID: GridKeepOut = { name: 'discovery pass', periodMs: 2 * 60_000, beforeMs: 30_000, afterMs: 10_000 };
 
 /**
  * The smallest wait (whole seconds) after which no grid instant falls in
@@ -44,8 +46,8 @@ export function phaseShift(
   maxShiftMs = 10 * 60_000,
 ): number | null {
   for (const g of grids) {
-    if (g.beforeMs + windowMs >= g.periodMs) {
-      throw new Error(`${g.name}: a ${windowMs}ms window plus ${g.beforeMs}ms cannot fit between instants ${g.periodMs}ms apart`);
+    if (g.beforeMs + windowMs + (g.afterMs ?? 0) >= g.periodMs) {
+      throw new Error(`${g.name}: a ${windowMs}ms window plus ${g.beforeMs}ms before and ${g.afterMs ?? 0}ms after cannot fit between instants ${g.periodMs}ms apart`);
     }
   }
   for (let shift = 0; shift <= maxShiftMs; shift += 1000) {
@@ -53,7 +55,7 @@ export function phaseShift(
     const clear = grids.every((g) => {
       const from = actionStart - g.beforeMs;
       const firstInstant = Math.ceil(from / g.periodMs) * g.periodMs;
-      return firstInstant >= actionStart + windowMs;
+      return firstInstant >= actionStart + windowMs + (g.afterMs ?? 0);
     });
     if (clear) return shift;
   }

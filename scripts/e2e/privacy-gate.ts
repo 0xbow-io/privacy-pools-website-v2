@@ -80,6 +80,7 @@ export function resolveHosts(config: {
     relayer: [
       'relayer-v2-prod-149184580131.us-east1.run.app',
       'relayer-staging.example',
+      'relayer-v2-staging-149184580131.us-east1.run.app',
       'relayer-testing.example',
       'testnet-relayer.privacypools.com',
     ],

@@ -160,6 +160,8 @@ import { buildFeeBreakdown, gasCostUsd, quoteGas, splitRelayerFee, swapLossUsd, 
 import { AddressAutocomplete } from '@/components/contacts/address-autocomplete';
 import { recordRecipientUseForActiveOwner } from '@/services/address-book-store';
 import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
+import { useShareAmountField } from '@/hooks/use-share-amount-field';
+import { preparedAmountData } from '@/services/prepared-amount-data';
 import type { ShareRate } from '@/services/share-rates';
 
 // Intent swap (withdraw-and-swap): a private note leaves the pool, swaps
@@ -584,7 +586,14 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
   const fromToken = inputTokens.some((t) => t.address.toLowerCase() === fromTokenChoice.address.toLowerCase())
     ? fromTokenChoice
     : (inputTokens[0] ?? fromTokenChoice);
+  // The amount in the pool's OWN units: exact shares for a yield share. What
+  // the user types is the coin and only crosses into this state through
+  // amountField below (editAmount). Every caller that hands an amount in
+  // (initialAmount, the hub's syncInlineForm) hands shares.
   const [amount, setAmount] = useState('');
+  // Bumped on every open and close: the amount field's draft belongs to one
+  // session of the form and never converts into the next (see amountField).
+  const [formSession, setFormSession] = useState(0);
   const [recipient, setRecipient] = useState('');
   // The recipient is YOUR wallet by default and the field stays hidden — a
   // swap-to-self is the overwhelmingly common case, and an always-visible
@@ -797,6 +806,25 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     // chainId IS read above; without it in the deps one render after an app-
     // chain switch kept the previous chain's balance under the new context.
   }, [poolsData.myPools, fromToken, chainId]);
+  // The typed figure is the COIN it names ("10 USDC"), never a share count.
+  // It converts to exact shares at the scheduled rate through the same boundary
+  // as Withdraw, Send and the hub's Swap tab, and is never cut to the balance
+  // (clampToMax false): the insufficient-balance error answers an amount above
+  // it. While a share's rate is unknown nothing converts and Review waits
+  // (canReview), never a 1:1 guess.
+  const amountField = useShareAmountField({
+    amount,
+    symbol: fromToken.symbol,
+    chainId,
+    maxSharesExact: formatUnits(balanceWei, fromToken.decimals),
+    capKnown: !poolsLoading,
+    onAmountResolved: setAmount,
+    underlyingEntry: !isSui,
+    clampToMax: false,
+    // A draft typed while the rate was missing dies with its session: reopening
+    // must not convert it into an amount nobody typed in the new one.
+    sessionKey: formSession,
+  });
   /**
    * Units for any SDK error that interpolates raw wei, BOTH sides of it.
    * A relayer fee is taken from what you spend; a deposit minimum and a router
@@ -980,6 +1008,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     !destinationWithdrawn
     && intentSwapInputSupported(chainId, fromToken.address)
     && amountWei > 0n
+    // A share whose rate has not loaded: the typed coin has no share amount
+    // yet, so there is nothing honest to prepare. Refused, never read 1:1.
+    && !amountField.loading
     && !overBalance
     // A cross-chain reshield needs one too: it is the only address the far
     // side can pay out to, and an invalid one would be discovered at failure.
@@ -1159,6 +1190,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     // on this network" for an asset that swaps fine (Mike and Pat, 2026-09-22).
     const requestedUnavailable = handoffRefused(request, chainInputs);
     opEpochRef.current += 1;
+    setFormSession((n) => n + 1);
     submittedRef.current = false;
     guardRef.current.invalidate();
     setQuotedNet(null);
@@ -1393,6 +1425,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     if (step === 'executing') return; // a relayed swap can't be abandoned mid-proof
     guardClaimLeave(() => {
       opEpochRef.current += 1;
+      setFormSession((n) => n + 1);
       invalidateQuoteRequests();
       setIsOpen(false);
     });
@@ -1481,18 +1514,22 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
 
   // --- Form edit helpers (every edit invalidates in-flight quotes) ---
 
+  // Typed text is the coin: it reaches `amount` (shares) only through the
+  // share-amount boundary. A plain asset passes through unchanged.
+  const toShares = amountField.toShares;
   const editAmount = useCallback((v: string) => {
     invalidateQuoteRequests();
-    setAmount(sanitizeAmountInput(v, fromToken.decimals));
-  }, [invalidateQuoteRequests, fromToken.decimals]);
+    setAmount(sanitizeAmountInput(toShares(v), fromToken.decimals));
+  }, [invalidateQuoteRequests, toShares, fromToken.decimals]);
 
   const editFromToken = useCallback((t: SwapTokenInfo) => {
     invalidateQuoteRequests();
+    // The amount is held in the previous token's units (shares for a share),
+    // so it cannot ride over to another asset: a share count would be read as
+    // that asset's units. A different token starts from an empty field.
+    if (t.address.toLowerCase() !== fromToken.address.toLowerCase()) setAmount('');
     setFromToken(t);
-    // Clamp the amount to the new token's decimals so the parsed value and
-    // the displayed string can't diverge after an 18→6 decimals switch.
-    setAmount((a) => sanitizeAmountInput(a, t.decimals));
-  }, [invalidateQuoteRequests]);
+  }, [invalidateQuoteRequests, fromToken.address]);
 
   const editRecipient = useCallback((v: string) => {
     invalidateQuoteRequests();
@@ -2850,8 +2887,13 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                       className={`min-w-[80px] grow shrink p-0 text-[24px] font-pp-regular ${amount ? 'text-text' : 'text-text-muted'}`}
                       // nw-keep(platform-css): web-only outlineStyle:'none' removes the focus ring — no className path; empty on native
                       style={WEB_NO_OUTLINE}
-                      value={amount}
+                      // The coin figure: shares read back at the rate, the draft while it waits.
+                      value={amountField.value}
                       onChangeText={editAmount}
+                      testID="swap-amount-input"
+                      // The exact amount the swap prepares (shares for a share),
+                      // for the browser smoke to check against the rate. Web only.
+                      {...preparedAmountData(amount)}
                       placeholder="0"
                       // nw-keep(data-color): placeholder color is a TextInput sink (theme token, no className path)
                       placeholderTextColor={colors.textMuted}

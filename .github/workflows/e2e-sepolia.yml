@@ -91,6 +91,8 @@ jobs:
           EXPO_PUBLIC_APP_ENV=staging
           TEST_MODE=true
           EXPO_PUBLIC_ASP_URL=https://api-dev.0xbow.io
+          # Public-repo defaults use .example placeholders. This instance's
+          # /v1/details matches Sepolia's pool, relay and transfer signer.
           EXPO_PUBLIC_SEPOLIA_RELAYER_URL=https://relayer-v2-staging-149184580131.us-east1.run.app
           EXPO_PUBLIC_ALCHEMY_KEY=${{ secrets.EXPO_PUBLIC_ALCHEMY_KEY }}
           EXPO_PUBLIC_BATCH_WITHDRAWALS=true
@@ -117,6 +119,9 @@ jobs:
 
       - name: Install the browser
         run: bunx playwright install --with-deps chrome
+
+      - name: Check journey UI helpers without spending
+        run: bun scripts/e2e/__tests__/unlock-gate.browser.ts
 
       # The privacy gate, against a throwaway local server: no app, no wallet,
       # no chain, no funds. Placed here because this is the only job with a

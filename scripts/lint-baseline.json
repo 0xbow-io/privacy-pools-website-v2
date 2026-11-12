@@ -557,7 +557,6 @@
     "[\"components/wallet-connect-modal-provider.tsx\",\"react-hooks/refs\",2,\"Error: Cannot access refs during render\",\"liveConnectedRef.current = liveConnected;\"]": 1,
     "[\"components/wallet-connect-modal-provider.tsx\",\"react-hooks/refs\",2,\"Error: Cannot access refs during render\",\"pendingIdRef.current = pendingId;\"]": 1,
     "[\"components/wallet-connect-modal-provider.tsx\",\"react-hooks/refs\",2,\"Error: Cannot access refs during render\",\"preparedUriRef.current = preparedUri;\"]": 1,
-    "[\"components/wallet-connect-modal-provider.tsx\",\"react-hooks/refs\",2,\"Error: Cannot access refs during render\",\"stellarRef.current = { activeIsStellar, connectFreighter, stellarWallet };\"]": 1,
     "[\"components/wallet-connect-modal-provider.tsx\",\"react-hooks/set-state-in-effect\",2,\"Error: Calling setState synchronously within an effect can trigger cascading renders\",\"useEffect(() => { if (!preparingLinks) setWaitingUid(null); }, [preparingLinks]);\"]": 1,
     "[\"components/withdraw-modal-provider.tsx\",\"@typescript-eslint/no-unused-vars\",1,\"'EthChainIcon' is defined but never used.\",\"function EthChainIcon({ size = 20 }: { size?: number }) {\"]": 1,
     "[\"components/withdraw-modal-provider.tsx\",\"@typescript-eslint/no-unused-vars\",1,\"'ViewStyle' is defined but never used.\",\"import type { ViewStyle, TextStyle } from 'react-native';\"]": 1,
