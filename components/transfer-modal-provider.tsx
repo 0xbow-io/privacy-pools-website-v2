@@ -454,7 +454,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   const activeEvmChainId = chainId;
   const suiSession = useSuiSession();
   const stellarSession = useStellarSession();
-  // Freighter connected but the account not unlocked in this tab: the notes are
+  // Varial connected but the account not unlocked in this tab: the notes are
   // unknown, not empty. Ask to sign in instead of claiming there is no balance.
   const stellarLocked = stellarSession.wallet.isConnected && !stellarSession.unlocked && stellarSession.status !== 'unlocking';
   const altSymbol = isStellar ? 'XLM' : 'SUI';
@@ -483,7 +483,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   const fromAddress = isStellar
     ? (stellarSession.wallet.isConnected ? stellarSession.wallet.address ?? undefined : undefined)
     : isSui ? suiSession.account?.address : connectedAddress;
-  // On Stellar the receipt belongs to the Freighter account that sent it.
+  // On Stellar the receipt belongs to the Varial account that sent it.
   currentIdentityRef.current = isStellar ? fromAddress ?? null : connectedAddress?.toLowerCase() ?? null;
   // A swap-send draft belongs to the identity that made it: sign-out or an
   // account switch drops it (cubic, #219).
@@ -1626,7 +1626,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     // No account, no balance to measure against: every limit below reads 0 and
     // told a visitor with no wallet that the most they could send was 0.0000
     // (Mike, 2026-09-24). The button already asks them to connect. Stellar
-    // has no EVM account at all: its account is the Freighter one.
+    // has no EVM account at all: its account is the Varial one.
     if (isStellar) { if (!stellarConnected || stellarLocked) return null; }
     else if (!connectedAddress) return null;
     if (isSui) {
@@ -1784,7 +1784,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     if (isStellar) {
       const sender = stellarSession.wallet.isConnected ? stellarSession.wallet.address : null;
       if (!sender) {
-        reportTransferError('Connect Freighter first.');
+        reportTransferError('Connect a Stellar wallet first.');
         return;
       }
       setSentAmountWei(null);
@@ -1876,7 +1876,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         const raw = err instanceof Error ? err.message : String(err);
         log('error', 'Transfer', `Stellar transfer failed: ${raw}`, err);
         const declined = /reject|denied|cancel|declined/i.test(raw);
-        // A one-time link was armed for this send. Declined in Freighter: the
+        // A one-time link was armed for this send. Declined in Varial: the
         // transfer never happened, so the link is dropped. Anything else after
         // that point may have landed: keep the link on screen, framed as an
         // unknown outcome (the sender also has the saved copy).

@@ -291,7 +291,7 @@ export function MyPrivacyPools({
   const { requiresWalletUnlock: evmRequiresUnlock, keyInitFailed, retryKeyInit, stellarLocked, unlockStellar } = useWalletUnlockGate();
   const { openSeedDerivationModal: openEvmSignIn } = useSeedDerivationModal();
   // Stellar's locked session wears the same sign-in affordance; its action is
-  // the Freighter unlock, not the EVM signature modal.
+  // the Varial unlock, not the EVM signature modal.
   const requiresWalletUnlock = evmRequiresUnlock || stellarLocked;
   const openSeedDerivationModal = stellarLocked ? unlockStellar : () => openEvmSignIn();
   const cachedLocked = (requiresWalletUnlock || keyInitFailed) && notes.length > 0;

@@ -271,7 +271,7 @@ describe('shouldOpenSeedOnConnectLanding', () => {
   });
 
   // The dialog only knows the EVM session: on Stellar its Sign in asked
-  // MetaMask to sign on Sepolia and Freighter was never asked.
+  // MetaMask to sign on Sepolia and Varial was never asked.
   test('never opens the EVM unlock on a Stellar or Sui landing', () => {
     expect(shouldOpenSeedOnConnectLanding({ ...LOCKED_EMPTY, nonEvmChain: true })).toBe(false);
   });
