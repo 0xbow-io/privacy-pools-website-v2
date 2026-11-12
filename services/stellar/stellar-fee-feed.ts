@@ -1,3 +1,4 @@
+import { torFetchIfActive } from '@/services/tor-fetch';
 import { STELLAR_TESTNET_RPC_URL } from '@/config/stellar-deployment';
 import { stellarRelayFeeFromResourceFee, type StellarFeeEstimates } from '@/services/stellar-fee-estimate';
 
@@ -11,7 +12,21 @@ export async function fetchStellarFees(): Promise<StellarFeeEstimates> {
     import('@stellar/stellar-sdk'),
     import('@/vendor/stellar-fees'),
   ]);
-  const settings = await fees.readStellarFeeSettings(new rpc.Server(STELLAR_TESTNET_RPC_URL, { timeout: 5 }));
+  const server = new rpc.Server(STELLAR_TESTNET_RPC_URL, { timeout: 5 });
+  // These fixed configuration keys use the public RPC route on dev and main.
+  const send = torFetchIfActive();
+  if (send) {
+    (server as unknown as { httpClient: unknown }).httpClient = {
+      async post(url: string, data: unknown) {
+        const res = await send(url, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data),
+        });
+        if (!res.ok) throw new Error(`Soroban RPC HTTP ${res.status}`);
+        return { data: await res.json(), status: res.status, statusText: res.statusText, headers: Object.fromEntries(res.headers.entries()) };
+      },
+    };
+  }
+  const settings = await fees.readStellarFeeSettings(server);
   const resourceFee = (action: 'transfer' | 'relay' | 'register_and_relay', n: number, m: number) => {
     const resources = fees.stellarRelayResources(fees.STELLAR_RELAY_RESOURCE_TABLE, action, { n, m }, {
       keystoreRecord: true,

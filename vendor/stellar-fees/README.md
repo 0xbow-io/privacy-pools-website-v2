@@ -20,12 +20,13 @@ ledger keys against the installed SDK. Replace this extraction with a supported
 SDK pricing subpath when one is available.
 
 The application reads these public settings every minute on the shared feed grid
-in builds that include Stellar, including sessions without Stellar opt-in. It
+when Stellar is supported and opted into at page load (or debug is enabled). It
 calculates all five transfer and withdrawal input counts locally. A failed read or settings at
 least two minutes old makes the displayed estimate unavailable; it does not initiate
-an extra request. The SDK can retry a public RPC snapshot-gap error once.
-The client uses dev's direct Soroban URL. Ports to branches with anonymous RPC
-routing must apply that routing to this client too.
+a UI-triggered request. The scheduler refreshes stale settings when an idle tab
+becomes active. The SDK can retry a public RPC snapshot-gap error once.
+The client uses the shared public RPC sender when anonymous RPC is active on
+both dev and main; a routing failure propagates without a direct retry.
 
 The native-XLM estimate adds 200,000 stroops flat fee and 100 stroops inclusion
 to the resource fee with a 25% margin rounded up. This policy must be updated

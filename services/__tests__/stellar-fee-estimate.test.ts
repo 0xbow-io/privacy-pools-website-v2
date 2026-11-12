@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { rpc, xdr } from '@stellar/stellar-sdk';
 import * as sdk from '@privacy-pools-v2/stellar-sdk';
 import * as fees from '@/vendor/stellar-fees';
+import * as routing from '@/services/tor-fetch';
 import { fetchStellarFees } from '@/services/stellar/stellar-fee-feed';
 import { readStellarTransferFee, readStellarWithdrawalFee, stellarRelayFeeFromResourceFee, STELLAR_FEE_INTERVAL_MS } from '@/services/stellar-fee-estimate';
 import { stellarTransferRelayFee, maxStellarTransferForInputs } from '@/config/stellar-deployment';
@@ -97,6 +98,7 @@ describe('Stellar display fee', () => {
   });
 
   test('the scheduled fetch sends only the SDK public configuration keys and propagates failure', async () => {
+    const route = spyOn(routing, 'torFetchIfActive').mockImplementation(() => null);
     const failure = new Error('offline');
     const calls: string[][] = [];
     const spy = spyOn(rpc.Server.prototype, 'getLedgerEntries').mockImplementation(async (...keys: xdr.LedgerKey[]) => {
@@ -106,19 +108,52 @@ describe('Stellar display fee', () => {
     try {
       await expect(fetchStellarFees()).rejects.toBe(failure);
       expect(calls).toEqual([sdk.stellarFeeSettingKeys().map(key => key.toXDR('base64'))]);
+      expect(route).toHaveBeenCalledTimes(1);
     } finally {
       spy.mockRestore();
+      route.mockRestore();
     }
   });
 
-  test('the UI only reads the cache and the build-wide feed list owns scheduling', () => {
+  test('the UI only reads the cache and the page-load feed list owns scheduling', () => {
     const hook = source('hooks/use-stellar-fee-estimate.ts');
     expect(hook).toContain('usePublicFeed<StellarFeeEstimates>(FEED_STELLAR_FEES)');
     expect(hook).not.toMatch(/fetch|useEffect|useQuery|setInterval|setTimeout/);
     const feeds = source('services/public-feeds.ts');
-    expect(feeds).toMatch(/if \(getChainConfig\(STELLAR_TESTNET_ID\)\) \{\s*publicFeeds.register\(\{\s*key: FEED_STELLAR_FEES,\s*intervalMs: STELLAR_FEE_INTERVAL_MS,\s*fetch: fetchStellarFees,/);
+    expect(feeds).toMatch(/if \(STELLAR_FEED_ENABLED\) \{\s*publicFeeds.register\(\{\s*key: FEED_STELLAR_FEES,\s*intervalMs: STELLAR_FEE_INTERVAL_MS,\s*maxAgeMs: 2 \* STELLAR_FEE_INTERVAL_MS,\s*fetch: fetchStellarFees,/);
     const fetcher = source('services/stellar/stellar-fee-feed.ts');
     expect(fetcher).toContain('fetchStellarFees()');
     expect(fetcher).not.toMatch(/\.simulateTransaction\(|fetch\(|apiClient/);
   });
+});
+
+test('public fee settings use anonymous RPC when active, without a direct fallback', async () => {
+  const calls: { url: string; body: unknown }[] = [];
+  let failure: Error | null = null;
+  let status = 200;
+  const route = spyOn(routing, 'torFetchIfActive').mockImplementation(() => async (url, init) => {
+    calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+    if (failure) throw failure;
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { entries: [], latestLedger: 1 } }), { status });
+  });
+  const direct = spyOn(globalThis, 'fetch').mockImplementation(async () => { throw new Error('Unexpected direct request'); });
+  const reader = spyOn(fees, 'readStellarFeeSettings').mockImplementation(async server => {
+    await server.getLedgerEntries(...sdk.stellarFeeSettingKeys());
+    return settings;
+  });
+  try {
+    await fetchStellarFees();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].body).toEqual({ jsonrpc: '2.0', id: 1, method: 'getLedgerEntries', params: { keys: sdk.stellarFeeSettingKeys().map(k => k.toXDR('base64')) } });
+    failure = new Error('anonymous route unavailable');
+    await expect(fetchStellarFees()).rejects.toBe(failure);
+    expect(calls).toHaveLength(2);
+    failure = null;
+    status = 503;
+    await expect(fetchStellarFees()).rejects.toThrow('Soroban RPC HTTP 503');
+    expect(calls).toHaveLength(3);
+    expect(direct).toHaveBeenCalledTimes(0);
+  } finally {
+    reader.mockRestore(); route.mockRestore(); direct.mockRestore();
+  }
 });

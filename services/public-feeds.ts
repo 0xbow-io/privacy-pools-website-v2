@@ -17,9 +17,12 @@ import { BULK_REGISTRY_INTERVAL_MS, refreshBulkKeystoreRegistry } from '@/servic
  *
  * Adding a feed here costs every user a request they may not need. That is the
  * trade: a request set that varies per session is a fingerprint, and a request
- * set that is a build constant removes that choice from the session. Only
- * CALLER-INDEPENDENT data belongs here: the zero-argument signature does not
- * prevent a closure from capturing user state, so definitions need review.
+ * set that is a build constant removes that choice from the session.
+ * Stellar testnet is the page-load opt-in exception, avoiding its public RPC
+ * for visitors who have not enabled it. Its cadence is still independent of
+ * actions within the session. Only CALLER-INDEPENDENT data belongs here:
+ * the zero-argument signature does not prevent a closure from capturing user
+ * state, so definitions need review.
  *
  * See services/public-feed-scheduler.ts for the timing argument in full.
  *
@@ -28,6 +31,7 @@ import { BULK_REGISTRY_INTERVAL_MS, refreshBulkKeystoreRegistry } from '@/servic
  * from here in components; never import this from a test.
  */
 import apiClient from '@/services/api-client';
+import { isDebugModeActive } from '@/components/debug-provider';
 import { publicFeeds } from '@/services/public-feed-scheduler';
 import { aspBackoff, probeAsp, startAspRequests, stopAspRequests } from '@/services/egress-fetch';
 import { ASP_BACKOFF_PROBE_MS } from '@/services/asp-backoff';
@@ -55,7 +59,7 @@ import {
 } from '@/services/yield-feed-grid';
 import { getConfiguredYieldDeployments } from '@/config/yield';
 import { getAllPrices, getTokenPrices } from '@/services/price-service';
-import { getChainConfig, supportedEvmChainIds } from '@/config/chains';
+import { getChainConfig, STELLAR_OPT_IN, supportedEvmChainIds } from '@/config/chains';
 import {
   feedLabelDecisions,
   LABEL_DECISIONS_INTERVAL_MS,
@@ -125,6 +129,8 @@ import {
 
 /** One minute, the cadence the hand-rolled queries already used. */
 const MINUTE = 60_000;
+// Snapshot at page load: enabling debug or changing networks later cannot start polling.
+const STELLAR_FEED_ENABLED = !!getChainConfig(STELLAR_TESTNET_ID) && (STELLAR_OPT_IN || isDebugModeActive());
 
 export const FEED_ASSETS_STATS_ALL = 'assets-stats:all';
 export const FEED_GLOBAL_STATISTICS = 'global-statistics';
@@ -201,11 +207,12 @@ export function startPublicFeeds(): void {
       retryMs: ASP_PUBLIC_KEY_RETRY_MS,
       fetch: fetchAspPublicKey,
     });
-    // Build configuration only: never gate on Stellar opt-in or wallet state.
-    if (getChainConfig(STELLAR_TESTNET_ID)) {
+    // Stellar testnet is opt-in; the feed set stays fixed for this page load.
+    if (STELLAR_FEED_ENABLED) {
       publicFeeds.register({
         key: FEED_STELLAR_FEES,
         intervalMs: STELLAR_FEE_INTERVAL_MS,
+        maxAgeMs: 2 * STELLAR_FEE_INTERVAL_MS,
         fetch: fetchStellarFees,
       });
     }
