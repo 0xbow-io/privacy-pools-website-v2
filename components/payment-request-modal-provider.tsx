@@ -1,3 +1,4 @@
+import { paymentRequestRecipientLabel } from '@/services/payment-request-disclosure';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 // RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
 // amounts, validation, quotes, relayer and on-chain values stay in shares
@@ -22,6 +23,9 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { ACTIVE_ENVIRONMENT } from '@/config/environments';
 import { tokenAmountLabel, isShareSymbol, displayTokenSymbol } from '@/services/share-display';
 import { assertPaymentRequestBounds, PaymentRequestBoundsError } from '@/services/payment-request-bounds';
+import { Skeleton } from '@/components/ui/skeleton';
+import { requestAmountInPoolUnits, requestRateMissing } from '@/services/payment-request-amount';
+import { underlyingForSharesFloor } from '@/services/underlying-amount-entry';
 import { assertDepositCap } from '@/services/deposit-cap';
 import { getPrice } from '@/services/price-service';
 import { ENTRYPOINT_ASSETS_ABI, getVettingFeeBPS, type EntrypointAssetConfig } from '@/services/entrypoint-assets';
@@ -70,10 +74,13 @@ import {
 } from '@/services/relayed-transfer';
 import { expectTransferRelay } from '@/services/transfer-relay-outputs';
 import { useNotes } from '@/hooks/use-notes';
+import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
 
 import { useTheme } from '@/components/theme-provider';
 import { PAY_URL_BASE } from '@/config/env';
-import { IsDefaultPoolActive } from '@/config/pool-profile';
+import { lookupOwnViewingKey, ownRegistrationResultRefusal } from '@/services/keystore-scope';
+import { REGISTRY_SYNCING_MESSAGE } from '@/services/nullifying-key-hash-cache';
+import { confirmedRegistration } from '@/services/keystore-registry-events';
 import { resolveEnsName } from '@/services/ens';
 
 // Production deployments set EXPO_PUBLIC_PAY_URL_BASE so share links pin
@@ -249,6 +256,12 @@ type PaymentRequestModalContextType = {
   requestToken: { symbol: string; address: Hex; decimals: number; chainId: number };
   /** The amount a request would be created for; the provider owns it. */
   requestAmount: string;
+  /**
+   * A share pool's request is waiting on its rate: the amount is the COIN the
+   * requester types and converts to shares at creation, so with no rate the
+   * field waits (shimmer, not editable) instead of guessing.
+   */
+  requestRateLoading: boolean;
   /** A request has been created: its amount is frozen into the payload. */
   requestCreated: boolean;
   /** The hub's card pushes each edit here. */
@@ -343,6 +356,7 @@ const PaymentRequestModalContext = createContext<PaymentRequestModalContextType>
   // ReferenceError at import time.
   requestToken: { symbol: 'ETH', address: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' as Hex, decimals: 18, chainId: 0 },
   requestAmount: '',
+  requestRateLoading: false,
   requestCreated: false,
   syncInlineRequestForm: () => {},
   isBusy: false,
@@ -563,6 +577,9 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
   // chain against itself and could never fire.
   const chainId = useActiveEvmChain().id;
   const balanceDisplay = useBalanceDisplay(chainId);
+  const shareText = useShareNameText(chainId);
+  // Feed-grid rates (no request): a share figure in a shortfall message reads as its underlying.
+  const { rateFor } = useShareRates();
   const withOpLock = useOpLock();
   const queryClient = useQueryClient();
   // The COMMITTED chain of the live session (null while none) — used ONLY to
@@ -891,6 +908,15 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
   // path emits coinType 0x2::sui::SUI.
   const requestTokenSymbol = isStellar ? 'XLM' : isSui ? 'SUI' : selectedToken.symbol;
   const requestTokenDecimals = isStellar ? STELLAR_XLM.decimals : isSui ? 9 : selectedToken.decimals;
+  // The Amount field is an amount of the COIN (what its label says). For a yield
+  // pool it converts to exact shares once, at creation, from the feed-grid rate
+  // (no request, no refetch); the link keeps those shares. Without the rate the
+  // field waits and nothing is converted or submitted.
+  const requestIsShare = !isSui && !isStellar && isShareSymbol(selectedToken.symbol);
+  const requestRate = requestIsShare ? rateFor(chainId, selectedToken.address) : undefined;
+  const requestRateLoading = requestIsShare && requestRateMissing(selectedToken.symbol, requestRate);
+  // The symbol the typed figure is in: the coin for a share pool, else the token.
+  const requestCoin = requestIsShare ? displayTokenSymbol(requestTokenSymbol) : requestTokenSymbol;
 
   // What the hub's amount card renders. Derived from the SAME selectedToken the
   // create path uses, so the pill can never name an asset the payload does not
@@ -1122,10 +1148,20 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         ? requestableTokens.find((token) => token.address.toLowerCase() === prefill.tokenAddress!.toLowerCase())
         : undefined;
       const chainMatches = !isSui && prefill.chainId === chainId;
+      // The original request's amount is in the pool's units (a share count for a
+      // yield pool) but the form's field is the coin: read the shares as the coin
+      // they redeem for now, rounded down (creation converts back up, so the
+      // re-issue asks for at least that). No rate, no prefill: never the count.
+      const reissueText = (() => {
+        if (!prefill.amount || !match) return null;
+        if (!isShareSymbol(match.symbol)) return prefill.amount;
+        const rate = rateFor(chainId, match.address);
+        return rate ? underlyingForSharesFloor(prefill.amount, rate) : null;
+      })();
       const amountOk = (() => {
-        if (!prefill.amount || !match) return false;
+        if (!reissueText || !match) return false;
         try {
-          return parseUnits(sanitizeAmountInput(prefill.amount), match.decimals) > 0n;
+          return parseUnits(sanitizeAmountInput(reissueText), match.decimals) > 0n;
         } catch {
           return false;
         }
@@ -1135,7 +1171,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         // Clamp to the MATCHED token's precision: unclamped, an over-precise
         // string is rounded half-up by parseUnits at create time, so the payload
         // would encode a different number than the form states.
-        setAmountInput(sanitizeAmountInput(prefill.amount!, match.decimals));
+        setAmountInput(sanitizeAmountInput(reissueText!, match.decimals));
       } else {
         setSelectedTokenAddress(requestableTokens[0].address);
         setAmountInput('');
@@ -1150,7 +1186,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
     }
     setInlinePreferred(!!prefill?.inline);
     setIsOpen(true);
-  }, [resetState, ensureConnected, identityMode, openSeedDerivationModal, isSui, isStellar, chainId, selectChain, requestTokenDecimals]);
+  }, [resetState, ensureConnected, identityMode, openSeedDerivationModal, isSui, isStellar, chainId, selectChain, requestTokenDecimals, rateFor]);
   useEffect(() => { openRequestRef.current = openRequestPaymentModal; }, [openRequestPaymentModal]);
 
   // A pay/receive payload carries its chain implicitly in its KIND. Align the
@@ -1397,15 +1433,16 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
     // and the Ready card must render the request that was CREATED, not the
     // live inputs (codex r3: a 1 ETH request could display as Ready for a
     // later 2 USDC edit).
-    const frozenView = balanceDisplay(amountInput.trim(), isSui ? 'SUI' : requestTokenSymbol, chainId);
-    const frozenAmountLabel = `${isShareSymbol(requestTokenSymbol) && frozenView.converted ? '≈ ' : ''}${frozenView.text}`;
+    // The typed figure is the coin (see requestCoin), so it reads as typed.
+    const frozenView = balanceDisplay(amountInput.trim(), isSui ? 'SUI' : requestCoin, chainId);
+    const frozenAmountLabel = frozenView.text;
     // === Stellar path === the SDK's blind request (stellar-request.ts): the
     // link carries note slots, a payment key and a tag, never this account's
     // address. The SDK keeps the request in this account, and its sync finds
     // the payment through it. No viewing key has to be published.
     if (isStellar) {
       const stellarAddress = stellarSession.wallet.isConnected ? stellarSession.wallet.address : null;
-      if (!stellarAddress) { setErrorMessage('Connect Freighter first.'); return; }
+      if (!stellarAddress) { setErrorMessage('Connect a Stellar wallet first.'); return; }
       if (!amountInput.trim()) { setErrorMessage('Enter an amount first.'); return; }
       setIsBusy(true); setStatusMessage(null); setWarningMessage(null); setErrorMessage(null);
       try {
@@ -1456,7 +1493,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
       } catch (error) {
         setStatusMessage(null);
         const raw = error instanceof Error ? error.message : String(error);
-        setErrorMessage(/reject|denied|cancel|declined/i.test(raw) ? 'Request cancelled in Freighter.' : stellarErrorMessage(raw));
+        setErrorMessage(/reject|denied|cancel|declined/i.test(raw) ? 'Request cancelled in your wallet.' : stellarErrorMessage(raw));
       } finally {
         setIsBusy(false);
       }
@@ -1505,6 +1542,17 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
       return;
     }
 
+    // The typed coin amount crosses into the pool's units HERE, once, rounded up
+    // so the payer pays at least what was typed. No rate: nothing is converted
+    // and nothing is created (never the typed number as a share count).
+    const requested = requestAmountInPoolUnits({ text: amountInput, symbol: selectedToken.symbol, rate: requestRate });
+    if (!requested.ok) {
+      setErrorMessage(requested.reason === 'rate-unavailable'
+        ? 'The current rate is still loading. Try again in a moment.'
+        : `${amountInput.trim()} ${requestCoin} is not an amount this pool can request.`);
+      return;
+    }
+
     // Both ends of what may be asked for, checked HERE rather than at pay time
     // (Nathaniel, QA 2026-09-21). A refusal, not a dead button: the user is
     // told which end they are on and nothing is created. The cap is the same
@@ -1513,7 +1561,8 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
     try {
       await assertPaymentRequestBounds({
         amount: parseFloat(amountInput),
-        symbol: requestTokenSymbol,
+        // The coin and the typed amount of it: the bounds are in dollars.
+        symbol: requestCoin,
         capUsd: ACTIVE_ENVIRONMENT.maxDepositUsd,
         fetchPrice: getPrice,
       });
@@ -1531,7 +1580,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
     setErrorMessage(null);
 
     try {
-      const amount = parseUnits(amountInput, selectedToken.decimals);
+      const amount = parseUnits(requested.units, selectedToken.decimals);
       const amountHex = `0x${amount.toString(16)}` as Hex;
       let signatureWarning: string | null = null;
       if (shouldSignRequest && !walletAddress) {
@@ -1556,37 +1605,27 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
       // try/catch surfaces an actionable error to the user.
       const session = await ensureInitialized();
       let registeredViewingKey: Hex | null = null;
+      // The seller's OWN account: the bulk viewing-key registry and this
+      // client's confirmed registrations answer first, with no request. Only
+      // when they have no current data does it ask the chain, as before the
+      // registries existed (no wait). Missing data is "unknown", which is not
+      // "unregistered": a chain read that fails says syncing instead of
+      // offering to register.
+      let ownKey: Awaited<ReturnType<typeof lookupOwnViewingKey>>;
       try {
-        const cfg = getChainConfig(chainId);
-        if (!cfg?.contracts) throw new Error(`Unsupported chain: ${chainId}`);
-        const [{ lookupViewingKey }, sdkSetup] = await Promise.all([
-          import('@/services/viewing-key-cache'),
-          import('@/services/sdk-runtime'),
-        ]);
-        const rpc = sdkSetup.createRPCInteractor(chainId, Number(cfg.contracts.fromBlock));
-        const ks = sdkSetup.createKeystoreInteractor(
-          rpc,
-          cfg.contracts.keystoreAddress as SdkAddress,
-          cfg.contracts.keystoreFromBlock,
-        );
-        const lookup = await lookupViewingKey(
-          chainId,
-          address.toLowerCase() as SdkAddress,
-          { getViewingKey: (account) => ks.getViewingKey(account) },
-          {
-            keystoreAddress: cfg.contracts.keystoreAddress,
-            useAspCache: IsDefaultPoolActive,
-          },
-        );
-        registeredViewingKey = lookup.viewingKey as Hex | null;
-        log('info', 'PaymentRequest', 'Seller viewing-key registration check', {
-          registered: !!registeredViewingKey,
-          source: lookup.source,
-          aspAvailable: lookup.aspAvailable,
-        });
-      } catch (registrationErr) {
-        log('warn', 'PaymentRequest', 'Could not check seller viewing-key registration; falling back to per-request discovery', registrationErr);
+        ownKey = await lookupOwnViewingKey(chainId, address, { chainFallback: true });
+      } catch (ownKeyErr) {
+        log('warn', 'PaymentRequest', 'Seller viewing-key check failed; not guessing', ownKeyErr);
+        throw new Error(REGISTRY_SYNCING_MESSAGE);
       }
+      if (ownKey.state === 'unknown') {
+        log('warn', 'PaymentRequest', 'Seller viewing-key registry is not current yet; not guessing');
+        throw new Error(REGISTRY_SYNCING_MESSAGE);
+      }
+      if (ownKey.state === 'registered') registeredViewingKey = ownKey.viewingKey as Hex;
+      log('info', 'PaymentRequest', 'Seller viewing-key registration check', {
+        registered: !!registeredViewingKey,
+      });
 
       // Unregistered: the request will work, but only from THIS browser until
       // it is claimed, so offer the safer route before creating it rather than
@@ -1607,26 +1646,20 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           if (!registered) { setIsBusy(false); return; }
           // Re-read the published key so this request takes the registered
           // (seed-recoverable) path rather than the per-request one.
+          // The registration modal recorded its confirmed receipt locally
+          // (confirmedRegistration), so this reads it before the ASP indexes it.
           try {
-            const [{ lookupViewingKey }, sdkSetup] = await Promise.all([
-              import('@/services/viewing-key-cache'),
-              import('@/services/sdk-runtime'),
-            ]);
-            const cfg = getChainConfig(chainId);
-            if (cfg?.contracts) {
-              const rpc = sdkSetup.createRPCInteractor(chainId, Number(cfg.contracts.fromBlock));
-              const ks = sdkSetup.createKeystoreInteractor(
-                rpc,
-                cfg.contracts.keystoreAddress as SdkAddress,
-                cfg.contracts.keystoreFromBlock,
-              );
-              const after = await lookupViewingKey(
-                chainId,
-                address.toLowerCase() as SdkAddress,
-                { getViewingKey: (account) => ks.getViewingKey(account) },
-                { keystoreAddress: cfg.contracts.keystoreAddress, useAspCache: false },
-              );
-              registeredViewingKey = after.viewingKey as Hex | null;
+            // The local record is written a tick after the receipt event
+            // (hashing is async): a few local re-reads, no request.
+            for (let attempt = 0; attempt < 10 && !registeredViewingKey; attempt++) {
+              const after = await lookupOwnViewingKey(chainId, address);
+              if (after.state === 'registered') registeredViewingKey = after.viewingKey as Hex;
+              else await new Promise((resolve) => setTimeout(resolve, 200));
+            }
+            // Still nothing local: the one chain read this re-check always made.
+            if (!registeredViewingKey) {
+              const after = await lookupOwnViewingKey(chainId, address, { chainFallback: true });
+              if (after.state === 'registered') registeredViewingKey = after.viewingKey as Hex;
             }
           } catch (reReadErr) {
             // Registration landed but the read failed: fall through to the
@@ -1700,8 +1733,8 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         bumpPaymentRequestRevision();
         toast({
           title: request.signature
-            ? `Signed payment request created for ${balanceDisplay(amountInput, selectedToken.symbol, chainId).text}.`
-            : `Payment request created for ${balanceDisplay(amountInput, selectedToken.symbol, chainId).text}.`,
+            ? `Signed payment request created for ${balanceDisplay(amountInput, requestCoin, chainId).text}.`
+            : `Payment request created for ${balanceDisplay(amountInput, requestCoin, chainId).text}.`,
         });
         // DEV-217: drop the "wallet is registered / no backup needed" yellow
         // info box; only surface a signature warning if one actually occurred.
@@ -1845,8 +1878,8 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
       }
       toast({
         title: shareableRequest.signature
-          ? `Signed payment request created for ${balanceDisplay(amountInput, selectedToken.symbol, chainId).text}.`
-          : `Payment request created for ${balanceDisplay(amountInput, selectedToken.symbol, chainId).text}.`,
+          ? `Signed payment request created for ${balanceDisplay(amountInput, requestCoin, chainId).text}.`
+          : `Payment request created for ${balanceDisplay(amountInput, requestCoin, chainId).text}.`,
       });
       // Only a real signature problem is a warning here. The backup story is
       // told once, by the panel under the pay link: a V3 request is only
@@ -1867,7 +1900,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
     } finally {
       setIsBusy(false);
     }
-  }, [address, walletAddress, amountInput, chainId, ensureInitialized, log, selectedToken, sellerName, shouldSignRequest, signTypedDataAsync, isSui, suiSession, isStellar, stellarSession, toast, saveBackupFile]);
+  }, [address, walletAddress, amountInput, chainId, ensureInitialized, log, selectedToken, sellerName, shouldSignRequest, signTypedDataAsync, isSui, suiSession, isStellar, stellarSession, toast, saveBackupFile, requestRate, requestCoin, requestTokenSymbol]);
 
   // Same-tick double-press guard (shared lock) — see hooks/use-op-lock.ts.
   const handleCreateRequest = useMemo(() => withOpLock(handleCreateRequestUnlocked), [withOpLock, handleCreateRequestUnlocked]);
@@ -2075,6 +2108,15 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         if (!registration.alreadyRegistered && !registration.keystoreCalldata && !registration.viewingKeyCalldata) {
           throw new Error('Keystore registration is unavailable for this session.');
         }
+        // "Already registered" (or a viewing-key-only plan) means SOME auth
+        // policy is set, not that it is this unlock's (SDK 1.0.2). The payment
+        // itself is a depositFor to the requester and needs neither leg, so
+        // when the policy is not confirmed ours: send nothing onto it and do
+        // not mark this chain set up.
+        const notOurs = ownRegistrationResultRefusal(request.chainId, address, registration);
+        if (notOurs) {
+          log('warn', 'PaymentRequest', 'Payer registration skipped: the on-chain policy is not this unlock', { chainId: request.chainId });
+        }
         // Each leg submits independently (viewing-only resume is a real SDK
         // state), and the SDK receipt's mined status is READ (codex round 2:
         // both statuses were ignored, so a reverted registration proceeded
@@ -2100,8 +2142,9 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           // requireOk lost the flag on exactly the failures that cost money.
           walletSpend = 'registration';
           requireOk(await rpcInteractor.waitForTransactionReceipt(regHash), 'Keystore registration');
+          if (!notOurs) confirmedRegistration(address, request.chainId, false);
         }
-        if (!registration.alreadyRegistered && registration.viewingKeyCalldata) {
+        if (!notOurs && !registration.alreadyRegistered && registration.viewingKeyCalldata) {
           if (!live()) { abortStale('before the viewing-key broadcast'); return; }
           const vkHash = await sendTransactionAsync({
             chainId: request.chainId,
@@ -2111,8 +2154,9 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           });
           walletSpend = 'registration';
           requireOk(await rpcInteractor.waitForTransactionReceipt(vkHash), 'Viewing-key registration');
+          confirmedRegistration(address, request.chainId, true);
         }
-        setReceiveSetup(address, request.chainId, 'complete', 'onchain');
+        if (!notOurs) setReceiveSetup(address, request.chainId, 'complete', 'onchain');
       }
 
       // prepareDepositFor's schema is XOR — either a bare `noteAddressHash`
@@ -2240,7 +2284,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           const have = balanceDisplay(formatUnits(payerBalance, meta.decimals), meta.symbol, request.chainId, request.tokenId).text;
           throw new Error(
             isShareSymbol(meta.symbol)
-              ? `This request asks for ${need}, a pool share your wallet cannot hold. Nothing was paid. Pay it from your shielded ${displayTokenSymbol(meta.symbol)} balance instead.`
+              ? `This request asks for ${need}, a pool token your wallet cannot hold. Nothing was paid. Pay it from your shielded ${displayTokenSymbol(meta.symbol)} balance instead.`
               : `You need ${need} in your wallet to pay this request, and you have ${have}. Nothing was paid.`,
           );
         }
@@ -2904,6 +2948,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           decimals: requestToken.decimals,
           maxLabels,
           singleDepositTopUp,
+          rate: rateFor(request.chainId, request.tokenId),
         }));
       }
       // Account-level capacity, captured once so the pre-relay and retry
@@ -3100,7 +3145,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         : request.version === 2
           ? { kind: 'viewing-key', evmAddress: request.recipientAddress as SdkAddress, publicViewingKey: request.recipientViewingPubKey }
           : { kind: 'blind', noteAddressHash: request.noteAddressHash };
-      const recipientDeps = await loadTransferRecipientDeps(request.chainId);
+      const recipientDeps = await loadTransferRecipientDeps(request.chainId, address);
       const builtRecipient = await buildTransferRecipient(recipientSpec, inputCommitments.length, recipientDeps);
       const outputsFor = (fee: bigint) => planTransferOutputs({
         inputNotes: selectedNotes,
@@ -3165,6 +3210,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
             singleDepositTopUp: requestAmountWei + quotedRelayFee > capacityPairable
               ? requestAmountWei + quotedRelayFee - capacityPairable
               : requestAmountWei + quotedRelayFee,
+            rate: rateFor(request.chainId, request.tokenId),
           }));
         }
         return relayTransferParams({
@@ -3512,7 +3558,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
     // toast / queryClient / gateOnLockedSession are all called inside this
     // callback and were missing; the sibling wallet-pay handler's list was
     // corrected for the same three (code review 2026-08-27).
-  }, [address, walletAddress, walletChainId, chainId, ensureInitialized, exportAccount, gateOnLockedSession, identityMode, inputPayload, isDebugEnabled, keystoreManager, log, noteManager, notes, openKeystoreRegistrationModal, publicClient, queryClient, refetchNotes, refreshNotes, switchChainAsync, toast, beginTx, endTx, isSui, suiSession, selectChain]);
+  }, [address, walletAddress, walletChainId, chainId, ensureInitialized, rateFor, exportAccount, gateOnLockedSession, identityMode, inputPayload, isDebugEnabled, keystoreManager, log, noteManager, notes, openKeystoreRegistrationModal, publicClient, queryClient, refetchNotes, refreshNotes, switchChainAsync, toast, beginTx, endTx, isSui, suiSession, selectChain]);
 
   // Same-tick double-press guard (shared lock) — see hooks/use-op-lock.ts.
   const handlePayViaTransfer = useMemo(() => withOpLock(handlePayViaTransferUnlocked), [withOpLock, handlePayViaTransferUnlocked]);
@@ -3921,7 +3967,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
       // FROZEN label once created; live draft label before that.
       const amountLabel = outputPayload && createdDraft
         ? createdDraft.amountLabel
-        : amountInput.trim() ? balanceDisplay(amountInput.trim(), requestTokenSymbol, chainId).text : '—';
+        : amountInput.trim() ? balanceDisplay(amountInput.trim(), requestCoin, chainId).text : '—';
       // Parsed once (it drives the code row).
       const createdRequest = outputPayload
         ? (() => {
@@ -3940,7 +3986,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
       const createdRequestId = createdRequest?.paymentId ?? createdRequest?.requestId;
       return {
         amountLabel,
-        amountHint: outputPayload && createdDraft ? createdDraft.amountHint : balanceDisplay(amountInput || '0', requestTokenSymbol, chainId).hint,
+        amountHint: outputPayload && createdDraft ? createdDraft.amountHint : balanceDisplay(amountInput || '0', requestCoin, chainId).hint,
         // Real code or nothing — no "Awaiting request" filler row.
         requestCode: createdRequestId ? formatRequestCode(createdRequestId) : undefined,
         status: outputPayload ? { label: 'Ready', color: colors.success } : undefined,
@@ -3973,7 +4019,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
         verifiedWalletUrl,
         noticeTitle: txHash
           ? 'Payment sent'
-          : previewPayExpired && requestSignatureStatus !== 'invalid' ? 'Request expired' : 'Double-blind payment',
+          : previewPayExpired && requestSignatureStatus !== 'invalid' ? 'Request expired' : 'Private payment request',
         // The receipt-sharing instruction is ONLY true for legacy v1 payments
         // (receiveLink present). SDK-native and v2 payments auto-discover and
         // produce NO receipt - telling every payer to "share the receipt" sent
@@ -4012,7 +4058,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
     };
     // `requestSignatureStatus` is read directly by the pay-mode notice now that
     // the (unrendered) sender field it used to arrive through is gone.
-  }, [amountInput, colors.success, createdDraft, colors.textMuted, mode, outputPayload, previewPayExpired, previewPayRequest, previewReceipt, previewReceiptToken, previewRequestToken, requestSignatureStatus, requestTokenSymbol, txHash, verifiedWalletLabel, verifiedWalletUrl, balanceDisplay, chainId, receiveLink]);
+  }, [amountInput, colors.success, createdDraft, colors.textMuted, mode, outputPayload, previewPayExpired, previewPayRequest, previewReceipt, previewReceiptToken, previewRequestToken, requestSignatureStatus, requestTokenSymbol, requestCoin, txHash, verifiedWalletLabel, verifiedWalletUrl, balanceDisplay, chainId, receiveLink]);
 
   // One status surface at a time (DEV-496): the rail while a payment runs,
   // the success card after it, the box only otherwise.
@@ -4020,7 +4066,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
 
   return (
     <PaymentRequestModalContext.Provider
-      value={{ openRequestPaymentModal, openPayRequestModal, openPayViaTransferModal, openReceivePaymentModal, closePaymentRequestModal, isOpen, inlineActive: isOpen && inlineHubActive, requestToken, requestAmount: amountInput, requestCreated: !!outputPayload, syncInlineRequestForm, isBusy, busyAction, mode, lastPaid, payRelayLatchFor: payRelayLatch }}
+      value={{ openRequestPaymentModal, openPayRequestModal, openPayViaTransferModal, openReceivePaymentModal, closePaymentRequestModal, isOpen, inlineActive: isOpen && inlineHubActive, requestToken, requestAmount: amountInput, requestRateLoading, requestCreated: !!outputPayload, syncInlineRequestForm, isBusy, busyAction, mode, lastPaid, payRelayLatchFor: payRelayLatch }}
     >
       {children}
       <RequestShell inline={inlineHubActive} isOpen={isOpen} isMobileSheet={isMobileSheet} onClose={closePaymentRequestModal}>
@@ -4071,17 +4117,17 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                 and the success card after it (DEV-496). */}
             {statusMessage && !payRunning && !statusBoxHidden ? (
               <View className="rounded-control border border-[#98B975] bg-[#F5FAEE] px-[12px] py-[10px]">
-                <Text className="font-pp-regular text-[13px] text-[#6E8A42]">{statusMessage}</Text>
+                <Text className="font-pp-regular text-[13px] text-[#6E8A42]">{shareText(statusMessage)}</Text>
               </View>
             ) : null}
             {warningMessage ? (
               <View className="rounded-control border border-[#E1C26B] bg-[#FFF9E8] px-[12px] py-[10px]">
-                <Text className="font-pp-regular text-[13px] text-[#8A6B1F]">{warningMessage}</Text>
+                <Text className="font-pp-regular text-[13px] text-[#8A6B1F]">{shareText(warningMessage)}</Text>
               </View>
             ) : null}
             {errorMessage ? (
               <View className="rounded-control border border-[#F2B8B5] bg-[#FFF4F4] px-[12px] py-[10px]">
-                <Text className="font-pp-regular text-[13px] text-danger">{errorMessage}</Text>
+                <Text className="font-pp-regular text-[13px] text-danger">{shareText(errorMessage)}</Text>
               </View>
             ) : null}
 
@@ -4107,9 +4153,9 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                       dead preview card. */}
                   {inlineHubActive && !outputPayload ? (
                     <View className="gap-[8px] rounded-control bg-background-secondary px-[16px] py-[22px]">
-                      <Text className="font-pp-sans-semi-bold text-[17px] text-text">Get paid without an address</Text>
+                      <Text className="font-pp-sans-semi-bold text-[17px] text-text">Request a private payment</Text>
                       <Text className="font-pp-sans text-[13px] leading-[19px] text-text-secondary">
-                        Create a payment request and share the link. The payer never learns your balance; you never expose your history.
+                        Create a payment link to receive into Privacy Pools.
                       </Text>
                     </View>
                   ) : null}
@@ -4127,7 +4173,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                       // (SUI / XLM): offering the EVM token list would
                       // mislabel what the request emits.
                       <View className="flex-row items-center gap-[6px] rounded-control border border-text bg-card-background px-[12px] py-[8px]">
-                        <Text className="font-pp-medium text-[13px] text-text">{requestTokenSymbol}</Text>
+                        <Text className="font-pp-medium text-[13px] text-text">{displayTokenSymbol(requestTokenSymbol)}</Text>
                       </View>
                     ) : (
                       requestableTokens.map((token) => {
@@ -4157,19 +4203,32 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                   {/* Same split as the token: inline, the hub's amount card owns
                       the figure and pushes it here. */}
                   {!inlineHubActive ? (<>
-                  <Text className="font-pp-semi-bold text-[12px] text-text-secondary">Amount ({requestTokenSymbol})</Text>
+                  <Text className="font-pp-semi-bold text-[12px] text-text-secondary">Amount ({displayTokenSymbol(requestTokenSymbol)})</Text>
+                  {/* A yield pool converts the typed coin amount to shares at
+                      creation from the feed rate: until it lands the field
+                      waits (shimmer), it never converts with a missing rate. */}
+                  {requestRateLoading ? (
+                    <View testID="request-amount-loading" className="py-[10px]">
+                      <Skeleton width={140} height={20} radius={6} />
+                    </View>
+                  ) : (
                   <TextInput
                     value={amountInput}
                     onChangeText={(text) => setAmountInput(sanitizeAmountInput(text, requestTokenDecimals))}
-                    placeholder={`${!isSui && isStablecoin(selectedToken.symbol) ? '5' : '0.01'} ${requestTokenSymbol}`}
+                    placeholder={`${!isSui && isStablecoin(requestCoin) ? '5' : '0.01'} ${requestCoin}`}
                     // nw-keep(data-color): placeholder color is a TextInput sink (theme token, no className path)
                     placeholderTextColor={colors.textMuted}
                     keyboardType="numeric"
                     className="rounded-control border border-border-light px-[12px] py-[10px] font-pp-regular text-[14px] text-text"
                   />
-                  {isShareSymbol(requestTokenSymbol) ? <Text className="text-[12px] text-text-secondary">Estimated value</Text> : null}
-                  <BalanceAmount view={balanceDisplay(amountInput || '0', requestTokenSymbol, chainId)} className="text-[12px] text-text-secondary" />
+                  )}
+                  <BalanceAmount view={balanceDisplay(amountInput || '0', requestCoin, chainId)} className="text-[12px] text-text-secondary" />
                   </>) : null}
+                  {!isSui && !isStellar && !outputPayload ? (
+                    <Text className="font-pp-regular text-[12px] leading-[17px] text-text-secondary" testID="request-wallet-disclosure">
+                      Registered requests include your wallet address.
+                    </Text>
+                  ) : null}
                   {!isSui && !isStellar && canSignPaymentRequest ? (
                     /* One compact line: toggle + (when on) the display-name
                        input. Checking it makes the connected wallet sign the
@@ -4183,7 +4242,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                           {/* nw-keep(data-color): checkmark glyph color is the card-background theme token into the vector-icon sink */}
                           {shouldSignRequest ? <Ionicons name="checkmark" size={12} color={colors.cardBackground} /> : null}
                         </View>
-                        <Text className="font-pp-semi-bold text-[13px] text-text">Display your name</Text>
+                        <Text className="font-pp-semi-bold text-[13px] text-text">Show name and wallet</Text>
                       </Pressable>
                       {/* Always mounted so the row (and the modal) never changes
                           height when toggled. Just hidden and inert while off. */}
@@ -4240,9 +4299,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                   {mode === 'pay' && previewPayRequest && !payRunning ? (
                     <View className="gap-[6px] rounded-control border border-border-light p-[12px]">
                       {/* Request code lives in the card above — not repeated here. */}
-                      {/* Accurate again: the share link no longer carries
-                          recipientAddress at all (2026-08-31). */}
-                      <Text className="font-pp-regular text-[12px] text-text">Recipient: hidden (double-blind)</Text>
+                      <Text className="font-pp-regular text-[12px] text-text">Recipient: {paymentRequestRecipientLabel(previewPayRequest)}</Text>
                       <Text className="font-pp-regular text-[12px] text-text">Token: {previewRequestToken ? (previewRequestToken.known ? poolDisplayLabel(previewRequestToken.symbol, previewPayRequest.chainId) : previewRequestToken.label) : previewPayRequest.tokenId}</Text>
                       <Text className="font-pp-regular text-[12px] text-text">
                         Amount: {previewRequestToken ? (previewRequestToken.known ? balanceDisplay(formatUnits(BigInt(previewPayRequest.amount), previewRequestToken.decimals), previewRequestToken.symbol, previewPayRequest.chainId, previewPayRequest.tokenId).text : previewRequestToken.label) : previewPayRequest.amount}
@@ -4359,7 +4416,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                           the escape hatch -- the handler clears the armed
                           intent and runs its switch-and-stop. Never gate
                           `disabled` on a flag that can fail to clear. */}
-                      {isBusy || pendingAutoAction ? <FlowProgress message={statusMessage ?? undefined} /> : null}
+                      {isBusy || pendingAutoAction ? <FlowProgress message={statusMessage ?? undefined} chainId={chainId} /> : null}
                     </View>
                   ) : receivedNote ? (
                     /* Claim flow: the import above was DEVICE-LOCAL. Anchoring
@@ -4414,7 +4471,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                           the whole story and vanished the moment anything else
                           touched `status`. */}
                       {claimStatus === 'anchoring' ? (
-                        <FlowProgress message={claimStatusMessage} />
+                        <FlowProgress message={claimStatusMessage} chainId={chainId} />
                       ) : null}
                       {claimStatus === 'anchored' ? (
                         <Text className="font-pp-regular text-[12px] text-success">
@@ -4423,7 +4480,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                       ) : blocked ? (
                         <Text className="font-pp-regular text-[12px] text-text-secondary">{blocked}</Text>
                       ) : claimError ? (
-                        <Text className="font-pp-regular text-[12px] text-danger">{claimError}</Text>
+                        <Text className="font-pp-regular text-[12px] text-danger">{shareText(claimError)}</Text>
                       ) : null}
                     </View>
                       );
@@ -4446,7 +4503,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                           {isBusy ? 'Processing...' : 'Receive Payment'}
                         </Text>
                       </Pressable>
-                      {isBusy ? <FlowProgress message={statusMessage ?? undefined} /> : null}
+                      {isBusy ? <FlowProgress message={statusMessage ?? undefined} chainId={chainId} /> : null}
                     </View>
                   )}
                 </>

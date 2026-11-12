@@ -1,6 +1,7 @@
 import { formatUnits } from 'viem';
 
-import { tokenAmountLabel } from '@/services/share-display';
+import { isShareSymbol, plainTokenFigure, tokenAmountLabel } from '@/services/share-display';
+import { formatShareAsUnderlying, shareExactAsUnderlyingDecimal, type ShareRate } from '@/services/share-rates';
 
 // The token a claim or payment link names, resolved for DISPLAY (DEV-484).
 //
@@ -52,7 +53,19 @@ export function resolveLinkToken(address: string, chainId: number | undefined, r
   return first ? { known: true, symbol: first.symbol, decimals: first.decimals } : { known: false, label: unknownTokenLabel(address) };
 }
 
-/** The amount line for a link: units and symbol when known, else the unknown label alone. */
-export function linkAmountText(rawAmount: bigint, token: LinkToken): string {
-  return token.known ? tokenAmountLabel(formatUnits(rawAmount, token.decimals), token.symbol) : token.label;
+/**
+ * The amount line for a link: units and symbol when known, else the unknown label alone.
+ * A link's amount is exact SHARES for a yield pool token (the pay page pays that
+ * count), so it is shown as the underlying it is worth at `rate`, the page's own
+ * feed-grid rate, rounded down (DEV-621). Without a rate it reads as loading
+ * ("… USDC", rendered as the shimmer), never as the share count. Display only.
+ */
+export function linkAmountText(rawAmount: bigint, token: LinkToken, rate?: ShareRate): string {
+  if (!token.known) return token.label;
+  const shares = formatUnits(rawAmount, token.decimals);
+  if (rate && isShareSymbol(token.symbol) && rate.shareDecimals === token.decimals) {
+    const underlying = shareExactAsUnderlyingDecimal(shares, rate);
+    if (underlying != null) return formatShareAsUnderlying(underlying, rate);
+  }
+  return tokenAmountLabel(plainTokenFigure(shares, token.symbol), token.symbol);
 }

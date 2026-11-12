@@ -22,6 +22,8 @@ import { defaultChainId, getChainConfig, SUI_TESTNET_ID } from '@/config/chains'
 import { RegisterWalletOffer, registerOfferGasText } from '@/components/register-wallet-offer';
 import { linkToken } from '@/services/link-token-registry';
 import { linkAmountText } from '@/services/link-token';
+import { useShareRates } from '@/hooks/use-share-rates';
+import { FigureText } from '@/components/ui/share-figure';
 import { decodeNoteReceiptFromUrl, extractNoteReceiptEncoded } from '@/services/note-receipt';
 import { useSessionChainId } from '@/hooks/use-session-chain-id';
 import {
@@ -222,8 +224,11 @@ export function ImportNoteModalProvider({ children }: { children: React.ReactNod
   // Any environment's registry, and never a guessed 18 decimals (DEV-484):
   // an OP USDC claim opened on Prod read "0.000000000003 0X0B2C".
   const token = note ? linkToken(note.tokenId, receipt?.chainId) : null;
+  // Exact share counts read as their underlying at the feed-grid rate (display only).
+  const { rateFor: shareRateFor } = useShareRates();
+  const shareRate = note ? shareRateFor(receipt?.chainId ?? 0, note.tokenId) : undefined;
   const amountLabel = notes.length > 0 && token
-    ? linkAmountText(notes.reduce((sum, n) => sum + BigInt(n.value), 0n), token)
+    ? linkAmountText(notes.reduce((sum, n) => sum + BigInt(n.value), 0n), token, shareRate)
     : null;
 
   const effectiveAddress = sessionAddress ?? address ?? null;
@@ -371,7 +376,7 @@ export function ImportNoteModalProvider({ children }: { children: React.ReactNod
                 <View className="gap-[8px] rounded-control border border-border-light px-[14px] py-[12px]">
                   <View className="flex-row items-center justify-between gap-[12px]">
                     <Text className="font-pp-semi-bold text-[14px] text-text">Amount</Text>
-                    <Text className="font-pp-semi-bold text-[14px] text-text">{amountLabel}</Text>
+                    <Text className="font-pp-semi-bold text-[14px] text-text"><FigureText text={amountLabel} /></Text>
                   </View>
                   <View className="flex-row items-center justify-between gap-[12px]">
                     <Text className="font-pp-medium text-[12px] text-text-muted">Owner</Text>

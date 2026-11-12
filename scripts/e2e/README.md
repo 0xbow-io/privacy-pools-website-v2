@@ -11,6 +11,7 @@ EXPO_PUBLIC_APP_ENV=staging
 EXPO_PUBLIC_TEST_MODE=true
 TEST_MODE=true
 EXPO_PUBLIC_ASP_URL=https://api-dev.0xbow.io
+EXPO_PUBLIC_SEPOLIA_RELAYER_URL=https://relayer-v2-staging-149184580131.us-east1.run.app
 EXPO_PUBLIC_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com
 EXPO_PUBLIC_BATCH_WITHDRAWALS=true
 ```
@@ -18,7 +19,7 @@ EXPO_PUBLIC_BATCH_WITHDRAWALS=true
 `EXPO_PUBLIC_ALCHEMY_KEY` is also supported. The scripts default to port 8081, but any port works: the hosted relayers and the ASP accept any origin, so several worktrees can run side by side (set `PROBE_URL` to match). If relayer quotes fail with a CORS error on some port, check whether the relayer has gained an allowlist:
 
 ```bash
-curl -s -o /dev/null -D - -X OPTIONS https://relayer-staging.example/v1/quote -H "Origin: http://localhost:8082" -H "Access-Control-Request-Method: POST"
+curl -s -o /dev/null -D - -X OPTIONS https://relayer-v2-staging-149184580131.us-east1.run.app/v1/quote -H "Origin: http://localhost:8082" -H "Access-Control-Request-Method: POST"
 ```
 
 The response must echo the origin in `access-control-allow-origin`.
@@ -37,11 +38,15 @@ bun scripts/e2e/sepolia.ts all 0.001
 bun scripts/e2e/payment-request.ts 0.0006
 ```
 
-Ensure Git LFS circuit artifacts are present and install Chromium with `bunx playwright install chromium`. Screenshots and unregistered-payee backup downloads are saved under ignored `.e2e-shots/`.
+Ensure Git LFS circuit artifacts are present and install Chromium with `bunx playwright install chromium`.
+
+The Sepolia verifiers still hold the pre-ceremony keys, while `public/artifacts` holds the ceremony keys production uses, so a proof from the checked-out files reverts on Sepolia (`PoolVault_InvalidDepositProof`, `0x08bf478d`). Run `bun scripts/e2e/sepolia-circuits.ts` once before the journeys: it reads each Sepolia verifier and swaps the matching pinned keys (`fixtures/sepolia-circuits.json`, sha256-checked, cached in `~/.cache/e2e-sepolia-circuits`) into `public/artifacts`. `--check` only reports. Restore with `git checkout -- public/artifacts` and never commit the swapped files. CI runs it in `e2e-sepolia.yml`. It swaps nothing once Sepolia verifies with the checked-out keys. Screenshots and unregistered-payee backup downloads are saved under ignored `.e2e-shots/`.
 
 ## CI and funds
 
 The `e2e-sepolia` workflow runs on pull requests and manual dispatch, not pushes to main. It uses `E2E_ACCOUNT_A_PK`, `E2E_ACCOUNT_B_PK`, and `EXPO_PUBLIC_ALCHEMY_KEY` secrets. Runs are serialized because they share account state.
+
+Core uses a wallet derived from A and the logged run/attempt identity, avoiding A's accumulated note history. Recover its key with `coreFixtureKey(A_KEY, identity)` in `scripts/e2e/core-fixture.ts`; set `E2E_CORE_FIXTURE_ID` to resume it. Cleanup returns unused wallet funds to A, retaining 0.0015 ETH for exiting remaining notes/change.
 
 A and B retain balances and registered viewing keys between runs. The runner tops up B from A. Its default startup minimum is 0.04 Sepolia ETH to cover fixture advances and a B top-up; most of the temporary float returns. Consolidation uses a recoverable account derived from A. Batch withdrawal uses a fresh account derived from A and a random fixture ID printed before funding; retain that ID with A to recover a failed run. Set `E2E_BATCH_FIXTURE_ID` to resume that fixture. Successful batches return the remaining wallet funds to A. Old batch accounts remain recoverable; their dust is not mixed into new fixtures. A fresh account exercises initial registration, shielding, and ragequit; the runner sweeps its remaining wallet balance back to A. If ragequit fails, it retains recovery gas and logs the throwaway key. Treat run logs and backups as private test artifacts.
 

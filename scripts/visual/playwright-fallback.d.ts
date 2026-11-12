@@ -11,6 +11,10 @@
 // happens; keep it to the subset the harness actually uses.
 declare module 'playwright' {
   export interface Locator {
+    filter(options: { visible?: boolean }): Locator;
+    evaluate<R>(fn: (element: HTMLElement) => R): Promise<R>;
+    getAttribute(name: string): Promise<string | null>;
+    innerText(): Promise<string>;
     first(): Locator;
     last(): Locator;
     count(): Promise<number>;
@@ -51,7 +55,10 @@ declare module 'playwright' {
       timeout?: number;
       clip?: { x: number; y: number; width: number; height: number };
     }): Promise<Buffer>;
-    getByText(text: string, options?: { exact?: boolean }): Locator;
+    locator(selector: string): Locator;
+    setContent(html: string): Promise<void>;
+    addLocatorHandler(locator: Locator, handler: () => Promise<unknown>): Promise<void>;
+    getByText(text: string | RegExp, options?: { exact?: boolean }): Locator;
     getByTestId(testId: string): Locator;
     getByPlaceholder(text: string, options?: { exact?: boolean }): Locator;
     exposeFunction(name: string, fn: (...args: never[]) => unknown): Promise<void>;
@@ -107,9 +114,10 @@ declare module 'playwright' {
       isMobile?: boolean;
     }): Promise<BrowserContext>;
     newPage(options?: { viewport?: { width: number; height: number } }): Promise<Page>;
+    version(): string;
     close(): Promise<void>;
   }
   export const chromium: {
-    launch(options?: { headless?: boolean; executablePath?: string; args?: string[] }): Promise<Browser>;
+    launch(options?: { headless?: boolean; channel?: string; chromiumSandbox?: boolean; executablePath?: string; args?: string[] }): Promise<Browser>;
   };
 }

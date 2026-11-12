@@ -5,22 +5,23 @@
  *
  * Pure module (no react-native) so it is bun-testable.
  */
+import { StellarRegistrationCancelledError } from './stellar-registration-prompt';
 import type { StellarFlowStage } from '@/services/stellar/stellar-account';
 
 export function describeStellarStage(stage: StellarFlowStage): string {
   switch (stage) {
     case 'unlocking':
-      return 'Unlocking your private account (sign in Freighter)...';
+      return 'Unlocking your private account (sign in your wallet)...';
     case 'registering':
-      return 'Setting up your private account (up to two approvals in Freighter)...';
+      return 'Setting up your private account (up to two approvals in your wallet)...';
     case 'proving':
       return 'Building the zero-knowledge proof...';
     case 'signing':
-      return 'Submitting (approve in Freighter)...';
+      return 'Submitting (approve in your wallet)...';
     case 'confirming':
       return 'Waiting for confirmation...';
     case 'registering-label':
-      return 'Submitting for approval (approve in Freighter)...';
+      return 'Submitting for approval (approve in your wallet)...';
     case 'relaying':
       return 'Sending through the relayer...';
     case 'syncing':
@@ -29,9 +30,14 @@ export function describeStellarStage(stage: StellarFlowStage): string {
 }
 
 const RULES: [RegExp, string][] = [
-  [/network.*mismatch|StellarWalletNetworkMismatch/i, 'Freighter is on another network. Switch it to Testnet and try again.'],
-  [/not installed|StellarWalletNotAvailable/i, 'Freighter is not available in this browser.'],
-  [/locked|not connected/i, 'Unlock Freighter and try again.'],
+  // The network's own refusals of a send (Transaction send failed: <code>): THIS transaction did not
+  // reach the chain. An earlier step of the same flow may have (the first of the two account setup
+  // transactions), and a retry builds only the missing step, so the copy is scoped to this one.
+  [/\btxTooLate\b/, 'The approval took too long and the network refused it. This transaction was not sent. Try again.'],
+  [/\btxBadSeq\b/, 'Another transaction from this wallet went through first. This transaction was not sent. Try again.'],
+  [/network.*mismatch|StellarWalletNetworkMismatch/i, 'Your wallet is on another network. Switch it to Testnet and try again.'],
+  [/not installed|StellarWalletNotAvailable/i, 'Your wallet is not available in this browser.'],
+  [/locked|not connected/i, 'Unlock your wallet and try again.'],
   // Before the generic 'not active' / 'insufficient' rules: these are note
   // state, not wallet state.
   [/RecipientViewingKeyUnregistered|no on-chain viewing key/i, 'The recipient has not set up a private account on Stellar yet. They need to open the app and make any private action first.'],
@@ -68,5 +74,13 @@ export function stellarUnlockErrorTitle(caught: unknown): string {
   const raw = caught instanceof Error ? caught.message : String(caught);
   // A contract rejection's diagnostic log can contain these words too.
   const cancelled = /reject|denied|cancel|declined/i.test(raw) && !CONTRACT_ERROR.test(raw);
-  return cancelled ? 'Sign-in cancelled in Freighter.' : stellarErrorMessage(raw);
+  return cancelled ? 'Sign-in cancelled in your wallet.' : stellarErrorMessage(raw);
+}
+
+/** Distinguish closing registration from rejecting a wallet request. */
+export function stellarActionError(caught: unknown, rejectionMessage = 'Transaction was rejected.'): string {
+  if (caught instanceof StellarRegistrationCancelledError) return caught.message;
+  const raw = caught instanceof Error ? caught.message : String(caught);
+  return /reject|denied|cancel|declined/i.test(raw) && !CONTRACT_ERROR.test(raw)
+    ? rejectionMessage : stellarErrorMessage(raw);
 }

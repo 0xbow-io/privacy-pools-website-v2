@@ -145,7 +145,9 @@ export function resolveDepositableTokens(
  * "Available soon" line instead of hiding an asset the user came for.
  */
 export function getDepositComingSoonTokens(chainId?: number): TokenMetadata[] {
-  return getActionableTokens(chainId).filter((t) => t.depositComingSoon);
+  // A share is never a pay row (its underlying or coin is), so a paused vault
+  // lists once, under the asset the user pays with.
+  return getActionableTokens(chainId).filter((t) => t.depositComingSoon && !t.yieldShare);
 }
 
 /** True when deposits for this asset are not open yet on this chain. */

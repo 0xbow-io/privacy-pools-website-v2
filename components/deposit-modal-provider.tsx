@@ -1,7 +1,9 @@
 import { SWAP_DEPOSIT_REFUND_NOTE } from '@/services/swap-deposit-copy';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
+import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 import { shieldHeadroomRoomText } from '@/services/shield-headroom-copy';
 import { relaunchReady } from '@/services/deposit-relaunch';
+import { ownRegistrationRefusal } from '@/services/keystore-identity-status';
 import { simulateWithAllowanceOverride } from '@/services/allowance-override-sim';
 import { KEY_SESSION_DEPOSIT_FOR_COPY } from '@/services/recipient-registration-hint';
 import { submitWalletTransaction } from '@/services/wallet-submit';
@@ -19,7 +21,7 @@ import { reportErrorReport } from '@/services/error-reports';
 import { classifyFailure } from '@/services/error-reports-cause';
 import { stellarErrorReportStage, type ErrorReportStage } from '@/services/error-reports-failure';
 import { TEST_MODE } from '@/config/env';
-import { DEPOSIT_FAQ_URL, SUPPORT_FORM_URL, SUPPORT_TELEGRAM_URL } from '@/config/support';
+import { DEPOSIT_FAQ_URL, SUPPORT_TELEGRAM_URL } from '@/config/support';
 import { ENTRYPOINT_ASSETS_ABI, getMinimumDepositAmount, getVettingFeeBPS, type EntrypointAssetConfig } from '@/services/entrypoint-assets';
 import { sameSymbol } from '@/services/symbol-match';
 import { formatDepositMinimum, friendlyDepositError, PREVIEW_MINT_ABI, requiredUnderlyingForMinShares, scaleUnits } from '@/services/deposit-limits';
@@ -61,7 +63,7 @@ import { getExplorerName, getExplorerTxUrl, getChainConfig, isChainSelectable, s
 import { STELLAR_TESTNET_CONTRACTS, STELLAR_XLM } from '@/config/stellar-deployment';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { useStellarBalance } from '@/hooks/use-stellar-balance';
-import { describeStellarStage, stellarErrorMessage } from '@/services/stellar/stellar-copy';
+import { describeStellarStage, stellarErrorMessage, stellarActionError } from '@/services/stellar/stellar-copy';
 import { StellarLabelRetryNotice } from '@/components/stellar-label-retry';
 import { isStellarAccountAddress } from '@/services/stellar/stellar-request';
 import type { PendingLabel } from '@/services/stellar/stellar-account';
@@ -76,6 +78,7 @@ import { recordShieldSwap } from '@/services/swap-bookkeeping';
 import { recordSwap } from '@/services/swap-records-store';
 import { pendingDepositRow, swapDepositPendingAsset } from '@/services/feed-reconciliation';
 import { addPendingOwnRow, removePendingOwnRow } from '@/services/pending-own-rows-store';
+import { useShareNameText } from '@/hooks/use-share-rates';
 
 /** Refusal when the recipient has no viewing key on this chain (depositFor). */
 const RECIPIENT_UNREGISTERED_MESSAGE =
@@ -148,7 +151,8 @@ import { useChainRouter } from '@/hooks/use-chain-router';
 import { useActiveEvmChain } from '@/hooks/use-active-evm-chain';
 import { useOpLock } from '@/hooks/use-op-lock';
 import { getDepositableTokens, getDepositComingSoonTokens, getKnownTokenMetadata, getTokenMetadataBySymbol, type TokenMetadata } from '@/config/tokens';
-import { comingSoonDepositMessage, displayTokenSymbol } from '@/services/share-display';
+import { comingSoonDepositMessage, displayTokenSymbol, tokenAmountLabel } from '@/services/share-display';
+import { formatTokenBalanceDown } from '@/services/token-format';
 import { useSuiSession } from '@/hooks/use-sui-session';
 import { SUI_SUPPORTED_TOKENS } from '@/config/sui-tokens';
 import { useSuiClientQuery } from '@mysten/dapp-kit';
@@ -160,7 +164,7 @@ import { useAllChainsPriceMap, usePriceFeedsSettled } from '@/hooks/use-all-chai
 import apiClient from '@/services/api-client';
 import { invalidateTransactionCaches } from '@/services/cache';
 import { NoteStatus, type Note, type PoolSession, type YieldDeployment } from '@/services/sdk-types';
-import { getConfiguredNativeYieldDeployment, getConfiguredYieldDepositDeploymentForUnderlying, getConfiguredYieldDeploymentForAsset, getNativeYieldDepositDeployment, getYieldDepositDeploymentForUnderlying, getYieldDeploymentsForChain, YIELD_APY_PERCENT, YIELD_OPT_OUT_FEE, yieldOptOutFeeActive } from '@/config/yield';
+import { getConfiguredNativeYieldDeployment, getConfiguredYieldDepositDeploymentForUnderlying, getConfiguredYieldDeploymentForAsset, getNativeYieldDepositDeployment, getYieldDepositDeploymentForUnderlying, getYieldDeploymentsForChain, VAULT_DEPOSITS_PAUSED_MESSAGE, YIELD_APY_PERCENT, YIELD_OPT_OUT_FEE, yieldDepositsPausedOnChain, yieldOptOutFeeActive } from '@/config/yield';
 import { PP_ROUTER_QUOTE_ABI, toYieldDepositFor } from '@/services/yield-deposit-for';
 import { toNativeYieldDeposit } from '@/services/yield-native-deposit';
 import { useYieldVaultProbeVersion } from '@/hooks/use-yield-vault-probe';
@@ -369,6 +373,10 @@ function cannotShieldMessage(options: { tokenSymbol?: string; tokenAddress?: str
   const meta = (options.tokenAddress ? getKnownTokenMetadata(options.tokenAddress, chainId) : undefined)
     ?? (options.tokenSymbol ? getTokenMetadataBySymbol(options.tokenSymbol, chainId) : undefined);
   const symbol = meta?.symbol ?? options.tokenSymbol ?? 'That token';
+  // Vault deposits are paused (EXPO_PUBLIC_YIELD_DEPOSITS_PAUSED): the share,
+  // its underlying and a native coin with a vault route all say so, before the
+  // "not verified yet" and "coming soon" readings below.
+  if (meta?.depositPaused) return VAULT_DEPOSITS_PAUSED_MESSAGE;
   // A yield share whose vault is not verified yet: the deposit is paid in the
   // underlying through the PPRouter, and that route only opens once the vault
   // has been checked on chain. Say so, and that it is a wait, not a refusal.
@@ -384,8 +392,8 @@ function cannotShieldMessage(options: { tokenSymbol?: string; tokenAddress?: str
     return comingSoonDepositMessage(symbol, getChainConfig(chainId)?.displayName);
   }
   return meta?.withdrawOnly
-    ? `Deposits of ${symbol} are closed on this network. Withdraw or send your shielded ${symbol} instead.`
-    : `${symbol} can't be shielded on this network.`;
+    ? `Deposits of ${displayTokenSymbol(symbol)} are closed on this network. Withdraw or send your shielded ${displayTokenSymbol(symbol)} instead.`
+    : `${displayTokenSymbol(symbol)} can't be shielded on this network.`;
 }
 
 /**
@@ -645,6 +653,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
   // chainId` switch guard below meaningful: it used to compare the wallet's
   // chain against itself and could never fire.
   const chainId = useActiveEvmChain().id;
+  const shareText = useShareNameText(chainId);
   const withOpLock = useOpLock();
   // Chain FROZEN at submission — explorer links must not follow a later
   // app-chain switch (codex round 3, P2).
@@ -725,6 +734,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     getCommittedManagers,
     refreshNotes,
     assertCanDeposit,
+    keystoreStatusForChain,
     createCrossChainShieldSession,
   } = usePoolSession();
 
@@ -892,7 +902,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       console.log(
         `[perf] · deposit-token resolve isSui=${isSui} chain=${crossChainPoolId ?? activeEvmChainId}`
         + ` want=${selectedToken.symbol}/${selectedToken.address}`
-        + ` via=${byAddress ? 'address' : bySymbol ? 'symbol' : 'FALLBACK[0]'}`
+        + ` via=${byAddress ? 'address' : bySymbol ? 'symbol' : 'FALLBACK[0]'}` // not-rendered: perf log
         + ` got=${configured.symbol}/${configured.address}`
         + ` available=[${depositTokens.map((t) => t.symbol).join(',')}]`,
       );
@@ -1230,7 +1240,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     : selectedToken.isNative
       ? nativeBalance == null
       : erc20BalanceRaw == null;
-  const walletBalanceFormatted = walletBalanceLoading ? '—' : `${walletBalance.toFixed(4)} ${displaySymbol}`;
+  const walletBalanceFormatted = walletBalanceLoading ? '—' : tokenAmountLabel(formatTokenBalanceDown(walletBalance, displaySymbol), displaySymbol);
 
   // --- Gas reserve (native deposits) ---
 
@@ -1422,7 +1432,15 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     // wagmi-specific.
     if (isSui) {
       if (enteredAmount > walletBalance) {
-        return `Insufficient balance (${walletBalance.toFixed(4)} ${displaySymbol} available)`;
+        // The exact balance, rounded DOWN: a figure rounded up would be one the
+        // user types and is refused again. The deposit catalog holds no shares
+        // (getDepositableTokens(...).filter(!yieldShare)), so this figure is the
+        // coin itself and never needs a rate.
+        // isSui also covers Stellar, whose budget is the spendable XLM, not a Sui balance.
+        const exact = isStellar
+          ? (stellarBalanceData ? formatUnits(stellarBalanceData.spendable, STELLAR_XLM.decimals) : '0')
+          : (suiBalanceData ? formatUnits(BigInt(suiBalanceData.totalBalance), suiDecimals) : '0');
+        return `Insufficient balance (${tokenAmountLabel(formatTokenBalanceDown(exact, displaySymbol), displaySymbol)} available)`;
       }
       return null;
     }
@@ -1433,7 +1451,8 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       return null; // partially-typed amount (e.g. "0."); let the input settle
     }
     if (enteredWei > walletBalanceWei) {
-      return `Insufficient balance (${walletBalance.toFixed(4)} ${displayTokenSymbol(selectedToken.symbol)} available)`;
+      // Rounded down from the exact balance, for the same reason as the Sui branch.
+      return `Insufficient balance (${tokenAmountLabel(formatTokenBalanceDown(formatUnits(walletBalanceWei, selectedToken.decimals), selectedToken.symbol), selectedToken.symbol)} available)`;
     }
     // Enough balance, but not enough left over for the vetting fee (and gas,
     // when the deposit asset is the native token).
@@ -1456,7 +1475,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       return formatDepositMinimum(depositMinPayWei, selectedToken.decimals, selectedToken.symbol);
     }
     return null;
-  }, [amount, enteredAmount, walletBalanceWei, spendableBalanceWei, spendableBalanceFormatted, walletBalance, selectedToken.decimals, selectedToken.symbol, isSui, displaySymbol, swapDepositActive, depositMinPayWei, minPending, tokenPrice, priceLoading, yieldExitBlocked, depositCapUsd]);
+  }, [amount, enteredAmount, walletBalanceWei, spendableBalanceWei, spendableBalanceFormatted, walletBalance, selectedToken.decimals, selectedToken.symbol, isSui, isStellar, stellarBalanceData, suiBalanceData, suiDecimals, displaySymbol, swapDepositActive, depositMinPayWei, minPending, tokenPrice, priceLoading, yieldExitBlocked, depositCapUsd]);
 
   // True while the cap cannot be judged yet because the price is still
   // loading: shown quietly (not as a red error) and the inline auto-confirm
@@ -1614,7 +1633,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     }
     // === Stellar path ===
     // The shared Stellar account (services/stellar/stellar-account.ts) derives
-    // keys on first use, proves, submits pool.deposit via Freighter, then
+    // keys on first use, proves, submits pool.deposit via Varial, then
     // registers the label ciphertext with the ASP registry.
     if (isStellar) {
       if (!stellarOwner) {
@@ -1641,16 +1660,24 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       setStep('loading');
       reportDepositError(null);
       depositErrorReportRef.current.phase = 'wallet-connect';
-      setLoadingMessage(describeStellarStage('unlocking'));
+      // Neutral until the session says otherwise: 'unlocking' (which names
+      // Freighter) arrives through onStage only when the account is really locked.
+      setLoadingMessage('Preparing your deposit...');
       try {
+        const { buildStellarClaimUrl } = await import('@/services/stellar/stellar-claim-url');
+        if (!live()) return;
         const res = await stellarSession.deposit({
           amount: amountBase,
           recipient: depositRecipientRef.current ?? undefined,
           shouldContinue: live,
           onStage: (stage) => { if (!live()) return; depositErrorReportRef.current.phase = stellarErrorReportStage(stage); setLoadingMessage(describeStellarStage(stage)); },
+          // An unregistered recipient gets a blind deposit and a claim link,
+          // as on EVM (DEV-499). Saved for the sender before signing.
+          onClaimReady: (notes) => { if (live()) setClaimReceiptUrl(buildStellarClaimUrl(notes)); },
         });
         // A run the user closed must not paint its hash into a newer flow.
         if (!live()) return;
+        if (res.claimNotes) setClaimReceiptUrl(buildStellarClaimUrl(res.claimNotes));
         setTxHash(res.txHash);
         setTxChainId(STELLAR_TESTNET_ID);
         setStellarLabelPending(res.pendingLabel ? { owner: stellarOwner, item: res.pendingLabel } : null);
@@ -1659,10 +1686,13 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
         const message = err instanceof Error ? err.message : String(err);
         log('error', 'Deposit', `Stellar deposit failed: ${message}`, err);
         if (!live()) return;
+        // Not on the success card: drop the link. If the tx did land, sync
+        // attaches it to the saved claim and the row offers it again.
+        setClaimReceiptUrl(null);
         if (/Superseded/.test(message)) { setStep('deposit'); return; }
         if (/reject|denied|cancel|declined/i.test(message)) {
           setStep('deposit');
-          reportDepositError('Transaction was rejected.', err);
+          reportDepositError(stellarActionError(err), err);
           return;
         }
         reportDepositError(`Deposit failed: ${stellarErrorMessage(message)}`, err, 'stellar-broadcast');
@@ -1923,6 +1953,21 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
         isRegistered = await depositSession.isKeystoreRegistered();
       }
       console.log('[Deposit][debug] keystore registered:', isRegistered);
+      // isKeystoreRegistered() only says SOMEONE registered this address, not
+      // with which keys. Before minting under this session's keys, the bulk
+      // registry must agree it is THIS unlock: a registry miss next to a
+      // registered chain may be another unlock's registration the local copy
+      // has not caught up with, and depositing would strand the note. Local
+      // read only (it waits for the grid, never fetches).
+      if (!recipientMode) {
+        const ownIdentity = await keystoreStatusForChain(depositChainId, { chainFallback: true });
+        if (!live()) { releaseTx(); log('warn', 'Deposit', 'Stale run aborted after the identity check'); return; }
+        const refusal = ownRegistrationRefusal(ownIdentity, isRegistered);
+        if (refusal) {
+          log('warn', 'Deposit', 'Refused: registry identity does not confirm this unlock', { chainId: depositChainId, identity: ownIdentity, isRegistered });
+          throw new Error(refusal);
+        }
+      }
       if (!isRegistered && keyOwnedDeposit) {
         // The connected wallet is only the payer — it cannot register the
         // key account's keystore (registration must come from the owner).
@@ -2657,6 +2702,15 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       const liveYieldIsNative = selectedToken.isNative && liveDeployment?.nativeMode === true;
       const useYieldPath = yieldAvailable && yieldOn && !!liveDeployment;
       depositErrorReportRef.current.isYield = useYieldPath;
+      // Vault deposits paused on this chain: an asset whose deposits land in a
+      // vault is refused here, before anything is prepared, and never shielded
+      // plainly into the closed or superseded pool. The configured route (not
+      // the verified one) decides, so a pending probe cannot slip past it.
+      if (yieldDepositsPausedOnChain(depositChainId) && (selectedToken.isNative
+        ? getConfiguredNativeYieldDeployment(depositChainId) !== undefined
+        : getConfiguredYieldDepositDeploymentForUnderlying(depositChainId, selectedToken.address) !== undefined)) {
+        throw new Error(VAULT_DEPOSITS_PAUSED_MESSAGE);
+      }
       // The native coin on a chain with a CONFIGURED native-mode route has one
       // way in: the router. If the verified route is not available right now
       // (probe pending or failed) the deposit is refused, never shielded plainly
@@ -3375,7 +3429,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
         : selectedToken.address;
       const optimisticAssetSymbol = yieldPrep && liveDeployment
         ? getKnownTokenMetadata(liveDeployment.ppUSDC, depositChainId)?.symbol
-          ?? `pp${liveDeployment.underlyingSymbol.toUpperCase()}`
+          ?? `pp${liveDeployment.underlyingSymbol.toUpperCase()}` // not-rendered: pending row data, shown through displayTokenSymbol
         : selectedToken.symbol;
       // A depositFor is the RECIPIENT's deposit: no pending row for the payer
       // (it would read as the payer's own pending balance).
@@ -3610,6 +3664,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     depositVettingFeeBps,
     amount,
     assertCanDeposit,
+    keystoreStatusForChain,
     chainId,
     walletChainId,
     wagmiConfig,
@@ -4241,7 +4296,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     });
   }, [isSui, isStellar, enteredAmount, tokenPrice, feePricing, chainId, crossChainShieldActive, crossChainPoolId, crossChainVetting, selectedToken.address, selectedToken.symbol, swapDepositActive, depositVettingFeeBps, swapRoute]);
 
-  // Re-sends the registration from an explicit tap (one Freighter approval);
+  // Re-sends the registration from an explicit tap (one Varial approval);
   // the next manual Sync does the same for any deposit this card is not for.
   const retryStellarLabels = stellarSession.retryPendingLabels;
   const stellarLabelRetry = useMemo(() => (stellarLabelPending && stellarLabelPending.owner === stellarOwner ? {
@@ -4255,7 +4310,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       } catch (caught) {
         const raw = caught instanceof Error ? caught.message : String(caught);
         errorToast({
-          title: /reject|denied|cancel|declined/i.test(raw) ? 'Cancelled in Freighter.' : stellarErrorMessage(raw),
+          title: /reject|denied|cancel|declined/i.test(raw) ? 'Cancelled in your wallet.' : stellarErrorMessage(raw),
           variant: 'destructive',
         });
         return false;
@@ -4332,6 +4387,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
           // nw-keep(platform-css): web-only position:fixed to anchor the backdrop over scrolling content (empty on native)
           style={WEB_FIXED_POSITION}
         >
+          <HubErrorBoundary onRetry={closeDepositModal}>
           {/* Blur overlay */}
           <Pressable
             className={`absolute inset-0 ${isDark ? 'bg-[rgba(0,0,0,0.6)]' : 'bg-[rgba(255,255,255,0.6)]'}`}
@@ -4469,7 +4525,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
                     })}
                   </View>
                   <Text className={`text-[12px] font-pp-regular ${validationError ? (softPending ? 'text-text-muted' : 'text-[#E53935]') : 'text-transparent'}`}>
-                    {validationError || ' '}
+                    {shareText(validationError) || ' '}
                   </Text>
                 </View>
 
@@ -4595,7 +4651,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
                     derived from the real status message (Prepare → Prove →
                     Submit → Confirm), so the row always says where the flow
                     actually is. */}
-                <FlowProgress message={loadingMessage} />
+                <FlowProgress message={loadingMessage} chainId={chainId} />
 
                 {/* Route cost, once the quote exists: the wallet is about to ask
                     for an amount of the pay token the user never typed. */}
@@ -4630,7 +4686,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
                     <Text className="text-[12px] leading-[16px] text-text-secondary font-pp-regular">
                       The exact amount spent depends on the route and can move within slippage.
                       {swapConfirm.display.needsApproval
-                        ? ` Two transactions: a ${payToken?.symbol ?? 'token'} approval first, then the swap.`
+                        ? ` Two transactions: a ${payToken ? displayTokenSymbol(payToken.symbol) : 'token'} approval first, then the swap.`
                         : ' One transaction.'}
                     </Text>
                     <Text className="text-[12px] leading-[16px] text-text-secondary font-pp-regular">
@@ -4795,12 +4851,6 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
                 </Text>
               </Pressable>
               <View className="w-[1px] h-[12px] bg-[#4D4D4D]" />
-              <Pressable onPress={() => Linking.openURL(SUPPORT_FORM_URL)}>
-                <Text className="text-[12px] text-[#4D4D4D] font-pp-regular">
-                  Support
-                </Text>
-              </Pressable>
-              <View className="w-[1px] h-[12px] bg-[#4D4D4D]" />
               <Pressable onPress={() => Linking.openURL(SUPPORT_TELEGRAM_URL)} testID="deposit-support-telegram">
                 <Text className="text-[12px] text-[#4D4D4D] font-pp-regular">
                   Telegram
@@ -4808,6 +4858,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
               </Pressable>
             </View>
           </Animated.View>
+          </HubErrorBoundary>
         </View>
       )}
 
@@ -4837,6 +4888,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
               isNative: t.isNative,
               name: TOKEN_NAMES[t.symbol],
               comingSoon: true,
+              depositPaused: t.depositPaused === true,
             })),
           ]}
           networks={supportedNetworks}
@@ -4845,7 +4897,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
           chainId={chainId}
           // Non-EVM: no EVM balance reads or swap routes. Stellar shows no
           // wallet figure here (the sheet's native read is Sui's), the form
-          // below shows the Freighter balance.
+          // below shows the Varial balance.
           isSui={isSui}
           balanceMode={isStellar ? 'none' : 'wallet'}
           onSelectToken={(t) => {

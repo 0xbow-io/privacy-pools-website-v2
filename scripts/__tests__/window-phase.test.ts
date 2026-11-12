@@ -18,7 +18,7 @@ describe('phaseShift keeps grid instants out of the action window', () => {
       const shift = phaseShift(now, OFFSET, W, grids);
       expect(shift).not.toBeNull();
       const start = now + shift! + OFFSET;
-      for (const g of grids) expect(instantsIn(start - g.beforeMs, start + W, g.periodMs)).toEqual([]);
+      for (const g of grids) expect(instantsIn(start - g.beforeMs, start + W + (g.afterMs ?? 0), g.periodMs)).toEqual([]);
     }
   });
 
@@ -31,5 +31,14 @@ describe('phaseShift keeps grid instants out of the action window', () => {
   test('a window that cannot fit between instants is an error, not a pass', () => {
     const tight: GridKeepOut = { name: 'tight', periodMs: 60_000, beforeMs: 10_000 };
     expect(() => phaseShift(0, OFFSET, W, [tight])).toThrow();
+  });
+
+  test('an action ending exactly on a tick leaves room for UI/timer overhead', () => {
+    expect(phaseShift(55_000, 0, W, [{ ...DISCOVERY_GRID, afterMs: 0 }])).toBe(0);
+    const shift = phaseShift(55_000, 0, W, [DISCOVERY_GRID]);
+    expect(shift).toBeGreaterThan(0);
+    const end = 55_000 + shift! + W + 9_000;
+    expect(instantsIn(55_000 + shift! - DISCOVERY_GRID.beforeMs, end, DISCOVERY_GRID.periodMs)).toEqual([]);
+    expect(() => phaseShift(0, 0, 800, [{ name: 'tight', periodMs: 1000, beforeMs: 100, afterMs: 100 }])).toThrow();
   });
 });

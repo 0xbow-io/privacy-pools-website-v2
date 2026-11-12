@@ -42,6 +42,7 @@ describe('host resolution', () => {
     expect(report.ok).toBe(false);
   });
   test('classifies the four parties we actually talk to', () => {
+    expect(classifyDestination('https://relayer-v2-staging-149184580131.us-east1.run.app/v1/details', HOSTS)).toBe('relayer');
     expect(classifyDestination('https://api-dev.0xbow.io/public-key', HOSTS)).toBe('asp');
     expect(classifyDestination('https://eth-sepolia.g.alchemy.com/v2/k', HOSTS)).toBe('rpc');
     expect(

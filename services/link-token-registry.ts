@@ -4,6 +4,7 @@
 import { ACTIVE_ENVIRONMENT, ENVIRONMENTS } from '@/config/environments';
 import { getKnownTokenMetadata } from '@/config/tokens';
 import { linkAmountText, resolveLinkToken, type LinkToken } from '@/services/link-token';
+import type { ShareRate } from '@/services/share-rates';
 
 // The active environment first: when two environments list the same address
 // on the same chain, the one this page serves wins.
@@ -22,6 +23,6 @@ export function linkToken(address: string, chainId?: number): LinkToken {
 }
 
 /** The amount line for a link's token (see linkAmountText). */
-export function linkAmountLabel(rawAmount: bigint, address: string, chainId?: number): string {
-  return linkAmountText(rawAmount, linkToken(address, chainId));
+export function linkAmountLabel(rawAmount: bigint, address: string, chainId?: number, rate?: ShareRate): string {
+  return linkAmountText(rawAmount, linkToken(address, chainId), rate);
 }

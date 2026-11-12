@@ -20,7 +20,7 @@ import { join } from 'node:path';
 
 import { hasErrorAmounts, InfeasibleBatchFee, InvalidYieldAmount } from '@privacy-pools-v2/sdk';
 
-import { humanizeSdkAmounts, KNOWN_AMOUNT_CODES, sdkErrorText, sentenceKeys } from '@/services/sdk-error-amounts';
+import { depositBelowMinimumValue, depositValueText, humanizeSdkAmounts, KNOWN_AMOUNT_CODES, sdkErrorText, sentenceKeys } from '@/services/sdk-error-amounts';
 
 const USDC = { decimals: 6, symbol: 'USDC' };
 const PPUSDC = { decimals: 18, symbol: 'ppUSDC' };
@@ -317,5 +317,24 @@ describe('copy rules', () => {
     const sentences = [...src.matchAll(/`([^`]*\$\{[^`]*)`/g)].map((m) => m[1]);
     expect(sentences.length).toBeGreaterThan(15);
     for (const s of sentences) expect(s).not.toContain('—');
+  });
+});
+
+describe('the Swap form headline reads the refusal\'s own figure (Pat QA on #26)', () => {
+  const USDT = { decimals: 6, symbol: 'USDT' };
+  test('structured and message-only refusals give the net value, printed as the sentence prints it', () => {
+    const structured = sdkError('min', 'depositBelowMinimum', 'received', { value: 9_639_123n, minimum: 10_000_000n });
+    const messageOnly = Object.assign(new Error('Reshield failed'), { cause: new Error('Deposit value 9639123 is below the Entrypoint minimum 10000000') });
+    for (const err of [structured, messageOnly]) {
+      const wei = depositBelowMinimumValue(err);
+      expect(wei).toBe(9_639_123n);
+      expect(sdkErrorText(err.cause ?? err, { output: USDT })).toContain(`about ${depositValueText(wei!, 6)} USDT`);
+    }
+    expect(depositValueText(9_639_123n, 6)).toBe('9.6391');
+  });
+  test('any other error has no net figure', () => {
+    expect(depositBelowMinimumValue(sdkError('x', 'invalidYieldAmount', 'received', { quote: 1n, budget: 2n }))).toBeNull();
+    expect(depositBelowMinimumValue(new Error('No route found'))).toBeNull();
+    expect(depositBelowMinimumValue('nope')).toBeNull();
   });
 });

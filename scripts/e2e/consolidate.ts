@@ -2,6 +2,7 @@
 // A dedicated recoverable account creates MIN_CONSOLIDATION_INPUTS (2) or more notes in ONE lineage, then
 // consolidates them through the UI. Existing treasury dust is not a fixture.
 import { fixtureBarrier } from './fixture-barrier';
+import { confirmConsolidation } from './consolidation-confirm';
 import { waitForApproval } from './approval-wait';
 import assert from 'node:assert/strict';
 import { formatEther, keccak256, parseEther, stringToBytes } from 'viem';
@@ -99,9 +100,7 @@ try {
   await page.getByTestId('consolidation-select').waitFor();
   assert.equal(await page.getByRole('checkbox', { checked: true }).count(), expected.notes.length);
   await page.getByTestId('consolidation-review').click();
-  await page.getByTestId('consolidation-confirmation').waitFor();
-  await page.getByTestId('consolidation-confirm').click();
-  const terminal = await waitForText(page, /Notes consolidated|Consolidation complete|Transfer failed|Consolidation outcome unknown|must be worth more|would not submit/i, 900_000);
+  const terminal = await confirmConsolidation(page);
   assert.match(terminal ?? '', /Notes consolidated|Consolidation complete/i);
   await clickButton(page, 'Done');
   const prepared = app.appLogs.slice(logFrom).join('\n').match(/Preparing transact \{"inputCommitments":\[([^\]]*)\]/);

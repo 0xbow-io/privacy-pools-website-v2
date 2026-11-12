@@ -40,6 +40,10 @@ import { consolidatableNotesOn } from '@/components/consolidation-asset-list';
 import type { Note } from '@/services/sdk-types';
 import { SuiTokenMark } from '@/components/ui/sui-token-mark';
 import { FinishSetupBanner } from '@/components/home/finish-setup-banner';
+import { FigureText } from '@/components/ui/share-figure';
+import { LOADING_FIGURE } from '@/services/token-format';
+import { AccountUnlockNotice } from '@/components/account-unlock-help';
+import { getChainConfig } from '@/config/chains';
 
 // --- Token Icons ---
 // nw-keep(svg-or-canvas): the fill/stroke props on every icon below are artwork
@@ -165,7 +169,7 @@ export function MyPrivacyPools({
   const { isLoading: notesLoading, notes } = useNotes();
   // An active keystore sync is also a loading state for the figures: a just
   // signed-in account shows 0 for several seconds while discovery runs.
-  const { isSyncing, syncChainsLeft, isInitializing, isInitialized, keysReady, error: sessionError, sessionAddress } = usePoolSession();
+  const { isSyncing, syncChainsLeft, isInitializing, isInitialized, keysReady, error: sessionError, sessionAddress, keystoreIdentityStatus } = usePoolSession();
   const sessionChainId = useSessionChainId();
   // Same flow the receipt page runs; the notes are already in the local store, so
   // the link is not needed to anchor them, only to have got them here.
@@ -287,7 +291,7 @@ export function MyPrivacyPools({
   const { requiresWalletUnlock: evmRequiresUnlock, keyInitFailed, retryKeyInit, stellarLocked, unlockStellar } = useWalletUnlockGate();
   const { openSeedDerivationModal: openEvmSignIn } = useSeedDerivationModal();
   // Stellar's locked session wears the same sign-in affordance; its action is
-  // the Freighter unlock, not the EVM signature modal.
+  // the Varial unlock, not the EVM signature modal.
   const requiresWalletUnlock = evmRequiresUnlock || stellarLocked;
   const openSeedDerivationModal = stellarLocked ? unlockStellar : () => openEvmSignIn();
   const cachedLocked = (requiresWalletUnlock || keyInitFailed) && notes.length > 0;
@@ -353,6 +357,9 @@ export function MyPrivacyPools({
     // only the asset list in a card. `className` still lets the pool page size
     // it (w-full / flex-1).
     <View testID="my-privacy-pools-card" className={`gap-[14px] overflow-visible z-[100] ${className}`}>
+      {!isSui && !isStellar && keysReady && keystoreIdentityStatus === 'incompatible' ? (
+        <AccountUnlockNotice network={getChainConfig(sessionChainId)?.displayName ?? 'this network'} />
+      ) : null}
       {/* Cached-balance refresh: the figure below is a frozen tab-cache
           snapshot; only the sign-in that rebuilds the keystore can actually
           re-sync it. Kept (the header that used to host it is gone). */}
@@ -504,7 +511,8 @@ export function MyPrivacyPools({
          * built, so the skeleton needs that too.
          */
         const sessionExpected = isInitializing || keysReady || isInitialized;
-        const figuresPending = !shownFigure && syncingNow && sessionExpected;
+        // A held share's rate still loading is a number on its way too (DEV-621).
+        const figuresPending = (!shownFigure && syncingNow && sessionExpected) || shownFigure === LOADING_FIGURE;
         return (
           <View className="gap-[2px]">
             {/* Sentence case, muted — the mock's quiet label over a loud figure. */}
@@ -580,7 +588,9 @@ export function MyPrivacyPools({
           <View className="items-center justify-center py-[32px]">
             {/* Locked: an empty list says nothing about the account yet. */}
             <Text className="font-pp-regular text-[13px] text-center text-text-secondary">
-              {requiresWalletUnlock
+              {!isSui && !isStellar && keysReady && keystoreIdentityStatus === 'incompatible'
+                ? 'Use your original unlock to see this account’s assets.'
+                : requiresWalletUnlock
                 ? 'Sign in to see your assets.'
                 : (data.hiddenEmptyPools ?? 0) > 0 ? 'No private balance right now.' : 'Your assets will show up here once you deposit.'}
             </Text>
@@ -606,8 +616,9 @@ export function MyPrivacyPools({
           const balanceText = balanceView ? balanceView.text : approxUnderlyingText(pool.balanceToken, pool.name);
           const pendingText = pendingView ? pendingView.text : approxUnderlyingText(pool.pendingToken, pool.name);
           // The dollar figures follow the SAME converted quantity, never shares × price.
-          const balanceUsdText = converted != null && underlyingPrice > 0 ? formatUsd(converted * underlyingPrice) : pool.balance;
-          const pendingUsdText = convertedPending != null && underlyingPrice > 0 ? formatUsd(convertedPending * underlyingPrice) : pool.pending;
+          // While the rate loads both wait (the shimmer), never a count priced as the coin (DEV-621).
+          const balanceUsdText = balanceView?.loading ? LOADING_FIGURE : converted != null && underlyingPrice > 0 ? formatUsd(converted * underlyingPrice) : pool.balance;
+          const pendingUsdText = pendingView?.loading ? LOADING_FIGURE : convertedPending != null && underlyingPrice > 0 ? formatUsd(convertedPending * underlyingPrice) : pool.pending;
           const markSymbol = displayTokenSymbol(pool.name).toUpperCase();
           const IconComponent = POOL_ICONS[markSymbol] || EthIcon;
           // Balances span chains (2026-08-18), so every row states its chain:
@@ -650,13 +661,13 @@ export function MyPrivacyPools({
                   </View>
                   <View className="items-end gap-[3px]">
                     <View className="flex-row items-center gap-[4px]">
-                      <Text numberOfLines={1} className="font-pp-medium text-[14px] leading-[16px] text-text">
-                        {balanceText}
+                      <Text numberOfLines={1} className="shrink font-pp-medium text-[14px] leading-[16px] text-text">
+                        <FigureText text={balanceText} />
                       </Text>
                       <ShareCountHint hint={balanceView?.hint ?? null} />
                     </View>
                     <Text numberOfLines={1} className="font-pp-regular text-[11px] leading-[13px] text-text-muted">
-                      {balanceUsdText}
+                      <FigureText text={balanceUsdText} />
                     </Text>
                   </View>
                 </View>
@@ -665,7 +676,7 @@ export function MyPrivacyPools({
                     <Text className="font-pp-regular text-[12px] leading-[16px] text-text-secondary">Pending</Text>
                     <View className="flex-row items-center gap-[4px]">
                       <Text numberOfLines={1} className="font-pp-regular text-[12px] leading-[16px] text-warning">
-                        {pendingText} · {pendingUsdText}
+                        <FigureText text={`${pendingText} · ${pendingUsdText}`} />
                       </Text>
                       <ShareCountHint hint={pendingView?.hint ?? null} />
                     </View>
@@ -710,15 +721,15 @@ export function MyPrivacyPools({
                   <ShareApyChip chainId={pool.chainId} tokenAddress={pool.tokenAddress} testID={`my-pool-row-apy-${pool.id}`} />
                   <View className="flex-1 gap-[2px]">
                     <View className="flex-row items-center gap-[4px]">
-                      <Text numberOfLines={1} className="font-pp-regular text-[13px] leading-[15px] text-text-secondary">
-                        {balanceText}
+                      <Text numberOfLines={1} className="shrink font-pp-regular text-[13px] leading-[15px] text-text-secondary">
+                        <FigureText text={balanceText} />
                       </Text>
                       <ShareCountHint hint={balanceView?.hint ?? null} />
                     </View>
                     {(parseFloat(pool.pendingTokenExact) || 0) > 0 && (
                       <View className="flex-row items-center gap-[4px]">
                         <Text numberOfLines={1} className="font-pp-regular text-[12px] leading-[16px] text-warning">
-                          {pendingText} pending
+                          <FigureText text={pendingText} /> pending
                         </Text>
                         <ShareCountHint hint={pendingView?.hint ?? null} />
                       </View>
@@ -729,7 +740,7 @@ export function MyPrivacyPools({
                     the row's button: a button cannot contain another button. */}
                 <View className="items-end gap-[2px] px-[8px] py-[12px]">
                   <Text numberOfLines={1} className="font-pp-semi-bold text-[14px] leading-[16px] text-text">
-                    {balanceUsdText}
+                    <FigureText text={balanceUsdText} />
                   </Text>
                   {keysReady && sessionAddress && !isSui && !isStellar && supportedEvmChainIds.includes(pool.chainId) && (
                     <ConsolidateLink chainId={pool.chainId} tokenAddress={pool.tokenAddress} testID={`consolidate-${pool.id}`}

@@ -1,0 +1,308 @@
+{
+  "about": "Pre-ceremony proving and verification keys that the Sepolia verifiers were deployed with. E2E only: scripts/e2e/sepolia-circuits.ts swaps them into the CI checkout when the chain still runs these keys. CIDs and sha256 come from the circuit manifest of SDK 0.0.0-prerelease.67c7d222 (the last SDK the suite passed with) and equal the git-lfs objects public/artifacts held before the 2026-10-20 ceremony keys landed.",
+  "chainId": 11155111,
+  "gateways": [
+    "https://gateway.pinata.cloud/ipfs",
+    "https://ipfs.io/ipfs",
+    "https://w3s.link/ipfs"
+  ],
+  "circuits": {
+    "deposit": {
+      "provingKey": {
+        "cid": "QmapgvDJc2ZSA3FLi9YwA7vd7QNThD2LKa17Zyn4pnDQ6S",
+        "sha256": "0e64b6d15ea540b3ab04d5596ab45d1ed6df0872e0261a850039372104837b30",
+        "size": 1031707
+      },
+      "verificationKey": {
+        "cid": "QmPiRu7icgKrxer7DRHwiWHwpyT2UxCfm475FSA5z8APuM",
+        "sha256": "cc0c1647983f2ca75b192e5c671b9b2932fd690709922bf32443a4053cd0912a"
+      }
+    },
+    "ragequit": {
+      "provingKey": {
+        "cid": "Qmeqe43QyQcASay6pkAw66N3ceSWNipVYShbd2hLvHxfZD",
+        "sha256": "3b0d2c3fdf26363be409dc4f01f5beb1c3cbc3b07a0c1ddb9e825e22e46d9bf4",
+        "size": 5932748
+      },
+      "verificationKey": {
+        "cid": "QmP46yuoVXH2KyqMBkkCviTzDqUELiRmAPJDic6P4oUeEn",
+        "sha256": "d285bf7a8f2e38d206c5513771d80816969c75b87558df194c1804ed1ec484d7"
+      }
+    },
+    "transact_1x1": {
+      "provingKey": {
+        "cid": "QmTwJqccgYF7bVvVDVHFGnB96tXQLyhRLohaFm3drKs1hr",
+        "sha256": "ba00dc63d1ef0b09a49dbf9348430362ef18dca5309ad5b6f06a896349c4c80a",
+        "size": 17942432
+      },
+      "verificationKey": {
+        "cid": "QmfN4QBhkz5NAoo9yd4L8gKjNkap2R4LSKE6yVNS26m4Rh",
+        "sha256": "e429d3e895de5cc9d2839a3fd8303fadd30be3759bac06ce7fb063ceda198308"
+      }
+    },
+    "transact_1x2": {
+      "provingKey": {
+        "cid": "QmUrciJbUu12kwTPxJEwPHmBT9pgeLkxeG1y4agCuMpFFu",
+        "sha256": "f107598438dee56e053d76724500a58f91457fec14df0f4ee057042a1025bf07",
+        "size": 18573744
+      },
+      "verificationKey": {
+        "cid": "QmRyrzFTq7gGcTcBtAnvA6WLBpX1Csi6SZSSJDgDQLjXFi",
+        "sha256": "3bb6f18aa4fec0961151fdc21a74ad9ca7326356cd4a4151b3e808dc12e30ad4"
+      }
+    },
+    "transact_1x3": {
+      "provingKey": {
+        "cid": "QmZbWNwb34sv8a3cZ6fjCNHqbCoDoHgPRep7En11ocbqqF",
+        "sha256": "55341d648bbf61e896f9a5b80bfd3c873a271eb515b77575a78a079c5b772e35",
+        "size": 19208144
+      },
+      "verificationKey": {
+        "cid": "QmRzofJFYKQWLrRzRwi3gfygVDSFqS5QrW8Vnurtm75MAq",
+        "sha256": "08f505c4899958c9f0a4b7b131d20223f5e4da0cac0fdb0da22b51e84d1515c9"
+      }
+    },
+    "transact_1x4": {
+      "provingKey": {
+        "cid": "Qmaqv6cKbtbV7Y9a55mx9cAzXqQ1dBALVMXbzaLpxftMWU",
+        "sha256": "866d2aad434ff2dff38774a6d82afeb71046eb73be87ea3ffb35401d94080d02",
+        "size": 19845632
+      },
+      "verificationKey": {
+        "cid": "QmSxB8KzLiY78xQjhKp5XTLwSwAzVdraG5q7pKYJ2znCXr",
+        "sha256": "68418087e3ecdc7d43d3db0c8684e689d5e2f4f16d12047c7403baffffa054f7"
+      }
+    },
+    "transact_1x5": {
+      "provingKey": {
+        "cid": "QmdPdM8t6muNkrALfQjhW5ctpGTLjiYY7fhwebnwuTa4zS",
+        "sha256": "de372dce472d9794dfd1ceac28bd3252dfe6b4eb233074d5d9f9ac1e42c45bfe",
+        "size": 20486208
+      },
+      "verificationKey": {
+        "cid": "QmRt6cSCwDQ7kVJEJ1Tr2yyFxWQSiji3kt3GkH22qmqdut",
+        "sha256": "009e6668a8063a8ffcad41fd3baff9ee7296de0f234522b41f4490ab11986c57"
+      }
+    },
+    "transact_2x1": {
+      "provingKey": {
+        "cid": "QmS2fG8MQhFQVKiRt29dBCSyGNipNspn5kz4T6D6689E8N",
+        "sha256": "add0ae7441be69dc7d25cc76fe8afb43c47511c134834ecbf76eff4451e6e1b2",
+        "size": 26871204
+      },
+      "verificationKey": {
+        "cid": "QmZn6fcEYdLtzWGr94B3WjdFfwhR9JcafRib7kzeM1sgoG",
+        "sha256": "4c5e51b308829a549b54d6d898556a3bf8e40656173919597564cd674997c333"
+      }
+    },
+    "transact_2x2": {
+      "provingKey": {
+        "cid": "QmYu1XoUzMAjH4JdUiXdSiRTfgpEDVRceHohhLGigMK8b4",
+        "sha256": "f7c133fd906dae36c88e1052777f03747288c9d4bec2023bf5cd37d315f83355",
+        "size": 27504380
+      },
+      "verificationKey": {
+        "cid": "QmTTH1rkq5TVa4z1KQVL3RqvDJhF7xcbbYHARKrCHidGE3",
+        "sha256": "73bc886a46bf4b27e84955960964bc6b622c751504baeb49825de4f6eda8b0ca"
+      }
+    },
+    "transact_2x3": {
+      "provingKey": {
+        "cid": "QmXUmyag1w7iwGu44tWe1LBeLBirAwPVQReUL6LpfUm4rE",
+        "sha256": "c713b515a2caaa10129aaf32862eaf1f791531d2f0ededcdf8532cc5aae5ce71",
+        "size": 32334948
+      },
+      "verificationKey": {
+        "cid": "Qmb9K98pEGjW9F8utif3p55jzDrpg3Uzt1k8BxnuSfGrAP",
+        "sha256": "a1ea01f4164790f6073f93d0f7875b8fba536373ad441fa7db08d6539dc09a0d"
+      }
+    },
+    "transact_2x4": {
+      "provingKey": {
+        "cid": "QmeYshTAGnkcNd7dLcvSy1VxfwNNnWQw6PFmnfX24P5jQZ",
+        "sha256": "a7ca0b0fbe6fb057d288d504aefdf58efae82dddfcb9c53055f7c1016c8455db",
+        "size": 32974300
+      },
+      "verificationKey": {
+        "cid": "QmZ1VRBgPF9tcYiKWwrCBndYEYi9ADH6uQ738yuTkEzRxQ",
+        "sha256": "39da36ea93eadc618934f63028e44f2f7d2ce0019d5e123e46351ccf0abe74bb"
+      }
+    },
+    "transact_2x5": {
+      "provingKey": {
+        "cid": "QmYqAUJ3sjtbbKtmXuQuiVCBwsfg2x9yuDDH7qJR9AzDMT",
+        "sha256": "c26d09d6c257998d9a71c254ebb2081557e12047db40bc7bd1352bb8177aa588",
+        "size": 33616740
+      },
+      "verificationKey": {
+        "cid": "QmY8qxktGku4rZDKMyaUNJgksWTyJGRhxAxB9yVQjgvDz3",
+        "sha256": "d8c7afa6e39bfdedcb3cad4dcc525f1b8aa9e31058c3810df6d17e7dc209b922"
+      }
+    },
+    "transact_3x1": {
+      "provingKey": {
+        "cid": "QmNQSgwBV9dvqX4a61auUNENwabrvzi8jH1Zq9ekyRqztG",
+        "sha256": "fb8088772dc632cae1fe10e5eb91138364c7769641684efa75491cfc68c9c940",
+        "size": 39993960
+      },
+      "verificationKey": {
+        "cid": "QmS6AErmyaXRoXw8E5XzWBBGQRi4wwXbr97kwgRDRzctEX",
+        "sha256": "eec06c6c929c97db7ad7824d0ed6c52bb786a760362e063b8375810c0389236d"
+      }
+    },
+    "transact_3x2": {
+      "provingKey": {
+        "cid": "QmTpuhSmXSovjXc7i8sgc5K6ygQife8hZNxJnXUKHHJT28",
+        "sha256": "8e7e260ee5fd54eb8a7de7836a2747487078096d5acd65bdccd806468521bc64",
+        "size": 40628680
+      },
+      "verificationKey": {
+        "cid": "QmVdCWHT1ybdA4pMSMLtjBHnzUdWLZ9FKi12zVB7hKqbwn",
+        "sha256": "d1232a8bf31390df81f9a65df4f524c40b19430f3b703842f76b76bce0f403a0"
+      }
+    },
+    "transact_3x3": {
+      "provingKey": {
+        "cid": "QmS93hHQnpAsYPQG7Jiw2zWJBS5HwzzVHn3JE4KS29cge8",
+        "sha256": "aa6d8ba5aa947a773c68c93ba575007c5b4f6dce3c6dbafca4284a365a013159",
+        "size": 41266488
+      },
+      "verificationKey": {
+        "cid": "QmPZM7fgpTds5xocL9pcKy2zKtG5MopstXJcpUe2V14mPJ",
+        "sha256": "d1a0bcc9c52e92d13aa84d4bee51a02e4808779015a5e45ddcdab97c2e9d2fd6"
+      }
+    },
+    "transact_3x4": {
+      "provingKey": {
+        "cid": "QmTfzhkm2vQWFMSvHbRScfCNDbZa1v5p6NNqCYsaHPTMTJ",
+        "sha256": "f01bf123b98e827efda24ca17f620904ad31b79bd1730b9d2e60c119a425a406",
+        "size": 41907384
+      },
+      "verificationKey": {
+        "cid": "QmfXbSExDAzCej8PREQEo5c5Dea4to7T5cQVGwzbnDQXnF",
+        "sha256": "9be6797e352e4e2b0f7a5ea3f4419555aca61abbc157dddd21c1ab8fa1eaa27a"
+      }
+    },
+    "transact_3x5": {
+      "provingKey": {
+        "cid": "QmcodnexWuqmPhTjWTEVZuBkgQzCdvtG44BTHYXj3XELxY",
+        "sha256": "f64f99b2f7e4cdc5069f6b3dd9ebd9b903b14dc53fcf197a53317998312a3345",
+        "size": 42551368
+      },
+      "verificationKey": {
+        "cid": "QmPc9UvfyYRv4UcM5xvJgMb5z5qyQpmMt7EwVAXmdnJ1jW",
+        "sha256": "76ce8edf07ec6ada81ebb14f0c2a37c7d2af1ca076c432274433b83dde6971c6"
+      }
+    },
+    "transact_4x1": {
+      "provingKey": {
+        "cid": "QmWtXsV6WCAHgME8ebxaeoV2Rd9HHFTcHD7beVXZT7tnpg",
+        "sha256": "848392fb4a9f17b40f26ef03a166e4e8bf47b9fe0ca6abf28c9fc75130324f9e",
+        "size": 48922412
+      },
+      "verificationKey": {
+        "cid": "Qme4sqejTEH8dP7u6XJ9rPVuAey2XaXC6A4qHeJi8DY76M",
+        "sha256": "23df18b1458bce6c3d0548a19b2b190b1a189e18404f3eb5948208d07646a7ef"
+      }
+    },
+    "transact_4x2": {
+      "provingKey": {
+        "cid": "QmZLyCwrMcfRwBkVEJasKjVxmLXJPuDsfxZUPJrnBLQygc",
+        "sha256": "46fdf80212238d9c29bf4b1d07c9388eef5acdf1d7fa9a39facb52fa13709870",
+        "size": 49558676
+      },
+      "verificationKey": {
+        "cid": "QmeRVAqhopEjhQoJ7PTRDtnR1DUViGmUaskzSxrSBLMkhj",
+        "sha256": "7b0812c2eb2c06762f2c87bb2da39567274c300db13cf23f53f6e67e8b8f0d37"
+      }
+    },
+    "transact_4x3": {
+      "provingKey": {
+        "cid": "QmT951angX69LcajUQvjfyv4sDmmwfHTLEztgTUezi7UCa",
+        "sha256": "eea45acc23672f44c772a82801fad75f534f78e89af5530db6077bb1eb486998",
+        "size": 50198028
+      },
+      "verificationKey": {
+        "cid": "QmeyWrDGPNqTKSxJxcAtGVrAaPsFLaM6yXBHBniGbqW7V6",
+        "sha256": "cf41e31009b034ec296220e7ea08f8f9b4d3c2b78d4bb11434a2f41c62c59913"
+      }
+    },
+    "transact_4x4": {
+      "provingKey": {
+        "cid": "QmZ9aRCDKVXhbyXqnnkwhc81tCXZjEcjGgvwCeTRDt7YYj",
+        "sha256": "6eac71fe752e456a6796499608174bd4a43e103a4e6236f1d4cf00d1581fd114",
+        "size": 50840468
+      },
+      "verificationKey": {
+        "cid": "QmarUMB5vVxeFarf3bn4vNx4e7voP9YvuiMzVuF7fq2DS1",
+        "sha256": "31e31961239ae864e6c2f9a36d8aa8b719fb6e6dee28f0b916e071f7d255c476"
+      }
+    },
+    "transact_4x5": {
+      "provingKey": {
+        "cid": "QmevaJ6MBUbAKgRu5aeRquPfURE8iCH3MTLnZh5o3TGQVm",
+        "sha256": "11a537dd541eb978ec62a000c0603fecc5a977d68b23714dd0f5c0b280dc0320",
+        "size": 51485996
+      },
+      "verificationKey": {
+        "cid": "QmcZqn1otFFLsHhYYc3B6U7HH1Kg4vrSUPd2w3yqtfpYLe",
+        "sha256": "c914523b571766f6e9b2476e6f2ec626f09cffcdcf1f67736f80b83b1e5c227a"
+      }
+    },
+    "transact_5x1": {
+      "provingKey": {
+        "cid": "QmR3hcRgSAVDoLMd4S9653HFAHk1MhnwBGWPY9J2Qs8kEj",
+        "sha256": "ce4d5c3262e75cd62a13981ec296d20cd02c636f05b708041add8662e1b4ff4f",
+        "size": 66239472
+      },
+      "verificationKey": {
+        "cid": "QmZo9os8UUB4Q4qjDUh1U47w6gSEDNfPWWim8DrLaypiwk",
+        "sha256": "257bcbe7d6f2d7b34e6b85b588bd735a644d3692239f90709ec473dd7e5b91d6"
+      }
+    },
+    "transact_5x2": {
+      "provingKey": {
+        "cid": "QmSKkMCAQtocRa7fPALqjZZQV3LasANWmXijHedkyvq5Ry",
+        "sha256": "6ecc00526cbd5853f2d3403235260e60c4c01912c4d06a9b857a39ab14ca37a0",
+        "size": 66877280
+      },
+      "verificationKey": {
+        "cid": "QmbEvCLzYCBkSGeyKHWrB7NubZhNcPcq3uSjiTu6KZNVRH",
+        "sha256": "1e20af3646579b56fae94a5f392eec5191ceb70cd4743759fa7d0fa0763d8e38"
+      }
+    },
+    "transact_5x3": {
+      "provingKey": {
+        "cid": "QmT2U9WHbbQEYTngAG3gMzwvrapQLQkFA9tewLUpB4bpfi",
+        "sha256": "ceb8bec785c9fef33ce420f104ae81edf838880eff9eca879ece98abef028bea",
+        "size": 67518176
+      },
+      "verificationKey": {
+        "cid": "QmcU2FE2x5eCriztMbJk1N7GaA3TN8Xru4FJiNHEGudzyJ",
+        "sha256": "280fd06395ef063acef95fd1d65c82a9be5bb07242873a80c37678dd48626c35"
+      }
+    },
+    "transact_5x4": {
+      "provingKey": {
+        "cid": "QmcqjypfSkMjwwgAGEBhg6vv8jZBWfMwDKJs1sSg5syjSU",
+        "sha256": "887189fd878d023ed1d4af3ef4fb375224a81a890adc42283bdba6f2efb3aeb4",
+        "size": 68162160
+      },
+      "verificationKey": {
+        "cid": "QmSHCy7CEUsGJzbz51M1PDUQbK95DKAMPu78BXAUedEFBr",
+        "sha256": "d39e30582223d89efb4811e95e79584061e7b4a8ab3ce9f6665162d6cacedfc0"
+      }
+    },
+    "transact_5x5": {
+      "provingKey": {
+        "cid": "QmcBjkr4V7cr1mygwcQHS2cE7LM1joTQ1UV5WsvEuH5GWQ",
+        "sha256": "b9bd7851765a209ed74456492b94e5b9f8d57b0899aa0f52113035761ee752ba",
+        "size": 68809232
+      },
+      "verificationKey": {
+        "cid": "QmbqqapZKBeQgCFuLUMwTLSTp5qQenRuTwyxZdrCMqWi61",
+        "sha256": "3f3dde610b5ade3ffb10b2fb0b716c717ddc1f90b1811dc1aaada9437f869cfe"
+      }
+    }
+  }
+}

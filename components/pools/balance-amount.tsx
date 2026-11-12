@@ -1,3 +1,4 @@
+import { estimatedUsdLabel } from '@/services/estimated-usd';
 // RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
 // amounts, validation, quotes, relayer and on-chain values stay in shares
 // (exact strings/bigints). Never convert an amount to underlying and back,
@@ -10,13 +11,21 @@
 // in that same boundary. No other operation converts display back.
 import { Text, View } from 'react-native';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
+import { ShareFigure } from '@/components/ui/share-figure';
 import type { ShareBalanceDisplay } from '@/services/share-balance-display';
 
-export function BalanceAmount({ view, className }: { view: ShareBalanceDisplay; className?: string }) {
-  return (
+export function BalanceAmount({ view, className, showUsd = false }: { view: ShareBalanceDisplay; className?: string; showUsd?: boolean }) {
+  const amount = (
     <View className="flex-row items-center gap-[4px] shrink">
-      <Text className={className}>{view.text}</Text>
+      <Text className={className}><ShareFigure view={view} /></Text>
       <ShareCountHint hint={view.hint} />
     </View>
   );
+  const usd = showUsd && !view.loading ? estimatedUsdLabel(view.usd) : null;
+  return usd ? (
+    <View className="items-end gap-[2px] shrink">
+      {amount}
+      <Text className="text-[11px] text-text-secondary">{usd}</Text>
+    </View>
+  ) : amount;
 }

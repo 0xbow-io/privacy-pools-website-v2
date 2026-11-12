@@ -1,7 +1,8 @@
 // Run against build:web served as an SPA, not Metro development mode:
 // PROBE_URL=http://localhost:8087 node scripts/e2e/navigation-continuity.mjs
 import assert from 'node:assert/strict';
-import { chromium, webkit } from 'playwright';
+import { webkit } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 import { installLandingWallet } from './fixtures/landing-wallet.mjs';
 
 const base = process.env.PROBE_URL ?? 'http://localhost:8087';
@@ -49,8 +50,9 @@ async function assertContinuity(page, label, { firstHomeVisit = false } = {}) {
     `${label}: returning to Home must not replay its entrance (${Math.min(...frames.flatMap(frame => frame.widgets))})`);
 }
 
-for (const [name, engine] of Object.entries({ chromium, webkit })) {
-  const browser = await engine.launch();
+const LAUNCHERS = { chromium: () => launchChrome(), webkit: () => webkit.launch() };
+for (const [name, launch] of Object.entries(LAUNCHERS)) {
+  const browser = await launch();
   try {
     // UI history must preserve drafts, while real route history still works.
     {

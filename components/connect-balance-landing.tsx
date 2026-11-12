@@ -7,6 +7,7 @@ import { useAccount } from 'wagmi';
 import { useMultiChainWallet } from '@/hooks/use-multi-chain-wallet';
 import { usePoolSession } from '@/hooks/use-pool-session';
 import { useWalletUnlockGate } from '@/hooks/use-wallet-unlock-gate';
+import { useChainRouter } from '@/hooks/use-chain-router';
 import { useSeedDerivationModal } from '@/components/seed-derivation-modal-provider';
 import {
   decideConnectLandingInvariant,
@@ -131,6 +132,10 @@ export function ConnectBalanceLanding() {
   const landingConnected = isConnected || !!keySessionAddress;
   const landingAddress = keySessionAddress ?? address;
   const sessionLocked = identityMode === 'wallet' && !keysReady;
+  // The unlock dialog is the EVM session's. On Sui or Stellar it would ask
+  // MetaMask to sign on Sepolia, never the chain's own wallet.
+  const { isSui: chainIsSui, isStellar: chainIsStellar } = useChainRouter();
+  const nonEvmChain = chainIsSui || chainIsStellar;
 
   const cachedBalance = hasAnyBalance(data.myPools);
   const feedHit = hasPublicDepositActivity(data.transactions, landingAddress);
@@ -440,6 +445,7 @@ export function ConnectBalanceLanding() {
           sessionLocked,
           hasCachedBalance: cachedBalance,
           seedHandled: seedOpenedRef.current,
+          nonEvmChain,
         });
         seedOpenedRef.current = true;
         if (openSeed) {
@@ -494,6 +500,7 @@ export function ConnectBalanceLanding() {
     router,
     routerReady,
     send,
+    nonEvmChain,
     sessionLocked,
     wagmiStatus,
   ]);

@@ -8,10 +8,11 @@
 // auto-connects it, and every signature and broadcast happens node-side with
 // viem. That makes a run frictionless: no wallet popups to drive, nothing to
 // click except the app's own UI.
-import { chromium, type Browser, type Page } from 'playwright';
+import { type Browser, type Page } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 import type { CapturedRequest } from './network-privacy';
 import { startNetworkCapture } from './network-capture';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { createPublicClient, decodeFunctionData, formatEther, http, parseEther } from 'viem';
 import { ENTRYPOINT_DEPOSIT_ABI } from '@privacy-pools-v2/sdk';
 import { sepolia } from 'viem/chains';
@@ -19,6 +20,19 @@ import { mnemonicToAccount, privateKeyToAccount, type PrivateKeyAccount } from '
 import { installEvmWallet } from '../visual/evm-wallet';
 import { waitForApproval } from './approval-wait';
 import { FIXTURE_NOTE_ETH, PAYMENT_FEE_RESERVE_ETH } from './funding';
+import { installUnlockGateHandler, unlockIfPrompted } from './unlock-gate';
+export { unlockIfPrompted } from './unlock-gate';
+import { installShareNameGuard, type ShareNameGuard } from './share-name-guard';
+
+// Every journey page carries the share-name guard (./share-name-guard.ts): it
+// watches the DOM for the whole run, so a toast or dialog that is up for a
+// second is caught, and the step helpers below (tab, clickButton, waitForText)
+// fail at the step where a share name was painted. A hit no step looked at
+// still fails the process on exit.
+const shareGuards = new WeakMap<Page, ShareNameGuard>();
+export async function shareNameStep(page: Page, step: string): Promise<void> {
+  await shareGuards.get(page)?.checkpoint(step);
+}
 
 export const ROOT = new URL('../..', import.meta.url).pathname.replace(/\/$/, '');
 // The relayer's CORS allowlist contains http://localhost:8081 and no other local
@@ -92,17 +106,12 @@ export async function openApp(
   startCapture: () => Promise<void>;
   stopCapture: () => Promise<void>;
 }> {
-  // Locally the browser is pinned under .pw-browsers; in CI `playwright install`
-  // puts it in its own cache, so fall back to playwright's resolution instead of
-  // failing on a path that only exists on one machine.
-  const pinned = `${ROOT}/.pw-browsers/chromium-1228/chrome-linux64/chrome`;
-  const browser = await chromium.launch({
-    headless: true,
-    ...(existsSync(pinned) ? { executablePath: pinned } : {}),
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  });
+  // Backups can be written before the first screenshot creates this folder.
+  mkdirSync(`${ROOT}/.e2e-shots`, { recursive: true, mode: 0o700 });
+  // Google Chrome stable, sandbox on, version-checked: see scripts/lib/chrome.mjs.
+  const browser = await launchChrome({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1200 }, reducedMotion: 'reduce', serviceWorkers: 'block' });
-  const capture = startNetworkCapture(context, { enabled: false, file: process.env.E2E_RPC_CAPTURE, devServerOrigin: BASE });
+  const capture = startNetworkCapture(context, { enabled: false, file: process.env.E2E_RPC_CAPTURE, diagnosticsFile: `${ROOT}/.e2e-shots/${opts.tag}-capture-timeout.json`, devServerOrigin: BASE });
   // Allow UI actions to finish while Metro and proof workers share the runner.
   // Journey assertions still require explicit success and confirmed outcomes.
   const ACTION_TIMEOUT_MS = Number(process.env.E2E_ACTION_TIMEOUT_MS ?? 90_000);
@@ -134,6 +143,7 @@ export async function openApp(
   // Instrumentation can sit behind the unlock modal; a forced pointer click
   // would hit that modal instead. Dismiss only the debug control directly.
   await page.addLocatorHandler(debugClose, () => debugClose.evaluate(button => button.click()));
+  await installUnlockGateHandler(page);
   await capture.attachPage(page);
   page.on('pageerror', (e) => console.log('  [pageerror]', e.message.slice(0, 160)));
   const appLogs: string[] = [];
@@ -152,6 +162,7 @@ export async function openApp(
   // than on a balance read that races the block.
   const sent: `0x${string}`[] = [];
   await installEvmWallet(page, acct, { liveSend: true, onSend: (h) => sent.push(h) });
+  shareGuards.set(page, await installShareNameGuard(page, { label: opts.tag }));
   let n = 0;
   const shot = async (name: string) => {
     n += 1;
@@ -202,48 +213,6 @@ export async function signIn(page: Page): Promise<void> {
 }
 
 /**
- * Clear the keystore-unlock gate if it is on screen, via a real wallet signature
- * (a headless browser has no passkey).
- *
- * This cannot be done once at sign-in: the gate is raised by the first ACTION,
- * so a flow's CTA click gets answered by "Unlock with passkey" instead of by the
- * transaction. Returns whether a gate was present.
- */
-export async function unlockIfPrompted(page: Page, maxWaitMs = 120_000): Promise<boolean> {
-  const gate = /Unlock with passkey|Unlock your account/;
-  if (!gate.test(await bodyText(page))) return false;
-  console.log('  unlock gate: taking the wallet-signature path');
-  const walletPath = page.getByText('Use wallet signature instead', { exact: false }).first();
-  if (await walletPath.isVisible().catch(() => false)) {
-    await walletPath.click().catch(() => {});
-    await sleep(1500);
-  }
-  // "Sign in" also exists in the header, so target the overlay's own copy.
-  const clicked = await page.evaluate(() => {
-    const overlays = Array.from(document.querySelectorAll('div')).filter((d) => {
-      const s = getComputedStyle(d);
-      return s.position === 'fixed' && /Unlock (with passkey|your account)/.test(d.textContent || '');
-    });
-    const host = overlays.pop() ?? document.body;
-    for (const want of ['Sign in', 'Sign message', 'Continue']) {
-      const cta = Array.from(host.querySelectorAll('*')).find(
-        (el) => el.textContent?.trim() === want && el.children.length === 0,
-      ) as HTMLElement | undefined;
-      if (cta) { ((cta.closest('button,[role="button"]') as HTMLElement) ?? cta).click(); return want; }
-    }
-    return null;
-  });
-  console.log('  unlock gate: clicked', clicked ?? '(nothing found)');
-  const until = Date.now() + maxWaitMs;
-  while (Date.now() < until) {
-    await sleep(Math.min(2000, Math.max(0, until - Date.now())));
-    if (!gate.test(await bodyText(page))) { console.log('  unlock gate: cleared'); return true; }
-  }
-  console.log(`  unlock gate: STILL on screen after ${Math.round(maxWaitMs / 1000)}s`);
-  return true;
-}
-
-/**
  * Answer the one-time keystore-registration gate.
  *
  * A brand-new account has no keys on-chain, so its FIRST action stops on an
@@ -291,7 +260,7 @@ export async function registerKeystoreIfPrompted(page: Page, timeoutMs = 180_000
     await sleep(3000);
   }
   console.log('  keystore registration: STILL on screen when the wait ran out');
-  return true;
+  throw new Error('Keystore registration did not finish before the e2e deadline');
 }
 
 /** Select the mounted pager page by its accessibility state, not hidden text. */
@@ -326,6 +295,7 @@ export async function tab(page: Page, label: Owner | 'Request', timeoutMs = 90_0
     }
   }
   await page.locator(`[data-testid="hub-page-${key}"]:not([aria-hidden="true"]):visible`).waitFor({ timeout: timeoutMs });
+  await shareNameStep(page, `tab ${label}`);
   return true;
 }
 
@@ -338,7 +308,7 @@ async function activeInput(page: Page, kind: 'amount' | 'recipient', owner?: Own
   );
   const field = kind === 'amount'
     ? root.locator('input[placeholder="0"], input[placeholder="0.0"]')
-    : root.locator('input[placeholder*="recipient address" i]');
+    : root.locator('input[data-testid="send-recipient-input"], input[data-testid="withdraw-recipient-input"], input[data-testid="hub-shield-recipient-input"]');
   return field.filter({ visible: true });
 }
 
@@ -490,6 +460,8 @@ export async function savedBackups(page: Page): Promise<{ calls: number; files: 
 }
 
 export async function clickButton(page: Page, label: string): Promise<boolean> {
+  // The screen the press is made from, then whatever it raised by the next step.
+  await shareNameStep(page, `before "${label}"`);
   const name = new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
   const button = page.getByRole('button', { name }).filter({ visible: true });
   if (await button.count()) {
@@ -517,6 +489,17 @@ export async function clickButton(page: Page, label: string): Promise<boolean> {
     await element.click();
     return true;
   } finally { await handle.dispose(); }
+}
+
+/** Wait for a mounting/enabling CTA, stopping after the first successful click. */
+export async function clickWhenReady(page: Page, label: string, timeoutMs = 30_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await unlockIfPrompted(page);
+    if (await clickButton(page, label)) return true;
+    await sleep(250);
+  }
+  return false;
 }
 
 /**
@@ -594,7 +577,10 @@ export async function waitForText(page: Page, re: RegExp, timeoutMs: number): Pr
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const t = await bodyText(page);
-    if (re.test(t)) return t;
+    if (re.test(t)) {
+      await shareNameStep(page, `"${String(re).slice(0, 60)}" on screen`);
+      return t;
+    }
     await sleep(2000);
   }
   return null;
@@ -624,26 +610,24 @@ export async function forceUnlock(page: Page): Promise<boolean> {
 export async function waitForShieldedBalance(page: Page, minutes = 10): Promise<number> {
   const read = async () => {
     const text = await page.locator('[data-testid^="hub-page-"]:not([aria-hidden="true"]):visible').innerText();
-    const m = text.match(/Shielded(?: balance)?\s+([0-9.]+)/i);
-    return m ? Number(m[1]) : 0;
+    const m = text.match(/Shielded(?: balance)?\s+([0-9][0-9,.]*)/i);
+    return { text, balance: m ? Number(m[1].replaceAll(',', '')) : 0 };
   };
   let last = await read();
-  if (last > 0) { console.log(`  shielded balance: ${last}`); return last; }
-  console.log('  shielded balance is 0 - waiting for note sync / ASP snapshot');
+  if (last.balance > 0) { console.log(`  shielded balance: ${last.balance}`); return last.balance; }
+  console.log('  waiting for the scheduled feed to resolve the shielded balance');
   const deadline = Date.now() + minutes * 60_000;
   while (Date.now() < deadline) {
-    // Nudge the header sync button, which resyncs every chain.
-    await page.evaluate(() => {
-      const btn = Array.from(document.querySelectorAll('[role="button"],button'))
-        .find((b) => /sync|refresh/i.test(b.getAttribute('aria-label') || ''));
-      (btn as HTMLElement | undefined)?.click();
-    });
-    await sleep(15_000);
+    // Read only. Repeated global Sync presses restart discovery and mutate the
+    // note topology while the spendability gate is trying to resolve it.
+    await unlockIfPrompted(page);
+    await sleep(Math.min(1000, Math.max(0, deadline - Date.now())));
     last = await read();
-    if (last > 0) { console.log(`  shielded balance: ${last}`); return last; }
+    if (last.balance > 0) { console.log(`  shielded balance: ${last.balance}`); return last.balance; }
   }
-  console.log(`  shielded balance still 0 after ${minutes}m`);
-  return 0;
+  await page.screenshot({ path: `${ROOT}/.e2e-shots/shielded-balance-timeout.png` });
+  const state = last.text.match(/(?:Loading shielded balance[^\n]*|Shielded balance unavailable[^\n]*|Shielded(?: balance)?\s+[^\n]+)/i)?.[0] ?? 'balance row not found';
+  throw new Error(`Shielded balance did not become spendable after ${minutes}m: ${state}`);
 }
 
 /**
@@ -802,7 +786,7 @@ export async function payPrivateRequest(page: Page, logs: string[]) {
       const text = await bodyText(page);
       const current = logs.slice(from).join('\n');
       if (/Transfer Successful|Payment sent|sent via relay/i.test(text)) return;
-      if (/outcome unknown|transaction reverted|Payment cannot be funded|Insufficient value for transact/i.test(text + current)) {
+      if (/outcome unknown|transaction reverted|Payment cannot be funded|Insufficient value for transact|Relayer quote failed to fetch/i.test(text + current)) {
         throw new Error('Private payment failed; inspect the payment log and screenshot');
       }
       if (/ASP leaves root mismatch|ASP unavailable/i.test(text + current)) { stale = true; break; }

@@ -1,6 +1,6 @@
 import { Pressable, Text } from 'react-native';
 
-import { applyAppEnvironment, withAppEnvironmentQuery } from '@/config/app-environment';
+import { IS_STAGING_ONLY_HOST, applyAppEnvironment, withAppEnvironmentQuery } from '@/config/app-environment';
 import type { ReceiptChain } from '@/services/receipt-chain';
 
 /** Reload into the environment that serves the chain, keeping this URL. */
@@ -38,6 +38,15 @@ export function ReceiptWrongNetworkCopy({ chain, textClassName, pasted = false, 
   const other = chain.otherEnvironment;
   if (!other) {
     return <Text className={textClassName}>This {noun} is for {chain.name}. Switch the app to {chain.name} to {verb} it.</Text>;
+  }
+  // A staging-only host (config/app-environment.ts) cannot switch worlds, so
+  // there is nothing to offer: say where the link belongs instead of a button.
+  if (IS_STAGING_ONLY_HOST) {
+    return (
+      <Text className={textClassName}>
+        This {noun} is for {chain.name}, on {other.label}. Open it on the {other.label} site, this one only serves Staging.
+      </Text>
+    );
   }
   return (
     <>

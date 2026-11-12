@@ -3,7 +3,7 @@
   "main": "./index.js",
   "version": "1.2.1",
   "scripts": {
-    "build:web": "bun run build:worker && EXPO_UNSTABLE_METRO_OPTIMIZE_GRAPH=1 EXPO_UNSTABLE_TREE_SHAKING=1 expo export -p web --source-maps &&bun scripts/inject-social-meta.mjs && bun scripts/preload-web-fonts.mjs && bun scripts/split-web-bootstrap.mjs && bun scripts/render-landing-document.tsx && bun scripts/sentry-sourcemaps.mjs",
+    "build:web": "bun scripts/build-web.mjs",
     "build:worker": "bun ./scripts/check-pinned-deps.mjs && bun ./scripts/build-snarkjs-worker.mjs && bun ./scripts/build-witness-worker.mjs",
     "build:witness-worker": "bun ./scripts/build-witness-worker.mjs",
     "check:pinned-deps": "bun ./scripts/check-pinned-deps.mjs",
@@ -24,7 +24,8 @@
     "e2e:tab-race": "bun ./scripts/e2e/tab-race.ts",
     "lint": "bun scripts/lint-baseline.mjs",
     "lint:strict": "expo lint",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "bun check",
+    "typecheck:tsc": "tsc --noEmit",
     "test": "bun test services scripts",
     "test:sui": "vitest run",
     "sui-witness-crosscheck": "node ./scripts/sui-witness-crosscheck.mjs",
@@ -50,12 +51,12 @@
     "@noble/curves": "2.0.1",
     "@noble/hashes": "2.0.1",
     "@privacy-pools-v2/sdk": "file:./vendor/privacy-pools-v2-sdk-1.0.2.tgz",
-    "@privacy-pools-v2/stellar-sdk": "file:./vendor/privacy-pools-v2-stellar-sdk-0.0.0-prerelease.c81ba9d5.tgz",
+    "@privacy-pools-v2/stellar-sdk": "file:./vendor/privacy-pools-v2-stellar-sdk-0.0.0-prerelease.1449fe37-p30.tgz",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-masked-view/masked-view": "0.3.2",
     "@sentry/react": "10.73.0",
-    "@stellar/freighter-api": "6.0.1",
-    "@stellar/stellar-sdk": "14.6.1",
+    "@stellar/varial-sdk": "7.0.0",
+    "@stellar/stellar-sdk": "16.4.1",
     "@tanstack/react-query": "5.100.9",
     "@walletconnect/ethereum-provider": "2.23.9",
     "ai": "6.0.176",
@@ -85,7 +86,6 @@
     "react-native": "0.85.3",
     "react-native-gesture-handler": "2.31.2",
     "react-native-get-random-values": "1.11.0",
-    "react-native-jelly-tabs": "0.0.9",
     "react-native-passkey": "3.6.2",
     "react-native-qrcode-svg": "6.3.21",
     "react-native-reanimated": "4.3.1",
@@ -100,7 +100,7 @@
     "tweetnacl-util": "0.15.1",
     "viem": "2.45.3",
     "wagmi": "3.6.9",
-    "zod": "4.4.3",
+    "zod": "4.6.6",
     "poseidon-lite": "0.2.1"
   },
   "devDependencies": {
@@ -112,7 +112,7 @@
     "babel-preset-expo": "56.0.14",
     "eslint": "9.39.4",
     "eslint-config-expo": "56.0.4",
-    "playwright": "1.62.1",
+    "playwright": "1.64.1",
     "tailwindcss": "3.4.19",
     "tsx": "4.21.0",
     "typescript": "6.0.3",
@@ -131,6 +131,7 @@
       "ws": "7.5.11"
     },
     "underscore": "1.13.8",
+    "axios": "1.20.0",
     "ethers": {
       "ws": "8.21.0"
     },
@@ -144,5 +145,8 @@
       "ws": "8.21.0"
     },
     "@0xbow/anon-rpc-rs-browser-harness": "file:./vendor/0xbow-anon-rpc-rs-browser-harness-0.4.0-alpha.1-cancel-bootstrap.tgz"
+  },
+  "engines": {
+    "node": "^22.23.4"
   }
 }

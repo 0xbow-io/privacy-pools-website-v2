@@ -9,6 +9,8 @@ import { debugSafeRow, debugSafeSpend, hexKey, projectOwnOutputs, type OwnOutput
 import { buildLineageTransferRow, buildSpendRows, countSpendActions, decorateOwnRows } from '@/services/activity-rows';
 import { getSwapRecordsRevision, readAllSwapRecords, subscribeSwapRecords } from '@/services/swap-records-store';
 import { readAllWithdrawRecipients } from '@/services/withdraw-recipients-store';
+import { recipientsFromOwnSpends, type PayoutRecord } from '@/services/recipient-suggestions';
+import type { AddressFormat } from '@/services/address-book-core';
 import { findWithdrawRecipientIn, type WithdrawRecipient } from '@/services/withdraw-recipients-core';
 import { collectReceivedTransfers, onlyClassifiedNotes, receiptSkipTxHashes, tagNotesByChain } from '@/services/received-transfers';
 import { contentKey } from '@/services/content-key';
@@ -42,6 +44,8 @@ import { readClaimedInputMap } from '@/services/claim-records-store';
 import type { NoteCounts } from '@/services/self-transfer-row';
 import { findOwnActionIn, noteTimeMs, ownDepositBridgeAllowed } from '@/services/own-actions-core';
 import { deriveStellarActivity, stellarSentRecipientLookup, type StellarActivityNote } from '@/services/stellar-activity';
+import { listStellarSentDeposits, readStellarClaimedNotes, readStellarDepositsFor } from '@/services/stellar/stellar-account';
+import { getStellarActivityRecordsVersion, subscribeStellarActivityRecords } from '@/services/stellar/stellar-activity-records';
 import { buildOwnHistoryEvents, ownDepositReviewStatus, type ActivityEvent } from '@/services/own-history-rows';
 import { useLabelDecisionsByChain } from '@/hooks/use-label-decisions-by-chain';
 import {
@@ -88,8 +92,10 @@ import { useStellarBalance } from '@/hooks/use-stellar-balance';
 import { fetchSuiApprovedSet } from '@/services/sui-witness/asp-labels';
 import { calculateLabelHash } from '@/services/sui-witness/crypto';
 import { getKnownTokenMetadata, getTokenMetadata, resolveTokenMetadata, formatTokenBalance, NATIVE_ASSET_ADDRESS, isStablecoin } from '@/config/tokens';
+import { formatCompactTokenAmount } from '@/services/explore-pools';
 import { useDebug } from '@/components/debug-provider';
-import { formatUsd } from '@/services/format-fiat';
+import { formatUsd, formatUsdBalance } from '@/services/format-fiat';
+import { LOADING_FIGURE } from '@/services/token-format';
 import { useTxActivity } from '@/components/tx-activity-provider';
 import { useLatchedWhile } from '@/hooks/use-latched-while';
 import { usePendingOwnRows } from '@/hooks/use-pending-own-rows';
@@ -183,6 +189,8 @@ export type Transaction = {
   id: string;
   address: string;
   fullAddress: string;
+  /** asp-v2#165, optional: the payout recipient of a withdrawal feed row. */
+  recipient?: string;
   type: string;
   chain: string;
   chainId: number;
@@ -269,6 +277,9 @@ export type Transaction = {
    *  event. They're personal (only meaningful in the 'mine' scope) and are kept
    *  out of the global 'all' feed. */
   isLineageSynthetic?: boolean;
+  /** A Stellar deposit this account made FOR another account, from this
+   *  device's own record (DEV-501). Authored, not owned; names no recipient. */
+  depositFor?: boolean;
 };
 
 export type PoolsData = {
@@ -284,6 +295,12 @@ export type PoolsData = {
    *  OUT of `transactions` (the global feed) so they only surface in the
    *  connected user's "My Transactions" scope. */
   lineageRows: Transaction[];
+  /**
+   * Recipients of this user's own withdrawals named by the ASP (asp-v2#165),
+   * joined in memory from the held snapshot and feed. Empty until that ASP
+   * field exists; read only by the recipient autocomplete.
+   */
+  ownPayoutRecipients?: PayoutRecord[];
   /** The ASP's event total per public-feed chain (deposits, transfers,
    *  withdrawals, ragequits), so a count is the protocol's, not the rows held. */
   publicEventTotalsByChain?: Readonly<Record<number, number>>;
@@ -384,6 +401,13 @@ type PoolsContextType = {
 
 // --- Helpers ---
 
+/** Address formats valid as a payout recipient on a chain (asp-v2#165 join). */
+function recipientFormatsFor(chainId: number | undefined): readonly AddressFormat[] | undefined {
+  if (chainId === undefined) return undefined;
+  const type = getChainConfig(chainId)?.chainType;
+  return type === 'evm' ? ['evm'] : type === 'sui' ? ['sui'] : type ? ['stellar'] : undefined;
+}
+
 const TOKEN_DECIMALS: Record<string, number> = {
   ETH: 18,
   USDC: 6,
@@ -408,11 +432,8 @@ const TOKEN_COLORS: Record<string, string> = {
 // here so the stats cards and pool pages keep their existing import path.
 export { formatUsd };
 
-function formatTokenAmount(value: number, symbol: string): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M ${symbol}`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(2)}K ${symbol}`;
-  return `${formatTokenBalance(value, symbol)} ${symbol}`;
-}
+// Same pool-size shape as Explore (services/explore-pools.ts).
+const formatTokenAmount = formatCompactTokenAmount;
 
 function computeChange24h(stats: GlobalStatistics | undefined): string {
   if (!stats) return '+0.0%';
@@ -505,6 +526,8 @@ function mapEventToTransaction(
       ? `${event.address.slice(0, 6)}...${event.address.slice(-4)}`
       : event.address,
     fullAddress: event.address,
+    // asp-v2#165, optional: a withdrawal's payout recipient when the ASP names it.
+    ...(typeof event.recipient === 'string' && event.recipient ? { recipient: event.recipient } : {}),
     type: typeMap[rawType] || rawType,
     chain: getChainConfig(event.asset.chainId)?.displayName || event.asset.chainName || 'ETH',
     chainId: event.asset.chainId,
@@ -581,6 +604,7 @@ const EMPTY_DATA: PoolsData = {
   allPools: [],
   transactions: [],
   lineageRows: [],
+  ownPayoutRecipients: [],
   priceMap: {},
   pricesLoading: true,
   transferTxHashes: new Set(),
@@ -874,6 +898,13 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
   // The Stellar account's on-chain note origins (read on its own sync clock),
   // for the activity rows below. Null until the account has synced.
   const { noteOrigins: stellarNoteOrigins } = useStellarSession();
+  // This device's deposit-for and claimed-link records: a new one re-derives
+  // the activity at once, not on the next unrelated change.
+  const stellarRecordsVersion = useSyncExternalStore(
+    subscribeStellarActivityRecords,
+    getStellarActivityRecordsVersion,
+    getStellarActivityRecordsVersion,
+  );
   const { data: stellarWalletBalance } = useStellarBalance(
     isStellarActive && stellarWallet.isConnected ? stellarWallet.address : null,
   );
@@ -1740,7 +1771,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
         poolValueTokenAmount: tokenAmount,
         poolValueToken: tokenAmount > 0
           ? formatTokenAmount(tokenAmount, displaySymbol)
-          : `0 ${displaySymbol}`,
+          : `0 ${displaySymbol}`, // raw-data: poolValueToken renders through approxUnderlyingText
         // "Total funds accepted" prefers the ASP's cumulative-approved-deposits
         // stat; when the ASP has no per-pool stats (Sui), fall back to the
         // event-summed deposit total so the column isn't a misleading $0.
@@ -1940,6 +1971,13 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
           priceUsd: priceMap['XLM'] || priceMap['xlm'] || 0,
           ownAddress: stellarWallet.isConnected ? stellarWallet.address ?? '' : '',
           sentRecipient: stellarSentRecipientLookup(readAllSentTransfers(), STELLAR_TESTNET_ID),
+          sentDeposits: stellarWallet.isConnected && stellarWallet.address
+            ? listStellarSentDeposits(stellarWallet.address).map((c) => ({
+              txHash: c.txHash, recipient: c.recipient, amount: c.amount, tokenId: c.notes[0]?.tokenId ?? '', createdAt: c.createdAt,
+            }))
+            : [],
+          depositsFor: stellarWallet.isConnected && stellarWallet.address ? readStellarDepositsFor(stellarWallet.address) : [],
+          claimed: stellarWallet.isConnected && stellarWallet.address ? readStellarClaimedNotes(stellarWallet.address) : [],
         })
       : null;
     {
@@ -2207,7 +2245,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
 
     // Per-row USD, captured while the row resolves its own decimals + price;
     // myPoolsStats sums THESE so the headline can't drift from the rows.
-    const rowUsd = new Map<string, { symbol: string; balanceUsd: number; pendingUsd: number }>();
+    const rowUsd = new Map<string, { symbol: string; balanceUsd: number; pendingUsd: number; waiting: boolean }>();
     // An emptied pool has nothing left to show: the row is dropped, for every
     // pool kind (Mike, DEV-466; it used to be legacy pools only, Pat
     // 2026-09-18). Any balance, pending amount or other live note keeps it.
@@ -2244,18 +2282,21 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
       // The hero total must be the sum of the ROWS: re-deriving decimals from
       // the static TOKEN_DECIMALS table and a symbol-only price made the total
       // disagree with the rows it summarises (kimi review, finding 7).
-      rowUsd.set(`${entry.chainId}:${entry.symbol.toLowerCase()}`, {
+      // A held share without its rate: its worth, and so the total, is not known yet (DEV-621).
+      const waiting = isShareSymbol(entry.symbol) && !shareRate && (BigInt(entry.balance) > 0n || BigInt(entry.pending) > 0n);
+      rowUsd.set(`${entry.chainId}:${entry.symbol.toLowerCase()}`, { // not-rendered: map key
         symbol: entry.symbol,
         balanceUsd: balanceUsdValue,
         pendingUsd: pendingUsdValue,
+        waiting,
       });
       return {
         // Chain-qualified: the same symbol can hold value on several chains.
-        id: `${entry.chainId}:${entry.symbol.toLowerCase()}`,
+        id: `${entry.chainId}:${entry.symbol.toLowerCase()}`, // not-rendered: row id
         name: entry.symbol,
         tokenAddress: entry.tokenAddress,
         chainId: entry.chainId,
-        balance: formatUsd(balanceUsdValue),
+        balance: waiting ? LOADING_FIGURE : formatUsd(balanceUsdValue),
         // formatTokenBalance, not a bare toFixed(4): a tiny cBTC shield rounded
         // to "0.0000 cBTC" here while the Deposit row in My transactions (which
         // already goes through it) read "<0.0001 cBTC" — the balances row above
@@ -2267,7 +2308,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
         // rounded for layout, but a tap-to-max must never overshoot the
         // spendable balance, so it consumes this string.
         balanceTokenExact: formatUnits(BigInt(entry.balance), decimals),
-        pending: formatUsd(pendingUsdValue),
+        pending: waiting ? LOADING_FIGURE : formatUsd(pendingUsdValue),
         pendingToken: `${formatTokenBalance(pendingNum, entry.symbol)} ${entry.symbol}`, // raw-data: parsed as a number (action-hub); renders apply approxUnderlyingText
         pendingTokenExact: formatUnits(BigInt(entry.pending), decimals),
         // "DEPOSITS" column = the user's actual deposits for this asset, not
@@ -2794,7 +2835,9 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
     let totalPendingUsd = 0;
     const assetPercentages: PoolAsset[] = [];
 
+    let totalWaiting = false;
     for (const row of rowUsd.values()) {
+      if (row.waiting) totalWaiting = true;
       totalBalanceUsd += row.balanceUsd;
       totalPendingUsd += row.pendingUsd;
       assetPercentages.push({
@@ -2855,11 +2898,13 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
     }
 
     const myPoolsStats: MyPoolsStats = {
-      acceptedFundsValue: formatUsd(totalBalanceUsd),
+      // Exactly two decimals, never abbreviated; loading while a held share's
+      // rate is still out, rather than a total that leaves it out (DEV-621).
+      acceptedFundsValue: totalWaiting ? LOADING_FIGURE : formatUsdBalance(totalBalanceUsd),
       acceptedFundsUsd: totalBalanceUsd,
       acceptedFundsChange: computeChange24h(statistics),
       acceptedFundsLabel: 'past 24h',
-      pendingValue: formatUsd(totalPendingUsd),
+      pendingValue: totalWaiting ? LOADING_FIGURE : formatUsdBalance(totalPendingUsd),
       pendingChange: '0%',
       totalDeposits,
       totalTransfers,
@@ -2892,7 +2937,11 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
         if (!ownership.definitive && ownershipPending(tx.txHash, true)) depositOwnership.pending.add(tx.txHash.toLowerCase());
       }
     }
-    return { myPools, hiddenEmptyPools, myPoolsStats, availableAssets, allPools, transactions, lineageRows, priceMap, pricesLoading, transferTxHashes, transactOutputsByTx, swapRouteKinds: swapRouteKindsByTx, anchorTxHashes, transferClassificationReady, spendClassificationPending, myDeposits, myExits, defaultChainId: defaultChain.id, internalTxHashes, unmatchedApprovedDeposits, depositOwnership, holdingsReady, historyPendingChainIds, ownTransfersPendingChainIds: ownTransfersPending, publicEventTotalsByChain: eventsResponse?.allTotalsLoaded ? eventsResponse.totalsByChain : {} };
+    // asp-v2#165: in-memory join of my own spends with the held rows. Nothing when the field is absent.
+    const ownPayoutRecipients = spendsReady
+      ? recipientsFromOwnSpends({ spends: userSpends.list, feedRows: transactions, formatsFor: recipientFormatsFor })
+      : [];
+    return { myPools, hiddenEmptyPools, myPoolsStats, availableAssets, allPools, transactions, lineageRows, ownPayoutRecipients, priceMap, pricesLoading, transferTxHashes, transactOutputsByTx, swapRouteKinds: swapRouteKindsByTx, anchorTxHashes, transferClassificationReady, spendClassificationPending, myDeposits, myExits, defaultChainId: defaultChain.id, internalTxHashes, unmatchedApprovedDeposits, depositOwnership, holdingsReady, historyPendingChainIds, ownTransfersPendingChainIds: ownTransfersPending, publicEventTotalsByChain: eventsResponse?.allTotalsLoaded ? eventsResponse.totalsByChain : {} };
   }, [
     historyPendingChainIds,
     ownTransfersPending,
@@ -2917,6 +2966,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
     stellarWallet.isConnected,
     stellarWallet.address,
     stellarNoteOrigins,
+    stellarRecordsVersion,
     defaultChain.displayName,
     defaultChain.id,
     defaultChain.nativeCurrency.symbol,
@@ -3045,6 +3095,8 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
     session: poolSession,
     chainId: sessionTarget?.chainId ?? null,
     snapshot: eventSnapshot,
+    identity: sessionAddress ?? myAddress ?? null,
+    keystoreManager,
   });
 
   return (

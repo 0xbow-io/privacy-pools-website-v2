@@ -21,8 +21,8 @@ import * as path from 'node:path';
 import type { Page } from 'playwright';
 import { BASELINE_DIR, BASE_URL, FIXTURE_DIR, type ColorName, type Variant } from './config';
 import { openFixtureStore, type FixtureMode } from './fixtures';
-import { assertOrUpdateBaselineManifest } from './baseline-manifest';
-import { launchBrowser, newDeterministicContext, stableScreenshot, waitForAppReady } from './harness';
+import { assertOrUpdateBaselineManifest, writeCaptureBrowser } from './baseline-manifest';
+import { captureBrowserLabel, launchBrowser, newDeterministicContext, stableScreenshot, waitForAppReady } from './harness';
 import { installEvmWallet, loadDevAccount } from './evm-wallet';
 
 const MODAL_SETS: { variant: Variant; color: ColorName }[] = [
@@ -89,8 +89,10 @@ async function main(): Promise<void> {
     else if (args[i] === '--commit') commit = args[++i];
     else if (args[i] === '--refresh-baselines') refreshBaselines = true;
   }
+  const browserLabel = await captureBrowserLabel();
+  writeCaptureBrowser(outDir, browserLabel);
   if (outDir === BASELINE_DIR) {
-    assertOrUpdateBaselineManifest({ allowRefresh: refreshBaselines, ...(commit ? { commit } : {}) });
+    assertOrUpdateBaselineManifest({ browser: browserLabel, allowRefresh: refreshBaselines, ...(commit ? { commit } : {}) });
   }
 
   const account = loadDevAccount();

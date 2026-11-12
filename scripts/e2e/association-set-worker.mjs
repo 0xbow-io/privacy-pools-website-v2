@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { build } from 'esbuild';
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 import { DEPLOYMENTS, MerkleService, PoseidonHashService } from '@privacy-pools-v2/sdk';
 
 const merkle = new MerkleService({ hashService: await PoseidonHashService.create() });
@@ -23,7 +23,7 @@ const server = createServer((request, response) => {
   else response.setHeader('Content-Type', 'text/html').end('<script src="/client.js"></script>');
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-const browser = await chromium.launch({ headless: true });
+const browser = await launchChrome({ headless: true });
 try {
   const page = await browser.newPage();
   const errors = [];

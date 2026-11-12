@@ -1,3 +1,4 @@
+import { paymentRequestRecipientLabel } from '@/services/payment-request-disclosure';
 import { payRelayUnknownMessage } from '@/services/pay-relay-guard';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -17,6 +18,8 @@ import { usePaymentRequestExpired } from '@/hooks/use-payment-request-expired';
 import { Colors } from '@/constants/theme';
 import { getChainConfig, getExplorerAddressUrl, getExplorerName, getExplorerTxUrl } from '@/config/chains';
 import { linkAmountLabel } from '@/services/link-token-registry';
+import { useShareRates } from '@/hooks/use-share-rates';
+import { FigureText } from '@/components/ui/share-figure';
 import { receiptChain } from '@/services/receipt-chain-registry';
 import { requestWalletRefusalFor } from '@/services/request-wallet-availability';
 import { ReceiptWrongNetworkCopy } from '@/components/receipt-wrong-network';
@@ -178,7 +181,9 @@ function EvmPayRequestScreen() {
   const linkChain = request ? receiptChain(request.chainId) : null;
   const linkElsewhere = !!linkChain && (!linkChain.supported || !!linkChain.otherEnvironment);
   const chainName = request ? (linkChain?.name ?? `Chain ${request.chainId}`) : 'Sepolia';
-  const amountLabel = request ? linkAmountLabel(BigInt(request.amount), request.tokenId, request.chainId) : null;
+  // A share request's amount is a share count: shown as its underlying at the feed-grid rate (display only).
+  const { rateFor: shareRateFor } = useShareRates();
+  const amountLabel = request ? linkAmountLabel(BigInt(request.amount), request.tokenId, request.chainId, shareRateFor(request.chainId, request.tokenId)) : null;
   const senderLabel = useMemo(() => {
     if (!isSignablePaymentRequest(request)) return null;
     const sig = request.signature;
@@ -466,14 +471,14 @@ function EvmPayRequestScreen() {
 
             <View className="flex-row items-center justify-between gap-[12px]">
               <Text className="font-pp-medium text-[14px] text-text">1x Private pool payment</Text>
-              <Text className="font-pp-semi-bold text-[14px] text-text">{amountLabel}</Text>
+              <Text className="font-pp-semi-bold text-[14px] text-text"><FigureText text={amountLabel} /></Text>
             </View>
 
             <View className="border-t border-dashed border-border-light" />
 
             <View className="flex-row items-center justify-between">
               <Text className="font-pp-bold text-[16px] text-text">Total</Text>
-              <Text className="font-pp-bold text-[16px] text-text">{amountLabel}</Text>
+              <Text className="font-pp-bold text-[16px] text-text"><FigureText text={amountLabel} /></Text>
             </View>
 
             <View className="gap-[8px]">
@@ -483,13 +488,7 @@ function EvmPayRequestScreen() {
               </View>
               <View className="flex-row items-center justify-between gap-[12px]">
                 <Text className="font-pp-medium text-[12px] text-text-muted">Recipient</Text>
-                {/* True again as of 2026-08-31: the share link no longer carries
-                    recipientAddress. It cannot be recovered from what remains
-                    either, since the address is bound inside
-                    noteAddressHash = Poseidon(ownerAddress, noteSecret) and the
-                    secrets ship zeroed. A SIGNED request is the exception and
-                    names its signer in the rows below, by the seller's choice. */}
-                <Text className="font-pp-medium text-[12px] text-right text-text-secondary">hidden (double-blind)</Text>
+                <Text className="font-pp-medium text-[12px] text-right text-text-secondary">{paymentRequestRecipientLabel(request)}</Text>
               </View>
               <View className="flex-row items-center justify-between gap-[12px]">
                 <Text className="font-pp-medium text-[12px] text-text-muted">Status</Text>
@@ -535,7 +534,7 @@ function EvmPayRequestScreen() {
                   ? 'Request expired'
                   : signatureStatus === 'valid'
                   ? `Signed by ${formatRequestCode(isSignablePaymentRequest(request) ? request.signature?.signer : null)}`
-                  : signatureStatus === 'invalid' ? 'Signature failed' : 'Double-blind payment'}
+                  : signatureStatus === 'invalid' ? 'Signature failed' : 'Private payment request'}
               </Text>
               <Text className="font-pp-regular text-[12px] leading-[18px] text-text-secondary">{signatureNotice}</Text>
             </View>

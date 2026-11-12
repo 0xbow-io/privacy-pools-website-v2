@@ -3,7 +3,8 @@
 // renders with NO styling because css-interop dropped its className.
 //
 //   safewrap bun scripts/visual/probe-ui-smoke.ts
-import { chromium, type Browser, type Page } from 'playwright';
+import { type Browser, type Page } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 
 const BASE = process.env.PROBE_URL ?? 'http://localhost:8081';
 const R = { ok: 0, fail: 0 };
@@ -239,7 +240,7 @@ async function frontPage(browser: Browser) {
   await ctx.close();
 }
 
-const browser = await chromium.launch({ args: ['--no-sandbox'] });
+const browser = await launchChrome();
 await homeDoors(browser);
 await frontPage(browser);
 await sheets(browser);

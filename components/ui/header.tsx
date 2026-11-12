@@ -16,6 +16,7 @@ import { ACTIVE_DEPLOYMENTS, ACTIVE_DEPLOYMENTS_BY_CHAIN } from '@/config/enviro
 import {
   ACTIVE_APP_ENVIRONMENT,
   APP_ENVIRONMENTS,
+  IS_STAGING_ONLY_HOST,
   appEnvironmentLabel,
   applyAppEnvironment,
 } from '@/config/app-environment';
@@ -24,7 +25,8 @@ import { useTheme } from '@/components/theme-provider';
 import { Logo } from './logo';
 import { VersionSwitch } from './version-switch';
 import { ChainLogo, chainLogoChainFor, type ChainLogoChain } from './chain-logo';
-import { useConnectFreighter, useStellarWallet } from '@/components/stellar-wallet-provider';
+import { useWalletConnectModal } from '@/components/wallet-connect-modal-provider';
+import { useStellarWallet } from '@/components/stellar-wallet-provider';
 import { useSupportedWalletConnection } from '@/hooks/use-supported-wallet-connection';
 import { usePoolSession } from '@/hooks/use-pool-session';
 import { useChainRouter } from '@/hooks/use-chain-router';
@@ -47,6 +49,7 @@ import { usePaymentRequestsModal } from '@/components/payment-requests-modal-pro
 import { useImportNoteModal } from '@/components/import-note-modal-provider';
 import { useAccountRecoveryModal } from '@/components/account-recovery-modal-provider';
 import { useCustomRpcModal } from '@/components/custom-rpc-modal-provider';
+import { ContactsModal } from '@/components/contacts/contacts-modal';
 import { activeCustomRpcUrl } from '@/config/custom-rpc';
 import { TOR_IN_FORCE, TOR_ON_DEVICE } from '@/config/tor';
 import { NotificationCenter } from '@/components/ui/notification-center';
@@ -148,7 +151,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
   // affordance below (ENS, finish-setup, account-key rows) keys off this.
   const connectedIsNonEvm = connectedIsSuiWallet || connectedIsStellar;
   const stellarWallet = useStellarWallet();
-  const connectFreighter = useConnectFreighter();
+  const { open: openStellarWalletPicker } = useWalletConnectModal();
   const { isConnected: evmConnected } = useAccount();
   const suiAccount = useCurrentAccount();
   const { disconnect } = useDisconnect();
@@ -264,6 +267,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
   // key, passkey), Theme (design variants) and Pool (every pool the ASP serves).
   // Each submenu has a back row; the menu always reopens on main.
   // 'environment' (Prod / Staging) is always offered; see the row below.
+  const [contactsOpen, setContactsOpen] = useState(false);
   const [actionsMenuView, setActionsMenuView] = useState<'main' | 'theme' | 'pool' | 'payments' | 'privacy' | 'environment'>('main');
 
   useEffect(() => {
@@ -406,8 +410,8 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
 
   const handleConnectWallet = () => {
     if (activeIsStellar) {
-      // Stellar: Freighter. Not installed -> send the user to get it.
-      void connectFreighter();
+      // Use the picker directly; an unrelated EVM connection must not switch chains.
+      void openStellarWalletPicker();
     } else if (activeIsSui) {
       // Sui: connect via the Wallet Standard (Slush et al). Prefer Slush when
       // several wallets are installed; if none, send the user to get Slush.
@@ -568,45 +572,16 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
               only, since the setting lives in localStorage and takes effect on
               a reload. Hidden once `menuActive`, so the dropdown row and this
               are never both on screen. */}
-          {!menuActive && !activeIsNonEvm && Platform.OS === 'web' && (
-            <Pressable
-              className="h-[28px] w-[28px] items-center justify-center rounded-pill bg-background-secondary"
-              // Wrapped, not passed by reference: the press event would arrive
-              // as the options argument and its properties would be read as
-              // flags.
-              onPress={() => openCustomRpcModal()}
-              testID="header-custom-rpc"
-              accessibilityRole="button"
-              accessibilityLabel={customRpcInForce ? 'Custom RPC: on' : 'Use custom RPC'}
-            >
-              {/* nw-keep(data-color): glyph color is a theme token into the vector-icon sink */}
-              <Ionicons
-                name="globe-outline"
-                size={16}
-                color={customRpcInForce ? colors.primary : colors.text}
-              />
-            </Pressable>
-          )}
-          {/* Tor, before connecting, for the same reason and one of its own.
-              The reason it shares: the actions dropdown is gated on
-              `menuActive`, so this was reachable only after connecting. The one
-              of its own: Tor decides how the FIRST request travels, and by the
-              time a wallet is connected that request has already gone. Offering
-              it only afterwards offers it too late. */}
           {!menuActive && !activeIsNonEvm && (Platform.OS === 'web' || TOR_ON_DEVICE) && (
             <Pressable
               className="h-[28px] w-[28px] items-center justify-center rounded-pill bg-background-secondary"
-              onPress={() => openCustomRpcModal({ torOnly: true })}
-              testID="header-tor"
+              onPress={() => openCustomRpcModal()}
+              testID="header-custom-rpc"
               accessibilityRole="button"
-              accessibilityLabel={TOR_IN_FORCE ? 'anon-rpc: on' : 'Connect with anon-rpc'}
+              accessibilityLabel={TOR_IN_FORCE ? 'Connection settings: anon-rpc on' : customRpcInForce ? 'Connection settings: custom RPC' : 'Connection settings'}
             >
               {/* nw-keep(data-color): glyph color is a theme token into the vector-icon sink */}
-              <Ionicons
-                name="shield-checkmark-outline"
-                size={16}
-                color={TOR_IN_FORCE ? colors.primary : colors.text}
-              />
+              <Ionicons name="globe-outline" size={16} color={TOR_IN_FORCE || customRpcInForce ? colors.primary : colors.text} />
             </Pressable>
           )}
           {/* Debug mode only: record everything the debug console logs. Next
@@ -619,6 +594,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
               // single "Connect Wallet" item, so go straight to the
               // picker. Connected: keep the dropdown (Copy / Sign Out).
               onPress={menuActive ? handleActionsPress : handleConnectWallet}
+              testID="header-account"
             >
               {menuActive && displayAddress ? (
                 <>
@@ -824,7 +800,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                         </Pressable>
                       )}
                       {/* A passkey session has no wallet signature to export as an account key,
-                          and neither has a Freighter session (the EVM account key
+                          and neither has a Varial session (the EVM account key
                           it would export does not exist). */}
                       {!passkeyActive && !(connectedIsStellar && !keySession) && (
                       <Pressable
@@ -838,7 +814,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                       </Pressable>
                       )}
                       {/* Only a connected EVM wallet can sign the ASP's SIWE message: a key,
-                          passkey, Sui or Freighter session has no such wallet to check. */}
+                          passkey, Sui or Varial session has no such wallet to check. */}
                       {evmConnected && !keySession && !passkeyActive && !connectedIsNonEvm && (
                       <Pressable
                         className="flex-row items-center gap-[10px] rounded-pill px-[12px] py-[10px] hover:bg-background-secondary"
@@ -854,7 +830,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                       )}
                       {/* Web only: the phone makes the code, this shows the QR.
                           exportAccountKey needs an EVM wallet or an imported key,
-                          so a Sui or Freighter wallet session gets no row. */}
+                          so a Sui or Varial wallet session gets no row. */}
                       {Platform.OS === 'web' && !passkeyActive && !(connectedIsNonEvm && !keySession) && (
                       <Pressable
                         className="flex-row items-center gap-[10px] rounded-pill px-[12px] py-[10px] hover:bg-background-secondary"
@@ -893,7 +869,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                           EVM wallet sessions bind to the wagmi address, so a
                           key-only or Sui session would export/import against
                           the wrong identity. Stellar has its own sealed backup
-                          for the Freighter account. */}
+                          for the Varial account. */}
                       {((connectedIsStellar && stellarWallet.isConnected) || (isConnected && !connectedIsNonEvm && !keySession)) && (<>
                       <Pressable
                         className="flex-row items-center gap-[10px] rounded-pill px-[12px] py-[10px] hover:bg-background-secondary"
@@ -1040,6 +1016,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                       2026-09-08): regular testers need Sepolia without knowing ?env=
                       or ?debug=1 (Artem: "too nerdy for regular testers"), and a tester
                       parked on staging must be able to get back to prod. */}
+                  {!IS_STAGING_ONLY_HOST && (
                   <Pressable
                     className="flex-row items-center gap-[10px] rounded-pill px-[12px] py-[10px] hover:bg-background-secondary"
                     onPress={() => setActionsMenuView('environment')}
@@ -1055,6 +1032,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                     </Text>
                     <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
                   </Pressable>
+                  )}
                   {INTERNAL_TOOLS_ENABLED && (
                   <Pressable
                     className="flex-row items-center gap-[10px] rounded-pill px-[12px] py-[10px] hover:bg-background-secondary"
@@ -1087,51 +1065,27 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                     <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
                   </Pressable>
                   )}
-                  {/* Own node for the selected chain (config/custom-rpc.ts).
-                      Last of the settings rows, above Sign Out. EVM only: the
-                      Sui client is built by dapp-kit from its own config, so
-                      the override cannot reach it. WEB only: the setting lives
-                      in localStorage and takes effect on a page reload, neither
-                      of which a native build has. The label is the "in force"
-                      indicator — no custom endpoint, no second state. */}
-                  {!activeIsNonEvm && Platform.OS === 'web' && (
+                  {/* Saved names for recipient addresses, with import/export (components/contacts). */}
+                  <Pressable
+                    className="flex-row items-center gap-[10px] rounded-pill px-[12px] py-[10px] hover:bg-background-secondary"
+                    onPress={() => { setActionsDropdownOpen(false); setContactsOpen(true); }}
+                    testID="menu-contacts"
+                  >
+                    {/* nw-keep(data-color): glyph color is a theme token into the vector-icon sink */}
+                    <Ionicons name="people-outline" size={16} color={colors.text} />
+                    <Text className="flex-1 font-pp-sans text-[14px] text-text">Contacts</Text>
+                  </Pressable>
+                  {/* One entry for the app's route and optional custom endpoints. */}
+                  {!activeIsNonEvm && (Platform.OS === 'web' || TOR_ON_DEVICE) && (
                   <Pressable
                     className="flex-row items-center gap-[10px] px-[12px] py-[10px]"
                     onPress={() => { setActionsDropdownOpen(false); openCustomRpcModal(); }}
                     testID="menu-custom-rpc"
                   >
-                    <Ionicons
-                      name="globe-outline"
-                      size={16}
-                      color={customRpcInForce ? colors.primary : colors.text}
-                    />
-                    <Text className={`flex-1 text-[14px] ${customRpcInForce ? 'font-pp-sans-semi-bold text-primary' : 'font-pp-sans text-text'}`}>
-                      {customRpcInForce ? 'Custom RPC: on' : 'Use custom RPC'}
-                    </Text>
-                  </Pressable>
-                  )}
-                  {/* Tor gets its own row rather than living inside the custom
-                      RPC form, because it is not the same decision: it changes
-                      how calls travel and works with OUR endpoints, so it needs
-                      nothing else set up. Same form underneath, opened with the
-                      endpoint fields folded away. Not gated like the custom
-                      RPC row: that override is web-only localStorage, while
-                      anon-rpc also runs on Android (SecureStore, the app
-                      restarts to apply it). Neither reaches the Sui client. */}
-                  {!activeIsNonEvm && (Platform.OS === 'web' || TOR_ON_DEVICE) && (
-                  <Pressable
-                    className="flex-row items-center gap-[10px] px-[12px] py-[10px]"
-                    onPress={() => { setActionsDropdownOpen(false); openCustomRpcModal({ torOnly: true }); }}
-                    testID="menu-tor"
-                  >
                     {/* nw-keep(data-color): glyph color is a theme token into the vector-icon sink */}
-                    <Ionicons
-                      name="shield-checkmark-outline"
-                      size={16}
-                      color={TOR_IN_FORCE ? colors.primary : colors.text}
-                    />
-                    <Text className={`flex-1 text-[14px] ${TOR_IN_FORCE ? 'font-pp-sans-semi-bold text-primary' : 'font-pp-sans text-text'}`}>
-                      {TOR_IN_FORCE ? 'anon-rpc: on' : 'Connect with anon-rpc'}
+                    <Ionicons name="globe-outline" size={16} color={TOR_IN_FORCE || customRpcInForce ? colors.primary : colors.text} />
+                    <Text className="flex-1 font-pp-sans text-[14px] text-text">
+                      {TOR_IN_FORCE ? 'Connection settings · anon-rpc on' : customRpcInForce ? 'Connection settings · custom RPC' : 'Connection settings'}
                     </Text>
                   </Pressable>
                   )}
@@ -1242,6 +1196,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
 
       <AccountKeyExportModal visible={exportKeyOpen} onClose={() => setExportKeyOpen(false)} />
       <ErrorReportsModal visible={errorReportsOpen} onClose={() => setErrorReportsOpen(false)} />
+      {contactsOpen ? <ContactsModal visible onClose={() => setContactsOpen(false)} /> : null}
       {/* Mounted only while open: closing unmounts it, so the code, key and QR go with it. */}
       {Platform.OS === 'web' && exportToMobileOpen ? (
         <AccountKeyToMobileModal visible onClose={() => setExportToMobileOpen(false)} />

@@ -25,6 +25,7 @@ function ctaDisabled(env: {
   shieldRecipientInvalid: boolean;
   shieldCapBlocksDeposit: boolean;
   shieldPricing: boolean;
+  shieldDepositsPaused: boolean;
 }): boolean {
   const match = SOURCE.match(/const ctaDisabled = ([\s\S]*?);\n/);
   if (!match) throw new Error('ctaDisabled is gone or was reshaped: update this guard');
@@ -41,6 +42,7 @@ const BASE = {
   shieldRecipientInvalid: false,
   shieldCapBlocksDeposit: false,
   shieldPricing: false,
+  shieldDepositsPaused: false,
 };
 
 test('a shield over the launch cap disables the CTA', () => {
@@ -97,4 +99,11 @@ test('"blocks" means every non-ok verdict except the transient one', () => {
   if (!noPrice.ok) expect(noPrice.reason).toBe('no-price');
   // Under the cap: nothing to block.
   expect(checkDepositCap({ amount: 0.01, symbol: 'ETH', priceUsd: 2600, capUsd }).ok).toBe(true);
+});
+
+test('vault deposits paused disables Shield only, never an exit', () => {
+  expect(ctaDisabled({ ...BASE, shieldDepositsPaused: true })).toBe(true);
+  for (const a of ['withdraw', 'send', 'swap', 'request']) {
+    expect(ctaDisabled({ ...BASE, a, shieldDepositsPaused: true })).toBe(false);
+  }
 });

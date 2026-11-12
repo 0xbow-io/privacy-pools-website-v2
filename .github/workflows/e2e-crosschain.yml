@@ -39,6 +39,9 @@ jobs:
         with:
           lfs: true
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -59,7 +62,7 @@ jobs:
           EOF
 
       - name: Install the browser
-        run: bunx playwright install --with-deps chromium
+        run: bunx playwright install --with-deps chrome
 
       - name: Build the proof workers
         run: |

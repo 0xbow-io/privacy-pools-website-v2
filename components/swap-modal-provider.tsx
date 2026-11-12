@@ -1,4 +1,5 @@
 import { formatUnits } from 'viem';
+import { ownRegistrationRefusal } from '@/services/keystore-identity-status';
 // RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
 // amounts, validation, quotes, relayer and on-chain values stay in shares
 // (exact strings/bigints). Never convert an amount to underlying and back,
@@ -9,6 +10,7 @@ import { formatUnits } from 'viem';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 import { BalanceAmount } from '@/components/pools/balance-amount';
+import { FigureText } from '@/components/ui/share-figure';
 import { HoverHint } from '@/components/ui/hover-hint';
 import { compactPhoneLayout } from '@/services/header-nav';
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, useSyncExternalStore } from 'react';
@@ -19,6 +21,7 @@ import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
 import { AlertCircleIcon, CaretDownIcon, CheckCircleIcon, CloseIcon } from '@/components/ui/modal-icons';
 import { WEB_NO_OUTLINE } from '@/components/ui/web-style-shims';
 import { View, Text, Pressable, Platform, useWindowDimensions, TextInput, Animated, ScrollView, Linking } from 'react-native';
+import { ShareFigure } from '@/components/ui/share-figure';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Svg, { Circle } from 'react-native-svg';
 import { useAccount } from 'wagmi';
@@ -26,6 +29,8 @@ import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import { usePools } from '@/components/pools-provider';
 import { usePoolSession } from '@/hooks/use-pool-session';
+import { useLeafGate } from '@/hooks/use-leaf-gate';
+import { useNotes } from '@/hooks/use-notes';
 import { useSeedDerivationModal } from '@/components/seed-derivation-modal-provider';
 import { useKeystoreRegistrationModal } from '@/components/keystore-registration-modal-provider';
 import { useRequireConnection } from '@/hooks/use-require-connection';
@@ -70,7 +75,7 @@ import {
 import { conversionFundingToken, intentTargetRefusal } from '@/config/intent-targets';
 import { getConfiguredYieldDeploymentForAsset } from '@/config/yield';
 import { conversionFundingUnits } from '@/services/shield-conversion-units';
-import { sdkErrorText } from '@/services/sdk-error-amounts';
+import { depositBelowMinimumValue, sdkErrorText, shareUnitsRate } from '@/services/sdk-error-amounts';
 import { isRelayerNullifierInFlight, isRelayWaitTimeout, relayInFlightMessage } from '@/services/transfer-outcome';
 import { isPendingRelayBlocked } from '@/services/pending-relays-core';
 import { assertNoPendingRelay } from '@/services/pending-relays-store';
@@ -93,7 +98,7 @@ import { isCustomSlippage, parseCustomSlippage, slippageLabel } from '@/services
 import { isLegacyPlainToken } from '@/config/pool-paths';
 import { getKnownTokenMetadata, getTokenMetadata } from '@/config/tokens';
 import { visibleSwapSources } from '@/services/pool-slug';
-import { displayTokenSymbol} from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol, swapRateText } from '@/services/share-display';
 import { handoffRefused, resolveHandoffToken } from '@/services/swap-token-handoff';
 import { friendlySwapError, relaySwapRefusalText } from '@/services/swap-error-copy';
 import { sameSymbol } from '@/services/symbol-match';
@@ -101,7 +106,9 @@ import type { SwapTokenInfo } from '@/config/intent-swaps';
 import { assertRelayerSwapProcessor } from '@/services/relayer-details';
 import { registerSwapHandoff } from '@/services/swap-handoff';
 import { noteShortfall, noteShortfallMessage } from '@/services/swap-note-shortfall';
+import { SWAP_APPROVAL_CHECKING, SWAP_APPROVAL_UNAVAILABLE, swapApprovalBlock, swapApprovalFromGate } from '@/services/swap-note-approval';
 import { OpShell } from '@/components/op-shell';
+import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 import { FlowProgress } from '@/components/ui/flow-progress';
 import { useInlineOpsCapable } from '@/hooks/use-inline-ops-capable';
 import {
@@ -151,6 +158,12 @@ import { useNativeMockBlock } from '@/hooks/use-native-mock-block';
 import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { FeeWarning } from '@/components/fee-warning';
 import { buildFeeBreakdown, gasCostUsd, quoteGas, splitRelayerFee, swapLossUsd, tokenUsd, type FeeGasReading } from '@/services/fee-warning';
+import { AddressAutocomplete } from '@/components/contacts/address-autocomplete';
+import { recordRecipientUseForActiveOwner } from '@/services/address-book-store';
+import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
+import { useShareAmountField } from '@/hooks/use-share-amount-field';
+import { preparedAmountData } from '@/services/prepared-amount-data';
+import type { ShareRate } from '@/services/share-rates';
 
 // Intent swap (withdraw-and-swap): a private note leaves the pool, swaps
 // through a LiFi route that is sealed inside the ZK proof, and the output
@@ -272,6 +285,15 @@ export type InlineSwapFormPatch = {
 export const SWAP_SEND_NO_CLAIM = 'No claim link needed. They\u2019ll find it automatically.';
 export const SWAP_SEND_CLAIM_WHY = 'They have no account to find it with, so the link is how they claim it.';
 
+/** See `inlineQuotedNet`. `wei` is in the output asset's base units. */
+export type InlineQuotedNet = {
+  grossWei: bigint;
+  inputToken: string;
+  outputToken: string;
+  destinationChainId: number;
+  wei: bigint;
+};
+
 type SwapModalContextType = {
   /** True when the flow opened or deferred; false when it refused the request. */
   openSwapModal: (options?: OpenSwapModalOptions) => boolean;
@@ -289,6 +311,13 @@ type SwapModalContextType = {
   inlineSend: boolean;
   /** Registration of a recipient the hub's Swap tab pushed, for its row's hint (DEV-510). */
   inlineRecipientRegistration: 'idle' | 'checking' | 'registered' | 'unregistered' | 'unknown';
+  /**
+   * The net deposit value the last Review press was refused on as below the
+   * pool minimum, for the request it priced. The hub shows it as "You receive
+   * privately" while its form still matches, so the headline and the refusal
+   * name one number. From that press's own quote: nothing is fetched for it.
+   */
+  inlineQuotedNet: InlineQuotedNet | null;
   syncInlineForm: (patch: InlineSwapFormPatch) => void;
 };
 
@@ -302,6 +331,7 @@ const SwapModalContext = createContext<SwapModalContextType>({
   inlineMode: 'wallet',
   inlineSend: false,
   inlineRecipientRegistration: 'idle',
+  inlineQuotedNet: null,
   syncInlineForm: () => {},
 });
 
@@ -422,7 +452,7 @@ type ReshieldSnapshot = {
  * so it is a deposit the ASP will refuse above the cap. Surfaced as a preflight
  * error (nothing signed or spent), same channel as the too-small-note refusal.
  */
-async function assertReshieldCap(noteValueWei: bigint, token: { symbol: string; decimals: number }): Promise<void> {
+async function assertReshieldCap(noteValueWei: bigint, token: { symbol: string; decimals: number }, rate?: ShareRate): Promise<void> {
   try {
     await assertDepositCap({
       amountWei: noteValueWei,
@@ -430,6 +460,10 @@ async function assertReshieldCap(noteValueWei: bigint, token: { symbol: string; 
       symbol: token.symbol,
       capUsd: ACTIVE_ENVIRONMENT.maxDepositUsd,
       fetchPrice: getPrice,
+      // The message's figure in the underlying it names. Display only.
+      underlyingPerShare: rate && rate.shareDecimals === token.decimals
+        ? Number(rate.assetsPerShare) / 10 ** rate.underlyingDecimals
+        : undefined,
     });
   } catch (err) {
     if (err instanceof DepositCapError) throw new ReshieldPreflightError(err.message);
@@ -457,6 +491,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
   // showing whenever the selection and the wallet split.
   const chainId = useActiveEvmChain().id;
   const balanceDisplay = useBalanceDisplay(chainId);
+  const shareText = useShareNameText(chainId);
+  // Feed-grid rates (no request), for a figure a message names in the underlying.
+  const { rateFor } = useShareRates();
   // The SESSION's chain (connector-first). Quotes select notes from the live
   // session, so a quote/review/confirm may only run while the session and the
   // app agree — see the context guards below and the invalidation effect.
@@ -471,6 +508,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     ensureInitialized, noteManager, refreshNotes, keysReady, identityMode, sessionAddress,
     createReshieldCrosschainSessions,
     sessionForChain,
+    keystoreStatusForChain,
     keystoreManager,
   } = usePoolSession();
   // The identity whose NOTES fund the swap: the SDK session owner (wallet or
@@ -561,7 +599,14 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
   const fromToken = inputTokens.some((t) => t.address.toLowerCase() === fromTokenChoice.address.toLowerCase())
     ? fromTokenChoice
     : (inputTokens[0] ?? fromTokenChoice);
+  // The amount in the pool's OWN units: exact shares for a yield share. What
+  // the user types is the coin and only crosses into this state through
+  // amountField below (editAmount). Every caller that hands an amount in
+  // (initialAmount, the hub's syncInlineForm) hands shares.
   const [amount, setAmount] = useState('');
+  // Bumped on every open and close: the amount field's draft belongs to one
+  // session of the form and never converts into the next (see amountField).
+  const [formSession, setFormSession] = useState(0);
   const [recipient, setRecipient] = useState('');
   // The recipient is YOUR wallet by default and the field stays hidden — a
   // swap-to-self is the overwhelmingly common case, and an always-visible
@@ -591,6 +636,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
   const [customSlippageError, setCustomSlippageError] = useState<string | null>(null);
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [snapshot, setSnapshot] = useState<QuoteSnapshot | null>(null);
+  // LI.FI's delivery detail is about the DESTINATION leg, so a share figure in
+  // it converts at the destination chain's rate, not the source chain's.
+  const deliveryShareText = useShareNameText(reshieldSnapshot?.destinationChainId ?? snapshot?.destinationChainId);
   const feePricing = useFeePricing(chainId);
   // Withdraw-and-swap: the relayer fee split into the gas it re-bills and its
   // margin, plus what the swap loses between the netted input and the output.
@@ -652,6 +700,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
   }, [reshieldSnapshot, chainId, feePricing]);
   const [isQuoting, setIsQuoting] = useState(false);
   const [swapError, setSwapError] = useState<string | null>(null);
+  const [quotedNet, setQuotedNet] = useState<InlineQuotedNet | null>(null);
   // Chain FROZEN at submission — explorer/polling must not follow a later
   // app-chain switch (codex round 3, P2).
   const [txChainId, setTxChainId] = useState<number | null>(null);
@@ -678,9 +727,33 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     if (ok) setClaimCopied(true);
     return ok;
   }, [claimUrl]);
-  // null = ASP association-set membership not resolved yet → quoting is
-  // blocked (fail closed), mirroring the withdrawal flow's spendability gate.
-  const [spendableCommitments, setSpendableCommitments] = useState<Set<string> | null>(null);
+
+  // The notes the gate checks: the session's ACTIVE notes with value, read
+  // reactively, so a sync that lands after the Swap tab opened is checked too.
+  const { notes: sessionNotes } = useNotes();
+  const swapGateNotes = useMemo(
+    () => sessionNotes.filter((n) => n.status === NoteStatus.ACTIVE && BigInt(n.value) > 0n),
+    [sessionNotes],
+  );
+  const swapLeafGate = useLeafGate(swapGateNotes, { enabled: !isSui });
+  // ASP spendability (fail closed while unresolved): an ACTIVE note can still
+  // be awaiting association-set membership, and every input of a swap needs an
+  // ASP Merkle proof. The answer is the ONE shared gate the withdraw flow and
+  // the balances read (hooks/use-leaf-gate.ts, the session's bulk association
+  // set), so no request is made here and none names a note.
+  //
+  // DEV-590: this used to be a per-open effect calling getMerkleProof once per
+  // note (a full set download each) and catching EVERY failure as "not in the
+  // set". On a fresh session the ASP backoff window or a notes sync landing
+  // after the open made long-approved notes read as "not approved yet", and a
+  // retry worked. Loading, failure and notes the answer did not cover are now
+  // distinct from a verified "not approved" (services/swap-note-approval.ts).
+  const swapApproval = useMemo(
+    () => (isSui || sessionChainId !== chainId
+      ? ({ status: 'checking' } as const)
+      : swapApprovalFromGate(swapLeafGate, swapGateNotes)),
+    [isSui, sessionChainId, chainId, swapLeafGate, swapGateNotes],
+  );
 
   // Async-quote race protection: a monotonic generation invalidated on
   // every relevant edit/close/reset; only the newest request commits state.
@@ -688,6 +761,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
   const invalidateQuoteRequests = useCallback(() => {
     guardRef.current.invalidate();
     setIsQuoting(false);
+    // The net figure a refused press computed belongs to the quote that is now
+    // outdated (a new slippage, amount, pair or reopened form): never show it.
+    setQuotedNet(null);
   }, []);
 
   // Destination network list — the chains the relayer + LiFi both support
@@ -743,6 +819,25 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     // chainId IS read above; without it in the deps one render after an app-
     // chain switch kept the previous chain's balance under the new context.
   }, [poolsData.myPools, fromToken, chainId]);
+  // The typed figure is the COIN it names ("10 USDC"), never a share count.
+  // It converts to exact shares at the scheduled rate through the same boundary
+  // as Withdraw, Send and the hub's Swap tab, and is never cut to the balance
+  // (clampToMax false): the insufficient-balance error answers an amount above
+  // it. While a share's rate is unknown nothing converts and Review waits
+  // (canReview), never a 1:1 guess.
+  const amountField = useShareAmountField({
+    amount,
+    symbol: fromToken.symbol,
+    chainId,
+    maxSharesExact: formatUnits(balanceWei, fromToken.decimals),
+    capKnown: !poolsLoading,
+    onAmountResolved: setAmount,
+    underlyingEntry: !isSui,
+    clampToMax: false,
+    // A draft typed while the rate was missing dies with its session: reopening
+    // must not convert it into an amount nobody typed in the new one.
+    sessionKey: formSession,
+  });
   /**
    * Units for any SDK error that interpolates raw wei, BOTH sides of it.
    * A relayer fee is taken from what you spend; a deposit minimum and a router
@@ -752,7 +847,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
    */
   const errorUnits = useMemo(
     () => ({
-      input: { decimals: fromToken.decimals, symbol: fromToken.symbol },
+      // A share's figures are share counts: converted at the scheduled rate, or
+      // loading while it is missing, never a count under the coin's name.
+      input: { decimals: fromToken.decimals, symbol: fromToken.symbol, rate: shareUnitsRate(fromToken.symbol, rateFor(chainId, fromToken.address)) },
       // LiFi's leg consumes the redeemed underlying when the note is a share,
       // so its figures are on a different scale from the note's.
       swapInput: swapInputUnits(chainId, fromToken.address, {
@@ -763,7 +860,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       // ITS units, and naming it after the input gave the right number under
       // the wrong name whenever both were 18 decimals.
       output: outputToken
-        ? { decimals: outputToken.token.decimals, symbol: outputToken.token.symbol }
+        ? { decimals: outputToken.token.decimals, symbol: outputToken.token.symbol, rate: shareUnitsRate(outputToken.token.symbol, rateFor(outputToken.chainId, outputToken.token.address)) }
         : null,
       // What the destination's router is FUNDED with. For a share target that
       // is its underlying, and a router quote or budget is in those units, not
@@ -776,7 +873,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         })
         : null,
     }),
-    [fromToken.decimals, fromToken.symbol, fromToken.address, chainId, outputToken, destinationChainId],
+    [fromToken.decimals, fromToken.symbol, fromToken.address, chainId, outputToken, destinationChainId, rateFor],
   );
   const swapErrorText = useCallback(
     (err: unknown, fallback: string) => {
@@ -810,9 +907,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
    * connected wallet with no say in it, which is how a user who swapped ETH to
    * BNB found the funds in the wallet he was signed in with (Mike, 2026-09-22).
    *
-   * So the address becomes a decision. It defaults to the user's own, which is
-   * what it was before, and anyone who would rather the failure landed somewhere
-   * unlinked can say so.
+   * So the address is a decision, with no default: the field starts empty and
+   * Review waits for one (typing your own wallet is fine, it is just never
+   * assumed).
    */
   const crossChainReshield = isReshield
     && destinationChainId !== chainId
@@ -919,11 +1016,14 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     && (crossChainReshield || !inlineHubActive))
     || (sameChainReshield && inlineSend));
   const customSelected = isCustomSlippage(slippage, SLIPPAGE_OPTIONS);
-  const spendabilityResolved = spendableCommitments !== null;
+  const spendabilityResolved = swapApproval.status === 'ready';
   const canReview =
     !destinationWithdrawn
     && intentSwapInputSupported(chainId, fromToken.address)
     && amountWei > 0n
+    // A share whose rate has not loaded: the typed coin has no share amount
+    // yet, so there is nothing honest to prepare. Refused, never read 1:1.
+    && !amountField.loading
     && !overBalance
     // A cross-chain reshield needs one too: it is the only address the far
     // side can pay out to, and an invalid one would be discovered at failure.
@@ -948,46 +1048,6 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       Animated.timing(sheetAnim, { toValue: 1, duration: 220, useNativeDriver: Platform.OS !== 'web' }).start();
     }
   }, [isOpen, sheetAnim]);
-
-  // ASP spendability resolution (fail closed while unresolved): an ACTIVE
-  // note can still be awaiting association-set membership; every input of a
-  // swap needs an ASP Merkle proof, so quoting from an unapproved lineage
-  // would fail only after witness generation. Mirrors the withdrawal flow.
-  useEffect(() => {
-    if (!isOpen || isSui) return;
-    let cancelled = false;
-    setSpendableCommitments(null);
-    (async () => {
-      try {
-        const activeNotes = (noteManager?.getNotes({ status: NoteStatus.ACTIVE }) ?? [])
-          .filter((n) => BigInt(n.value) > 0n);
-        if (activeNotes.length === 0) {
-          if (!cancelled) setSpendableCommitments(new Set());
-          return;
-        }
-        const { createASPClient, createHashService, createMerkleService } = await import('@/services/sdk-runtime');
-        const hashService = await createHashService();
-        const merkleService = createMerkleService(hashService);
-        const aspClient = await createASPClient(chainId, merkleService);
-        const next = new Set<string>();
-        await Promise.all(activeNotes.map(async (note) => {
-          try {
-            const labelHash = hashService.hash([note.label]);
-            if (!labelHash) return;
-            await aspClient.getMerkleProof(labelHash);
-            next.add(note.commitment);
-          } catch {
-            // No ASP proof for the label yet → not spendable.
-          }
-        }));
-        if (!cancelled) setSpendableCommitments(next);
-      } catch (err) {
-        log('warn', 'Swap', 'Spendability resolution failed. Staying closed', { error: String(err) });
-        // Leave null: quoting stays blocked rather than guessing.
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [isOpen, isSui, chainId, noteManager, log]);
 
   // Fee-commitment countdown while reviewing (from the snapshot's signed
   // expiration). On expiry the quote is dead — back to input with an honest
@@ -1147,8 +1207,10 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     // on this network" for an asset that swaps fine (Mike and Pat, 2026-09-22).
     const requestedUnavailable = handoffRefused(request, chainInputs);
     opEpochRef.current += 1;
+    setFormSession((n) => n + 1);
     submittedRef.current = false;
     guardRef.current.invalidate();
+    setQuotedNet(null);
     setStep('input');
     // THE SWAP SURFACE IS ALWAYS PRIVATE TO PRIVATE. Never a public payout.
     //
@@ -1174,7 +1236,8 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     // expanded: an address someone else typed must be visible to be checked,
     // and the collapsed state reads as "goes to my own wallet".
     const handedOffRecipient = options?.recipient?.trim();
-    setRecipient(handedOffRecipient || sessionAddress || address || '');
+    // Never pre-filled with the connected wallet (services/explicit-recipient.ts).
+    setRecipient(handedOffRecipient || '');
     setRecipientOpen(!!handedOffRecipient);
     setSendHandoff(!!handedOffRecipient && options?.mode === 'reshield');
     hubRecipientRef.current = false;
@@ -1226,7 +1289,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     // Per-attempt, like every other flag here: left set, one failed local note
     // write would tell the user every LATER reshield hadn't been recorded.
     setReshieldSyncWarning(false);
-  }, [address, sessionAddress, chainId]);
+  }, [chainId]);
 
   // Context invalidation (codex P1 on 4b2202a): this modal is STATEFUL —
   // fromToken/destinationChainId initialize once, and a review snapshot frozen
@@ -1379,6 +1442,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     if (step === 'executing') return; // a relayed swap can't be abandoned mid-proof
     guardClaimLeave(() => {
       opEpochRef.current += 1;
+      setFormSession((n) => n + 1);
       invalidateQuoteRequests();
       setIsOpen(false);
     });
@@ -1456,29 +1520,33 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         setRecipient(typed);
         setSendHandoff(true);
       } else if (wasHub) {
-        setRecipient(sessionAddress || address || '');
+        setRecipient('');
         setSendHandoff(false);
       }
       setRecipientOpen(!!typed);
     } else if (patch.recipient !== undefined) {
-      setRecipient(patch.recipient.trim() || sessionAddress || address || '');
+      setRecipient(patch.recipient.trim());
     }
-  }, [inlineBase, invalidateQuoteRequests, fromToken, chainId, destinationChainId, isReshield, sessionAddress, address]);
+  }, [inlineBase, invalidateQuoteRequests, fromToken, chainId, destinationChainId, isReshield]);
 
   // --- Form edit helpers (every edit invalidates in-flight quotes) ---
 
+  // Typed text is the coin: it reaches `amount` (shares) only through the
+  // share-amount boundary. A plain asset passes through unchanged.
+  const toShares = amountField.toShares;
   const editAmount = useCallback((v: string) => {
     invalidateQuoteRequests();
-    setAmount(sanitizeAmountInput(v, fromToken.decimals));
-  }, [invalidateQuoteRequests, fromToken.decimals]);
+    setAmount(sanitizeAmountInput(toShares(v), fromToken.decimals));
+  }, [invalidateQuoteRequests, toShares, fromToken.decimals]);
 
   const editFromToken = useCallback((t: SwapTokenInfo) => {
     invalidateQuoteRequests();
+    // The amount is held in the previous token's units (shares for a share),
+    // so it cannot ride over to another asset: a share count would be read as
+    // that asset's units. A different token starts from an empty field.
+    if (t.address.toLowerCase() !== fromToken.address.toLowerCase()) setAmount('');
     setFromToken(t);
-    // Clamp the amount to the new token's decimals so the parsed value and
-    // the displayed string can't diverge after an 18→6 decimals switch.
-    setAmount((a) => sanitizeAmountInput(a, t.decimals));
-  }, [invalidateQuoteRequests]);
+  }, [invalidateQuoteRequests, fromToken.address]);
 
   const editRecipient = useCallback((v: string) => {
     invalidateQuoteRequests();
@@ -1508,23 +1576,25 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     requestFromToken: SwapTokenInfo,
     grossWei: bigint,
   ): { notes: Note[] } | { error: string; reason: 'unresolved' | 'uncovered' } => {
-    if (!spendableCommitments) {
-      return {
-        // A distinct reason, because confirm-time callers must NOT report this
-        // as "your notes no longer cover the amount" — it is an approval-state
-        // race, and misdiagnosing it sends the user looking at their balance.
-        reason: 'unresolved',
-        error: 'Note approval state is no longer available. Review again.',
-      };
-    }
     const heldNotes = (noteManager?.getNotes({ status: NoteStatus.ACTIVE }) ?? []).filter(
       (n: Note) =>
         String(n.tokenId).toLowerCase() === requestFromToken.address.toLowerCase()
         && BigInt(n.value) > 0n,
     );
-    const activeNotes = heldNotes.filter((n: Note) => spendableCommitments.has(n.commitment));
+    // Not known yet, or not readable, is a distinct reason: confirm-time callers
+    // must NOT report it as "your notes no longer cover the amount" or as notes
+    // waiting for approval (DEV-590). It is a wait for the ASP's answer.
+    if (swapApproval.status !== 'ready') {
+      return swapApprovalBlock(swapApproval, heldNotes.map((n: Note) => n.commitment))!;
+    }
+    const approved = swapApproval.approved;
+    const activeNotes = heldNotes.filter((n: Note) => approved.has(n.commitment));
     const selection = selectSwapInputNotes(activeNotes, grossWei);
     if (!selection.covered) {
+      // A held note the answer did not cover (it synced after the check) is
+      // unknown, not unapproved: never name it as waiting (DEV-590).
+      const unknown = swapApprovalBlock(swapApproval, heldNotes.map((n: Note) => n.commitment));
+      if (unknown) return unknown;
       // Which of the three limits it is, rather than one number that could be
       // any of them. The sum is over the SAME note set each figure is about:
       // everything held, what the ASP approved, and what one proof can spend.
@@ -1537,14 +1607,16 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
             approvedWei: sum(activeNotes),
             selectableWei: selection.total,
           }),
-          // Raw symbol: the message names the coin and marks share amounts
-          // approximate itself (DEV-408).
+          // Raw symbol: the message names the coin itself. The figures are
+          // share counts, shown as the underlying at the live rate (DEV-591).
           { symbol: requestFromToken.symbol, decimals: requestFromToken.decimals },
+          undefined,
+          (wei: bigint) => balanceDisplay(formatUnits(wei, requestFromToken.decimals), requestFromToken.symbol, chainId, requestFromToken.address).text,
         ),
       };
     }
     return { notes: selection.notes };
-  }, [spendableCommitments, noteManager]);
+  }, [swapApproval, noteManager, balanceDisplay, chainId]);
 
   /**
    * Make room for the registration modal without losing the form.
@@ -1655,6 +1727,16 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         });
         return 'handled';
       }
+      // Registered there, but under which keys? The live read above is a
+      // nonzero check. The reshield mints the far note under this session's
+      // keys, so the bulk registry must confirm they are the registered ones
+      // (local read, waits for the grid, never fetches).
+      const refusal = ownRegistrationRefusal(await keystoreStatusForChain(destinationChainId, { chainFallback: true }), true);
+      if (!args.isCurrent()) return 'handled';
+      if (refusal) {
+        setSwapError(refusal);
+        return 'handled';
+      }
     }
 
     // Bind the quote (LiFi fromAddress) and the proof to the deployed
@@ -1685,7 +1767,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     const relayer = relayers.find((r: { status?: string }) => r.status === 'active') ?? relayers[0];
     if (!relayer) throw new Error('No relayer is available for swaps right now.');
     return { session, relayer };
-  }, [ensureInitialized, identityMode, openKeystoreRegistrationModal, chainId, crossChainReshield, swapSend, destinationChainId, sessionForChain, hideForRegistration]);
+  }, [ensureInitialized, identityMode, openKeystoreRegistrationModal, chainId, crossChainReshield, swapSend, destinationChainId, sessionForChain, keystoreStatusForChain, hideForRegistration]);
 
   // --- Quote (input → review) ---
 
@@ -1878,6 +1960,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     const isCurrent = () => guardRef.current.isCurrent(requestToken, requestKey);
     setIsQuoting(true);
     setSwapError(null);
+    setQuotedNet(null);
     setSwapUnavailable(false);
     try {
       // Swap-send only: the recipient must already be able to receive a private
@@ -1936,18 +2019,19 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
             'Swapping to another network needs a connected wallet: it is the address the destination pays out to if the far side cannot complete.',
           );
         }
-        // The address the user chose, defaulting to their own: the form
-        // pre-fills the connected wallet, so doing nothing keeps exactly the
-        // behaviour this had before the field existed.
+        // The address the user typed, never a default: the field starts empty
+        // and canReview refuses a cross-chain reshield without a valid one, so
+        // a failed far leg can no longer land in the connected wallet unasked.
         // A swap-send: the field is the recipient, so a failed far leg pays
-        // the sender's own wallet instead.
-        fallbackForReview = (requestSendTo ? address : (trimmedRecipient || address)) as Address;
+        // the sender's own wallet instead (unchanged: there is no separate
+        // field for it, and the recipient may control no address there).
+        fallbackForReview = (requestSendTo ? address : trimmedRecipient) as Address;
         const sessions = await createReshieldCrosschainSessions({ destinationChainId: requestDestination });
         if (!sessions) {
           throw new ReshieldPreflightError('Swapping to that network is not available yet.');
         }
         if (requestSendTo && !crossChainSendOutputSupported(requestOutputToken.address, requestDestination)) {
-          throw new ReshieldPreflightError('This asset cannot be sent privately to that network. Pick a pool share, or use Withdraw.');
+          throw new ReshieldPreflightError('This asset cannot be sent privately to that network. Pick a supported token, or use Withdraw.');
         }
         const crossSource = sessions.source as unknown as ReshieldCrosschainSessionLike;
         // Same estimate the transfer flow runs at Confirm, so Review matches it.
@@ -2006,7 +2090,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       }
       // Launch cap on the note this reshield would create (codex: the deposit
       // modal's check never sees this path).
-      await assertReshieldCap(BigInt(estimate.noteValue), requestOutputToken);
+      await assertReshieldCap(BigInt(estimate.noteValue), requestOutputToken, rateFor(outputToken.chainId, requestOutputToken.address));
 
       if (!isCurrent()) return;
       setReshieldSnapshot({
@@ -2033,6 +2117,18 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       if (!isCurrent()) return;
       log('error', 'Swap', 'Reshield estimate failed', { error: String(err) });
+      // Below the pool minimum: keep the net figure the refusal was computed
+      // on, so the form's headline shows the same number as the error.
+      const netWei = depositBelowMinimumValue(err);
+      if (netWei !== null) {
+        setQuotedNet({
+          grossWei,
+          inputToken: requestFromToken.address,
+          outputToken: requestOutputToken.address,
+          destinationChainId: requestDestination,
+          wei: netWei,
+        });
+      }
       if (err instanceof ReshieldPreflightError) {
         setSwapError(swapErrorText(err, 'The swap failed.'));
       } else if (isSwapUnavailableError(err)) {
@@ -2068,7 +2164,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     } finally {
       if (isCurrent()) setIsQuoting(false);
     }
-  }, [canReview, outputToken, amountWei, fromToken, slippage, chainId, sessionChainId, address, trimmedRecipient, swapSend, noteIdentity, destinationChainId, createReshieldCrosschainSessions, selectApprovedNotes, resolveSwapSession, log, swapErrorText]);
+  }, [canReview, outputToken, rateFor, amountWei, fromToken, slippage, chainId, sessionChainId, address, trimmedRecipient, swapSend, noteIdentity, destinationChainId, createReshieldCrosschainSessions, selectApprovedNotes, resolveSwapSession, log, swapErrorText]);
   const getReshieldEstimateRef = useRef(getReshieldEstimate);
   getReshieldEstimateRef.current = getReshieldEstimate;
 
@@ -2267,6 +2363,8 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       // Confirmed write → refresh the shared tx/stats caches (codex round 1, P1).
       void invalidateTransactionCaches(queryClient);
       if (snap.crossChain) setDelivery({ status: 'pending', ...withBridge(snap.prepared.swapTarget) });
+      // Recipient history (backed up, feeds the autocomplete): the payout address.
+      recordRecipientUseForActiveOwner(snap.recipient, chainId);
       if (live()) setStep('success');
     } catch (err) {
       // Deliberately NOT classified as route-unavailable: confirm-phase
@@ -2442,7 +2540,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
             // moves the output between the two clicks essentially always, and
             // an exact floor refused every attempt (QA, 2026-09-22).
             minNoteValueWei: reshieldConsentFloor(snap.display.newNoteValueWei, snap.slippage),
-        assertNoteValue: (wei) => assertReshieldCap(wei, snap.outputToken),
+        assertNoteValue: (wei) => assertReshieldCap(wei, snap.outputToken, rateFor(snap.destinationChainId, snap.outputToken.address)),
             outputUnits: { symbol: snap.outputToken.symbol, decimals: snap.outputToken.decimals },
             destinationName: getChainConfig(snap.destinationChainId)?.displayName ?? `chain ${snap.destinationChainId}`,
             // Swap-send: the note is FOR this account on the destination chain,
@@ -2524,6 +2622,8 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
             now: crossBroadcastAt ?? Date.now(),
           }, { recordOwnAction, recordWithdrawFee, recordSwap });
         } catch { /* local bookkeeping is best-effort; the swap succeeded */ }
+        // A swap-send names a payee: recipient history (backed up, feeds the autocomplete).
+        if (snap.recipient) recordRecipientUseForActiveOwner(snap.recipient, snap.destinationChainId);
         try { await refreshNotes(); } catch { /* balances refresh best-effort */ }
         void invalidateTransactionCaches(queryClient);
         if (live()) setStep('success');
@@ -2548,7 +2648,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         // Bind execution to the figure shown on Review — a route that got worse
         // in the meantime must ask again rather than execute silently.
         minNoteValueWei: reshieldConsentFloor(snap.display.newNoteValueWei, snap.slippage),
-        assertNoteValue: (wei) => assertReshieldCap(wei, snap.outputToken),
+        assertNoteValue: (wei) => assertReshieldCap(wei, snap.outputToken, rateFor(snap.destinationChainId, snap.outputToken.address)),
         // Swap-send: the new note is FOR this account. Read from the snapshot
         // Review showed, never from the live form.
         ...(snap.recipient ? { recipient: sameBlind ? sameBlind.recipient : { discoveryData: { evmAddress: snap.recipient } } } : {}),
@@ -2628,6 +2728,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
           now: broadcastAt ?? Date.now(),
         }, { recordOwnAction, recordWithdrawFee, recordSwap });
       } catch { /* local bookkeeping is best-effort; the swap succeeded */ }
+      if (snap.recipient) recordRecipientUseForActiveOwner(snap.recipient, chainId);
       try { await refreshNotes(); } catch { /* balances refresh best-effort */ }
       // Confirmed write → refresh the shared tx/stats caches (codex round 1, P1).
       void invalidateTransactionCaches(queryClient);
@@ -2669,7 +2770,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       }
       setStep('review');
     }
-  }, [reshieldSnapshot, selectApprovedNotes, resolveSwapSession, chainId, sessionChainId, noteIdentity, refreshNotes, createReshieldCrosschainSessions, queryClient, log, refuseIfSelectionPendingRelay, prepareBlindSwapSend]);
+  }, [reshieldSnapshot, selectApprovedNotes, rateFor, resolveSwapSession, chainId, sessionChainId, noteIdentity, refreshNotes, createReshieldCrosschainSessions, queryClient, log, refuseIfSelectionPendingRelay, prepareBlindSwapSend]);
 
   // Same-tick double-press guard (shared lock) — see hooks/use-op-lock.ts.
   const confirmReshield = useMemo(() => withOpLock(confirmReshieldUnlocked), [withOpLock, confirmReshieldUnlocked]);
@@ -2692,9 +2793,10 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       inlineMode: mode,
       inlineSend: isOpen && inlineSend,
       inlineRecipientRegistration: isOpen ? swapSendRegistration : 'idle',
+      inlineQuotedNet: isOpen && inlineHubActive && !inlineSend ? quotedNet : null,
       syncInlineForm,
     }),
-    [openSwapModal, closeSwapModal, isOpen, inlineHubActive, inlineSend, step, mode, swapSendRegistration, syncInlineForm],
+    [openSwapModal, closeSwapModal, isOpen, inlineHubActive, inlineSend, step, mode, swapSendRegistration, syncInlineForm, quotedNet],
   );
 
   const explorerUrl = txHash ? getExplorerTxUrl(txChainId ?? chainId, txHash) : null;
@@ -2737,6 +2839,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
           isDark={colorScheme === 'dark'}
           sheetAnim={sheetAnim}
           onClose={closeSwapModal}
+          closeBlocked={step === 'executing'}
           // Conflicting box props (width/max-w/padding/radius) live in exactly ONE
           // branch so class order can't flip the RN style-array override result.
           cardClassName={`relative max-h-[92%] items-center gap-[16px] overflow-hidden border border-border bg-card-background ${
@@ -2783,7 +2886,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                 )}
                 {swapError && !swapUnavailable && (
                   <View className="w-full rounded-legacy-8 border border-danger bg-danger-bg px-[12px] py-[10px]">
-                    <Text className="text-[12px] leading-[17px] text-danger font-pp-medium" testID="swap-error">{swapError}</Text>
+                    <Text className="text-[12px] leading-[17px] text-danger font-pp-medium" testID="swap-error">{shareText(swapError)}</Text>
                   </View>
                 )}
 
@@ -2793,7 +2896,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[12px] leading-[17px] text-text-muted font-pp-regular">You swap</Text>
                     <Text className="text-[12px] leading-[17px] text-text-muted font-pp-regular">
-                      Available: {(poolsLoading ? '—' : balanceDisplay(formatUnits(balanceWei, fromToken.decimals), fromToken.symbol, chainId).text)}
+                      Available: {poolsLoading ? '—' : <ShareFigure view={balanceDisplay(formatUnits(balanceWei, fromToken.decimals), fromToken.symbol, chainId)} />}
                     </Text>
                     {!poolsLoading ? <ShareCountHint hint={balanceDisplay(formatUnits(balanceWei, fromToken.decimals), fromToken.symbol, chainId).hint} /> : null}
                   </View>
@@ -2802,8 +2905,13 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                       className={`min-w-[80px] grow shrink p-0 text-[24px] font-pp-regular ${amount ? 'text-text' : 'text-text-muted'}`}
                       // nw-keep(platform-css): web-only outlineStyle:'none' removes the focus ring — no className path; empty on native
                       style={WEB_NO_OUTLINE}
-                      value={amount}
+                      // The coin figure: shares read back at the rate, the draft while it waits.
+                      value={amountField.value}
                       onChangeText={editAmount}
+                      testID="swap-amount-input"
+                      // The exact amount the swap prepares (shares for a share),
+                      // for the browser smoke to check against the rate. Web only.
+                      {...preparedAmountData(amount)}
                       placeholder="0"
                       // nw-keep(data-color): placeholder color is a TextInput sink (theme token, no className path)
                       placeholderTextColor={colors.textMuted}
@@ -2819,7 +2927,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                             onPress={() => editFromToken(t)}
                           >
                             <TokenNetworkIcon symbol={t.symbol} chainId={chainId} size={16} />
-                            <Text className={`text-[13px] text-text ${selected ? 'font-pp-bold' : 'font-pp-regular'}`}>{t.symbol === fromToken.symbol ? fromToken.symbol : displayTokenSymbol(t.symbol)}</Text>
+                            <Text className={`text-[13px] text-text ${selected ? 'font-pp-bold' : 'font-pp-regular'}`}>{displayTokenSymbol(t.symbol)}</Text>
                           </Pressable>
                         );
                       })}
@@ -2878,9 +2986,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                     <Ionicons name="shield-checkmark-outline" size={14} color={colors.primary} />
                     {(() => {
                       const note = crossChainReshield && swapSend
-                        ? `Stays private: the output is swapped and bridged, and deposited as a new shielded note for the recipient on ${destinationName}.`
+                        ? `Deposits privately for the recipient on ${destinationName}. Failed destination delivery can pay the public fallback wallet.`
                         : crossChainReshield
-                        ? `Stays private: the output is re-deposited as a new shielded note in your account. No wallet address is involved unless the far side fails${showRecipientField ? ', and the address below is where that would land' : ''}.`
+                        ? 'Deposits privately into your account. Failed destination delivery can pay the public fallback wallet.'
                         : swapSend
                           ? 'Stays private: the output is deposited as a new shielded note owned by the recipient. Nothing is paid to a wallet, and the recipient and amount are not published.'
                           : 'Stays private: the output is re-deposited as a new shielded note in your account. No wallet address is involved.';
@@ -2889,8 +2997,8 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                           <View className="min-w-0 shrink flex-row items-center gap-[4px]">
                             {/* The fallback wallet stays on screen: it is where a failed cross-chain leg lands. */}
                             <Text className="shrink text-[12px] leading-[17px] text-text-secondary font-pp-regular">
-                              {crossChainReshield && !swapSend && showRecipientField && !crossChainSendField
-                                ? 'Stays private. If the far side fails, it lands at the address below.'
+                              {crossChainReshield
+                                ? 'Private deposit · public fallback'
                                 : 'Stays private'}
                             </Text>
                             {/* nw-keep(data-color): glyph colour is a runtime theme token (vector-icon sink) */}
@@ -2931,7 +3039,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                           // Collapsing returns the destination to your wallet,
                           // so a half-typed address can never be submitted
                           // from a hidden field.
-                          if (open) editRecipient(sessionAddress ?? address ?? '');
+                          if (open) editRecipient('');
                           return !open;
                         });
                       }}
@@ -2952,7 +3060,11 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                   )}
                 </View>
                 {recipientOpen || crossChain || crossChainReshield ? (
+                  // Every destination this field can name is an EVM chain (ADDRESS_RE above).
+                  <AddressAutocomplete value={recipient} onSelect={editRecipient} formats={['evm']} testID="swap-recipient">
+                  {(bind) => (
                   <TextInput
+                    {...bind}
                     className={`w-full rounded-control border px-[14px] py-[11px] text-[14px] text-text font-pp-regular ${recipient && !recipientValid ? 'border-danger' : 'border-border'}`}
                     // nw-keep(platform-css): web-only outlineStyle:'none' removes the focus ring — no className path; empty on native
                     style={WEB_NO_OUTLINE}
@@ -2963,7 +3075,10 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                     placeholderTextColor={colors.textMuted}
                     autoCapitalize="none"
                     autoCorrect={false}
+                    testID="swap-recipient-input"
                   />
+                  )}
+                  </AddressAutocomplete>
                 ) : (
                   <Text numberOfLines={1} className="w-full text-[13px] text-text-secondary font-pp-regular">
                     Your wallet{address ? ` · ${address.slice(0, 6)}…${address.slice(-4)}` : ''}
@@ -2974,7 +3089,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                 {thirdPartyRecipient && !swapSendOutputOk && (
                   <Text className="text-[12px] leading-[17px] text-text-muted font-pp-regular" testID="swap-send-output-unsupported">
                     {crossChainReshield
-                      ? `Only a pool share can be sent privately to ${destinationName}. Pick one, or use Withdraw.`
+                      ? `Only a supported token can be sent privately to ${destinationName}. Pick one, or use Withdraw.`
                       : 'This asset can’t be sent privately to another address yet. Pick a different asset, or send to your own account.'}
                   </Text>
                 )}
@@ -3002,6 +3117,11 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                     </Pressable>
                   </View>
                 )}
+                {showRecipientField && crossChainReshield && !crossChainSendField && trimmedRecipient === '' && (
+                  <Text className="text-[12px] leading-[17px] text-text-muted font-pp-regular" testID="swap-fallback-required">
+                    Enter the address to pay on {destinationName} if the swap cannot finish there.
+                  </Text>
+                )}
                 {showRecipientField && crossChainReshield && crossChainSendField && (
                   <Text className="text-[12px] leading-[17px] text-text-muted font-pp-regular">
                     If the far side cannot complete, the bridged tokens go to your connected wallet on {destinationName}.
@@ -3014,7 +3134,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                 )}
                 {!spendabilityResolved && (
                   <Text className="text-[12px] leading-[17px] text-text-muted font-pp-regular">
-                    Confirming which notes are approved to spend…
+                    {swapApproval.status === 'unavailable' ? SWAP_APPROVAL_UNAVAILABLE : SWAP_APPROVAL_CHECKING}
                   </Text>
                 )}
 
@@ -3127,10 +3247,10 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
               <ScrollView className="w-full" contentContainerClassName="gap-[14px]">
                 <Text className="w-full text-center text-[24px] text-text font-pp-sans-bold">Review swap</Text>
                 <View className="flex-row justify-center">
-                  <View className="rounded-legacy-6 border border-success px-[8px] py-[3px]">
-                    <Text className="text-[10px] tracking-[0.4px] text-success font-pp-semi-bold">
+                  <View className={`rounded-legacy-6 border px-[8px] py-[3px] ${reshieldSnapshot.destinationChainId !== chainId ? 'border-warning' : 'border-success'}`}>
+                    <Text className={`text-[10px] tracking-[0.4px] font-pp-semi-bold ${reshieldSnapshot.destinationChainId !== chainId ? 'text-warning' : 'text-success'}`}>
                       {reshieldSnapshot.destinationChainId !== chainId
-                        ? 'STAYS PRIVATE · CROSSES CHAINS'
+                        ? 'PRIVATE DEPOSIT · PUBLIC FALLBACK'
                         : 'STAYS PRIVATE · 1 TRANSACTION'}
                     </Text>
                   </View>
@@ -3142,7 +3262,8 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                     address on that chain. Saying this at Review is the only
                     place it can still change the decision. */}
                 {reshieldSnapshot.destinationChainId !== chainId && (
-                  <View className="w-full gap-[6px] rounded-legacy-8 border border-border bg-background-secondary px-[12px] py-[10px]">
+                  <View className="w-full gap-[6px] rounded-legacy-8 border border-warning bg-warning-bg px-[12px] py-[10px]">
+                    <Text className="text-[12px] font-pp-semi-bold text-warning">Public fallback</Text>
                     <Text className="text-[12px] leading-[17px] text-text-secondary font-pp-regular">
                       The new note lands in the {getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`} pool. This chain&apos;s transaction confirms first; the deposit over there follows and can take a few minutes.
                     </Text>
@@ -3156,7 +3277,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
 
                 {swapError && (
                   <View className="w-full rounded-legacy-8 border border-danger bg-danger-bg px-[12px] py-[10px]">
-                    <Text className="text-[12px] leading-[17px] text-danger font-pp-medium" testID="swap-error">{swapError}</Text>
+                    <Text className="text-[12px] leading-[17px] text-danger font-pp-medium" testID="swap-error">{shareText(swapError)}</Text>
                   </View>
                 )}
 
@@ -3210,7 +3331,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                     <Text className="text-[13px] text-text-muted font-pp-medium">
                       {reshieldSnapshot.recipient ? 'New shielded note for them (at least)' : 'New shielded note (at least)'}
                     </Text>
-                    <BalanceAmount view={balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-bold" />
+                    <BalanceAmount view={balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-bold" showUsd />
                   </View>
                   {reshieldSnapshot.recipient && (
                     <View className="flex-row flex-wrap items-center justify-between gap-[8px]" testID="swap-send-review-recipient">
@@ -3244,7 +3365,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                 </View>
                 {reshieldHintOpen && (
                   <Text className="w-full text-[12px] leading-[17px] text-text-secondary font-pp-regular">
-                    Confirming proves the deposit on your device and only then takes the relayer&apos;s final quote, so the exact amounts are fixed at submission. The transaction is atomic. If it fails, nothing leaves the pool.
+                    {reshieldSnapshot.destinationChainId !== chainId
+                      ? 'Amounts are fixed at submission. The source transaction is atomic; destination delivery can fail and pay the public fallback wallet.'
+                      : 'Amounts are fixed at submission. The transaction is atomic: if it fails, nothing leaves the pool.'}
                   </Text>
                 )}
 
@@ -3316,8 +3439,8 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
               <ScrollView className="w-full" contentContainerClassName="gap-[14px]">
                 <Text className="w-full text-center text-[24px] text-text font-pp-sans-bold">Review swap</Text>
                 <View className="flex-row justify-center">
-                  <View className="rounded-legacy-6 border border-success px-[8px] py-[3px]">
-                    <Text className="text-[10px] tracking-[0.4px] text-success font-pp-semi-bold">
+                  <View className={`rounded-legacy-6 border px-[8px] py-[3px] ${snapshot.crossChain ? 'border-warning' : 'border-success'}`}>
+                    <Text className={`text-[10px] tracking-[0.4px] font-pp-semi-bold ${snapshot.crossChain ? 'text-warning' : 'text-success'}`}>
                       {snapshot.crossChain ? `CROSS-CHAIN · TO ${snapshot.destinationName.toUpperCase()}` : 'SAME CHAIN · 1 TRANSACTION'}
                     </Text>
                   </View>
@@ -3325,17 +3448,15 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
 
                 {swapError && (
                   <View className="w-full rounded-legacy-8 border border-danger bg-danger-bg px-[12px] py-[10px]">
-                    <Text className="text-[12px] leading-[17px] text-danger font-pp-medium" testID="swap-error">{swapError}</Text>
+                    <Text className="text-[12px] leading-[17px] text-danger font-pp-medium" testID="swap-error">{shareText(swapError)}</Text>
                   </View>
                 )}
 
                 <View className="w-full gap-[8px] rounded-control border border-border p-[16px]">
-                  {/* The asset you PAY, which the received side already handles
-                      through tokenAmountLabel. These three are SHARE counts, so
-                      approxUnderlyingText renames them to the underlying and
-                      marks them approximate: the gap is the accrued rate, and it
-                      understates rather than overstates. The share is named
-                      nowhere the user reads. A plain symbol passes through. */}
+                  {/* The asset you PAY. These three are SHARE counts, so
+                      balanceDisplay shows them as the underlying at the live rate
+                      (DEV-591): the share is named nowhere the user reads. A
+                      plain symbol passes through. */}
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[13px] text-text-muted font-pp-medium">You swap</Text>
                     <BalanceAmount view={balanceDisplay(snapshot.amountText, snapshot.fromToken.symbol, chainId)} className="text-[13px] text-text font-pp-regular" />
@@ -3351,16 +3472,20 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                   </View>
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[13px] text-text-muted font-pp-medium">Estimated received</Text>
-                    <Text className="text-[13px] text-text font-pp-regular">{balanceDisplay(snapshot.display.estimatedOutput, snapshot.outputToken.symbol, snapshot.destinationChainId).text}</Text>
+                    <BalanceAmount view={balanceDisplay(snapshot.display.estimatedOutput, snapshot.outputToken.symbol, snapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" showUsd />
                   </View>
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[13px] text-text-muted font-pp-medium">Min received</Text>
-                    <Text className="text-[13px] text-text font-pp-bold">{balanceDisplay(snapshot.display.minReceived, snapshot.outputToken.symbol, snapshot.destinationChainId).text}</Text>
+                    <Text className="text-[13px] text-text font-pp-bold"><ShareFigure view={balanceDisplay(snapshot.display.minReceived, snapshot.outputToken.symbol, snapshot.destinationChainId)} /></Text>
                   </View>
-                  {!!snapshot.display.rate && (
+                  {/* A rate between share COUNTS is not a rate between the coins,
+                      so it shows only once both sides read as their coin. */}
+                  {!!snapshot.display.rate
+                    && (!isShareSymbol(snapshot.fromToken.symbol) || balanceDisplay('1', snapshot.fromToken.symbol, chainId).converted)
+                    && (!isShareSymbol(snapshot.outputToken.symbol) || balanceDisplay('1', snapshot.outputToken.symbol, snapshot.destinationChainId).converted) && (
                     <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                       <Text className="text-[13px] text-text-muted font-pp-medium">Rate</Text>
-                      <Text className="text-[13px] text-text font-pp-regular">1 {balanceDisplay('1', snapshot.fromToken.symbol, chainId).symbol} ≈ {Number(snapshot.display.rate) * balanceDisplay('1', snapshot.outputToken.symbol, snapshot.destinationChainId).amount / balanceDisplay('1', snapshot.fromToken.symbol, chainId).amount} {balanceDisplay('1', snapshot.outputToken.symbol, snapshot.destinationChainId).symbol}</Text>
+                      <Text className="text-[13px] text-text font-pp-regular"><FigureText text={swapRateText(Number(snapshot.display.rate), balanceDisplay('1', snapshot.fromToken.symbol, chainId), balanceDisplay('1', snapshot.outputToken.symbol, snapshot.destinationChainId))} /></Text>
                     </View>
                   )}
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
@@ -3492,7 +3617,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                     address instead, repeating it is the false success QA hit. */}
                 {!(delivery?.status === 'recovered' || delivery?.status === 'failed') && (
                   <Text className="w-full text-center text-[12px] text-text-muted font-pp-regular">
-                    {reshieldSnapshot.destinationChainId !== chainId && reshieldSnapshot.recipient && delivery?.status === 'done'
+                    <FigureText text={reshieldSnapshot.destinationChainId !== chainId && reshieldSnapshot.recipient && delivery?.status === 'done'
                       ? `At least ${balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} was deposited as a new shielded note for ${reshieldSnapshot.recipient.slice(0, 6)}…${reshieldSnapshot.recipient.slice(-4)} on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`}. They will see it after their next sync.`
                       : reshieldSnapshot.destinationChainId !== chainId && reshieldSnapshot.recipient
                       ? `At least ${balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} is being deposited as a new shielded note for ${reshieldSnapshot.recipient.slice(0, 6)}…${reshieldSnapshot.recipient.slice(-4)} on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`}. The deposit follows this transaction and can take a few minutes.`
@@ -3500,7 +3625,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                       ? `At least ${balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} as a new shielded note on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`}. The transaction above is this chain's leg; the deposit over there follows and can take a few minutes, and it becomes spendable once that pool's association set includes it.`
                       : reshieldSnapshot.recipient
                         ? `At least ${balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} was deposited as a new shielded note for ${reshieldSnapshot.recipient.slice(0, 6)}…${reshieldSnapshot.recipient.slice(-4)}. They will see it after their next sync, and it becomes spendable once the pool's association set includes it.`
-                        : `At least ${balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} as a new shielded note. It becomes spendable once the pool's association set includes it.`}
+                        : `At least ${balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} as a new shielded note. It becomes spendable once the pool's association set includes it.`} />
                   </Text>
                 )}
                 {/* Live status of the far leg, same tracker flow 1 uses. Without
@@ -3513,7 +3638,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                       : delivery.status === 'recovered'
                       ? `The deposit on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`} did not run, so ${recoveredWhere(delivery.refunded, sourceChainName, getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`)}. It is in your wallet, not in the pool.`
                       : delivery.status === 'failed'
-                        ? `The deposit on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`} did not complete${delivery.detail ? `: ${delivery.detail}` : ''}. LI.FI pays the fallback address on that chain when the far side cannot deposit.`
+                        ? `The deposit on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`} did not complete${delivery.detail ? `: ${deliveryShareText(delivery.detail)}` : ''}. LI.FI pays the fallback address on that chain when the far side cannot deposit.`
                         : `${deliveryProgress ?? 'Tracking the bridge…'} Deposit pending on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`}.`}
                   </Text>
                 )}
@@ -3585,20 +3710,20 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                 </Text>
                 {!snapshot.crossChain && (
                   <Text className="w-full text-center text-[12px] text-text-muted font-pp-regular">
-                    Min {balanceDisplay(snapshot.display.minReceived, snapshot.outputToken.symbol, snapshot.destinationChainId).text} to your recipient.
+                    Min <ShareFigure view={balanceDisplay(snapshot.display.minReceived, snapshot.outputToken.symbol, snapshot.destinationChainId)} /> to your recipient.
                   </Text>
                 )}
                 {snapshot.crossChain && (
                   <Text className={`w-full text-center text-[12px] font-pp-regular ${delivery?.status === 'failed' || delivery?.status === 'recovered' ? 'text-danger' : 'text-text-muted'}`}>
-                    {delivery?.status === 'recovered' && delivery.refunded
+                    <FigureText text={delivery?.status === 'recovered' && delivery.refunded
                       ? `The swap on ${snapshot.destinationName} did not run, so ${recoveredWhere(true, sourceChainName, snapshot.destinationName)}.`
                       : delivery?.status === 'done'
                       ? `Delivered on ${snapshot.destinationName} (min ${balanceDisplay(snapshot.display.minReceived, snapshot.outputToken.symbol, snapshot.destinationChainId).text}).`
                       : delivery?.status === 'recovered'
                       ? `The swap on ${snapshot.destinationName} did not run, so the bridge paid your address there in the token it carried rather than ${displayTokenSymbol(snapshot.outputToken.symbol)}.`
                       : delivery?.status === 'failed'
-                        ? `Bridge delivery failed${delivery.detail ? `: ${delivery.detail}` : ''}. Destination-swap failures refund to your address on ${snapshot.destinationName}; certain bridge failures refund to the source-chain RelaySwaps contract and need relayer assistance to recover.`
-                        : `${deliveryProgress ?? 'Tracking the bridge…'} Delivery pending on ${snapshot.destinationName}.`}
+                        ? `Bridge delivery failed${delivery.detail ? `: ${deliveryShareText(delivery.detail)}` : ''}. Destination-swap failures refund to your address on ${snapshot.destinationName}; certain bridge failures refund to the source-chain RelaySwaps contract and need relayer assistance to recover.`
+                        : `${deliveryProgress ?? 'Tracking the bridge…'} Delivery pending on ${snapshot.destinationName}.`} />
                   </Text>
                 )}
                 {explorerUrl && (
@@ -3637,6 +3762,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
           deposit modal uses. The network pane IS the destination-chain
           picker; it lists one chain until cross-chain destinations exist. */}
       {isOpen && selectorOpen && (
+        <HubErrorBoundary onRetry={() => setSelectorOpen(false)}>
         <TokenNetworkSelector
           tokens={outputTokens}
           networks={destinationChains}
@@ -3662,6 +3788,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
           onClose={() => setSelectorOpen(false)}
           networkTitle="Destination network"
         />
+        </HubErrorBoundary>
       )}
     </SwapModalContext.Provider>
   );

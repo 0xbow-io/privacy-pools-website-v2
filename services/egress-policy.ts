@@ -239,8 +239,11 @@ export const ASP_ROUTES: AspRoute[] = [
     // no 'asset' here (egress-policy-coverage derives this set from both).
     params: ['sinceId'],
   },
-  // Public keystore registry, consumed by services/viewing-key-cache.ts.
-  { path: new RegExp(`^/${CHAIN}/public/viewing-keys$`), params: ['sinceId'] },
+  // Public keystore registries, consumed by services/viewing-key-cache.ts and
+  // services/nullifying-key-hash-cache.ts. 'entrypoint' is the configured pool,
+  // selecting its keystore on a chain whose pools use more than one.
+  { path: new RegExp(`^/${CHAIN}/public/viewing-keys$`), params: ['sinceId', 'entrypoint'], opaqueParams: ['entrypoint'] },
+  { path: new RegExp(`^/${CHAIN}/public/nullifying-key-hashes$`), params: ['sinceId', 'entrypoint'], opaqueParams: ['entrypoint'] },
   {
     path: new RegExp(`^/${CHAIN}/public/ppusdc-rate-history$`),
     params: ['asset', 'sinceId'],

@@ -16,14 +16,15 @@ import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
 import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import { formatUnits } from 'viem';
 
+import { useStellarConnectAction } from '@/hooks/use-stellar-connect-action';
 import { useStellarWallet } from '@/components/stellar-wallet-provider';
 import { useTransferModal } from '@/components/transfer-modal-provider';
 import { STELLAR_TESTNET_ID, getExplorerTxUrl } from '@/config/chains';
-import { STELLAR_XLM } from '@/config/stellar-deployment';
+import { STELLAR_XLM, stellarTransferRelayFee } from '@/config/stellar-deployment';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { toStellarSdkPaymentRequest } from '@/services/payment-request-codec';
-import { describeStellarStage, stellarErrorMessage } from '@/services/stellar/stellar-copy';
+import { describeStellarStage, stellarErrorMessage, stellarActionError } from '@/services/stellar/stellar-copy';
 import { decodeStellarPayLink, isStellarRequestExpired, type DecodedStellarRequest } from '@/services/stellar/stellar-request';
 import { selectGreedyTransferInputs, TRANSFER_MAX_INPUTS, TRANSFER_MAX_LABELS } from '@/services/transfer-note-selection';
 import type { Note as UiNote } from '@/services/sdk-types';
@@ -55,6 +56,9 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
   const stroops = link ? BigInt(link.request.amount) : null;
   const amountText = stroops !== null ? formatUnits(stroops, STELLAR_XLM.decimals) : null;
   const amountLabel = amountText ? `${amountText} XLM` : null;
+  // Paid through the relayer: its fee comes on top of the amount.
+  const relayFee = stellarTransferRelayFee();
+  const totalLabel = stroops !== null ? `up to ${formatUnits(stroops + relayFee, STELLAR_XLM.decimals)} XLM` : null;
   const paymentCode = link
     ? short(link.format === 'blind' ? link.request.paymentId.replace(/^0x/, '') : link.request.requestId.replace(/-/g, ''))
     : '';
@@ -65,6 +69,12 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
   // Disconnected counts too: a first press connects and signs in, the next one pays.
   const needsSignIn = link?.format === 'blind' && (!wallet.isConnected || !stellarSession.unlocked);
 
+  const openWalletPicker = useStellarConnectAction(encoded, () => {
+    if (!link || isOwnRequest || paidTx || (link.format === 'blind' && isStellarRequestExpired(link.request))) return;
+    if (link.format === 'blind') void signIn();
+    else void payByAddress();
+  });
+
   const ensureStellar = async (): Promise<boolean> => {
     if (activeChainId !== STELLAR_TESTNET_ID) {
       const outcome = await selectChain(STELLAR_TESTNET_ID);
@@ -74,16 +84,13 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
       }
     }
     if (!wallet.isConnected) {
-      const connected = await wallet.connect();
-      if (!connected) {
-        setError(wallet.isAvailable ? 'Connect Freighter to pay.' : 'Install Freighter to pay.');
-        return false;
-      }
+      await openWalletPicker();
+      return false;
     }
     return true;
   };
 
-  const payByAddress = async () => {
+  async function payByAddress() {
     if (link?.format !== 'address' || !amountText) return;
     const request = link.request;
     setError(null);
@@ -98,10 +105,10 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
         if (details && details.recipient === request.recipient && details.amount === amountText) setPaidTx(txHash);
       },
     });
-  };
+  }
 
   // Explicit user action: unlock and sync, so the balance below is current.
-  const signIn = async () => {
+  async function signIn() {
     setError(null);
     setBusy(true);
     try {
@@ -114,7 +121,7 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
       setStatus(null);
       setBusy(false);
     }
-  };
+  }
 
   const payBlind = async () => {
     if (link?.format !== 'blind' || stroops === null || busy) return;
@@ -129,16 +136,19 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
       await signIn();
       return;
     }
+    // A relayed payment pays the relayer's fee from the same notes.
+    const fee = stellarTransferRelayFee();
+    const need = stroops + fee;
     const pick = selectGreedyTransferInputs(
       stellarSession.spendableNotes as unknown as UiNote[],
-      stroops,
+      need,
       TRANSFER_MAX_INPUTS,
       TRANSFER_MAX_LABELS,
     );
     if (!pick.covered) {
       const available = formatUnits(stellarSession.spendableTotal, STELLAR_XLM.decimals);
-      setError(stellarSession.spendableTotal < stroops
-        ? `Insufficient Stellar balance (${available} XLM available).`
+      setError(stellarSession.spendableTotal < need
+        ? `Insufficient Stellar balance (${available} XLM available${fee > 0n ? `, plus a relayer fee of up to ${formatUnits(fee, STELLAR_XLM.decimals)} XLM` : ''}).`
         : `One transfer can spend up to ${TRANSFER_MAX_INPUTS} notes from ${TRANSFER_MAX_LABELS} deposits.`);
       return;
     }
@@ -154,7 +164,7 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
       const raw = e instanceof Error ? `${e.name} ${e.message}` : String(e);
       setError(/PaymentRequestExpired/.test(raw)
         ? 'This payment request has expired. Ask for a new link.'
-        : /reject|denied|cancel|declined/i.test(raw) ? 'Payment cancelled in Freighter.' : stellarErrorMessage(raw));
+        : stellarActionError(e, 'Payment cancelled in your wallet.'));
     } finally {
       setStatus(null);
       setBusy(false);
@@ -201,12 +211,16 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
               <Text className="font-pp-medium text-[14px] text-text">1x Private pool payment</Text>
               <Text className="font-pp-semi-bold text-[14px] text-text">{amountLabel}</Text>
             </View>
+            <View className="flex-row items-center justify-between gap-[12px]">
+              <Text className="font-pp-medium text-[14px] text-text">Relayer fee</Text>
+              <Text className="font-pp-semi-bold text-[14px] text-text" testID="stellar-pay-fee">up to {formatUnits(relayFee, STELLAR_XLM.decimals)} XLM</Text>
+            </View>
 
             <View className="border-t border-dashed border-border-light" />
 
             <View className="flex-row items-center justify-between">
               <Text className="font-pp-bold text-[16px] text-text">Total</Text>
-              <Text className="font-pp-bold text-[16px] text-text">{amountLabel}</Text>
+              <Text className="font-pp-bold text-[16px] text-text">{totalLabel}</Text>
             </View>
 
             <View className="gap-[8px]">

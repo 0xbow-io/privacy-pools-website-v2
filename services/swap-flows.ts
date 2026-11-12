@@ -31,7 +31,7 @@ import {
   lifiAddressesKnownForChain,
 } from '@/config/lifi-addresses';
 import { acrossDirectSourceChainIds, isAcrossSpokePool } from '@/config/across-direct';
-import { displayTokenSymbol, isShareSymbol, tokenAmountLabel, approxUnderlyingText } from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol, tokenAmountLabel } from '@/services/share-display';
 import type { Address, Hash, Hex, SwapStatusLike } from '@/services/sdk-types';
 import { prepareSizedAgain } from '@/services/yield-sizing-race';
 
@@ -463,7 +463,7 @@ export function describeSwapSendsSoFar(
   cleanup?: AllowanceCleanup,
   swap?: SwapSubmissionState | null,
 ): string {
-  const symbol = token?.symbol ?? 'your pay token';
+  const symbol = token ? displayTokenSymbol(token.symbol) : 'your pay token';
   const stillLive = liveAllowancesAfter(sent);
   const broadcast = broadcastApprovals(sent);
   const pending = broadcast.filter((record) => record.pending);
@@ -1638,7 +1638,7 @@ export function shapeReshieldForDisplay(
   const amountText = (value: bigint, units: { symbol: string; decimals: number }) => {
     const figure = formatUnitsText(value, units.decimals, fractionDigitsFor(value, units.decimals));
     const symbol = displayTokenSymbol(units.symbol);
-    return isShareSymbol(units.symbol) ? `≈ ${figure} ${symbol}` : `${figure} ${symbol}`;
+    return isShareSymbol(units.symbol) ? tokenAmountLabel(figure, units.symbol) : `${figure} ${symbol}`;
   };
   const inputText = (raw: string) => amountText(hexToBigInt(raw), input);
   const outputText = (raw: string) => amountText(hexToBigInt(raw), output);
@@ -1736,7 +1736,7 @@ export function assertReshieldRelayAmount(
   /** Units of the FROM token, so a refusal reads as an amount, not as raw base units on the Review screen. */
   units?: { decimals: number; symbol: string },
 ): void {
-  const show = (wei: bigint) => (units ? approxUnderlyingText(`${formatUnitsText(wei, units.decimals)} ${units.symbol}`, units.symbol) : wei.toString());
+  const show = (wei: bigint) => (units ? tokenAmountLabel(formatUnitsText(wei, units.decimals), units.symbol) : wei.toString());
   const net = hexToBigInt(quote.netAmount);
   const fee = hexToBigInt(quote.feeAmount || '0');
   if (net <= 0n) {
@@ -2411,7 +2411,7 @@ export async function runReshieldCrosschain(
   // before any estimate, when the output is not a share or the build lacks them.
   const transfer = params.recipient ? requireTransferCrosschainSession(sourceSession) : null;
   if (transfer && !needsShareRoute) {
-    throw new ReshieldPreflightError('This asset cannot be sent privately to that network. Pick a pool share, or use Withdraw.');
+    throw new ReshieldPreflightError('This asset cannot be sent privately to that network. Pick a supported token, or use Withdraw.');
   }
   if (needsShareRoute && !transfer) redepositYieldTarget(destinationSession, params.outputToken, true);
   const gross = toHex(params.grossWei);
