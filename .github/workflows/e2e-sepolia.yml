@@ -91,6 +91,9 @@ jobs:
           EXPO_PUBLIC_APP_ENV=staging
           TEST_MODE=true
           EXPO_PUBLIC_ASP_URL=https://api-dev.0xbow.io
+          # Public-repo defaults use .example placeholders. This instance's
+          # /v1/details matches Sepolia's pool, relay and transfer signer.
+          EXPO_PUBLIC_SEPOLIA_RELAYER_URL=https://relayer-v2-staging-149184580131.us-east1.run.app
           EXPO_PUBLIC_ALCHEMY_KEY=${{ secrets.EXPO_PUBLIC_ALCHEMY_KEY }}
           EXPO_PUBLIC_BATCH_WITHDRAWALS=true
           EOF
