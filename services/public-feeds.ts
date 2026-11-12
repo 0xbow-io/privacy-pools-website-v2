@@ -1,3 +1,4 @@
+import { BULK_REGISTRY_INTERVAL_MS, refreshBulkKeystoreRegistry } from '@/services/keystore-bulk-feed';
 /**
  * THE list of public feeds this app fetches.
  *
@@ -329,6 +330,11 @@ export function startPublicFeeds(): void {
       // to the same interval, so an extra tick before that window elapses is
       // a cheap no-op read, not a second request.
       const chainKeystoreAddress = LEGACY_CONFIG?.keystore ?? getChainConfig(chainId)?.contracts?.keystoreAddress;
+      publicFeeds.register<string>({
+        key: `bulk-keystore-registry:${chainId}`,
+        intervalMs: BULK_REGISTRY_INTERVAL_MS,
+        fetch: () => refreshBulkKeystoreRegistry(chainId, chainKeystoreAddress),
+      });
       publicFeeds.register<SyncOutcome>({
         key: feedViewingKeyRegistry(chainId),
         intervalMs: FULL_RESYNC_INTERVAL_MS,

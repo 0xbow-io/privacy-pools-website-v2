@@ -23,6 +23,8 @@ const { confirmedRegistration, onConfirmedRegistration } = await import('@/servi
 const { lookupOwnViewingKey } = await import('@/services/keystore-scope');
 const { identityStatusFromRegistry, ownRegistrationRefusal, REGISTRATION_UNCONFIRMED_MESSAGE } = await import('@/services/keystore-identity-status');
 const { REGISTRY_SYNCING_MESSAGE } = cache;
+const { readBulkRegistry, resetBulkRegistriesForTests, sweepBulkRegistry } = await import('@/services/keystore-bulk-fallback');
+const { lookupViewingKey } = await import('@/services/viewing-key-cache');
 
 const CHAIN = 1;
 const OWNER = '0x00000000000000000000000000000000000a11ce';
@@ -61,8 +63,26 @@ const sdkIsRegistered = async (i: { getNullifyingKeyHash: (a: string) => Promise
 const sdkIsViewingKeySet = async (i: { getViewingKey: (a: string) => Promise<unknown> }) => BigInt((await i.getViewingKey(OWNER)) as string) !== ZERO;
 
 beforeEach(() => {
+  resetBulkRegistriesForTests();
   store.clear();
   cache.resetNullifyingKeyHashCacheForTests();
+});
+
+test('own identity and recipient preflight use a complete bulk-chain fallback without any lookup request', async () => {
+  if (!SCOPED) throw new Error('test requires a configured keystore');
+  expect((await lookupViewingKey(CHAIN, OWNER, { keystoreAddress: SCOPED })).lookupFailed).toBe(true);
+  await sweepBulkRegistry(CHAIN, SCOPED, 0n, 100n, {
+    head: async () => 10n, blockHash: async () => 'same',
+    events: async () => [
+      { kind: 'auth', account: OWNER, value: MINE, blockNumber: 1n, logIndex: 0 },
+      { kind: 'viewing', account: OWNER, value: VK, blockNumber: 1n, logIndex: 1 },
+    ],
+  });
+  expect(readBulkRegistry(CHAIN, SCOPED)).not.toBeNull();
+  expect(cache.readRegistryView(CHAIN, OWNER, SCOPED)).toMatchObject({ nullifyingKeyHash: MINE, nullifyingFresh: true, viewingKey: VK, viewingFresh: true });
+  expect(await lookupViewingKey(CHAIN, OWNER, { keystoreAddress: SCOPED })).toMatchObject({ viewingKey: VK, source: 'cache', aspAvailable: false });
+  expect(await lookupViewingKey(CHAIN, RECIPIENT, { keystoreAddress: SCOPED })).toEqual({ viewingKey: null, source: 'cache', aspAvailable: false });
+  expect((await lookupViewingKey(2, OWNER, { keystoreAddress: SCOPED })).lookupFailed).toBe(true);
 });
 
 describe('own-account reads never reach the chain when the registries answer', () => {
@@ -85,21 +105,21 @@ describe('own-account reads never reach the chain when the registries answer', (
     expect(calls).toEqual([]);
   });
 
-  test('missing data is NOT unregistered: the chain answers at once, no wait, no refusal', async () => {
+  test('missing data stays unknown without an account request', async () => {
     const { interactor, calls } = fakeChain({ hash: MINE, viewingKey: VK });
     routeOwnKeystoreReads(interactor, { chainId: CHAIN, ownerAddress: OWNER });
     const started = Date.now();
-    expect(await sdkIsRegistered(interactor)).toBe(true);
-    expect(await sdkIsViewingKeySet(interactor)).toBe(true);
+    await expect(sdkIsRegistered(interactor)).rejects.toThrow(REGISTRY_SYNCING_MESSAGE);
+    await expect(sdkIsViewingKeySet(interactor)).rejects.toThrow(REGISTRY_SYNCING_MESSAGE);
     expect(Date.now() - started).toBeLessThan(1_000);
-    expect(calls.map((c) => c.method)).toEqual(['getNullifyingKeyHash', 'getViewingKey']);
+    expect(calls).toEqual([]);
   });
 
-  test('missing data with an unregistered chain reads as unregistered only because the CHAIN said so', async () => {
+  test('a chain zero cannot turn unavailable bulk data into unregistered', async () => {
     const { interactor, calls } = fakeChain();
     routeOwnKeystoreReads(interactor, { chainId: CHAIN, ownerAddress: OWNER });
-    expect(await sdkIsRegistered(interactor)).toBe(false);
-    expect(calls.length).toBe(1);
+    await expect(sdkIsRegistered(interactor)).rejects.toThrow(REGISTRY_SYNCING_MESSAGE);
+    expect(calls).toEqual([]);
   });
 
   test('a failed chain read stays a failure, never "unregistered"', async () => {
@@ -108,8 +128,8 @@ describe('own-account reads never reach the chain when the registries answer', (
       getViewingKey: async () => { throw new Error('rpc down'); },
     };
     routeOwnKeystoreReads(interactor, { chainId: CHAIN, ownerAddress: OWNER });
-    await expect(sdkIsRegistered(interactor)).rejects.toThrow('rpc down');
-    await expect(sdkIsViewingKeySet(interactor)).rejects.toThrow('rpc down');
+    await expect(sdkIsRegistered(interactor)).rejects.toThrow(REGISTRY_SYNCING_MESSAGE);
+    await expect(sdkIsViewingKeySet(interactor)).rejects.toThrow(REGISTRY_SYNCING_MESSAGE);
   });
 
   test('a stale registry still answers a write-once hash hit, but not a miss', async () => {
@@ -117,8 +137,8 @@ describe('own-account reads never reach the chain when the registries answer', (
     const { interactor, calls } = fakeChain();
     routeOwnKeystoreReads(interactor, { chainId: CHAIN, ownerAddress: OWNER });
     expect(await sdkIsRegistered(interactor)).toBe(true);
-    await interactor.getNullifyingKeyHash(RECIPIENT.replace('b0b', 'c0c'));
-    expect(calls.map((c) => c.account)).toEqual([RECIPIENT.replace('b0b', 'c0c')]);
+    await expect(interactor.getNullifyingKeyHash(RECIPIENT.replace('b0b', 'c0c'))).rejects.toThrow(REGISTRY_SYNCING_MESSAGE);
+    expect(calls).toEqual([]);
   });
 });
 
@@ -182,7 +202,7 @@ describe('a registration confirmed by a receipt lets register-then-deposit proce
   });
 });
 
-describe('one policy for every own-account read: registry first, then the chain, never a wait', () => {
+describe('one registry-only policy for every SDK account read', () => {
   /** Every own-account path the SDK walks, over one interactor. */
   const paths = (interactor: Parameters<typeof sdkIsRegistered>[0] & Parameters<typeof sdkIsViewingKeySet>[0]) => ({
     deposit: () => sdkIsRegistered(interactor),
@@ -192,18 +212,14 @@ describe('one policy for every own-account read: registry first, then the chain,
     exit: () => sdkIsRegistered(interactor),
   });
 
-  test('stale or empty registry: every path goes to the chain and succeeds at once', async () => {
+  test('stale or empty registry: every path refuses without calling the chain', async () => {
     const { interactor, calls } = fakeChain({ hash: MINE, viewingKey: VK });
     routeOwnKeystoreReads(interactor, { chainId: CHAIN, ownerAddress: OWNER });
     const started = Date.now();
     const p = paths(interactor);
-    expect(await p.deposit()).toBe(true);
-    expect(await p.registration()).toEqual([true, true]);
-    expect(await p.paymentRequest()).toBe(true);
-    expect(await p.spend()).toBe(true);
-    expect(await p.exit()).toBe(true);
+    for (const read of Object.values(p)) await expect(read()).rejects.toThrow(REGISTRY_SYNCING_MESSAGE);
     expect(Date.now() - started).toBeLessThan(1_000);
-    expect(calls.length).toBe(6);
+    expect(calls).toEqual([]);
   });
 
   test('registry hit: ZERO account-keyed reads on every own-account path', async () => {
@@ -219,7 +235,7 @@ describe('one policy for every own-account read: registry first, then the chain,
     expect(calls).toEqual([]);
   });
 
-  test('concurrent reads do not influence each other: a hit stays local while a miss goes to the chain', async () => {
+  test('concurrent reads do not influence each other: a hit stays local while a miss refuses', async () => {
     // Only the hash registry is current: B's viewing read has no answer locally.
     store.set(envScopedStorageKey(`ppv2_nullifying_key_hashes_v1_${CHAIN}`), JSON.stringify({ byAccount: { [OWNER]: MINE }, lastSyncedId: '1', lastSyncedAt: Date.now() }));
     const a = fakeChain({ hash: MINE });
@@ -232,13 +248,12 @@ describe('one policy for every own-account read: registry first, then the chain,
     const gate = new Promise<void>((r) => { release = r; });
     // A long spend in flight on A (proofs take seconds) while B reads.
     const spend = (async () => { await gate; return a.interactor.getNullifyingKeyHash(OWNER); })();
-    const viewing = await b.interactor.getViewingKey(OTHER_OWNER);
+    await expect(b.interactor.getViewingKey(OTHER_OWNER)).rejects.toThrow(REGISTRY_SYNCING_MESSAGE);
     release();
     expect(await spend).toBe(MINE);
-    expect(viewing).toBe(`0x${'0'.repeat(64)}`);
-    // A answered from the registry (no read), B asked the chain once.
+    // Neither session sent an account-keyed read.
     expect(a.calls).toEqual([]);
-    expect(b.calls.map((c) => c.method)).toEqual(['getViewingKey']);
+    expect(b.calls).toEqual([]);
   });
 
   test('there is no shared mutable scope left, and every wrapper is gone', () => {
@@ -274,25 +289,22 @@ describe('one policy for every own-account read: registry first, then the chain,
   });
 });
 
-describe('recipients keep their behavior', () => {
-  test('a recipient or counterparty read goes to the chain exactly as before', async () => {
+describe('recipients also stay local', () => {
+  test('a recipient or counterparty reads the complete registry', async () => {
     seedCurrentRegistries({ [RECIPIENT]: MINE }, { [RECIPIENT]: VK });
     const { interactor, calls } = fakeChain({ hash: MINE, viewingKey: VK });
     routeOwnKeystoreReads(interactor, { chainId: CHAIN, ownerAddress: OWNER });
     expect(await interactor.getViewingKey(RECIPIENT)).toBe(VK);
     expect(await interactor.getNullifyingKeyHash(RECIPIENT)).toBe(MINE);
-    expect(calls).toEqual([
-      { method: 'getViewingKey', account: RECIPIENT },
-      { method: 'getNullifyingKeyHash', account: RECIPIENT },
-    ]);
+    expect(calls).toEqual([]);
   });
 
-  test('the recipient prechecks (deposit-for, transfer, claim link) still use lookupViewingKey, untouched', () => {
+  test('recipient prechecks and preparation use the bulk registry', () => {
     const src = (rel: string) => readFileSync(join(__dirname, '../..', rel), 'utf8');
     expect(src('components/deposit-modal-provider.tsx')).toContain('lookupViewingKey(');
     expect(src('components/transfer-modal-provider.tsx')).toContain('lookupViewingKey(');
-    // Only the signed-in account is routed; the transfer deps take it as an option.
-    expect(src('services/relayed-transfer.ts')).toContain('if (ownerAddress) {');
+    expect(src('services/relayed-transfer.ts')).toContain('readRegistryView(chainId, evmAddress');
+    expect(src('services/relayed-transfer.ts')).not.toContain('keystore.getViewingKey');
   });
 });
 
