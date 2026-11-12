@@ -16,7 +16,7 @@ import { fixtureBarrier } from './fixture-barrier';
 import { envValue, paymentRequestEth } from './funding';
 import { parseEther } from 'viem';
 import {
-  account, accountFromKey, openApp, signIn, tab, enterAmount, clickButton,
+  account, accountFromKey, openApp, signIn, tab, enterAmount, clickButton, clickWhenReady,
   unlockIfPrompted, sleep,
   requestPillSymbol,
   payPrivateRequest, ensurePaymentFunding, selectToken, accountNotes,
@@ -94,7 +94,8 @@ try {
       record('create request', false, 'amount field not found on the request card');
     } else {
       await sleep(1500);
-      if (!(await clickButton(payee.page, 'Create request'))) {
+      if (!(await clickWhenReady(payee.page, 'Create request'))) {
+        await payee.shot('request-create-unavailable');
         record('create request', false, 'Create request not pressable');
       } else {
         payUrl = await waitForUnlockedLink(payee.page, '/pay#');

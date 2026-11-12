@@ -2,7 +2,7 @@
 import { expect } from 'bun:test';
 import { launchChrome } from '../../lib/chrome.mjs';
 import { installUnlockGateHandler, unlockIfPrompted, waitForUnlockedLink } from '../unlock-gate';
-import { fillRecipient, waitForShieldedBalance } from '../lib';
+import { clickWhenReady, fillRecipient, waitForShieldedBalance } from '../lib';
 
 const browser = await launchChrome({ headless: true });
 try {
@@ -74,6 +74,13 @@ try {
   expect(await balance.locator('button[aria-label="Sync balances"]').getAttribute('data-clicked')).toBeNull();
   console.log('PASS scheduled balance resolves without repeated global Sync presses');
   await balance.close();
+  const cta = await browser.newPage();
+  await cta.setContent('<button disabled onclick="this.dataset.clicks=String(Number(this.dataset.clicks || 0)+1)">Create request</button>');
+  await cta.evaluate(() => { setTimeout(() => { document.querySelector('button')!.disabled = false; }, 100); });
+  expect(await clickWhenReady(cta, 'Create request', 5000)).toBe(true);
+  expect(await cta.locator('button').getAttribute('data-clicks')).toBe('1');
+  console.log('PASS delayed request CTA is clicked exactly once after enabling');
+  await cta.close();
   const page = await browser.newPage();
   await page.setContent('<div style="position:fixed;inset:0"><h2>Unlock your account</h2><button>Sign in</button></div>');
   await expect(unlockIfPrompted(page, 100)).rejects.toThrow('did not finish');

@@ -12,7 +12,7 @@ import { type Browser, type Page } from 'playwright';
 import { launchChrome } from '../lib/chrome.mjs';
 import type { CapturedRequest } from './network-privacy';
 import { startNetworkCapture } from './network-capture';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { createPublicClient, decodeFunctionData, formatEther, http, parseEther } from 'viem';
 import { ENTRYPOINT_DEPOSIT_ABI } from '@privacy-pools-v2/sdk';
 import { sepolia } from 'viem/chains';
@@ -106,6 +106,8 @@ export async function openApp(
   startCapture: () => Promise<void>;
   stopCapture: () => Promise<void>;
 }> {
+  // Backups can be written before the first screenshot creates this folder.
+  mkdirSync(`${ROOT}/.e2e-shots`, { recursive: true, mode: 0o700 });
   // Google Chrome stable, sandbox on, version-checked: see scripts/lib/chrome.mjs.
   const browser = await launchChrome({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1200 }, reducedMotion: 'reduce', serviceWorkers: 'block' });
@@ -487,6 +489,17 @@ export async function clickButton(page: Page, label: string): Promise<boolean> {
     await element.click();
     return true;
   } finally { await handle.dispose(); }
+}
+
+/** Wait for a mounting/enabling CTA, stopping after the first successful click. */
+export async function clickWhenReady(page: Page, label: string, timeoutMs = 30_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await unlockIfPrompted(page);
+    if (await clickButton(page, label)) return true;
+    await sleep(250);
+  }
+  return false;
 }
 
 /**
