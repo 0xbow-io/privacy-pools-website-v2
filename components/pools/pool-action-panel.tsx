@@ -176,7 +176,11 @@ export function PoolActionPanel({
   const spendableExact = pool?.balanceTokenExact ?? '0';
   const balanceDisplay = useBalanceDisplay(activeChainId);
   const balanceView = balanceDisplay(spendableExact, symbol, activeChainId, pool?.tokenAddress);
-  const amountField = useShareAmountField({ amount, symbol, chainId: activeChainId, maxSharesExact: spendableExact, capKnown: !poolsLoading, onAmountResolved: setTypedAmount, underlyingEntry: action === 'withdraw' || action === 'transfer' });
+  // Swap is typed in the coin too ("10 USDC", never 10 shares) and hands exact
+  // shares to the swap modal; like the hub's Swap tab it is never cut to the
+  // balance, so the swap flow's own insufficient-balance error answers it.
+  const amountField = useShareAmountField({ amount, symbol, chainId: activeChainId, maxSharesExact: spendableExact, capKnown: !poolsLoading, onAmountResolved: setTypedAmount,
+    underlyingEntry: action === 'withdraw' || action === 'transfer' || action === 'swap', clampToMax: action !== 'swap' });
 
   /**
    * Fill the amount with a fraction of the spendable balance. Base-unit

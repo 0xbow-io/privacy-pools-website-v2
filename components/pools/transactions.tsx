@@ -46,6 +46,7 @@ import { useDrawerHost, launchFromDrawer } from '@/components/home/drawer-host';
 import { getUiParam, pushUiParamEntry, retireUiParamEntry, rebaseUiParamEntry, subscribeUiUrl } from '@/components/ui-url-events';
 import { usePools, type Transaction } from '@/components/pools-provider';
 import { useRagequitModal } from '@/components/ragequit-modal-provider';
+import { stellarIncomingActions } from '@/services/stellar-activity';
 import { useWithdrawModal } from '@/components/withdraw-modal-provider';
 import { useAccountRecoveryModal } from '@/components/account-recovery-modal-provider';
 import { useNotes } from '@/hooks/use-notes';
@@ -1441,7 +1442,7 @@ export function Transactions({
   const stellarWallet = useStellarWallet();
   const stellarWalletAddress = stellarWallet.isConnected ? stellarWallet.address ?? null : null;
   const { openSeedDerivationModal: openEvmSignIn } = useSeedDerivationModal();
-  // Stellar's locked session: same banner, Freighter unlock as the action.
+  // Stellar's locked session: same banner, Varial unlock as the action.
   const requiresWalletUnlock = evmRequiresUnlock || stellarLocked;
   const openSeedDerivationModal = stellarLocked ? unlockStellar : () => openEvmSignIn();
   const sessionLocked = requiresWalletUnlock || keyInitFailed;
@@ -2103,8 +2104,10 @@ export function Transactions({
             && (chainScope === undefined || depositTx.chainId === chainScope);
           // At risk disables Withdraw (the ASP set will not prove it) but keeps
           // Exit: ragequit is the escape hatch for exactly these deposits.
-          const canWithdraw = depositTx.status === 'completed' && depositTx.fundsState !== 'at_risk' && !isFullySpent && isMine;
-          const canExit = (depositTx.status === 'completed' || depositTx.status === 'pending' || depositTx.fundsState === 'at_risk') && !isFullySpent && isMine;
+          const incoming = stellarIncomingActions(tx, notesByChain.get(tx.chainId) ?? [], stellarWalletAddress);
+          const incomingInScope = chainScope === undefined || tx.chainId === chainScope;
+          const canWithdraw = (incomingInScope && incoming.canWithdraw) || depositTx.status === 'completed' && depositTx.fundsState !== 'at_risk' && !isFullySpent && isMine;
+          const canExit = (incomingInScope && incoming.canExit) || (depositTx.status === 'completed' || depositTx.status === 'pending' || depositTx.fundsState === 'at_risk') && !isFullySpent && isMine;
           // The note backup is the EVM account export; a Stellar note is not in it.
           const canExportNote = isMine && depositTx.type === 'Deposit' && depositTx.chainId !== STELLAR_TESTNET_ID;
           // Only pulse for the current user's own pending deposits (a swap's

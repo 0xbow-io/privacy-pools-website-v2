@@ -60,7 +60,7 @@ import { useAllChainsPriceMap } from '@/hooks/use-all-chains-price-map';
 import { getChainConfig, getExplorerName, getExplorerTxUrl, STELLAR_TESTNET_ID, SUI_TESTNET_ID } from '@/config/chains';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { estimateStellarRelayFee, maxStellarWithdrawForInputs } from '@/config/stellar-deployment';
-import { describeStellarStage, stellarErrorMessage } from '@/services/stellar/stellar-copy';
+import { describeStellarStage, stellarActionError } from '@/services/stellar/stellar-copy';
 import { SUI_TESTNET_RELAYER_URL } from '@/config/sui-deployment';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { useSuiSession } from '@/hooks/use-sui-session';
@@ -2241,7 +2241,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     // wallet + an ASP-approved input note (enforced in handleConfirm's isSui path).
     if (isSui) {
       if (!altAccount) {
-        reportWithdrawError(isStellar ? 'Please connect Freighter first.' : 'Please connect your Sui wallet first.');
+        reportWithdrawError(isStellar ? 'Please connect a Stellar wallet first.' : 'Please connect your Sui wallet first.');
         return;
       }
       // Same selection the confirm path runs — refuse review when it would fail.
@@ -2884,9 +2884,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     setLoadingMessage('Preparing withdrawal proof...');
 
     // === Stellar path ===
-    // Self-submitted withdrawal through the shared Stellar account: the same
-    // mixed-label, five-input selection the EVM path uses, then the SDK's own
-    // withdraw (change note back to self, processor = this account).
+    // Relayed withdrawal through the shared Stellar account: the same
+    // mixed-label, five-input selection the EVM path uses, then the SDK's
+    // relayed withdraw (change note back to self, processor = the relay contract).
     if (reviewContext?.mode === 'sui' && reviewContext.poolChainId === STELLAR_TESTNET_ID) {
       try {
         const amountOut = parseTokenAmount(amount, altDecimals);
@@ -2897,7 +2897,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         if (selection.total < gross) {
           throw new Error(`Not enough to cover the amount plus the relayer fee within ${WITHDRAW_MAX_INPUTS} notes. Withdraw a smaller amount.`);
         }
-        // The reviewed recipient only, never the Freighter account.
+        // The reviewed recipient only, never the Varial account.
         const recipient = explicitRecipient(reviewContext.recipient, (a) => STELLAR_RECIPIENT_RE.test(a));
         if (!recipient) throw new Error(RECIPIENT_REQUIRED_MESSAGE);
         if (!isSameOperation()) { log('warn', 'Withdraw', 'Stale run aborted before Stellar broadcast'); return; }
@@ -2917,7 +2917,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       } catch (err) {
         const raw = err instanceof Error ? err.message : String(err);
         if (/Superseded/.test(raw)) return;
-        const message = /reject|denied|cancel|declined/i.test(raw) ? 'Transaction was rejected.' : stellarErrorMessage(raw);
+        const message = stellarActionError(err);
         log('error', 'Withdraw', `Stellar withdraw failed: ${raw}`, err);
         reportWithdrawError(message);
         submittedRef.current = false;

@@ -201,7 +201,7 @@ export function ChainProvider({ children }: { children: React.ReactNode }) {
     }
   }, [suiAccount?.address, selectedChainId]);
 
-  // Same transition rule for the Stellar wallet (Freighter).
+  // Same transition rule for the Stellar wallet (Varial).
   const prevStellarAddressRef = useRef<string | null>(null);
   const stellarAddress = stellarWallet.isConnected ? stellarWallet.address : null;
   useEffect(() => {

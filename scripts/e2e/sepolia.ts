@@ -25,6 +25,7 @@ import {
   selectToken, awaitNativeDeposit, openTransactionDetail, accountNotes, waitForApprovedDeposit, waitForInitialDiscovery,
 } from './lib';
 import { fixtureBarrier } from './fixture-barrier';
+import { canRetryExpiredWithdrawal } from './withdrawal-retry';
 import { DISCOVERY_GRID, PRICE_GRID, phaseShift } from './window-phase';
 import { collectJourneySecrets, resolveHosts, runNetworkPrivacyGate, reportJourneyPrivacy, type TimingWindow } from './privacy-gate';
 import { recordPublicState } from './public-state-fixture.mjs';
@@ -168,6 +169,13 @@ async function settleSnapshotBackstop(p: Page): Promise<number | null> {
  * instrument the withdrawal itself.
  */
 async function measureFormTiming(p: Page, amt: string): Promise<void> {
+  // Resolve the real spending gate before freezing public responses for the
+  // timing experiment. Pinning a mid-refresh association set can otherwise
+  // preserve a loading/mismatched generation throughout the measured window.
+  if (!(await tab(p, 'Withdraw'))) throw new Error('Withdraw tab never became active before timing controls');
+  await selectToken(p, 'Withdraw');
+  await waitForShieldedBalance(p);
+  await tab(p, 'Shield');
   const restoreSnapshots = await pinPublicState();
   try {
     // This policy covers preparation, before consent to disclose a transaction.
@@ -321,7 +329,7 @@ async function doShield(p: Page, requested: string): Promise<string | null> {
  * balance can only move one way. E2E_WITHDRAW_TO overrides it, and CI's drain
  * sends the leftovers to the mother instead.
  */
-async function doWithdraw(p: Page, requested: string, capRetriesLeft = 1): Promise<boolean> {
+async function doWithdraw(p: Page, requested: string, capRetriesLeft = 1, quoteRetriesLeft = 2): Promise<boolean> {
   const amt = capped(requested, 'withdrawal');
   const to = (process.env.E2E_WITHDRAW_TO as `0x${string}` | undefined) ?? acct.address;
   if (!(await tab(p, 'Withdraw'))) { record('withdraw', false, 'Withdraw tab never became active'); return false; }
@@ -395,6 +403,12 @@ async function doWithdraw(p: Page, requested: string, capRetriesLeft = 1): Promi
     /Withdrawal Successful|transaction reverted|Withdrawal failed|Withdrawal outcome unknown|most you can withdraw right now is/i,
     900_000,
   );
+  if (canRetryExpiredWithdrawal(panel ?? '') && quoteRetriesLeft > 0) {
+    console.log('  quote expired before submission; accepting the explicit fresh-quote retry');
+    if (!(await clickButton(p, 'Try Again'))) throw new Error('Expired quote did not offer Try Again');
+    await sleep(2000);
+    return doWithdraw(p, requested, capRetriesLeft, quoteRetriesLeft - 1);
+  }
   // A balance split across many small deposits caps a single withdrawal (up to
   // 5 notes from ONE deposit), and the app says exactly what that cap is. The
   // phase used to fail on the cap and then wait out the full 10-minute payout
@@ -417,7 +431,7 @@ async function doWithdraw(p: Page, requested: string, capRetriesLeft = 1): Promi
     }
     await clickButton(p, 'Try Again');
     await sleep(2000);
-    return doWithdraw(p, retry, capRetriesLeft - 1);
+    return doWithdraw(p, retry, capRetriesLeft - 1, quoteRetriesLeft);
   }
   if (!/Withdrawal Successful/i.test(panel ?? '')) {
     record('withdraw', false, (await cardError(p)) ?? 'withdrawal did not report success; no payout polling or resubmission');
@@ -780,6 +794,7 @@ async function doRagequit(p: Page): Promise<boolean> {
     record('ragequit', false, `no "Accept and exit" button: ${(await cardError(p)) ?? 'unknown state'}`);
     return false;
   }
+  await registerKeystoreIfPrompted(p);
   const settled = await waitForText(p, /Exit Successful|Ragequit failed|transaction reverted/i, 900_000);
   await shot('ragequit-after');
   if (!/Exit Successful/i.test(settled ?? '')) {

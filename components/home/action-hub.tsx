@@ -55,7 +55,7 @@ import { ACTIVE_ENVIRONMENT } from '@/config/environments';
 import { cappedQuickAmounts, checkDepositCap } from '@/services/deposit-cap';
 import { useAllChainsPriceMap } from '@/hooks/use-all-chains-price-map';
 import { resolveConfiguredEntrypoint } from '@/services/pool-entrypoint';
-import { MoreWalletsButton, useWalletPicker, WalletConnectQr, WalletDeepLinkList, WalletLinksPreparing, WalletNotOpened, WalletOptionContent } from '@/components/wallet-connect-modal-provider';
+import { MoreWalletsButton, useWalletConnectModal, useWalletPicker, WalletConnectQr, WalletDeepLinkList, WalletLinksPreparing, WalletNotOpened, WalletOptionContent } from '@/components/wallet-connect-modal-provider';
 import { PasskeySignInPanel } from '@/components/passkey-sign-in-panel';
 import { usePasskeyAccount } from '@/components/passkey-account-context';
 import { AccountKeySignIn } from '@/components/account-key-sign-in';
@@ -131,6 +131,7 @@ import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { buildFeeBreakdown, gasCostUsd, type FeeGasReading } from '@/services/fee-warning';
 import { AddressAutocomplete } from '@/components/contacts/address-autocomplete';
 import { shieldElsewhere } from '@/services/shield-elsewhere';
+import { pagerResyncTarget } from '@/services/hub-pager-sync';
 
 // Shared content-zone floor = the tallest tab's natural height, so every tab
 // lands on the same card height. Keep this in step with the real tallest tab:
@@ -398,6 +399,7 @@ export function ActionHub({
   // `isSuiChain` / `isStellar` explicitly.
   const isSui = isSuiChain || isStellar;
   const stellarWallet = useStellarWallet();
+  const { open: openStellarWalletPicker } = useWalletConnectModal();
   const { data: stellarBalance, refetch: refetchStellarBalance } = useStellarBalance(isStellar && stellarWallet.isConnected ? stellarWallet.address : null);
   const { toast } = useToast();
   // Full asset/network picker for the deposit form — same sheet the modal
@@ -716,8 +718,22 @@ export function ActionHub({
     };
   }, [actionIndex, pagerW, pagerScrollX, reducedMotion, visibleActions, isFocused]);
   const onPagerScroll = useCallback((e: { nativeEvent: { contentOffset: { x: number } } }) => {
-    if (!pagerUserScrolling.current) return;
     const x = e.nativeEvent.contentOffset.x;
+    // The selected tab is the only truth: a scroll the user did not make (the
+    // browser revealing a focused field) is undone, so the bar and the form
+    // can never name different tabs.
+    const { pagerW: w, visibleActions: acts } = pagerGeometry.current;
+    const back = pagerResyncTarget({
+      offsetX: x,
+      actionIndex: acts.findIndex((v) => v.key === actionRef.current),
+      stride: pageStride(w),
+      userScrolling: pagerUserScrolling.current,
+    });
+    if (back !== null) {
+      pagerRef.current?.scrollTo({ x: back, animated: false });
+      return;
+    }
+    if (!pagerUserScrolling.current) return;
     pagerScrollX.setValue(x);
     if (pagerScrollTimer.current) clearTimeout(pagerScrollTimer.current);
     pagerScrollTimer.current = setTimeout(() => {
@@ -1481,7 +1497,7 @@ export function ActionHub({
   // initializes itself, so it is never "locked" in this sense.
   // EVM session lock only: Sui and Stellar unlock inside their own flows.
   const sessionLocked = !isSui && identityMode === 'wallet' && !keysReady;
-  // Stellar: Freighter connected but the account not unlocked yet, so the
+  // Stellar: Varial connected but the account not unlocked yet, so the
   // shielded figures are not known. Say so instead of showing 0.
   const { stellarLocked, unlockStellar } = useWalletUnlockGate();
   // Cross-chain shield: the pool sits on a different chain than the wallet and
@@ -2259,7 +2275,7 @@ export function ActionHub({
     void refetchNativeBalance();
     void refetchErc20Balance();
     void refetchSuiBalance();
-    // The Freighter account's own balance after its own deposit: the network
+    // The Varial account's own balance after its own deposit: the network
     // already saw that deposit come from this account, so this read adds
     // nothing an observer did not have (same reasoning as the EVM reads).
     if (isStellar) void refetchStellarBalance();
@@ -2804,12 +2820,7 @@ export function ActionHub({
     const canLaunchWithAccountKey = !isSui && identityMode === 'key';
     if (!walletConnected && !canLaunchWithAccountKey) {
       if (isStellar) {
-        // Active Stellar chain: Freighter, or send the user to get it.
-        if (stellarWallet.isAvailable) {
-          void stellarWallet.connect();
-        } else if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          window.open('https://www.freighter.app', '_blank', 'noopener');
-        }
+        void openStellarWalletPicker();
         return;
       }
       if (isSui) {
@@ -4702,7 +4713,12 @@ export function ActionHub({
               <View
                 key={x.key}
                 testID={`hub-page-${x.key}`}
-                ref={(node) => { pageNodes.current[x.key] = node; }}
+                ref={(node) => {
+                  pageNodes.current[x.key] = node;
+                  // Focus (a click, a paste) must never land in an off-screen
+                  // page: the browser would scroll the pager onto it.
+                  if (WEB && node) (node as unknown as HTMLElement).inert = x.key !== action;
+                }}
                 /* nw-keep(measured-or-inset): each page is exactly one measured pager width */
                 style={{ width: pageStride(pagerW), paddingLeft: PAGE_EDGE, paddingRight: PAGE_GUTTER, alignSelf: 'flex-start' }}
                 onLayout={(event) => {
