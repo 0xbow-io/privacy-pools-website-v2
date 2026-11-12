@@ -21,9 +21,9 @@ SDK pricing subpath when one is available.
 
 The application reads these public settings every minute on the shared feed grid
 when Stellar is supported and opted into at page load (or debug is enabled). It
-calculates all five transfer and withdrawal input counts locally. A failed read or settings at
-least two minutes old makes the displayed estimate unavailable; it does not initiate
-a UI-triggered request. The scheduler refreshes stale settings when an idle tab
+calculates all five transfer and withdrawal input counts locally. Missing settings
+or settings at least two minutes old make the displayed estimate unavailable.
+A failed refresh retains the last good settings within that freshness limit. The scheduler refreshes stale settings when an idle tab
 becomes active. The SDK can retry a public RPC snapshot-gap error once.
 The client uses the shared public RPC sender when anonymous RPC is active on
 both dev and main; a routing failure propagates without a direct retry.

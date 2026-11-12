@@ -68,13 +68,18 @@ describe('Stellar display fee', () => {
     expect(readStellarWithdrawalFee({ ...ready, status: 'error', error: new Error('offline') }, 1, 10000000n, 1000)).toBeNull();
   });
 
-  test('missing, failed, stale and invalid-shape cache reads are unavailable', () => {
+  test('fresh cached fees survive a failed refresh; missing, stale and invalid-shape reads are unavailable', () => {
     const ready = { status: 'ready' as const, data: { transfer: [317289n, 390145n, 437862n, 460439n, 483015n], withdrawal: [395273n, 442989n, 490703n, 538420n, 586137n] }, at: 1000 };
     expect(readStellarTransferFee(ready, 1, 1000)).toBe(317289n);
     expect(readStellarTransferFee(ready, 5, 1000 + 2 * STELLAR_FEE_INTERVAL_MS - 1)).toBe(483015n);
     expect(readStellarTransferFee(ready, 1, 1000 + 2 * STELLAR_FEE_INTERVAL_MS)).toBeNull();
     expect(readStellarTransferFee({ status: 'empty' }, 1)).toBeNull();
-    expect(readStellarTransferFee({ ...ready, status: 'error', error: new Error('offline'), dataAt: 1000 }, 1, 1001)).toBeNull();
+    const failedRefresh = { ...ready, status: 'error' as const, error: new Error('offline'), dataAt: 1000, at: 61000 };
+    expect(readStellarTransferFee(failedRefresh, 1, 61000)).toBe(317289n);
+    expect(readStellarWithdrawalFee(failedRefresh, 1, 10000000n, 61000)).toBe(445273n);
+    expect(readStellarTransferFee(failedRefresh, 1, 121000)).toBeNull();
+    expect(readStellarWithdrawalFee(failedRefresh, 1, 10000000n, 121000)).toBeNull();
+    expect(readStellarTransferFee({ status: 'error', error: new Error('offline'), at: 1000 }, 1, 1001)).toBeNull();
     for (const n of [0, 6, 1.5, NaN]) expect(readStellarTransferFee(ready, n, 1000)).toBeNull();
     expect(readStellarTransferFee({ ...ready, data: { transfer: [], withdrawal: [] } }, 1, 1000)).toBeNull();
     expect(readStellarTransferFee({ ...ready, data: { transfer: [-1n], withdrawal: [-1n] } }, 1, 1000)).toBeNull();

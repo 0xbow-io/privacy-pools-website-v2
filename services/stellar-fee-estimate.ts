@@ -20,13 +20,15 @@ export function stellarRelayFeeFromResourceFee(resourceFee: bigint): bigint {
 }
 
 function readBaseFee(state: FeedState<StellarFeeEstimates>, operation: keyof StellarFeeEstimates, inputs: number, now: number): bigint | null {
-  if (state.status !== 'ready' || now - state.at >= 2 * STELLAR_FEE_INTERVAL_MS) return null;
+  if (state.status === 'empty') return null;
+  const at = state.status === 'ready' ? state.at : state.dataAt;
+  if (!state.data || at === undefined || now - at >= 2 * STELLAR_FEE_INTERVAL_MS) return null;
   if (!Number.isInteger(inputs) || inputs < 1 || inputs > 5) return null;
   const fee = state.data[operation][inputs - 1];
   return fee !== undefined && fee >= 0n ? fee : null;
 }
 
-/** Cache-only reads. Missing, failed or stale pricing is unknown, as on EVM. */
+/** Cache-only reads. A failed refresh can reuse data within the freshness limit. */
 export function readStellarTransferFee(state: FeedState<StellarFeeEstimates>, inputs: number, now = Date.now()): bigint | null {
   return readBaseFee(state, 'transfer', inputs, now);
 }

@@ -1032,9 +1032,9 @@ class StellarAccount {
   keepClaim(commitments: readonly Hex[], params: { reviewedFee: bigint; onStage?: StageListener; shouldContinue?: () => boolean }) {
     return this.enqueue(async () => {
       const { address, generation } = this.requireSigner();
-      const session = await this.ensureSession(params?.onStage);
+      const session = await this.ensureSession(params.onStage);
       const relayer = await this.connectRelayer(await loadStellarSdk());
-      await this.ensureRegistered(session, generation, params?.onStage, params?.shouldContinue);
+      await this.ensureRegistered(session, generation, params.onStage, params.shouldContinue);
       await this.stampClaimedNotes(session, commitments, true);
       const { notes } = await session.exportAccount();
       const wanted = new Set(commitments.map((c) => BigInt(c)));
@@ -1043,7 +1043,7 @@ class StellarAccount {
         throw new Error('Not spendable yet. Try again after the next sync.');
       }
       this.assertStillBound(generation);
-      params?.onStage?.('proving');
+      params.onStage?.('proving');
       const total = claimed.reduce((sum, n) => sum + BigInt(n.value), 0n);
       const result = await this.withTransferRelayer(relayer, async () => {
         // Relayed: the fee comes out of the claimed notes, and whatever the
@@ -1059,7 +1059,7 @@ class StellarAccount {
         });
       });
       if (!result.txReceipt.status) throw new Error('The transaction failed on-chain.');
-      params?.onStage?.('syncing');
+      params.onStage?.('syncing');
       await this.refreshLocal(session, address);
       return { txHash: String(result.txReceipt.txHash) };
     });
@@ -1314,7 +1314,7 @@ class StellarAccount {
       this.assertStillBound(generation);
       if (params?.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       const session = await this.ensureSession(params?.onStage);
-      await this.ensureRegistered(session, generation, params?.onStage, params?.shouldContinue);
+      await this.ensureRegistered(session, generation, params.onStage, params.shouldContinue);
     });
   }
 }

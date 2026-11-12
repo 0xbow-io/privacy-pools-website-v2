@@ -150,12 +150,7 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
     // A relayed payment pays the relayer's fee from the same notes.
     const fee = stellarTransferRelayFee();
     const need = stroops + fee;
-    const pick = selectGreedyTransferInputs(
-      stellarSession.spendableNotes as unknown as UiNote[],
-      need,
-      TRANSFER_MAX_INPUTS,
-      TRANSFER_MAX_LABELS,
-    );
+    const pick = feeSelection;
     if (!pick.covered) {
       const available = formatUnits(stellarSession.spendableTotal, STELLAR_XLM.decimals);
       setError(stellarSession.spendableTotal < need
