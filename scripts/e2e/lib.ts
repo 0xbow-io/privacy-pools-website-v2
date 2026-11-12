@@ -260,7 +260,7 @@ export async function registerKeystoreIfPrompted(page: Page, timeoutMs = 180_000
     await sleep(3000);
   }
   console.log('  keystore registration: STILL on screen when the wait ran out');
-  return true;
+  throw new Error('Keystore registration did not finish before the e2e deadline');
 }
 
 /** Select the mounted pager page by its accessibility state, not hidden text. */

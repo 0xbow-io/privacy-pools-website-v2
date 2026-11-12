@@ -2,7 +2,7 @@
 import { expect } from 'bun:test';
 import { launchChrome } from '../../lib/chrome.mjs';
 import { installUnlockGateHandler, unlockIfPrompted, waitForUnlockedLink } from '../unlock-gate';
-import { clickWhenReady, fillRecipient, waitForShieldedBalance } from '../lib';
+import { clickWhenReady, fillRecipient, registerKeystoreIfPrompted, waitForShieldedBalance } from '../lib';
 
 const browser = await launchChrome({ headless: true });
 try {
@@ -81,6 +81,12 @@ try {
   expect(await cta.locator('button').getAttribute('data-clicks')).toBe('1');
   console.log('PASS delayed request CTA is clicked exactly once after enabling');
   await cta.close();
+  const registration = await browser.newPage();
+  await registration.setContent('<h2>Register before you exit</h2><button onclick="document.body.innerHTML=\'Exit Successful\'">Register and continue</button>');
+  expect(await registerKeystoreIfPrompted(registration, 5000)).toBe(true);
+  expect(await registration.locator('body').innerText()).toBe('Exit Successful');
+  console.log('PASS fresh-wallet exit accepts registration and resumes');
+  await registration.close();
   const page = await browser.newPage();
   await page.setContent('<div style="position:fixed;inset:0"><h2>Unlock your account</h2><button>Sign in</button></div>');
   await expect(unlockIfPrompted(page, 100)).rejects.toThrow('did not finish');
