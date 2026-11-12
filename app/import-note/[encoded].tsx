@@ -10,6 +10,8 @@ import { useAccount } from 'wagmi';
 import { getChainConfig, defaultChainId } from '@/config/chains';
 import { linkToken } from '@/services/link-token-registry';
 import { linkAmountText } from '@/services/link-token';
+import { useShareRates } from '@/hooks/use-share-rates';
+import { FigureText } from '@/components/ui/share-figure';
 import { decodeNoteReceiptFromUrl } from '@/services/note-receipt';
 import { isStellarClaimLink } from '@/services/stellar/stellar-claim';
 import { StellarClaimNoteScreen } from '@/components/stellar-claim-note';
@@ -170,6 +172,9 @@ function EvmImportNoteScreen() {
   // Any environment's registry, and never a guessed 18 decimals (DEV-484):
   // an OP USDC claim opened on Prod read "0.000000000003 0X0B2C".
   const token = note ? linkToken(note.tokenId, receipt?.chainId) : null;
+  // Exact share counts read as their underlying at the feed-grid rate (display only).
+  const { rateFor: shareRateFor } = useShareRates();
+  const shareRate = note ? shareRateFor(receipt?.chainId ?? 0, note.tokenId) : undefined;
   // A wallet that can pay its own registration has the relayer anchor each
   // note in its own transfer; one that cannot gets a single relayed claim over
   // the whole receipt. The path is decided at press, so a wallet whose gas is
@@ -207,7 +212,7 @@ function EvmImportNoteScreen() {
     decimals: nativeCurrency.decimals,
   })?.amountText ?? null;
   const amountLabel = notes.length > 0 && token
-    ? linkAmountText(notes.reduce((sum, n) => sum + BigInt(n.value), 0n), token)
+    ? linkAmountText(notes.reduce((sum, n) => sum + BigInt(n.value), 0n), token, shareRate)
     : null;
 
   // The owner of the note is the recipient. Match it against the active
@@ -310,7 +315,7 @@ function EvmImportNoteScreen() {
 
             <View className="flex-row items-center justify-between">
               <Text className="font-pp-bold text-[16px] text-text">Amount</Text>
-              <Text className="font-pp-bold text-[16px] text-text">{amountLabel}</Text>
+              <Text className="font-pp-bold text-[16px] text-text"><FigureText text={amountLabel} /></Text>
             </View>
 
             <View className="gap-[8px]">
@@ -466,15 +471,15 @@ function EvmImportNoteScreen() {
                       {claimSplit && token ? (
                         <View testID="claim-split" className="gap-[2px]">
                           <Text className="font-pp-regular text-[12px] leading-[18px] text-text-secondary">
-                            Fee: {linkAmountText(claimSplit.feeWei, token)}
+                            Fee: <FigureText text={linkAmountText(claimSplit.feeWei, token, shareRate)} />
                           </Text>
                           {claimSplit.payoutWei > 0n ? (
                             <Text className="font-pp-regular text-[12px] leading-[18px] text-text-secondary">
-                              {PUBLIC_PAYOUT_LABEL}: {linkAmountText(claimSplit.payoutWei, token)}
+                              {PUBLIC_PAYOUT_LABEL}: <FigureText text={linkAmountText(claimSplit.payoutWei, token, shareRate)} />
                             </Text>
                           ) : null}
                           <Text className="font-pp-regular text-[12px] leading-[18px] text-text-secondary">
-                            Stays shielded: {linkAmountText(claimSplit.changeWei, token)}
+                            Stays shielded: <FigureText text={linkAmountText(claimSplit.changeWei, token, shareRate)} />
                           </Text>
                         </View>
                       ) : null}

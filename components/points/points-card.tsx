@@ -3,6 +3,7 @@ import { Text, View, useWindowDimensions } from 'react-native';
 
 import { Card } from '@/components/ui/card';
 import { TokenNetworkIcon } from '@/components/ui/token-network-icon';
+import { displayTokenSymbol } from '@/services/share-display';
 import { getChainConfig } from '@/config/chains';
 import { usePoints } from '@/hooks/use-points';
 import {
@@ -64,7 +65,7 @@ function PositionRow({ row, nowSeconds, compact }: { row: PointsRow; nowSeconds:
       <View className="flex-[1.4] flex-row items-center gap-[8px]">
         <TokenNetworkIcon symbol={row.symbol} size={20} chainId={row.chainId} />
         <View>
-          <Text className="font-pp-semi-bold text-[12px] text-text">{row.symbol || 'Unknown asset'}</Text>
+          <Text className="font-pp-semi-bold text-[12px] text-text">{row.symbol ? displayTokenSymbol(row.symbol) : 'Unknown asset'}</Text>
           {!!chainName && <Text className="font-pp-regular text-[10px] text-text-muted">{chainName}</Text>}
         </View>
       </View>

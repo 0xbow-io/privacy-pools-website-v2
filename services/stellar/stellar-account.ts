@@ -98,11 +98,16 @@ import { bumpPaymentRequestRevision } from '@/services/payment-request-revision'
 import { registerDebugSnapshot } from '@/services/debug-snapshots';
 import { blindClaimNote, blindNoteAddressHash, isUnregisteredRecipientError, toImportableNote, type StellarClaimNote } from '@/services/stellar/stellar-claim';
 import { findSentClaim, readSentClaims, saveSentClaim, SENT_CLAIMS_BASE_KEY, setSentClaimTx } from '@/services/stellar/stellar-sent-claims';
+import { CLAIMED_NOTES_BASE_KEY, DEPOSITS_FOR_BASE_KEY, readClaimedNotes, readDepositsFor, recordClaimedNotes, recordDepositFor } from '@/services/stellar/stellar-activity-records';
 import { isStellarAccountAddress, requestStates, type StellarRequestState } from '@/services/stellar/stellar-request';
 import type { StellarSdkPaymentRequest } from '@/services/payment-request-codec';
 import { envScopedStorageKey } from '@/config/app-environment';
 import { buildStellarNoteOrigins, reconstructStellarSpends, type StellarNoteOrigins } from '@/services/stellar-activity';
 import { withSigningWindow } from '@/services/stellar/stellar-signing-window';
+
+import { rowStatus, type RowStatus } from '@/services/registration-rows';
+import { registerStellarAccount, stellarRegistrationStatus } from '@/services/stellar/stellar-registration';
+import { stellarRegistrationPrompts } from '@/services/stellar/stellar-registration-prompt';
 
 export type { StellarRequestState };
 
@@ -120,6 +125,8 @@ export interface StellarAccountSnapshot {
   unlocked: boolean;
   notes: StellarNote[];
   registered: boolean | null;
+  /** Both keystore legs, read only on explicit setup actions. */
+  registrationStatus: RowStatus | undefined;
   /**
    * Where each of these notes came from on chain (deposit + depositor, or a
    * transact output) and when, read from the pool's event history in bulk on
@@ -158,6 +165,7 @@ const EMPTY: StellarAccountSnapshot = {
   unlocked: false,
   notes: [],
   registered: null,
+  registrationStatus: undefined,
   noteOrigins: null,
   paymentRequests: [],
   lastSyncedAt: null,
@@ -178,6 +186,7 @@ class StellarAccount {
   // Bumped whenever the bound address changes: a flow started for one account
   // refuses to submit anything after another account binds.
   private generation = 0;
+  private registrationGuard: (() => void) | null = null;
   // Memory only, like the session's own keys: matches this account's spends
   // in the pool's Transacted events (services/stellar-activity.ts).
   private nullifyingKey: string | null = null;
@@ -207,6 +216,7 @@ class StellarAccount {
     if (previous) purgeBackedUpStellarRequests(STELLAR_TESTNET_ID, previous);
     this.signer = signer;
     this.generation++;
+    stellarRegistrationPrompts.cancel();
     this.sessionPromise = null;
     this.nullifyingKey = null;
     this.syncPromise = null;
@@ -339,6 +349,7 @@ class StellarAccount {
   }
 
   private async buildSession(address: string, signer: StellarWalletProvider): Promise<StellarPoolSession> {
+    const generation = this.generation;
     const sdk = await loadStellarSdk();
     this.rpc = createIndexedRpcInteractor(sdk, ASP_URL);
     const protocolKeys = await deriveProtocolKeys(sdk, address, signer);
@@ -361,7 +372,17 @@ class StellarAccount {
       protocolKeys,
       // Each transaction's validity window starts when Freighter is asked to sign it
       // (stellar-signing-window.ts). The key derivation above signs through the bare signer.
-      walletInteractor: { type: 'freighter', provider: withSigningWindow(signer) },
+      walletInteractor: { type: 'freighter', provider: withSigningWindow({
+        ...signer,
+        signTransaction: async (xdr, opts) => {
+          this.assertStillBound(generation);
+          this.registrationGuard?.();
+          const signed = await signer.signTransaction(xdr, opts);
+          this.assertStillBound(generation);
+          this.registrationGuard?.();
+          return signed;
+        },
+      }) },
       // In-memory: the account is persisted below via export/import after every
       // sync (one JSON blob per account), which also restores notes saved by
       // builds from before the SDK's storage schema fix.
@@ -505,10 +526,13 @@ class StellarAccount {
       : undefined;
     return buildStellarNoteOrigins({
       notes,
-      deposits: deposits.map((d) => ({ txHash: String(d.txHash), outputCommitment: String(d.outputCommitment), depositor: String(d.caller) })),
+      deposits: deposits.map((d) => ({ txHash: String(d.txHash), outputCommitment: String(d.outputCommitment), depositor: String(d.caller), value: String(d.depositedValue) })),
       transacts: transacts.map((t) => ({ txHash: String(t.txHash), outputCommitments: t.outputCommitments.map(String) })),
       logs: page.events.map((e) => ({ transactionHash: String(e.transactionHash), ledger: String(e.ledger), ledgerClosedAt: e.ledgerClosedAt })),
       spends,
+      // This account's deposits for others (local record): amount and time
+      // come from this same page, never from a request of their own.
+      authoredDepositTxHashes: this.snapshot.address ? readStellarDepositsFor(this.snapshot.address).map((d) => d.txHash) : [],
       ragequits: ragequits.map((r) => ({ txHash: String(r.txHash), commitment: String(r.commitment) })),
     });
   }
@@ -572,31 +596,68 @@ class StellarAccount {
     return this.syncPromise;
   }
 
-  private async ensureRegistered(session: StellarPoolSession, generation: number, onStage?: StageListener) {
-    // prepareRegisterKeystore checks both legs and builds only the missing one. isKeystoreRegistered()
-    // checks just the auth policy, so an account whose set_viewing_key never landed read as
-    // registered forever and could not be sent to (RecipientViewingKeyUnregistered).
-    const registration = await session.prepareRegisterKeystore();
-    if (registration.alreadyRegistered) return;
-    this.assertStillBound(generation);
-    onStage?.('registering');
-    await session.executeRegisterKeystore(registration);
-    // The spend right after re-checks registration, and the RPC can lag the
-    // registration by a few seconds (seen on testnet as a failed check on a
-    // registered account). Wait until the read agrees before continuing.
-    let confirmed = false;
-    for (let attempt = 0; attempt < 10 && !confirmed; attempt++) {
+  /** Explicit card check: never unlocks, signs or runs on the sync clock. */
+  checkRegistration() {
+    const { generation } = this.requireSigner();
+    return this.enqueue(async () => {
+      this.assertStillBound(generation);
+      if (!this.snapshot.unlocked || !this.sessionPromise) return;
       try {
-        confirmed = (await session.prepareRegisterKeystore()).alreadyRegistered;
-      } catch {
-        // transient read failure right after registering: retry
+        const session = await this.sessionPromise;
+        this.assertStillBound(generation);
+        const registration = await session.prepareRegisterKeystore();
+        this.assertStillBound(generation);
+        this.set({ registrationStatus: rowStatus(this.snapshot.registrationStatus ?? 'unknown', stellarRegistrationStatus(registration)) });
+      } catch (error) {
+        this.assertStillBound(generation);
+        if (this.snapshot.registrationStatus === undefined) this.set({ registrationStatus: 'unknown' });
+        throw error;
       }
-      if (!confirmed) await new Promise((resolve) => setTimeout(resolve, 2_000));
+    });
+  }
+
+  private async ensureRegistered(session: StellarPoolSession, generation: number, onStage?: StageListener, shouldContinue: () => boolean = () => true) {
+    let attempted = false;
+    try {
+      await registerStellarAccount({
+        session,
+        onStatus: (state) => this.set({ registrationStatus: rowStatus(this.snapshot.registrationStatus ?? 'unknown', state) }),
+        address: this.snapshot.address!,
+        assertActive: () => {
+          this.assertStillBound(generation);
+          if (!shouldContinue()) throw new Error('Superseded');
+        },
+        requestConsent: (prompt) => stellarRegistrationPrompts.request(prompt, shouldContinue),
+        execute: async (registration, guard) => {
+          attempted = true;
+          this.registrationGuard = guard;
+          try {
+            onStage?.('registering');
+            await session.executeRegisterKeystore(registration);
+          } finally {
+            this.registrationGuard = null;
+          }
+        },
+      });
+      this.assertStillBound(generation);
+      if (!shouldContinue()) throw new Error('Superseded');
+      this.set({ registered: true, registrationStatus: 'compatible' });
+    } catch (error) {
+      // Closing cannot undo a submitted step. Keep its status for the card,
+      // without resuming the abandoned action or writing into a new account.
+      if (attempted && generation === this.generation) {
+        try {
+          const registration = await session.prepareRegisterKeystore();
+          this.assertStillBound(generation);
+          this.set({ registrationStatus: rowStatus(this.snapshot.registrationStatus ?? 'unknown', stellarRegistrationStatus(registration)) });
+        } catch {
+          // Retain the last confirmed answer if the RPC is unavailable.
+        }
+      }
+      throw error;
+    } finally {
+      stellarRegistrationPrompts.finish();
     }
-    if (!confirmed) {
-      throw new Error('Your account registration has not shown up on chain yet. Try again in a minute.');
-    }
-    this.set({ registered: true });
   }
 
   /**
@@ -627,7 +688,7 @@ class StellarAccount {
       // would land seconds before the relayed withdrawal and link the two. A deposit FOR
       // someone else leaves no note here, so it needs no registration of the payer, and
       // asking for one would put signatures ahead of the recipient check.
-      if (!params.recipient) await this.ensureRegistered(session, generation, onStage);
+      if (!params.recipient) await this.ensureRegistered(session, generation, onStage, params.shouldContinue);
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       onStage?.('proving');
       const base = { tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId, value: toHex(params.amount) };
@@ -680,6 +741,15 @@ class StellarAccount {
       if (!receipt.status) throw new Error('The deposit transaction failed on-chain.');
       const txHash = receipt.txHash as string;
       if (claim) setSentClaimTx(sentClaimsStorage(), SENT_CLAIMS_KEY, claim.id, txHash);
+      // The recipient's note never reaches this account, so this device's own
+      // record is what lets the depositor see the payment (DEV-501).
+      if (params.recipient) {
+        recordDepositFor(sentClaimsStorage(), DEPOSITS_FOR_KEY, {
+          depositor: address,
+          txHash,
+          createdAt: Date.now(),
+        });
+      }
       onStage?.('syncing');
       await this.refreshLocal(session, address);
       return {
@@ -708,7 +778,7 @@ class StellarAccount {
       // account never appears on the withdrawal. Its details are read BEFORE
       // registration, so an unreachable relayer fails before the wallet is asked to sign.
       const relayer = await this.connectRelayer(await loadStellarSdk());
-      await this.ensureRegistered(session, generation, onStage);
+      await this.ensureRegistered(session, generation, onStage, params.shouldContinue);
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       // The fee comes on top of `amount`, so the inputs must cover amount + fee.
       onStage?.('proving');
@@ -771,7 +841,7 @@ class StellarAccount {
       const session = await this.ensureSession(onStage);
       // The relayer is read before registration, so an unreachable one fails before the wallet signs.
       const relayer = await this.connectRelayer(await loadStellarSdk());
-      await this.ensureRegistered(session, generation, onStage);
+      await this.ensureRegistered(session, generation, onStage, params.shouldContinue);
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       this.assertStillBound(generation);
       onStage?.('proving');
@@ -822,7 +892,7 @@ class StellarAccount {
       if (!isStellarAccountAddress(params.recipient)) throw new Error('Not a Stellar account address.');
       if (params.recipient === address) throw new Error('That is your own address. Pick someone else to send to.');
       const session = await this.ensureSession(onStage);
-      await this.ensureRegistered(session, generation, onStage);
+      await this.ensureRegistered(session, generation, onStage, params.shouldContinue);
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       this.assertStillBound(generation);
       onStage?.('proving');
@@ -898,6 +968,13 @@ class StellarAccount {
       }
       // Best effort here (a just-sent note may not be indexed yet); saving requires it.
       await this.stampClaimedNotes(session, notes.map((n) => n.commitment as Hex), false);
+      // Already on chain: the activity shows the receipt now, not after the next sync.
+      recordClaimedNotes(sentClaimsStorage(), CLAIMED_NOTES_KEY, notes.map((n) => ({
+        owner: address,
+        commitment: n.commitment,
+        txHash: n.txHash,
+        claimedAt: Date.now(),
+      })));
       await this.refreshLocal(session, address);
       return { imported, already: notes.length - imported };
     });
@@ -909,12 +986,12 @@ class StellarAccount {
    * and the link is no longer needed. Registers the account first if needed
    * (Freighter pays; relayed registration is not available on Stellar).
    */
-  keepClaim(commitments: readonly Hex[], params?: { onStage?: StageListener }) {
+  keepClaim(commitments: readonly Hex[], params?: { onStage?: StageListener; shouldContinue?: () => boolean }) {
     return this.enqueue(async () => {
       const { address, generation } = this.requireSigner();
       const session = await this.ensureSession(params?.onStage);
       const relayer = await this.connectRelayer(await loadStellarSdk());
-      await this.ensureRegistered(session, generation, params?.onStage);
+      await this.ensureRegistered(session, generation, params?.onStage, params?.shouldContinue);
       await this.stampClaimedNotes(session, commitments, true);
       const { notes } = await session.exportAccount();
       const wanted = new Set(commitments.map((c) => BigInt(c)));
@@ -951,7 +1028,7 @@ class StellarAccount {
       const { onStage } = params;
       const { address, generation } = this.requireSigner();
       const session = await this.ensureSession(onStage);
-      await this.ensureRegistered(session, generation, onStage);
+      await this.ensureRegistered(session, generation, onStage, params.shouldContinue);
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       this.assertStillBound(generation);
       onStage?.('proving');
@@ -1161,7 +1238,7 @@ class StellarAccount {
       if (params.request.tokenId !== STELLAR_TESTNET_CONTRACTS.nativeAssetContractId) throw new Error('This request is not for XLM.');
       const session = await this.ensureSession(onStage);
       const relayer = await this.connectRelayer(await loadStellarSdk());
-      await this.ensureRegistered(session, generation, onStage);
+      await this.ensureRegistered(session, generation, onStage, params.shouldContinue);
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       this.assertStillBound(generation);
       onStage?.('proving');
@@ -1184,14 +1261,16 @@ class StellarAccount {
 
   /**
    * Makes this account able to RECEIVE private transfers: unlocks and
-   * publishes the keystore entry (viewing key) if it is not there yet. A
-   * payment request needs it, since the payer's transfer is encrypted to it.
+   * publishes both keystore legs if missing. Address-based transfers need
+   * the viewing key; blind payment requests do not.
    */
-  ensureCanReceive(params?: { onStage?: StageListener }) {
+  ensureCanReceive(params?: { onStage?: StageListener; shouldContinue?: () => boolean }) {
+    const { generation } = this.requireSigner();
     return this.enqueue(async () => {
-      const { generation } = this.requireSigner();
+      this.assertStillBound(generation);
+      if (params?.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       const session = await this.ensureSession(params?.onStage);
-      await this.ensureRegistered(session, generation, params?.onStage);
+      await this.ensureRegistered(session, generation, params?.onStage, params?.shouldContinue);
     });
   }
 }
@@ -1320,6 +1399,18 @@ if (typeof __DEV__ !== 'undefined' && __DEV__) {
 
 // The sender's saved one-time claims (services/stellar/stellar-sent-claims.ts).
 const SENT_CLAIMS_KEY = envScopedStorageKey(SENT_CLAIMS_BASE_KEY);
+const DEPOSITS_FOR_KEY = envScopedStorageKey(DEPOSITS_FOR_BASE_KEY);
+const CLAIMED_NOTES_KEY = envScopedStorageKey(CLAIMED_NOTES_BASE_KEY);
+
+/** Deposits this account made for other accounts, from this device's record (activity rows). */
+export function readStellarDepositsFor(depositor: string) {
+  return readDepositsFor(sentClaimsStorage(), DEPOSITS_FOR_KEY, depositor);
+}
+
+/** Notes this account claimed from one-time links on this device (activity rows). */
+export function readStellarClaimedNotes(owner: string) {
+  return readClaimedNotes(sentClaimsStorage(), CLAIMED_NOTES_KEY, owner);
+}
 
 function sentClaimsStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
   try {

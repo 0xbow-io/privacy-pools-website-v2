@@ -6,8 +6,8 @@
   "description": "Ownership manifest for the NativeWind port: every file the audit tool flags as carrying a styling signal (StyleSheet usage, style sinks, visual color props, or raw color literals in static styles) is assigned to exactly one migration phase. scripts/nativewind-manifest.test.ts asserts this list stays complete against the live audit output.",
   "groundTruth": {
     "filesWithStyleSheetCreate": 0,
-    "filesWithAnyStylingSignal": 138,
-    "portedFiles": 148,
+    "filesWithAnyStylingSignal": 144,
+    "portedFiles": 155,
     "note": "LIVE COUNTERS — updated by every porting commit (scripts/nativewind-manifest.test.ts pins the audit to this snapshot). Pre-port baseline: 90 files call StyleSheet.create (the plan's ground truth; liquid-light + vault-backdrop reference StyleSheet.absoluteFill only) and 110 files carry any styling signal, including SVG/icon color-prop-only files and spread-only forwarded-style contracts (haptic-tab, external-link — flagged via the audit's jsx-spread sink). Files gain \"ported\": true as their phase lands; a ported file may drop out of the styled set entirely."
   },
   "outOfScope": [
@@ -24,12 +24,12 @@
   },
   "counts": {
     "F-C/theme-infra": 2,
-    "P1/shared-primitives": 55,
+    "P1/shared-primitives": 61,
     "P2/app-routes": 30,
     "P2/classic-pools": 14,
     "P2/ecosystem-payroll": 9,
     "P2/portfolio": 7,
-    "P2/vault-home": 15,
+    "P2/vault-home": 16,
     "P3/subwave-1": 12,
     "P3/subwave-2": 1,
     "P3/subwave-3": 1,
@@ -805,6 +805,12 @@
       "ported": true
     },
     {
+      "path": "components/ui/share-figure.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
       "path": "components/ui/sui-connect-button.tsx",
       "phase": "P1",
       "slice": "shared-primitives",
@@ -939,6 +945,42 @@
     },
     {
       "path": "components/consolidation-panel.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/contacts/address-suggestions-list.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/contacts/address-suggestions-list.web.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/contacts/contact-edit-modal.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/contacts/contacts-modal.tsx",
+      "phase": "P1",
+      "slice": "shared-primitives",
+      "ported": true
+    },
+    {
+      "path": "components/home/registration-card-frame.tsx",
+      "phase": "P2",
+      "slice": "vault-home",
+      "ported": true
+    },
+    {
+      "path": "components/ui/registration-modal-frame.tsx",
       "phase": "P1",
       "slice": "shared-primitives",
       "ported": true

@@ -1,4 +1,4 @@
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 const BASE = process.env.PROBE_URL ?? 'http://localhost:8080';
 async function tapTab(page: any, testId: string) {
   const box = await page.getByTestId(testId).boundingBox();
@@ -6,7 +6,7 @@ async function tapTab(page: any, testId: string) {
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 }
 async function main() {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchChrome({ headless: true });
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   const page = await ctx.newPage();
   await page.addInitScript(() => { try { window.localStorage.setItem('ppv2_smartwallet_skipped_v1', '1'); } catch {} });

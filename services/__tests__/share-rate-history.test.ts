@@ -99,7 +99,7 @@ describe('conversion at the transaction', () => {
     const c = shareConversionAt({ ...series, history: [] }, { timestampSec: 15_000 })!;
     expect(c.atTx).toBe(false);
     expect(c.assetsPerShare).toBe(series.current!.assetsPerShare);
-    expect(shareValueLabel(c, 10n * E18)).toBe('≈ 10.04 USDT');
+    expect(shareValueLabel(c, 10n * E18)).toBe('~10.04 USDT');
   });
 
   test('positions outside coverage use an explicitly approximate current rate', () => {
@@ -107,7 +107,7 @@ describe('conversion at the transaction', () => {
       const c = shareConversionAt(series, at)!;
       expect(c.atTx).toBe(false);
       expect(c.assetsPerShare).toBe(series.current!.assetsPerShare);
-      expect(shareValueLabel(c, 10n * E18)).toBe('≈ 10.04 USDT');
+      expect(shareValueLabel(c, 10n * E18)).toBe('~10.04 USDT');
     }
   });
 

@@ -1,8 +1,8 @@
 // PROBE_URL=http://localhost:8081 node scripts/e2e/connected-action-tabs.mjs
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 import { installLandingWallet } from './fixtures/landing-wallet.mjs';
-const browser = await chromium.launch({ headless: true });
+const browser = await launchChrome({ headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   await installLandingWallet(page);

@@ -406,3 +406,22 @@ export function depositMatchesMyNotes(
   if (label && sets.labels.has(label)) return true;
   return false;
 }
+
+/**
+ * The depositor-address fallback for a deposit row no note of mine claims.
+ * A deposit this wallet made FOR someone else is never mine by address: the
+ * depositor is me, but the money is the recipient's, so the row must not offer
+ * Withdraw or Exit. That holds whether the row is flagged `depositFor` (Stellar
+ * builds one from this device's record, `fullAddress` = the depositor) or its
+ * tx hash is in the outgoing-deposit store, or signal 3 sealed it elsewhere.
+ */
+export function depositMineByAddress(
+  row: { txHash?: string | null; fullAddress?: string | null; depositFor?: boolean },
+  ownAddress: string | null | undefined,
+  excluded: { outgoing: ReadonlySet<string>; notMine: ReadonlySet<string>; pending: ReadonlySet<string> },
+): boolean {
+  if (row.depositFor) return false;
+  const hash = row.txHash?.toLowerCase();
+  if (hash && (excluded.outgoing.has(hash) || excluded.notMine.has(hash) || excluded.pending.has(hash))) return false;
+  return !!ownAddress && !!row.fullAddress && row.fullAddress.toLowerCase() === ownAddress.toLowerCase();
+}

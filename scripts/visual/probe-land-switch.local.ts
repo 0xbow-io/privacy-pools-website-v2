@@ -3,7 +3,7 @@
 // cycle by navigating away (a real user choice), come back home, then switch
 // the wallet to the FUNDED account B (accountsChanged, like a real extension).
 // B must get a fresh landing cycle -> /?panel=balances.
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 import { generatePrivateKey, privateKeyToAccount, mnemonicToAccount } from 'viem/accounts';
 import { installEvmWallet } from './evm-wallet';
 
@@ -11,7 +11,7 @@ const FUNDED = mnemonicToAccount(process.env.TEST_PHRASE.trim()).address;
 const accountA = privateKeyToAccount(generatePrivateKey());
 console.log('A (unfunded):', accountA.address, '| B (funded):', FUNDED);
 
-const browser = await chromium.launch({ args: ['--no-sandbox'] });
+const browser = await launchChrome();
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
 await context.addInitScript(() => localStorage.setItem('ppv2_smartwallet_skipped_v1', '1'));
 const page = await context.newPage();

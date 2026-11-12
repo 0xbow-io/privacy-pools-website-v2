@@ -4,7 +4,7 @@
 // overlay then closes via history.back() — exactly what the real picker does.
 // Without the overlay guard the landing pushed its panel entry on top and the
 // pop stripped it, reading as a user dismissal -> terminal stop.
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 import { mnemonicToAccount } from 'viem/accounts';
 import { installEvmWallet } from './evm-wallet';
 
@@ -12,7 +12,7 @@ const PHRASE = process.env.TEST_PHRASE;
 if (!PHRASE) throw new Error('TEST_PHRASE missing from env');
 const account = mnemonicToAccount(PHRASE.trim());
 
-const browser = await chromium.launch({ args: ['--no-sandbox'] });
+const browser = await launchChrome();
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
 await context.addInitScript(() => localStorage.setItem('ppv2_smartwallet_skipped_v1', '1'));
 const page = await context.newPage();

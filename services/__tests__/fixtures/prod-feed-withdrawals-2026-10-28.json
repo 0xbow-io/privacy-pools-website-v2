@@ -1,0 +1,632 @@
+{
+ "source": "GET https://api-v2.0xbow.io/global/public/events?perPage=200&page=1 (2026-10-28), withdrawal events whose address is empty (33 of the 35 withdrawals on the page; the 2 that name an address are left out so no third-party address is committed)",
+ "events": [
+  {
+   "type": "withdrawal",
+   "eventId": 490,
+   "createdAt": "2026-10-28T15:40:43.903Z",
+   "amount": "182195422368585052115",
+   "address": "",
+   "txHash": "0x03ae0e66acfb2874919820f0581158b52f69ca2c25ee365098377a95eff71cb8",
+   "timestamp": 1793202035000,
+   "asset": {
+    "asset": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6",
+    "tokenAddress": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6",
+    "assetAddress": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6",
+    "denomination": 18
+   },
+   "aspRoot": "15251859114620624921888607118817560141842484242607895847859990112962782389350"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 487,
+   "createdAt": "2026-10-28T14:33:27.547Z",
+   "amount": "5351847218635766",
+   "address": "",
+   "txHash": "0x1b8e531ab665662673ebfa49aabf17a37c3a61414d9de12f1345e6c2467a2a95",
+   "timestamp": 1793198005000,
+   "asset": {
+    "asset": "0x319abee703b5f6c3db9c2f126475ef49b20fdd49",
+    "chainId": 10,
+    "chainName": "Chain 10",
+    "tokenSymbol": "0x319abee703b5f6c3db9c2f126475ef49b20fdd49",
+    "tokenAddress": "0x319abee703b5f6c3db9c2f126475ef49b20fdd49",
+    "assetAddress": "0x319abee703b5f6c3db9c2f126475ef49b20fdd49",
+    "denomination": 18
+   },
+   "aspRoot": "4752592491285897101698996176699936234182790525302212521029741824470034559039"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 486,
+   "createdAt": "2026-10-28T14:09:12.249Z",
+   "amount": "1169951379749939",
+   "address": "",
+   "txHash": "0x4cfd5defa4cb8afcbe924d179df8332c0a3cbc8c05886ae7de3a048b77b23b3a",
+   "timestamp": 1793196539000,
+   "asset": {
+    "asset": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "tokenAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "assetAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "denomination": 18
+   },
+   "aspRoot": "7394975281510726599624503741844945767141673914383357836143992530463940386291"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 485,
+   "createdAt": "2026-10-28T14:07:42.311Z",
+   "amount": "1237802863022611",
+   "address": "",
+   "txHash": "0xa26200ef2feeaf0d3ebabd26ef05ad44fbabaea8d9223bd53929938ddac723a8",
+   "timestamp": 1793196455000,
+   "asset": {
+    "asset": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "tokenAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "assetAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "denomination": 18
+   },
+   "aspRoot": "7394975281510726599624503741844945767141673914383357836143992530463940386291"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 484,
+   "createdAt": "2026-10-28T14:06:42.677Z",
+   "amount": "1271249464238305",
+   "address": "",
+   "txHash": "0x338805b8510041713cc5ad5142c4417f9cd07c640a54e4c7c16a417b11cfd32a",
+   "timestamp": 1793196395000,
+   "asset": {
+    "asset": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "tokenAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "assetAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "denomination": 18
+   },
+   "aspRoot": "7394975281510726599624503741844945767141673914383357836143992530463940386291"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 483,
+   "createdAt": "2026-10-28T14:04:12.422Z",
+   "amount": "998971200682544465",
+   "address": "",
+   "txHash": "0x8d682008fb6a80eb0c9090dca643b19e3a771ca7e03cec7d58d34ad4bb68aa56",
+   "timestamp": 1793196239000,
+   "asset": {
+    "asset": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "tokenAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "assetAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "denomination": 18
+   },
+   "aspRoot": "7394975281510726599624503741844945767141673914383357836143992530463940386291"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 482,
+   "createdAt": "2026-10-28T13:24:27.283Z",
+   "amount": "59898961807743268930",
+   "address": "",
+   "txHash": "0x7216f752f39075774737618600eaa11791e9a0f2efeb879573a56cb748d5edb2",
+   "timestamp": 1793193851000,
+   "asset": {
+    "asset": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6",
+    "tokenAddress": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6",
+    "assetAddress": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6",
+    "denomination": 18
+   },
+   "aspRoot": "8055228842010406288670048786846985653848726332622441087328947893966341377359"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 481,
+   "createdAt": "2026-10-28T13:24:11.898Z",
+   "amount": "4075518787588690",
+   "address": "",
+   "txHash": "0xbaca28974a80aed4553947acedc48a174ec251fb6ace731c6d141732d669a02c",
+   "timestamp": 1793193839000,
+   "asset": {
+    "asset": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "tokenAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "assetAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "denomination": 18
+   },
+   "aspRoot": "8055228842010406288670048786846985653848726332622441087328947893966341377359"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 480,
+   "createdAt": "2026-10-28T13:14:26.934Z",
+   "amount": "2614029900129194205599",
+   "address": "",
+   "txHash": "0x4e7b837ad658aa120ec2e0e798eb7f1d549e63e64cc5863229a9499dbe1a827e",
+   "timestamp": 1793193263000,
+   "asset": {
+    "asset": "0xa4cf419558ef36cc6ffb666195684dc963910426",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0xa4cf419558ef36cc6ffb666195684dc963910426",
+    "tokenAddress": "0xa4cf419558ef36cc6ffb666195684dc963910426",
+    "assetAddress": "0xa4cf419558ef36cc6ffb666195684dc963910426",
+    "denomination": 18
+   },
+   "aspRoot": "8055228842010406288670048786846985653848726332622441087328947893966341377359"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 477,
+   "createdAt": "2026-10-28T10:09:41.496Z",
+   "amount": "10429340635259517169",
+   "address": "",
+   "txHash": "0xe404a6b7e28e1d3dcace0a76f67494985ff92358c0688d911a4d58d8af4fcc84",
+   "timestamp": 1793182175000,
+   "asset": {
+    "asset": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6",
+    "tokenAddress": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6",
+    "assetAddress": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6",
+    "denomination": 18
+   },
+   "aspRoot": "9494550925846320898199179572521131910970361890741802149420573209535741145200"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 474,
+   "createdAt": "2026-10-28T07:56:25.300Z",
+   "amount": "998800343381811706",
+   "address": "",
+   "txHash": "0xcf40046b4ff39dbbab557cd3cec67948fe90a7d7b8be179e0c87c3715745b7ec",
+   "timestamp": 1793174171000,
+   "asset": {
+    "asset": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "tokenAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "assetAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "denomination": 18
+   },
+   "aspRoot": "2313988161978353954755308203600689415907203066057263149628018217949289196679"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 473,
+   "createdAt": "2026-10-28T06:54:54.734Z",
+   "amount": "898907097841139677",
+   "address": "",
+   "txHash": "0x92a02cae6ea0ea4532a08950b57902c8258c1041ee08f8f95bad0b9558028eef",
+   "timestamp": 1793170487000,
+   "asset": {
+    "asset": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "tokenAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "assetAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "denomination": 18
+   },
+   "aspRoot": "1166248829092906813806416762834905336432759919609858993491815497648669683276"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 472,
+   "createdAt": "2026-10-28T06:53:53.817Z",
+   "amount": "99918686810891257",
+   "address": "",
+   "txHash": "0x99a622d633946e0c96764353030cf11ea5bbe42680ae99d2de5fd7a2ac7cdf24",
+   "timestamp": 1793170415000,
+   "asset": {
+    "asset": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "tokenAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "assetAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "denomination": 18
+   },
+   "aspRoot": "1166248829092906813806416762834905336432759919609858993491815497648669683276"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 471,
+   "createdAt": "2026-10-28T06:12:38.377Z",
+   "amount": "12980729176620726",
+   "address": "",
+   "txHash": "0x89bc0185aedfe3878f2207a932afe5b88f1576a5ecf3102557b6927ec60ae9a2",
+   "timestamp": 1793167955000,
+   "asset": {
+    "asset": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "tokenAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "assetAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "denomination": 18
+   },
+   "aspRoot": "1166248829092906813806416762834905336432759919609858993491815497648669683276"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 470,
+   "createdAt": "2026-10-28T05:26:22.798Z",
+   "amount": "13979255806852749",
+   "address": "",
+   "txHash": "0x712ec03ce70d96756f1c1d55f1185f4f8b3c728bfc2a6129399bf15f1ceb057a",
+   "timestamp": 1793165171000,
+   "asset": {
+    "asset": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "tokenAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "assetAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "denomination": 18
+   },
+   "aspRoot": "13269781791768997420680398129187926555136553949942207411124006194035657423018"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 469,
+   "createdAt": "2026-10-28T03:07:23.722Z",
+   "amount": "100000000000000000000",
+   "address": "",
+   "txHash": "0x232e9df52b507be72816e4f5c37879725e899e6c7d34960b8a33759d14f8ddcc",
+   "timestamp": 1793156831000,
+   "asset": {
+    "asset": "0xa4cf419558ef36cc6ffb666195684dc963910426",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0xa4cf419558ef36cc6ffb666195684dc963910426",
+    "tokenAddress": "0xa4cf419558ef36cc6ffb666195684dc963910426",
+    "assetAddress": "0xa4cf419558ef36cc6ffb666195684dc963910426",
+    "denomination": 18
+   },
+   "aspRoot": "223584696076655776981843402737648253555215149047081106426865573851831041349"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 468,
+   "createdAt": "2026-10-28T00:24:37.428Z",
+   "amount": "29961708001594573",
+   "address": "",
+   "txHash": "0xf9a4a4127a510ad2757b576bbea5f694395f53e21ce153d3c97aa0c37522b9e2",
+   "timestamp": 1793147063000,
+   "asset": {
+    "asset": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "tokenAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "assetAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "denomination": 18
+   },
+   "aspRoot": "9820252722874847947668964946081992285967642748323983900492004408469727085328"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 467,
+   "createdAt": "2026-10-27T23:28:40.851Z",
+   "amount": "554350016060227326767",
+   "address": "",
+   "txHash": "0xad186e9801f4cad39f68ec696de2e1180a4ee7609f51b303086e0eb91544c5ff",
+   "timestamp": 1793143713000,
+   "asset": {
+    "asset": "0x4a5b11c3898367664d94b43be1dcea163bb1d094",
+    "chainId": 8453,
+    "chainName": "Chain 8453",
+    "tokenSymbol": "0x4a5b11c3898367664d94b43be1dcea163bb1d094",
+    "tokenAddress": "0x4a5b11c3898367664d94b43be1dcea163bb1d094",
+    "assetAddress": "0x4a5b11c3898367664d94b43be1dcea163bb1d094",
+    "denomination": 18
+   },
+   "aspRoot": "17808268036831667477218224239674070819125895074438968151785677588399682892131"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 466,
+   "createdAt": "2026-10-27T22:35:12.262Z",
+   "amount": "10000000000000000000",
+   "address": "",
+   "txHash": "0x09d18f559017f954509ce79b79a41eb0b69081181e3fbf54325ec415e310a9d6",
+   "timestamp": 1793140497000,
+   "asset": {
+    "asset": "0x4a5b11c3898367664d94b43be1dcea163bb1d094",
+    "chainId": 8453,
+    "chainName": "Chain 8453",
+    "tokenSymbol": "0x4a5b11c3898367664d94b43be1dcea163bb1d094",
+    "tokenAddress": "0x4a5b11c3898367664d94b43be1dcea163bb1d094",
+    "assetAddress": "0x4a5b11c3898367664d94b43be1dcea163bb1d094",
+    "denomination": 18
+   },
+   "aspRoot": "17808268036831667477218224239674070819125895074438968151785677588399682892131"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 465,
+   "createdAt": "2026-10-27T20:39:10.104Z",
+   "amount": "183046567842243384259",
+   "address": "",
+   "txHash": "0xace9aedba954e1966de78ee1bf288e3a0b9da8ad3b322ddee4a45b5243ee66c4",
+   "timestamp": 1793133539000,
+   "asset": {
+    "asset": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6",
+    "tokenAddress": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6",
+    "assetAddress": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6",
+    "denomination": 18
+   },
+   "aspRoot": "13855247304844162698972719749117223496633832354936598771093601670394994432436"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 463,
+   "createdAt": "2026-10-27T20:27:55.281Z",
+   "amount": "249931909830099188137",
+   "address": "",
+   "txHash": "0x6698a7e56a7387ac1c550cea3462c7afaac838f627da586791638e6ca0c2beb9",
+   "timestamp": 1793132867000,
+   "asset": {
+    "asset": "0xa4cf419558ef36cc6ffb666195684dc963910426",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0xa4cf419558ef36cc6ffb666195684dc963910426",
+    "tokenAddress": "0xa4cf419558ef36cc6ffb666195684dc963910426",
+    "assetAddress": "0xa4cf419558ef36cc6ffb666195684dc963910426",
+    "denomination": 18
+   },
+   "aspRoot": "14450570454209192463610196630665632960875040432017956503919458103000926959174"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 461,
+   "createdAt": "2026-10-27T16:24:37.751Z",
+   "amount": "99566564346797897587",
+   "address": "",
+   "txHash": "0xa4c31aaa6736d90c758e36d422123fb022d7f503200f4c8ddd79029f2876d12c",
+   "timestamp": 1793118263000,
+   "asset": {
+    "asset": "0xa4cf419558ef36cc6ffb666195684dc963910426",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0xa4cf419558ef36cc6ffb666195684dc963910426",
+    "tokenAddress": "0xa4cf419558ef36cc6ffb666195684dc963910426",
+    "assetAddress": "0xa4cf419558ef36cc6ffb666195684dc963910426",
+    "denomination": 18
+   },
+   "aspRoot": "2530842321373746502754326531135096801652481528149124023090712496548592941795"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 460,
+   "createdAt": "2026-10-27T15:44:39.750Z",
+   "amount": "5000000000000000",
+   "address": "",
+   "txHash": "0x6b0b5a516da5f80095266635a90295e364a5dee5691d112b5f873858a534f5a4",
+   "timestamp": 1793115873000,
+   "asset": {
+    "asset": "0x319abee703b5f6c3db9c2f126475ef49b20fdd49",
+    "chainId": 8453,
+    "chainName": "Chain 8453",
+    "tokenSymbol": "0x319abee703b5f6c3db9c2f126475ef49b20fdd49",
+    "tokenAddress": "0x319abee703b5f6c3db9c2f126475ef49b20fdd49",
+    "assetAddress": "0x319abee703b5f6c3db9c2f126475ef49b20fdd49",
+    "denomination": 18
+   },
+   "aspRoot": "5775969545411609537414541967220522728277997163098009426545604101382901695119"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 458,
+   "createdAt": "2026-10-27T13:56:51.525Z",
+   "amount": "144967574988452095983",
+   "address": "",
+   "txHash": "0xc236a05d8736c7a791d95f5f3a70acf06489aa273eb90d1381f5267e7deb3275",
+   "timestamp": 1793109407000,
+   "asset": {
+    "asset": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6",
+    "tokenAddress": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6",
+    "assetAddress": "0xc246afb23482ff9596e9cee5f1f678efe0eb1ad6",
+    "denomination": 18
+   },
+   "aspRoot": "20106028427043689316476103946094321709519794181015095785709382095532270292143"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 457,
+   "createdAt": "2026-10-27T13:19:51.773Z",
+   "amount": "8939009846452262",
+   "address": "",
+   "txHash": "0x2804d0fc8be6e862f03fb5d11b4b69f252d9b0ff634b28512893863007c9a0a8",
+   "timestamp": 1793107187000,
+   "asset": {
+    "asset": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "tokenAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "assetAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "denomination": 18
+   },
+   "aspRoot": "20106028427043689316476103946094321709519794181015095785709382095532270292143"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 456,
+   "createdAt": "2026-10-27T12:51:05.622Z",
+   "amount": "9906301948835068",
+   "address": "",
+   "txHash": "0x20b49357f2fb76c38ac89fbe4223ad06e2e45d6df61d752874c41cfed35c77d4",
+   "timestamp": 1793105459000,
+   "asset": {
+    "asset": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "tokenAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "assetAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "denomination": 18
+   },
+   "aspRoot": "1382576083517288360079708362746943374097997317769054503634549195604100030360"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 455,
+   "createdAt": "2026-10-27T12:31:35.458Z",
+   "amount": "399809568237384365659",
+   "address": "",
+   "txHash": "0x4bbb6e6efb05dd8964034c9c4330e3801578c89981998ed57b6809d03e434477",
+   "timestamp": 1793104290000,
+   "asset": {
+    "asset": "0x4a5b11c3898367664d94b43be1dcea163bb1d094",
+    "chainId": 42161,
+    "chainName": "Chain 42161",
+    "tokenSymbol": "0x4a5b11c3898367664d94b43be1dcea163bb1d094",
+    "tokenAddress": "0x4a5b11c3898367664d94b43be1dcea163bb1d094",
+    "assetAddress": "0x4a5b11c3898367664d94b43be1dcea163bb1d094",
+    "denomination": 18
+   },
+   "aspRoot": "8495028166615387953276084878433446606658907554011289607171804738236791681948"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 454,
+   "createdAt": "2026-10-27T12:20:05.407Z",
+   "amount": "10002716151414050",
+   "address": "",
+   "txHash": "0x15e40c667438ba05a97969fe4d58a0baeac3b6c617648d112eb1f16328abffc1",
+   "timestamp": 1793103601000,
+   "asset": {
+    "asset": "0x319abee703b5f6c3db9c2f126475ef49b20fdd49",
+    "chainId": 8453,
+    "chainName": "Chain 8453",
+    "tokenSymbol": "0x319abee703b5f6c3db9c2f126475ef49b20fdd49",
+    "tokenAddress": "0x319abee703b5f6c3db9c2f126475ef49b20fdd49",
+    "assetAddress": "0x319abee703b5f6c3db9c2f126475ef49b20fdd49",
+    "denomination": 18
+   },
+   "aspRoot": "2005436945495394167816013499732742761095540454715559196778057893506132794043"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 453,
+   "createdAt": "2026-10-27T10:34:34.632Z",
+   "amount": "43388149415238429",
+   "address": "",
+   "txHash": "0xd47c8e2a07d7b28e626b15a0d797e756df80b341ee5102e59f9c5ece4b4bc3cc",
+   "timestamp": 1793097272000,
+   "asset": {
+    "asset": "0x319abee703b5f6c3db9c2f126475ef49b20fdd49",
+    "chainId": 42161,
+    "chainName": "Chain 42161",
+    "tokenSymbol": "0x319abee703b5f6c3db9c2f126475ef49b20fdd49",
+    "tokenAddress": "0x319abee703b5f6c3db9c2f126475ef49b20fdd49",
+    "assetAddress": "0x319abee703b5f6c3db9c2f126475ef49b20fdd49",
+    "denomination": 18
+   },
+   "aspRoot": "5769672433517072493772515808729385448312059477809349119714193205156173730578"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 452,
+   "createdAt": "2026-10-27T07:43:34.536Z",
+   "amount": "13593954948291955652",
+   "address": "",
+   "txHash": "0x8d284c088c3772b66db562a0b46a9d92925a79b840ccdfee5646051f9e9a7ec9",
+   "timestamp": 1793087003000,
+   "asset": {
+    "asset": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "tokenAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "assetAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "denomination": 18
+   },
+   "aspRoot": "3132616102230659571190222556700558365897766037969382167610092135992776794510"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 451,
+   "createdAt": "2026-10-27T06:49:34.048Z",
+   "amount": "3664000000000000",
+   "address": "",
+   "txHash": "0x84ea19d10b4e3db623f0333d3eb57320ca4dd6c5ebb68272ba977f673ed26299",
+   "timestamp": 1793083763000,
+   "asset": {
+    "asset": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "chainId": 1,
+    "chainName": "Chain 1",
+    "tokenSymbol": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "tokenAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "assetAddress": "0x66051920d25af4e3596a8a46309f4d045f9d83b7",
+    "denomination": 18
+   },
+   "aspRoot": "3132616102230659571190222556700558365897766037969382167610092135992776794510"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 449,
+   "createdAt": "2026-10-27T05:08:49.383Z",
+   "amount": "9044913119760453041",
+   "address": "",
+   "txHash": "0xbe02e83b3b2eaf66c8408372546fc46bd1983271783448bc10839aa1822c04bd",
+   "timestamp": 1793077716000,
+   "asset": {
+    "asset": "0x4a5b11c3898367664d94b43be1dcea163bb1d094",
+    "chainId": 42161,
+    "chainName": "Chain 42161",
+    "tokenSymbol": "0x4a5b11c3898367664d94b43be1dcea163bb1d094",
+    "tokenAddress": "0x4a5b11c3898367664d94b43be1dcea163bb1d094",
+    "assetAddress": "0x4a5b11c3898367664d94b43be1dcea163bb1d094",
+    "denomination": 18
+   },
+   "aspRoot": "492242090174910250375219664212957308383793627529203529119571565907047984160"
+  },
+  {
+   "type": "withdrawal",
+   "eventId": 448,
+   "createdAt": "2026-10-27T05:06:59.142Z",
+   "amount": "1050127505198760289",
+   "address": "",
+   "txHash": "0xc3690c0273872d24374912cfc16be27a0783cfb695300dd4983f3e26015df6ee",
+   "timestamp": 1793077616000,
+   "asset": {
+    "asset": "0x4a5b11c3898367664d94b43be1dcea163bb1d094",
+    "chainId": 42161,
+    "chainName": "Chain 42161",
+    "tokenSymbol": "0x4a5b11c3898367664d94b43be1dcea163bb1d094",
+    "tokenAddress": "0x4a5b11c3898367664d94b43be1dcea163bb1d094",
+    "assetAddress": "0x4a5b11c3898367664d94b43be1dcea163bb1d094",
+    "denomination": 18
+   },
+   "aspRoot": "492242090174910250375219664212957308383793627529203529119571565907047984160"
+  }
+ ]
+}
