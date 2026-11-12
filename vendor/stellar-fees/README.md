@@ -24,6 +24,8 @@ in builds that include Stellar, including sessions without Stellar opt-in. It
 calculates all five transfer and withdrawal input counts locally. A failed read or settings at
 least two minutes old makes the displayed estimate unavailable; it does not initiate
 an extra request. The SDK can retry a public RPC snapshot-gap error once.
+The client uses dev's direct Soroban URL. Ports to branches with anonymous RPC
+routing must apply that routing to this client too.
 
 The native-XLM estimate adds 200,000 stroops flat fee and 100 stroops inclusion
 to the resource fee with a 25% margin rounded up. This policy must be updated
@@ -39,4 +41,5 @@ quotes for a 1 XLM withdrawal matched all five local estimates: 445273, 492989,
 Send, payment requests, and saving a claimed link share the transfer estimates.
 Withdrawal fee, total, and remaining displays use the withdrawal estimate.
 The transfer ceiling of 750,000 stroops and the existing withdrawal reserve
-still determine affordability and acceptance of binding signed quotes.
+still determine affordability. Signed quotes must also stay within the displayed
+estimate plus the existing EVM reviewed-fee allowance (1%, with a 16-unit floor).

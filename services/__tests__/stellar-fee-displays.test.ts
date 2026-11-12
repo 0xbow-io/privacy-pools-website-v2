@@ -89,3 +89,9 @@ test('all Stellar fee displays read the shared cache, including requests and sav
     expect(source).not.toMatch(/fetchStellarFees|readStellarFeeSettings/);
   }
 });
+
+test('payment requests show a preliminary estimate before a funded selection is available', () => {
+  expect(pay('feeInputCount', { stroops: 10000000n, feeSelection: { covered: false, selectedNotes: [] } })).toBe(1);
+  expect(pay('feeInputCount', { stroops: 10000000n, feeSelection: { covered: true, selectedNotes: notes } })).toBe(3);
+  expect(pay('feeInputCount', { stroops: null, feeSelection: { covered: false, selectedNotes: [] } })).toBe(0);
+});

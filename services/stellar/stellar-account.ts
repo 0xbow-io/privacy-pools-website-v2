@@ -30,6 +30,7 @@
  * (stellar-request-storage.ts), since nothing else can rebuild a blind
  * request's note secrets, and making one downloads a request backup.
  */
+import { feeWithinReviewed, relayerFeeJitterAllowance } from '@/services/relayer-fee-jitter';
 import type {
   Hex,
   IRelayerInteractor,
@@ -337,7 +338,7 @@ class StellarAccount {
   private async relayOnce(
     session: StellarPoolSession,
     relayer: IRelayerInteractor<StellarAddress>,
-    params: TransferOnceAction,
+    params: TransferOnceAction & { reviewedFee: bigint },
   ): Promise<TransferResult<StellarAddress, StellarLog>> {
     const sdk = await loadStellarSdk();
     return (await relayTransferOnce(
@@ -346,7 +347,7 @@ class StellarAccount {
       {
         ...params,
         tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
-        maxFee: STELLAR_TRANSFER_RELAY_FEE_ESTIMATE,
+        maxFee: params.reviewedFee + relayerFeeJitterAllowance(params.reviewedFee),
         maxInputs: sdk.MAX_INPUTS,
         maxOutputs: sdk.MAX_OUTPUTS,
       },
@@ -799,6 +800,7 @@ class StellarAccount {
   }
 
   withdraw(params: {
+    reviewedFee: bigint;
     amount: bigint;
     recipient: string;
     inputCommitments: Hex[];
@@ -837,8 +839,9 @@ class StellarAccount {
           // Priced by proof shape, as the SDK asks for it (n = m = inputs).
           shape: { n: Math.min(params.inputCommitments.length, 5), m: Math.min(params.inputCommitments.length, 5) },
         });
-        // The inputs were selected for amount + this estimate; a higher fee would not be covered.
-        if (BigInt(quote.feeAmount) > estimateStellarRelayFee(params.amount)) {
+        // Keep both the selected-input reserve and the reviewed fee limit.
+        const fee = BigInt(quote.feeAmount);
+        if (fee > estimateStellarRelayFee(params.amount) || !feeWithinReviewed(fee, params.reviewedFee)) {
           throw new Error('The relayer asks for more than the fee shown. Try again later.');
         }
         const option = {
@@ -864,6 +867,7 @@ class StellarAccount {
   }
 
   transfer(params: {
+    reviewedFee: bigint;
     amount: bigint;
     recipient: string;
     inputCommitments: Hex[];
@@ -886,6 +890,7 @@ class StellarAccount {
       const result = await this.withTransferRelayer(relayer, () =>
         // Relayed: the relayer submits, its fee comes on top of `amount`. One quote, one proof.
         this.relayOnce(session, relayer, {
+          reviewedFee: params.reviewedFee,
           amount: params.amount,
           inputCommitments: params.inputCommitments,
           recipient: { kind: 'registered', address: params.recipient },
@@ -912,6 +917,7 @@ class StellarAccount {
    * the registration, if any.
    */
   sendOneTime(params: {
+    reviewedFee: bigint;
     amount: bigint;
     recipient: string;
     inputCommitments: Hex[];
@@ -937,6 +943,7 @@ class StellarAccount {
       // account does not appear on the transaction. One quote, one proof.
       const result = await this.withTransferRelayer(relayer, () =>
         this.relayOnce(session, relayer, {
+          reviewedFee: params.reviewedFee,
           amount: params.amount,
           inputCommitments: params.inputCommitments,
           recipient: { kind: 'oneTime', address: params.recipient },
@@ -1022,7 +1029,7 @@ class StellarAccount {
    * and the link is no longer needed. Registers the account first if needed
    * (Varial pays; relayed registration is not available on Stellar).
    */
-  keepClaim(commitments: readonly Hex[], params?: { onStage?: StageListener; shouldContinue?: () => boolean }) {
+  keepClaim(commitments: readonly Hex[], params: { reviewedFee: bigint; onStage?: StageListener; shouldContinue?: () => boolean }) {
     return this.enqueue(async () => {
       const { address, generation } = this.requireSigner();
       const session = await this.ensureSession(params?.onStage);
@@ -1043,6 +1050,7 @@ class StellarAccount {
         // estimate over-reserves returns to this account as change.
         if (total <= STELLAR_TRANSFER_RELAY_FEE_ESTIMATE) throw new Error('This link holds less than the relayer fee.');
         return this.relayOnce(session, relayer, {
+          reviewedFee: params.reviewedFee,
           amount: total - STELLAR_TRANSFER_RELAY_FEE_ESTIMATE,
           inputCommitments: claimed.map((n) => n.commitment as Hex),
           recipient: { kind: 'registered', address },
@@ -1260,6 +1268,7 @@ class StellarAccount {
    * other Stellar transfers; nothing about the recipient is looked up.
    */
   payPaymentRequest(params: {
+    reviewedFee: bigint;
     request: StellarSdkPaymentRequest;
     inputCommitments: Hex[];
     onStage?: StageListener;
@@ -1277,6 +1286,7 @@ class StellarAccount {
       onStage?.('proving');
       const result = await this.withTransferRelayer(relayer, () =>
         this.relayOnce(session, relayer, {
+          reviewedFee: params.reviewedFee,
           paymentRequest: params.request,
           inputCommitments: params.inputCommitments,
           guard: () => {
@@ -1298,7 +1308,7 @@ class StellarAccount {
    * publishes both keystore legs if missing. Address-based transfers need
    * the viewing key; blind payment requests do not.
    */
-  ensureCanReceive(params?: { onStage?: StageListener; shouldContinue?: () => boolean }) {
+  ensureCanReceive(params: { reviewedFee: bigint; onStage?: StageListener; shouldContinue?: () => boolean }) {
     const { generation } = this.requireSigner();
     return this.enqueue(async () => {
       this.assertStillBound(generation);

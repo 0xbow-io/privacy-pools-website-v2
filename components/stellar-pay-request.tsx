@@ -65,7 +65,8 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
     TRANSFER_MAX_INPUTS,
     TRANSFER_MAX_LABELS,
   ), [stellarSession.spendableNotes, stroops]);
-  const relayFee = useStellarTransferFeeEstimate(stroops !== null && feeSelection.covered ? feeSelection.selectedNotes.length : 0);
+  const feeInputCount = stroops === null ? 0 : feeSelection.covered ? feeSelection.selectedNotes.length : 1;
+  const relayFee = useStellarTransferFeeEstimate(feeInputCount);
   const totalLabel = stroops !== null && relayFee !== null
     ? `~${formatUnits(stroops + relayFee, STELLAR_XLM.decimals)} XLM`
     : 'Estimate unavailable';
@@ -164,7 +165,9 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
     }
     setBusy(true);
     try {
+      if (relayFee === null) throw new Error('Estimate unavailable. Try again later.');
       const result = await stellarSession.payPaymentRequest({
+        reviewedFee: relayFee,
         request: toStellarSdkPaymentRequest(link.request),
         inputCommitments: pick.selectedNotes.map((n) => n.commitment as `0x${string}`),
         onStage: (stage) => setStatus(describeStellarStage(stage)),

@@ -2891,6 +2891,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     // relayed withdraw (change note back to self, processor = the relay contract).
     if (reviewContext?.mode === 'sui' && reviewContext.poolChainId === STELLAR_TESTNET_ID) {
       try {
+        if (stellarFeeWei === null) throw new Error('Estimate unavailable. Try again later.');
         const amountOut = parseTokenAmount(amount, altDecimals);
         const active = stellarSession.spendableNotes as unknown as Note[];
         // The relayer fee comes on top: pick notes covering amount + fee.
@@ -2905,6 +2906,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         if (!isSameOperation()) { log('warn', 'Withdraw', 'Stale run aborted before Stellar broadcast'); return; }
         submittedRef.current = true;
         const result = await stellarSession.withdraw({
+          reviewedFee: stellarFeeWei,
           amount: amountOut,
           recipient,
           inputCommitments: selection.notes.map((n) => n.commitment as `0x${string}`),
@@ -4694,7 +4696,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       settleWatch.release();
       endTx();
     }
-  }, [isSui, suiSession, sdkReady, poolSession, noteManager, keystoreManager, notes, amount, effectiveReceiveExact, selectedToken, selectedTokenAddress, targetAddress, connectedAddress, activeFeeCommitment, batchPlan, swapSnapshot, reviewContext, getBatchWithdrawSession, withdrawalProcessorAddress, chainId, log, resetQuote, selectedPA, refetchNotes, exportAccount, preferredTransaction, preferredWithdrawNote, ensureInitialized, spendabilityKey, spendableCommitments, publicClient, queryClient, beginTx, endTx, coldStartClaim, getQuote, gasTokenChecked, signTypedDataAsync, markRegistered, crossChainReceive, receiveChainId]);
+  }, [isSui, stellarFeeWei, suiSession, sdkReady, poolSession, noteManager, keystoreManager, notes, amount, effectiveReceiveExact, selectedToken, selectedTokenAddress, targetAddress, connectedAddress, activeFeeCommitment, batchPlan, swapSnapshot, reviewContext, getBatchWithdrawSession, withdrawalProcessorAddress, chainId, log, resetQuote, selectedPA, refetchNotes, exportAccount, preferredTransaction, preferredWithdrawNote, ensureInitialized, spendabilityKey, spendableCommitments, publicClient, queryClient, beginTx, endTx, coldStartClaim, getQuote, gasTokenChecked, signTypedDataAsync, markRegistered, crossChainReceive, receiveChainId]);
 
   // Same-tick double-press guard — see hooks/use-op-lock.ts.
   const handleConfirm = useMemo(() => withOpLock(handleConfirmUnlocked), [withOpLock, handleConfirmUnlocked]);
@@ -5667,7 +5669,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                   {/* Fee, relayer and quote countdown. */}
                   {isStellar ? (
                     <Text className="py-[9px] font-pp-sans text-[11.5px] text-text-muted">
-                      Relayer fee {stellarFeeWei === null ? 'Estimate unavailable' : `~${formatUnits(stellarFeeWei, altDecimals)} XLM`}
+                      Relayer fee: {stellarFeeWei === null ? 'Estimate unavailable' : `~${formatUnits(stellarFeeWei, altDecimals)} XLM`}
                     </Text>
                   ) : (
                   <View className="flex-row flex-wrap items-center justify-between gap-[6px] py-[9px]">

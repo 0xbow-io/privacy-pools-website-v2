@@ -110,7 +110,9 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
     const scope = keepScope.current;
     setBusy(describeStellarStage('proving'));
     try {
+      if (relayFee === null) throw new Error('Estimate unavailable. Try again later.');
       const { txHash } = await stellar.keepClaim(claim.notes.map((n) => n.commitment as `0x${string}`), {
+        reviewedFee: relayFee,
         shouldContinue: () => scope.active,
         onStage: (stage) => { if (scope.active) setBusy(describeStellarStage(stage)); },
       });

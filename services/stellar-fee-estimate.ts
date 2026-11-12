@@ -1,7 +1,7 @@
-import { STELLAR_MAX_RELAY_FEE, STELLAR_RELAYER_FEE_BPS } from '@/config/stellar-deployment';
+import { STELLAR_MAX_RELAY_FEE, STELLAR_RELAYER_FEE_BPS, STELLAR_TESTNET_ID } from '@/config/stellar-deployment';
 import type { FeedState } from '@/services/public-feed-scheduler';
 
-export const FEED_STELLAR_FEES = 'stellar-fees:202';
+export const FEED_STELLAR_FEES = `stellar-fees:${STELLAR_TESTNET_ID}`;
 export const STELLAR_FEE_INTERVAL_MS = 60_000;
 /** Index n-1 holds the base fee for n inputs, before withdrawal's amount fee. */
 export type StellarFeeEstimates = {

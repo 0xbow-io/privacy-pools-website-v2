@@ -1792,6 +1792,10 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         reportTransferError('Connect a Stellar wallet first.');
         return;
       }
+      if (stellarFeeEstimate === null) {
+        reportTransferError('Estimate unavailable. Try again later.');
+        return;
+      }
       setSentAmountWei(null);
       setSentUnits(null);
       setStep('loading');
@@ -1819,6 +1823,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         if (oneTime) {
           const { buildStellarClaimUrl } = await import('@/services/stellar/stellar-claim-url');
           const sent = await stellarSession.sendOneTime({
+            reviewedFee: stellarFeeEstimate,
             amount: want,
             recipient: recipientAddress,
             inputCommitments,
@@ -1839,6 +1844,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         } else {
           try {
             result = await stellarSession.transfer({
+              reviewedFee: stellarFeeEstimate,
               amount: want,
               recipient: recipientAddress,
               inputCommitments,
@@ -3439,7 +3445,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     hideAddress, relayFeeEstimate, maxSpendableWei, sendTransactionAsync, walletAddress, sendExactActive,
     selectedNoteCommitments, enteredAmountWei, selectedTokenId, chainId, forcedInputs, feeDisplayGrain, selectedDecimals,
     transfer, prepareRelayed, log, noteManager, keystoreManager,
-    activeNotes, selectedDecimals, recipientIsRegistered, recipientRegistrationCheck, stellarOneTime, stellarSendFee,
+    activeNotes, selectedDecimals, recipientIsRegistered, recipientRegistrationCheck, stellarOneTime, stellarSendFee, stellarFeeEstimate,
     refetchNotes,
     exportAccount, publicClient,
     beginTx, endTx,
