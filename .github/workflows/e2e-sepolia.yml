@@ -91,6 +91,7 @@ jobs:
           EXPO_PUBLIC_APP_ENV=staging
           TEST_MODE=true
           EXPO_PUBLIC_ASP_URL=https://api-dev.0xbow.io
+          EXPO_PUBLIC_SEPOLIA_RELAYER_URL=https://relayer-v2-staging-149184580131.us-east1.run.app
           EXPO_PUBLIC_ALCHEMY_KEY=${{ secrets.EXPO_PUBLIC_ALCHEMY_KEY }}
           EXPO_PUBLIC_BATCH_WITHDRAWALS=true
           EOF
