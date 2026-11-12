@@ -1630,7 +1630,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     }
     // === Stellar path ===
     // The shared Stellar account (services/stellar/stellar-account.ts) derives
-    // keys on first use, proves, submits pool.deposit via Freighter, then
+    // keys on first use, proves, submits pool.deposit via Varial, then
     // registers the label ciphertext with the ASP registry.
     if (isStellar) {
       if (!stellarOwner) {
@@ -4288,7 +4288,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     });
   }, [isSui, isStellar, enteredAmount, tokenPrice, feePricing, chainId, crossChainShieldActive, crossChainPoolId, crossChainVetting, selectedToken.address, selectedToken.symbol, swapDepositActive, depositVettingFeeBps, swapRoute]);
 
-  // Re-sends the registration from an explicit tap (one Freighter approval);
+  // Re-sends the registration from an explicit tap (one Varial approval);
   // the next manual Sync does the same for any deposit this card is not for.
   const retryStellarLabels = stellarSession.retryPendingLabels;
   const stellarLabelRetry = useMemo(() => (stellarLabelPending && stellarLabelPending.owner === stellarOwner ? {
@@ -4302,7 +4302,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       } catch (caught) {
         const raw = caught instanceof Error ? caught.message : String(caught);
         errorToast({
-          title: /reject|denied|cancel|declined/i.test(raw) ? 'Cancelled in Freighter.' : stellarErrorMessage(raw),
+          title: /reject|denied|cancel|declined/i.test(raw) ? 'Cancelled in your wallet.' : stellarErrorMessage(raw),
           variant: 'destructive',
         });
         return false;
@@ -4889,7 +4889,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
           chainId={chainId}
           // Non-EVM: no EVM balance reads or swap routes. Stellar shows no
           // wallet figure here (the sheet's native read is Sui's), the form
-          // below shows the Freighter balance.
+          // below shows the Varial balance.
           isSui={isSui}
           balanceMode={isStellar ? 'none' : 'wallet'}
           onSelectToken={(t) => {

@@ -71,7 +71,7 @@ function useRealMultiChainWallet(): MultiChainWallet {
   const activeIsSui = getChainConfig(selectedChainId)?.chainType === 'sui';
   const activeIsStellar = getChainConfig(selectedChainId)?.chainType === 'stellar';
 
-  // Stellar wallet state (Freighter)
+  // Stellar wallet state (Varial)
   const stellarWallet = useStellarWallet();
 
   if (activeIsSui) {
@@ -114,7 +114,7 @@ function useRealMultiChainWallet(): MultiChainWallet {
       isSui: false,
       isStellar: true,
       isEvm: false,
-      // Freighter on another network (Mainnet/Futurenet): the SDK's own
+      // Varial on another network (Mainnet/Futurenet): the SDK's own
       // interactor also refuses to sign, this lets the UI say so first.
       networkMismatch: connected && stellarWallet.networkMismatch,
     };
