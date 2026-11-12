@@ -111,7 +111,7 @@ export async function openApp(
   // Google Chrome stable, sandbox on, version-checked: see scripts/lib/chrome.mjs.
   const browser = await launchChrome({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1200 }, reducedMotion: 'reduce', serviceWorkers: 'block' });
-  const capture = startNetworkCapture(context, { enabled: false, file: process.env.E2E_RPC_CAPTURE, devServerOrigin: BASE });
+  const capture = startNetworkCapture(context, { enabled: false, file: process.env.E2E_RPC_CAPTURE, diagnosticsFile: `${ROOT}/.e2e-shots/${opts.tag}-capture-timeout.json`, devServerOrigin: BASE });
   // Allow UI actions to finish while Metro and proof workers share the runner.
   // Journey assertions still require explicit success and confirmed outcomes.
   const ACTION_TIMEOUT_MS = Number(process.env.E2E_ACTION_TIMEOUT_MS ?? 90_000);

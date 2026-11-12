@@ -108,7 +108,7 @@ try {
   expect(await delayed.locator('body').getAttribute('data-clicks')).toBe('1');
   console.log('PASS delayed sign-in becomes enabled and is clicked only once');
   await delayed.close();
-  for (const outcome of ['success', 'unknown', 'fee-loop']) {
+  for (const outcome of ['success', 'quote-fetch', 'unknown', 'fee-loop']) {
     const consolidation = await browser.newPage();
     await consolidation.setContent('<div id="stage"></div>');
     await consolidation.evaluate((mode) => {
@@ -123,10 +123,10 @@ try {
         document.querySelector('[data-testid="consolidation-confirm"]')!.addEventListener('click', () => {
           document.body.dataset.clicks = String(++clicks);
           if (mode === 'unknown') root.innerHTML = 'Consolidation outcome unknown';
-          else if (mode === 'success' && clicks > 1) root.innerHTML = 'Consolidation complete';
+          else if ((mode === 'success' || mode === 'quote-fetch') && clicks > 1) root.innerHTML = 'Consolidation complete';
           else {
             const error = document.createElement('p');
-            error.textContent = 'Transfer failed: The relayer fee increased. Review the updated quote before trying again. Nothing was sent.';
+            error.textContent = mode === 'quote-fetch' ? 'Could not reach the relayer to price this transfer, so nothing was sent and your balance is unchanged. Try again in a moment.' : 'Transfer failed: The relayer fee increased. Review the updated quote before trying again. Nothing was sent.';
             root.append(error);
           }
         });
@@ -134,8 +134,8 @@ try {
       review();
     }, outcome);
     const terminal = await confirmConsolidation(consolidation);
-    expect(await consolidation.locator('body').getAttribute('data-clicks')).toBe(outcome === 'success' ? '2' : outcome === 'unknown' ? '1' : '3');
-    expect(terminal).toContain(outcome === 'success' ? 'Consolidation complete' : outcome === 'unknown' ? 'outcome unknown' : 'Nothing was sent');
+    expect(await consolidation.locator('body').getAttribute('data-clicks')).toBe((outcome === 'success' || outcome === 'quote-fetch') ? '2' : outcome === 'unknown' ? '1' : '3');
+    expect(terminal).toContain((outcome === 'success' || outcome === 'quote-fetch') ? 'Consolidation complete' : outcome === 'unknown' ? 'outcome unknown' : 'Nothing was sent');
     console.log(`PASS consolidation ${outcome}: retry is bounded and unknown outcomes are never retried`);
     await consolidation.close();
   }
