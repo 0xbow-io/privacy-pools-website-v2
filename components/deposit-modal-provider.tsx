@@ -62,7 +62,7 @@ import { getExplorerName, getExplorerTxUrl, getChainConfig, isChainSelectable, s
 import { STELLAR_TESTNET_CONTRACTS, STELLAR_XLM } from '@/config/stellar-deployment';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { useStellarBalance } from '@/hooks/use-stellar-balance';
-import { describeStellarStage, stellarErrorMessage } from '@/services/stellar/stellar-copy';
+import { describeStellarStage, stellarErrorMessage, stellarActionError } from '@/services/stellar/stellar-copy';
 import { StellarLabelRetryNotice } from '@/components/stellar-label-retry';
 import { isStellarAccountAddress } from '@/services/stellar/stellar-request';
 import type { PendingLabel } from '@/services/stellar/stellar-account';
@@ -1239,7 +1239,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     : selectedToken.isNative
       ? nativeBalance == null
       : erc20BalanceRaw == null;
-  const walletBalanceFormatted = walletBalanceLoading ? '—' : tokenAmountLabel(walletBalance.toFixed(4), displaySymbol);
+  const walletBalanceFormatted = walletBalanceLoading ? '—' : tokenAmountLabel(formatTokenBalanceDown(walletBalance, displaySymbol), displaySymbol);
 
   // --- Gas reserve (native deposits) ---
 
@@ -1687,7 +1687,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
         if (/Superseded/.test(message)) { setStep('deposit'); return; }
         if (/reject|denied|cancel|declined/i.test(message)) {
           setStep('deposit');
-          reportDepositError('Transaction was rejected.', err);
+          reportDepositError(stellarActionError(err), err);
           return;
         }
         reportDepositError(`Deposit failed: ${stellarErrorMessage(message)}`, err, 'stellar-broadcast');

@@ -59,7 +59,7 @@ import { useAllChainsPriceMap } from '@/hooks/use-all-chains-price-map';
 import { getChainConfig, getExplorerName, getExplorerTxUrl, STELLAR_TESTNET_ID, SUI_TESTNET_ID } from '@/config/chains';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { estimateStellarRelayFee, maxStellarWithdrawForInputs } from '@/config/stellar-deployment';
-import { describeStellarStage, stellarErrorMessage } from '@/services/stellar/stellar-copy';
+import { describeStellarStage, stellarActionError } from '@/services/stellar/stellar-copy';
 import { SUI_TESTNET_RELAYER_URL } from '@/config/sui-deployment';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { useSuiSession } from '@/hooks/use-sui-session';
@@ -2916,7 +2916,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       } catch (err) {
         const raw = err instanceof Error ? err.message : String(err);
         if (/Superseded/.test(raw)) return;
-        const message = /reject|denied|cancel|declined/i.test(raw) ? 'Transaction was rejected.' : stellarErrorMessage(raw);
+        const message = stellarActionError(err);
         log('error', 'Withdraw', `Stellar withdraw failed: ${raw}`, err);
         reportWithdrawError(message);
         submittedRef.current = false;

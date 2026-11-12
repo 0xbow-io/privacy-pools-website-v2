@@ -298,6 +298,11 @@ export interface EventSnapshotResponse {
   keystoreLeaves: SnapshotLeaf[];
   notes: SnapshotNote[];
   /**
+   * asp-v2#205, optional and additive: the ASP cut this response to a page at
+   * a block boundary. Ask again with `sinceBlock` set to `snapshotBlockNumber`.
+   */
+  hasMore?: boolean;
+  /**
    * asp-v2#150, optional and additive: the pool state the ASP derived from its
    * own indexed rows at snapshotBlockNumber, checked against the chain by
    * services/snapshot-pool-state.ts. Decimal strings.

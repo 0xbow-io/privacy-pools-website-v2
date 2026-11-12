@@ -1,6 +1,10 @@
 import { describe, test, expect } from 'bun:test';
 
-import { buildRunItems, resolvePayrollTransferParams, applyMarkPaid, buildRunsCsv } from '@/components/payroll/io';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { payrollCurrencyOptions, buildRunItems, resolvePayrollTransferParams, applyMarkPaid, buildRunsCsv, payrollSentMatchesRow } from '@/components/payroll/io';
+import { sharesForUnderlyingCeil, underlyingForSharesFloor } from '@/services/underlying-amount-entry';
 import type { Employee, PayrollRun, PayrollRunItem } from '@/services/payroll-store';
 
 function employee(over: Partial<Employee> = {}): Employee {
@@ -34,6 +38,19 @@ function item(over: Partial<PayrollRunItem> = {}): PayrollRunItem {
 function run(items: PayrollRunItem[], status: PayrollRun['status'] = 'pending'): PayrollRun {
   return { id: 'run1', date: 0, periodLabel: 'July 2026', items, status };
 }
+
+describe('payroll currencies', () => {
+  test('offers each mainnet coin once, including when a share precedes its coin', () => {
+    const tokens = ['ppETH', 'ETH', 'USDC', 'USDT', 'ppUSDC', 'ppUSDT'].map((symbol) => ({ symbol }));
+    expect(payrollCurrencyOptions(tokens)).toEqual(['ETH', 'USDC', 'USDT']);
+  });
+
+  test('keeps the selected network currencies without adding mainnet assets', () => {
+    expect(payrollCurrencyOptions([{ symbol: 'cBTC' }])).toEqual(['cBTC']);
+    expect(payrollCurrencyOptions([{ symbol: 'BNB' }, { symbol: 'FDUSD' }])).toEqual(['BNB', 'FDUSD']);
+    expect(payrollCurrencyOptions([])).toEqual([]);
+  });
+});
 
 describe('buildRunItems', () => {
   test('includes only active employees, mapped to pending items', () => {
@@ -97,6 +114,18 @@ describe('resolvePayrollTransferParams', () => {
     expect(ok(resolvePayrollTransferParams(item({ currency: 'ETH' }), deps)).tokenSymbol).toBe('ETH');
     expect(ok(resolvePayrollTransferParams(item({ currency: 'USDT' }), deps)).tokenSymbol).toBe('USDT');
     expect(ok(resolvePayrollTransferParams(item({ currency: 'USDC' }), deps)).tokenSymbol).toBe('USDC');
+  });
+
+  test('existing share-denominated rows resolve in coin units and coin precision', () => {
+    for (const currency of ['ppETH', 'ppUSDC', 'ppUSDT']) {
+      const params = ok(resolvePayrollTransferParams(item({ currency, amountText: '1000' }), deps));
+      expect(params.tokenSymbol).toBe(currency.slice(2));
+      expect(params.amount).toBe('1000');
+      expect(params.amountUnits).toBe('underlying');
+      expect(params.decimals).toBe(currency === 'ppETH' ? 18 : 6);
+    }
+    const result = resolvePayrollTransferParams(item({ currency: 'ppUSDC', amountText: '1.0000001' }), deps);
+    expect('refusal' in result && /6 decimal places/.test(result.refusal)).toBe(true);
   });
 
   // codex round 3: the old fallback silently substituted USDC for any
@@ -195,5 +224,69 @@ describe('buildRunsCsv', () => {
 
   test('is just the header when there are no runs', () => {
     expect(buildRunsCsv([])).toBe('Period,Date,Payee,Wallet,Network,Amount,Currency,Status,Tx Hash');
+  });
+});
+
+// DEV-622: a payroll amount is a salary in the COIN. The Send form holds pool
+// units (vault shares for a yield pool), so the handoff must say what unit the
+// amount is in, and a paid row is judged on the value delivered in the coin.
+describe('payroll to Send unit handoff (DEV-622)', () => {
+  const deps = {
+    resolveChainId: (network: string) => (network === 'Ethereum' ? 1 : undefined),
+    getToken: (symbol: string, chainId: number) => (chainId === 1 && ['ETH', 'USDC', 'USDT'].includes(symbol) ? { decimals: symbol === 'ETH' ? 18 : 6 } : undefined),
+  };
+  const RATE = {
+    chainId: 1, share: '0xshare', underlying: '0xusdt', shareSymbol: 'ppUSDT', shareDecimals: 18,
+    assetsPerShare: 1_005_420n, underlyingSymbol: 'USDT', underlyingDecimals: 6,
+  };
+  const resolved = () => {
+    const r = resolvePayrollTransferParams(item({ currency: 'USDT', amount: 1018.4 }), deps);
+    if ('refusal' in r) throw new Error(r.refusal);
+    return r;
+  };
+
+  test('the handoff names the amount as underlying and carries the coin decimals', () => {
+    const p = resolved();
+    expect(p.amount).toBe('1018.4');
+    expect(p.amountUnits).toBe('underlying');
+    expect(p.decimals).toBe(6);
+  });
+
+  test('regression: run.tsx never hands a salary to Send without its unit', () => {
+    const here = new URL('.', import.meta.url).pathname;
+    const src = readFileSync(join(here, '..', 'run.tsx'), 'utf8');
+    expect(src).toMatch(/amountUnits:\s*params\.amountUnits/);
+    // The transfer modal converts a coin amount before it is stored as the amount.
+    const modal = readFileSync(join(here, '..', '..', 'transfer-modal-provider.tsx'), 'utf8');
+    expect(modal).toMatch(/setAmount\(prefill\?\.amountUnits === 'underlying' \? '' : prefill\?\.amount \?\? ''\)/);
+    expect(modal).toMatch(/sharesForUnderlyingCeil\(pendingUnderlying\.text, rate\)/);
+  });
+
+  test('the converted send delivers exactly the salary, and the row is marked paid', () => {
+    const p = resolved();
+    const shares = sharesForUnderlyingCeil(p.amount, RATE)!;
+    const details = { chainId: 1, tokenSymbol: 'ppUSDT', recipient: p.recipient, underlyingAmount: underlyingForSharesFloor(shares, RATE) };
+    expect(details.underlyingAmount).toBe('1018.4');
+    expect(payrollSentMatchesRow({ details, recipient: p.recipient, amount: p.amount, tokenSymbol: p.tokenSymbol, decimals: p.decimals, expectedChainId: 1 })).toBe(true);
+  });
+
+  test('a share count sent as if it were the coin does NOT mark the row paid (the incident)', () => {
+    const p = resolved();
+    // 1,018.4 shares were sent: worth 1023.919728 USDT.
+    const details = { chainId: 1, tokenSymbol: 'ppUSDT', recipient: p.recipient, underlyingAmount: underlyingForSharesFloor('1018.4', RATE) };
+    expect(details.underlyingAmount).toBe('1023.919728');
+    expect(payrollSentMatchesRow({ details, recipient: p.recipient, amount: p.amount, tokenSymbol: p.tokenSymbol, decimals: p.decimals })).toBe(false);
+  });
+
+  test('an unknown rate, another coin, another recipient or chain keeps the row unpaid', () => {
+    const p = resolved();
+    const base = { chainId: 1, tokenSymbol: 'ppUSDT', recipient: p.recipient, underlyingAmount: '1018.4' };
+    const check = (details: typeof base | (Omit<typeof base, 'underlyingAmount'> & { underlyingAmount: string | null }), expectedChainId?: number) =>
+      payrollSentMatchesRow({ details, recipient: p.recipient, amount: p.amount, tokenSymbol: p.tokenSymbol, decimals: p.decimals, expectedChainId });
+    expect(check(base, 1)).toBe(true);
+    expect(check({ ...base, underlyingAmount: null })).toBe(false);
+    expect(check({ ...base, tokenSymbol: 'ppUSDC' })).toBe(false);
+    expect(check({ ...base, recipient: '0x2222222222222222222222222222222222222222' })).toBe(false);
+    expect(check(base, 56)).toBe(false);
   });
 });
