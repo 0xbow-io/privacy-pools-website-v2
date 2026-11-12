@@ -5,6 +5,7 @@
  *
  * Pure module (no react-native) so it is bun-testable.
  */
+import { StellarRegistrationCancelledError } from './stellar-registration-prompt';
 import type { StellarFlowStage } from '@/services/stellar/stellar-account';
 
 export function describeStellarStage(stage: StellarFlowStage): string {
@@ -74,4 +75,12 @@ export function stellarUnlockErrorTitle(caught: unknown): string {
   // A contract rejection's diagnostic log can contain these words too.
   const cancelled = /reject|denied|cancel|declined/i.test(raw) && !CONTRACT_ERROR.test(raw);
   return cancelled ? 'Sign-in cancelled in your wallet.' : stellarErrorMessage(raw);
+}
+
+/** Distinguish closing registration from rejecting a wallet request. */
+export function stellarActionError(caught: unknown, rejectionMessage = 'Transaction was rejected.'): string {
+  if (caught instanceof StellarRegistrationCancelledError) return caught.message;
+  const raw = caught instanceof Error ? caught.message : String(caught);
+  return /reject|denied|cancel|declined/i.test(raw) && !CONTRACT_ERROR.test(raw)
+    ? rejectionMessage : stellarErrorMessage(raw);
 }

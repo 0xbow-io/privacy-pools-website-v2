@@ -24,7 +24,7 @@ import { STELLAR_XLM, stellarTransferRelayFee } from '@/config/stellar-deploymen
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { toStellarSdkPaymentRequest } from '@/services/payment-request-codec';
-import { describeStellarStage, stellarErrorMessage } from '@/services/stellar/stellar-copy';
+import { describeStellarStage, stellarErrorMessage, stellarActionError } from '@/services/stellar/stellar-copy';
 import { decodeStellarPayLink, isStellarRequestExpired, type DecodedStellarRequest } from '@/services/stellar/stellar-request';
 import { selectGreedyTransferInputs, TRANSFER_MAX_INPUTS, TRANSFER_MAX_LABELS } from '@/services/transfer-note-selection';
 import type { Note as UiNote } from '@/services/sdk-types';
@@ -164,7 +164,7 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
       const raw = e instanceof Error ? `${e.name} ${e.message}` : String(e);
       setError(/PaymentRequestExpired/.test(raw)
         ? 'This payment request has expired. Ask for a new link.'
-        : /reject|denied|cancel|declined/i.test(raw) ? 'Payment cancelled in your wallet.' : stellarErrorMessage(raw));
+        : stellarActionError(e, 'Payment cancelled in your wallet.'));
     } finally {
       setStatus(null);
       setBusy(false);

@@ -21,6 +21,7 @@ function deferred<T>() {
 function fixture() {
   let notes: typeof note[] = [];
   let discovery = 0;
+  const depositsFor: { depositor: string; txHash: string }[] = [];
   let execution = async () => receipt;
   let origins = async (): Promise<StellarNoteOrigins> => ({ byCommitment: {}, complete: false });
   const session = {
@@ -40,6 +41,8 @@ function fixture() {
     STELLAR_TESTNET_CONTRACTS: { nativeAssetContractId: 'XLM' },
     toHex: (n: bigint) => `0x${n.toString(16)}`,
     canonicalCommitment, saveAccount: () => {}, requestStates: () => [],
+    sentClaimsStorage: () => null, DEPOSITS_FOR_KEY: 'test-deposits-for',
+    recordDepositFor: (_storage: unknown, _key: string, record: { depositor: string; txHash: string }) => depositsFor.push(record),
   };
   const account = new Function(...Object.keys(globals), `${js}; return new StellarAccount();`)(...Object.values(globals)) as {
     snapshot: { address: string; notes: typeof note[]; noteOrigins: StellarNoteOrigins | null };
@@ -55,7 +58,7 @@ function fixture() {
   account.ensureRegistered = async () => {};
   account.readNoteOrigins = () => origins();
   return {
-    account, discovery: () => discovery,
+    account, discovery: () => discovery, depositsFor,
     execute: (fn: typeof execution) => { execution = fn; },
     index: (fn: typeof origins) => { origins = fn; },
     rows: () => deriveStellarActivity(account.snapshot.notes, account.snapshot.noteOrigins, context).rows,
@@ -79,6 +82,8 @@ test('an unsuccessful receipt creates no activity', async () => {
 
 test('a deposit for another account never becomes the payer’s own pending deposit', async () => {
   const f = fixture(); await f.account.deposit({ amount: 1n, recipient: 'G-other' });
+  expect(f.depositsFor).toHaveLength(1);
+  expect(f.depositsFor[0]).toMatchObject({ depositor: OWNER, txHash: receipt.txHash });
   expect(f.rows()).toHaveLength(0);
   expect(f.account.snapshot.noteOrigins).toBeNull();
 });

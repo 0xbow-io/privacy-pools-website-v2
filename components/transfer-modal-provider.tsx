@@ -68,7 +68,7 @@ import { useDebug } from '@/components/debug-provider';
 import { useTxActivity } from '@/components/tx-activity-provider';
 import { getExplorerName, getExplorerTxUrl, getChainConfig, STELLAR_TESTNET_ID, SUI_TESTNET_ID } from '@/config/chains';
 import { useStellarSession } from '@/hooks/use-stellar-session';
-import { describeStellarStage, stellarErrorMessage, stellarUnlockErrorTitle } from '@/services/stellar/stellar-copy';
+import { describeStellarStage, stellarActionError, stellarUnlockErrorTitle } from '@/services/stellar/stellar-copy';
 import type { Note as StellarUiNote } from '@/services/sdk-types';
 import { FlowProgress } from '@/components/ui/flow-progress';
 import { fetchTransferFeeQuote } from '@/services/transfer-fee-quote';
@@ -1895,7 +1895,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           }
         }
         if (!live() || /Superseded/.test(raw)) return;
-        reportTransferError(declined ? 'Transaction was rejected.' : stellarErrorMessage(raw), err);
+        reportTransferError(stellarActionError(err), err);
         setStep('review');
       }
       return;

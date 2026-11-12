@@ -23,6 +23,7 @@
  * services/sdk-setup.ts already sends, so it names a region of history many
  * clients share rather than this client's own watermark.
  */
+import { snapshotCursor } from '@/services/asp-event-snapshot';
 import { alignLogScanStart, LOG_SCAN_ALIGNMENT_BLOCKS } from '@/services/log-scan-alignment';
 
 /** How far behind the last covered block every delta starts, at least. */
@@ -94,4 +95,37 @@ export function mergeSnapshotDelta<T extends Record<string, unknown>>(
     merged[section] = [...kept, ...deltaRows];
   }
   return merged as T;
+}
+
+/** A runaway guard: the ASP pages at 5,000 rows, so 50 pages is 250,000 rows of one section. */
+export const MAX_SNAPSHOT_PAGES = 50;
+
+/**
+ * Joins the pages after `first` while the ASP says `hasMore` (asp-v2#205).
+ * Each page starts at the previous page's `snapshotBlockNumber`, which the ASP
+ * chose from its data and the request alone, so every client asks for the same
+ * pages. A page that cannot be joined, or does not move forward, ends the loop:
+ * the payload then claims only the blocks it holds, and the next refresh tops
+ * it up.
+ */
+export async function followSnapshotPages<T>(
+  first: T,
+  sections: readonly string[],
+  fetchPage: (since: bigint) => Promise<T>,
+): Promise<T> {
+  let held = first;
+  for (let page = 1; (held as { hasMore?: unknown })?.hasMore === true && page < MAX_SNAPSHOT_PAGES; page++) {
+    const since = snapshotCursor(held, sections);
+    if (since === null) break;
+    const merged = mergeSnapshotDelta(
+      held as Record<string, unknown>,
+      (await fetchPage(since)) as Record<string, unknown>,
+      since,
+      sections,
+    );
+    const reached = merged ? snapshotCursor(merged, sections) : null;
+    if (!merged || reached === null || reached <= since) break;
+    held = merged as T;
+  }
+  return held;
 }
