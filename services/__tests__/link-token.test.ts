@@ -11,7 +11,7 @@ describe('a link token from another environment (DEV-484)', () => {
   test('OP USDC opened on Prod is 6-decimal USDC, not 18-decimal "0X0B2C"', () => {
     const token = resolveLinkToken(OP_USDC, 10, ON_PROD);
     expect(token).toEqual({ known: true, symbol: 'USDC', decimals: 6 });
-    expect(linkAmountText(3_000_000n, token)).toBe('3 USDC');
+    expect(linkAmountText(3_000_000n, token)).toBe('3.00 USDC');
   });
 
   test('a token no environment knows shows no amount at all', () => {

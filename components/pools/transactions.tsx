@@ -46,6 +46,7 @@ import { useDrawerHost, launchFromDrawer } from '@/components/home/drawer-host';
 import { getUiParam, pushUiParamEntry, retireUiParamEntry, rebaseUiParamEntry, subscribeUiUrl } from '@/components/ui-url-events';
 import { usePools, type Transaction } from '@/components/pools-provider';
 import { useRagequitModal } from '@/components/ragequit-modal-provider';
+import { stellarIncomingActions } from '@/services/stellar-activity';
 import { useWithdrawModal } from '@/components/withdraw-modal-provider';
 import { useAccountRecoveryModal } from '@/components/account-recovery-modal-provider';
 import { useNotes } from '@/hooks/use-notes';
@@ -75,7 +76,7 @@ import { formatUsd, formatUsdPrecise } from '@/services/format-fiat';
 import { useShareRates } from '@/hooks/use-share-rates';
 import { TransactionRowMenu, type TransactionRowMenuItem } from '@/components/pools/transaction-row-menu';
 import { ExplorerPrivacyHint, explorerPrivacyText } from '@/components/ui/explorer-privacy-hint';
-import { classifyTransfer, computeUserTransferAmount, mergeMyTransactions, withLineageTransfers } from '@/services/transfer-direction';
+import { claimedNetAmount, classifyTransfer, computeUserTransferAmount, mergeMyTransactions, withLineageTransfers } from '@/services/transfer-direction';
 import { activityHeaderCount } from '@/services/global-events-pages';
 import { findPaidRequest } from '@/services/paid-requests-store';
 import { priceFromMap } from '@/services/price-map-merge';
@@ -84,7 +85,8 @@ import { findWithdrawFee } from '@/services/withdraw-fees-store';
 import { relayerFeeFor, relayerFeeUsdNote } from '@/services/relayer-fee-row';
 import { findWithdrawRecipient } from '@/services/withdraw-recipients-store';
 import { formatFeeUnits } from '@/services/relay-fee-split';
-import { detailAmountDigits, isStablecoin } from '@/services/token-format';
+import { detailAmountDigits, isStablecoin, LOADING_FIGURE } from '@/services/token-format';
+import { FigureText } from '@/components/ui/share-figure';
 import { encodePaymentReceiptPayloadForUrl, type PaymentReceiptPayload } from '@/services/payment-request-codec';
 import { PAY_URL_BASE } from '@/config/env';
 import { SUPPORT_TELEGRAM_URL } from '@/config/support';
@@ -608,7 +610,7 @@ function DetailRow({ label, value, mono, href, explorerName, copy, singleLine, l
           numberOfLines={singleLine ? 1 : 2}
           ellipsizeMode={singleLine ? 'middle' : 'tail'}
         >
-          {value}
+          <FigureText text={value} />
         </Text>
       )}
     </View>
@@ -626,11 +628,11 @@ function DetailLeg({ leg, caption, amount, usd, narrow }: { leg: RowLeg & { chai
       <AssetChainMark asset={leg.asset} chain={leg.chain} chainId={leg.chainId} size={28} />
       <View className="min-w-0 flex-1 gap-[1px]">
         <Text numberOfLines={1} className="font-pp-sans text-[11.5px] text-text-muted">{caption}</Text>
-        <Text numberOfLines={1} className="font-pp-bold text-[17px] text-text">{amount}</Text>
-        {narrow && side ? <Text numberOfLines={1} className="font-pp-sans text-[11.5px] text-text-muted">{side}</Text> : null}
+        <Text numberOfLines={1} className="font-pp-bold text-[17px] text-text"><FigureText text={amount} /></Text>
+        {narrow && side ? <Text numberOfLines={1} className="font-pp-sans text-[11.5px] text-text-muted"><FigureText text={side} /></Text> : null}
       </View>
       {!narrow && side ? (
-        <Text numberOfLines={1} className="shrink-0 font-pp-sans text-[12px] text-text-muted">{side}</Text>
+        <Text numberOfLines={1} className="shrink-0 font-pp-sans text-[12px] text-text-muted"><FigureText text={side} /></Text>
       ) : null}
     </View>
   );
@@ -688,9 +690,11 @@ export function TransactionDetailModal({ tx, onClose, onCloseForAction, actions 
   // Same rule as the feed row (services/share-display.ts): the underlying's
   // name always, exact with the rate, approximate without it.
   const detailAmount = (n: number): string => balanceDisplay(n, tx.asset, tx.chainId, tx.tokenAddress).text;
-  const detailUsd = (n: number, fallback: number): string => (detailRate && detailPrice > 0
-    ? `≈ ${formatUsd(shareNumberAsUnderlying(n, detailRate) * detailPrice)}`
-    : `≈ $${fallback.toLocaleString('en-US', { maximumFractionDigits: 2 })}`);
+  // A share's dollar figure waits for its rate (the shimmer), never a count
+  // priced as if it were the coin (DEV-621).
+  const detailUsd = (n: number, fallback: number): string => (detailRate
+    ? (detailPrice > 0 ? `≈ ${formatUsd(shareNumberAsUnderlying(n, detailRate) * detailPrice)}` : '')
+    : isShareSymbol(tx.asset) ? LOADING_FIGURE : `≈ ${formatUsd(fallback)}`);
   const sentTxHashes = useMemo(() => buildSentTxHashSet(), []);
   const sentRecord = tx.type === 'Transfer' ? findSentTransfer(tx.txHash) : null;
   // Same two stores as the list row: a payment-request payment is stamped in
@@ -748,6 +752,10 @@ export function TransactionDetailModal({ tx, onClose, onCloseForAction, actions 
   if (transferRaw === null && direction && direction !== 'self' && tx.isLineageSynthetic) {
     try { transferRaw = BigInt(tx.rawAmount); } catch { transferRaw = null; }
   }
+  // A claimed payment leads with what reached the balance, as its list row
+  // does; the amount sent and the claim fee are rows below (DEV-621).
+  const claimGrossRaw = direction === 'in' && tx.claimTxHash ? transferRaw : null;
+  if (direction === 'in') transferRaw = claimedNetAmount(tx, transferRaw);
   let transferTokenAmount: number | null = null;
   let transferUsd: number | null = null;
   if (transferRaw !== null) {
@@ -870,7 +878,7 @@ export function TransactionDetailModal({ tx, onClose, onCloseForAction, actions 
     : feeAmountRow
       ? detailUsd(tx.tokenAmount, tx.usdValue)
     : tx.type === 'Transfer' && transferUsd !== null
-    ? (transferTokenAmount !== null ? detailUsd(transferTokenAmount, transferUsd) : `≈ $${transferUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}`)
+    ? (transferTokenAmount !== null ? detailUsd(transferTokenAmount, transferUsd) : `≈ ${formatUsd(transferUsd)}`)
     : tx.type === 'Transfer'
       ? ''
       : detailUsd(tx.tokenAmount, tx.usdValue);
@@ -892,11 +900,16 @@ export function TransactionDetailModal({ tx, onClose, onCloseForAction, actions 
     return { rate, amount: rate ? shareNumberAsUnderlying(leg.tokenAmount, rate) : leg.tokenAmount };
   };
   const legAmount = (leg: SwapLeg, approx = false) => {
-    const text = balanceDisplay(leg.tokenAmount, leg.asset, leg.chainId, leg.tokenAddress).text;
-    return approx && !text.startsWith('\u2248') ? `\u2248 ${text}` : text;
+    const view = balanceDisplay(leg.tokenAmount, leg.asset, leg.chainId, leg.tokenAddress);
+    const text = view.text;
+    if (view.loading) return text;
+    // A quote is an estimate: "~", as the list row marks it (swapLegTexts).
+    return approx && !/^[~\u2248]/.test(text) ? `~${text}` : text;
   };
   const legUsd = (leg: SwapLeg) => {
     const { rate, amount } = legUnits(leg);
+    // A share leg's dollar figure waits for its rate (DEV-621).
+    if (isShareSymbol(leg.asset) && !rate) return LOADING_FIGURE;
     const price = rate ? underlyingPriceFor(rate, poolsData.priceMap) : 0;
     const usd = rate && price > 0 ? amount * price : leg.usdValue;
     return usd > 0 ? `\u2248 ${usd < 0.01 ? '<$0.01' : formatUsdPrecise(usd)}` : '';
@@ -956,13 +969,20 @@ export function TransactionDetailModal({ tx, onClose, onCloseForAction, actions 
     detailRows.push({ label: 'Amount moved', value: exactUnitsLabel(rawWei(tx.movedAmountRaw), rowDecimals, tx.asset) });
   }
   if (feeText) detailRows.push({ label: 'Relayer fee', value: feeText });
+  if (claimGrossRaw !== null && transferRaw !== null && claimGrossRaw !== transferRaw) {
+    detailRows.push({ label: 'Sent to you', value: exactUnitsLabel(claimGrossRaw, transferRowDecimals(tx), tx.asset) });
+  }
   if (claimFeeText) detailRows.push({ label: tx.withRegistration ? 'Claim and registration fee' : 'Claim fee', value: claimFeeText });
   if (showReconciled && reconciledLabel && reconciledText) detailRows.push({ label: reconciledLabel, value: reconciledText });
-  // Two transactions when a cross-chain swap has delivered, one otherwise.
+  // Keep the payment link alongside its claim or cross-chain delivery links.
   const receiveTx = swap?.swapOut.deliveryTxHash;
   if (tx.txHash) {
     detailRows.push({ label: receiveTx ? 'Swap transaction' : 'Transaction', value: tx.txHash, mono: true, singleLine: true, href: getExplorerTxUrl(tx.chainId, tx.txHash), explorerName: getExplorerName(tx.chainId) });
   }
+  const claimTxHashes = tx.claimTxHashes ?? (tx.claimTxHash ? [tx.claimTxHash] : []);
+  claimTxHashes.forEach((hash, i) => {
+    detailRows.push({ label: claimTxHashes.length > 1 ? `Claim transaction ${i + 1}` : 'Claim transaction', value: hash, mono: true, singleLine: true, href: getExplorerTxUrl(tx.chainId, hash), explorerName: getExplorerName(tx.chainId) });
+  });
   if (swap && receiveTx) {
     detailRows.push({ label: 'Receive transaction', value: receiveTx, mono: true, singleLine: true, href: getExplorerTxUrl(swap.swapOut.chainId, receiveTx), explorerName: getExplorerName(swap.swapOut.chainId) });
   }
@@ -1059,9 +1079,9 @@ export function TransactionDetailModal({ tx, onClose, onCloseForAction, actions 
           <View className="flex-row items-center gap-[12px]">
             <AssetChainMark asset={tx.asset} chain={tx.chain} chainId={tx.chainId} size={40} />
             <View className="min-w-0 flex-1 gap-[2px]">
-              <Text numberOfLines={1} className="font-pp-bold text-[20px] text-text">{headerAmount}</Text>
+              <Text numberOfLines={1} className="font-pp-bold text-[20px] text-text"><FigureText text={headerAmount} /></Text>
               <ShareCountHint hint={balanceDisplay(transferTokenAmount ?? tx.tokenAmount, tx.asset, tx.chainId, tx.tokenAddress).hint} />
-              {headerUsd ? <Text numberOfLines={1} className="font-pp-sans text-[12px] text-text-muted">{headerUsd}</Text> : null}
+              {headerUsd ? <Text numberOfLines={1} className="font-pp-sans text-[12px] text-text-muted"><FigureText text={headerUsd} /></Text> : null}
             </View>
           </View>
           )}
@@ -2042,6 +2062,8 @@ export function Transactions({
           if (transferRaw === null && direction && direction !== 'self' && tx.isLineageSynthetic) {
             try { transferRaw = BigInt(tx.rawAmount); } catch { transferRaw = null; }
           }
+          // A claimed payment shows what reached the balance (DEV-621).
+          if (direction === 'in') transferRaw = claimedNetAmount(tx, transferRaw);
           let transferTokenAmount: number | null = null;
           let transferUsd: number | null = null;
           if (transferRaw !== null) {
@@ -2082,8 +2104,10 @@ export function Transactions({
             && (chainScope === undefined || depositTx.chainId === chainScope);
           // At risk disables Withdraw (the ASP set will not prove it) but keeps
           // Exit: ragequit is the escape hatch for exactly these deposits.
-          const canWithdraw = depositTx.status === 'completed' && depositTx.fundsState !== 'at_risk' && !isFullySpent && isMine;
-          const canExit = (depositTx.status === 'completed' || depositTx.status === 'pending' || depositTx.fundsState === 'at_risk') && !isFullySpent && isMine;
+          const incoming = stellarIncomingActions(tx, notesByChain.get(tx.chainId) ?? [], stellarWalletAddress);
+          const incomingInScope = chainScope === undefined || tx.chainId === chainScope;
+          const canWithdraw = (incomingInScope && incoming.canWithdraw) || depositTx.status === 'completed' && depositTx.fundsState !== 'at_risk' && !isFullySpent && isMine;
+          const canExit = (incomingInScope && incoming.canExit) || (depositTx.status === 'completed' || depositTx.status === 'pending' || depositTx.fundsState === 'at_risk') && !isFullySpent && isMine;
           // The note backup is the EVM account export; a Stellar note is not in it.
           const canExportNote = isMine && depositTx.type === 'Deposit' && depositTx.chainId !== STELLAR_TESTNET_ID;
           // Only pulse for the current user's own pending deposits (a swap's
@@ -2196,14 +2220,17 @@ export function Transactions({
             ? `Fee ${exactFeeText}`
             : feeAmountRow
               ? tx.value
+            // A share's dollar line waits for its rate, like the amount above it (DEV-621).
+            : isShareSymbol(tx.asset) && !shareRate && (tx.type !== 'Transfer' || transferTokenAmount !== null)
+              ? LOADING_FIGURE
             : tx.type === 'Transfer'
             ? (transferTokenAmount !== null && shareRate
-                ? (shareUsd(transferTokenAmount) ?? (transferUsd !== null ? `$${transferUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}` : ''))
+                ? (shareUsd(transferTokenAmount) ?? '')
                 : transferUsd !== null
-                  ? `$${transferUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}`
+                  ? formatUsd(transferUsd)
                   : '')
             // A real amount priced at $0 means no price feed (testnet XLM), not a worthless deposit.
-            : (shareUsd(tx.tokenAmount) ?? (tx.usdValue === 0 && tx.tokenAmount > 0 ? '' : tx.value));
+            : (shareRate ? (shareUsd(tx.tokenAmount) ?? '') : (tx.usdValue === 0 && tx.tokenAmount > 0 ? '' : tx.value));
 
           const rowMenuItems = () => buildMenuItems(tx, { canWithdraw, canExit, canExportNote }, depositTx);
           if (phoneRows) {
@@ -2282,11 +2309,11 @@ export function Transactions({
                 <View className="shrink-0 flex-row items-center gap-[4px] overflow-visible">
                   <View className="min-w-[76px] items-end gap-[2px]">
                     <Text numberOfLines={1} className="font-pp-semi-bold text-[13.5px] leading-[18px] text-text">
-                      {rowTokenText}
+                      <FigureText text={rowTokenText} />
                     </Text>
                     <ShareCountHint hint={balanceDisplay(transferTokenAmount ?? tx.tokenAmount, tx.asset, tx.chainId, tx.tokenAddress).hint} />
                     <Text numberOfLines={1} className={stackedLegs ? 'font-pp-semi-bold text-[13.5px] leading-[18px] text-text' : 'font-pp-regular text-[11.5px] leading-[16px] text-text-muted'}>
-                      {rowUsdText}
+                      <FigureText text={rowUsdText} />
                     </Text>
                   </View>
                   {compactRows ? null : Platform.OS === 'web' ? (

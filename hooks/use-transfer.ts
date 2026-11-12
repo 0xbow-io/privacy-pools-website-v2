@@ -250,7 +250,7 @@ export function useTransfer(): UseTransferResult {
       if (input.consolidation && (input.amount !== 0n || input.recipientAddress.toLowerCase() !== input.ownerAddress.toLowerCase())) {
         throw new Error('Consolidation must be a relayed, fee-only transaction to your own private account.');
       }
-      const deps = await loadTransferRecipientDeps(input.chainId);
+      const deps = await loadTransferRecipientDeps(input.chainId, input.ownerAddress);
       const recipient = await buildTransferRecipient(
         {
           kind: 'address',

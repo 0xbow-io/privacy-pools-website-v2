@@ -4,7 +4,7 @@ import { serve } from 'bun';
 // Run: safewrap bun scripts/e2e/network-capture-smoke.mjs
 import assert from 'node:assert/strict';
 import { gzipSync } from 'node:zlib';
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 import { startNetworkCapture } from './network-capture.ts';
 import { findLeaks } from './network-privacy.ts';
 
@@ -22,7 +22,7 @@ const server = serve({
   },
   websocket: { message() {} },
 });
-const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'], ...(process.env.PW_EXECUTABLE_PATH ? { executablePath: process.env.PW_EXECUTABLE_PATH } : {}) });
+const browser = await launchChrome({ headless: true });
 try {
   const context = await browser.newContext({ serviceWorkers: 'block' });
   const capture = startNetworkCapture(context);

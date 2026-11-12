@@ -16,6 +16,7 @@ import { DROPDOWN_SHADOW } from '@/components/ui/web-style-shims';
 import { useRouter } from 'expo-router';
 import { useShareYield } from '@/hooks/use-share-yield';
 import { formatApyPercent } from '@/services/share-yield';
+import { displayTokenSymbol } from '@/services/share-display';
 
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Svg, { Path, Circle, Line, Polyline } from 'react-native-svg';
@@ -440,7 +441,7 @@ export function AllPositions({
                             APR column and the yield hint. */}
                         {position.venueLabel ? null : position.actionSymbol ? (
                           <Text className="font-pp-regular text-[10.5px] text-text-muted">
-                            held as {position.actionSymbol}
+                            held as {displayTokenSymbol(position.actionSymbol)}
                           </Text>
                         ) : null}
                       </View>

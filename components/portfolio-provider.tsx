@@ -23,6 +23,7 @@ import { getConfiguredYieldDeployments } from '@/config/yield';
 import { getKnownTokenMetadata, isStablecoin, formatTokenBalance } from '@/config/tokens';
 import { buildPortfolioPositions } from '@/services/portfolio-positions';
 import { formatUsdPrecise } from '@/services/format-fiat';
+import { tokenAmountLabel } from '@/services/share-display';
 import { usePoolSession } from '@/hooks/use-pool-session';
 import {
   FIGURE_LOADING,
@@ -221,8 +222,8 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       let pendingLabel: string | null = null;
       if (p.pendingBalance > 0) {
         pendingLabel = p.pendingValueUnavailable
-          ? `${`${formatTokenBalance(p.pendingBalance, p.shareSymbol ?? p.tokenSymbol)} ${p.shareSymbol ?? p.tokenSymbol}`} pending. Value unavailable.`
-          : `${formatTokenBalance(p.pendingBalance, p.tokenSymbol)} ${p.tokenSymbol} pending`;
+          ? `${tokenAmountLabel(formatTokenBalance(p.pendingBalance, p.shareSymbol ?? p.tokenSymbol), p.shareSymbol ?? p.tokenSymbol)} pending. Value unavailable.`
+          : `${tokenAmountLabel(formatTokenBalance(p.pendingBalance, p.tokenSymbol), p.tokenSymbol)} pending`;
       }
       return {
         tokenSymbol: p.tokenSymbol,

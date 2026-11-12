@@ -9,7 +9,8 @@
 // is no balance, must not redirect on a restored session, must not touch
 // every variant, and must never trap navigation. The redirect decision itself is
 // covered by services/__tests__/connect-landing.test.ts.
-import { chromium, type Page } from 'playwright';
+import { type Page } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 import { installEvmWallet, loadDevAccount } from './evm-wallet';
 
 const BASE = process.env.PROBE_URL ?? 'http://localhost:8081';
@@ -20,7 +21,7 @@ function check(label: string, pass: boolean, detail = '') {
 }
 
 async function boot(width: number, url: string, connected: boolean) {
-  const browser = await chromium.launch({ args: ['--no-sandbox'] });
+  const browser = await launchChrome();
   const context = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: 'reduce', deviceScaleFactor: 1 });
   await context.addInitScript(() => localStorage.setItem('ppv2_smartwallet_skipped_v1', '1'));
   const page = await context.newPage();

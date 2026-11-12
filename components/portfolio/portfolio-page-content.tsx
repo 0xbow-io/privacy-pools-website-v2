@@ -11,6 +11,7 @@ import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 // in that same boundary. No other operation converts display back.
 import { LooseShareUnwrap } from '@/components/yield/loose-share-unwrap';
 import { poolDisplayLabel } from '@/config/pool-paths';
+import { displayTokenSymbol, tokenAmountLabel } from '@/services/share-display';
 import { useMemo } from 'react';
 import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { Redirect } from 'expo-router';
@@ -104,7 +105,7 @@ function PortfolioBody() {
       return {
         color: TOKEN_BRAND_COLORS[p.tokenSymbol] || '#999999',
         percentage,
-        label: `${p.tokenSymbol} ${percentage}% of net value`,
+        label: `${displayTokenSymbol(p.tokenSymbol)} ${percentage}% of net value`,
       };
     });
   }, [positions, totalValue, hasPositions]);
@@ -147,7 +148,7 @@ function PortfolioBody() {
           chainId: rowChainId,
           myValueToken: p.valueUnavailable
             ? 'Value temporarily unavailable'
-            : `${p.balanceFormatted} ${p.tokenSymbol}`,
+            : tokenAmountLabel(p.balanceFormatted, p.tokenSymbol),
           myValueUsd: p.valueUnavailable ? '—' : p.valueUsdFormatted,
           shareHint: p.shareHint,
           pendingLabel: p.pendingLabel,
@@ -230,7 +231,7 @@ function PortfolioBody() {
             assetsCount={positions.length}
             yieldEarnedUsd={yieldEarnedTile?.text ?? null}
             yieldEarnedLoading={yieldEarnedTile?.loading === true}
-            assetsLabel={hasPositions ? positions.map((p) => p.tokenSymbol).join(', ') : 'No assets yet'}
+            assetsLabel={hasPositions ? positions.map((p) => displayTokenSymbol(p.tokenSymbol)).join(', ') : 'No assets yet'}
             hasData={hasPositions}
             assets={portfolioAssets}
           />

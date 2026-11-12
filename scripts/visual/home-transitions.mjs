@@ -2,9 +2,9 @@
 // Run with: node scripts/visual/home-transitions.mjs (PROBE_URL overrides :8083).
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 
-const browser = await chromium.launch({ headless: true });
+const browser = await launchChrome({ headless: true });
 const base = process.env.PROBE_URL ?? 'http://localhost:8083';
 
 async function expectPanel(page, panel) {

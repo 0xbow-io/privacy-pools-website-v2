@@ -2,12 +2,14 @@ import { approxUnderlyingText } from '@/services/share-display';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useActiveEvmChain } from '@/hooks/use-active-evm-chain';
 import { useOpLock } from '@/hooks/use-op-lock';
-import { Pressable, Text, View, useWindowDimensions } from 'react-native';
-import { Modal } from '@/components/ui/modal';
+import { Pressable, Text, View } from 'react-native';
+import { RegistrationModalFrame, REGISTRATION_TITLE as DEFAULT_TITLE, REGISTRATION_BODY as DEFAULT_BODY, REGISTRATION_PRIMARY as DEFAULT_PRIMARY } from '@/components/ui/registration-modal-frame';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useAccount, useConfig, usePublicClient, useSendTransaction, useSwitchChain } from 'wagmi';
-import { getAccount } from 'wagmi/actions';
+import { useAccount, useConfig, usePublicClient, useSwitchChain } from 'wagmi';
+import { getAccount, getConnectorClient } from 'wagmi/actions';
+import { getCapabilities, getCallsStatus, sendCalls } from 'viem/actions';
 import type { Address as ViemAddress, Hex } from 'viem';
+import { useShareNameText } from '@/hooks/use-share-rates';
 
 import { useTheme } from '@/components/theme-provider';
 import { Colors } from '@/constants/theme';
@@ -27,6 +29,7 @@ import {
   describeRegistrationError,
   REGISTRATION_TX_PENDING_MESSAGE,
   describeUnpayableWallet,
+  registrationBlockedByGas,
   GASLESS_REGISTRATION_CONFIRM_BODY,
   GASLESS_REGISTRATION_CONFIRM_BODY_TOP_UP,
   GASLESS_REGISTRATION_CONFIRM_PRIMARY,
@@ -61,6 +64,11 @@ import {
   VIEWING_KEY_GAS_LIMIT,
 } from '@/services/receive-setup';
 import { priceWalletTx, registrationOwnerUnchanged, walletTxFields, type FeeReadClient } from '@/services/wallet-tx-fees';
+import { ownRegistrationResultRefusal } from '@/services/keystore-scope';
+import { confirmedRegistration } from '@/services/keystore-registry-events';
+import { REGISTRATION_INCOMPATIBLE_MESSAGE } from '@/services/keystore-identity-status';
+import { sendWalletTransaction } from '@/services/wallet-send-refusal';
+import { clearRegistrationBatch, hasPendingRegistrationBatch, RegistrationBatchPendingError, submitRegistrationBatch } from '@/services/registration-batch';
 
 export const REGISTRATION_CLOSED_BEFORE_PROMPT = 'Registration was closed before the wallet prompt. Nothing was sent.';
 export const REGISTRATION_OWNER_CHANGED =
@@ -162,11 +170,6 @@ type OpenOptions = {
 /** `gasTopUpWei`: from the signed commitment; null when no top-up was delivered. */
 type PublishStep = { gasTopUpWei: bigint | null };
 
-const DEFAULT_TITLE = 'Register your wallet';
-const DEFAULT_BODY =
-  'A one-time on-chain setup lets others send you private payments and lets you spend what you receive. You only do this once per wallet.';
-const DEFAULT_PRIMARY = 'Register now';
-
 /**
  * How long the modal waits on a wallet that has been handed a transaction.
  *
@@ -228,8 +231,6 @@ export function useKeystoreRegistrationModal() {
 export function KeystoreRegistrationModalProvider({ children }: { children: React.ReactNode }) {
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
-  const { width: windowWidth } = useWindowDimensions();
-  const isMobileSheet = windowWidth <= 540;
   const { address } = useAccount();
   // The chain this flow ACTS ON — the app's selection, not the wallet's.
   //
@@ -263,10 +264,10 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
   // chain directly; a cross-chain open is about the OTHER one.
   const [targetChainId, setTargetChainId] = useState<number | null>(null);
   const chainId = targetChainId ?? activeChainId;
+  const shareText = useShareNameText(chainId);
   const crossChainTarget = targetChainId !== null && targetChainId !== activeChainId;
   const withOpLock = useOpLock();
   const publicClient = usePublicClient({ chainId });
-  const { sendTransactionAsync } = useSendTransaction();
   const { switchChainAsync } = useSwitchChain();
   const {
     poolSession,
@@ -372,8 +373,8 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
     try {
       // Reads the named chain's keystore, not the active session's. Also the
       // only load-time viewing-key read the receive prompts rely on.
-      const identity = await keystoreStatusForChain(chainId);
-      if (identity === 'unknown') throw new Error(`Registration on chain ${chainId} could not be read.`);
+      const identity = await keystoreStatusForChain(chainId, { chainFallback: true });
+      if (identity === 'unknown') throw new Error(`Registration on chain ${chainId} is still syncing. Try again in a moment.`);
       setReceiveSetup(sessionAddress ?? address, chainId, receiveSetupFromIdentity(identity), 'onchain');
       // 'partial' and 'incompatible' both have an auth policy.
       const registered = identity !== 'unregistered';
@@ -606,6 +607,11 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
     ),
     [gasless, chainId, gaslessAllowed],
   );
+  // While that warning is up, Register is off: the press could only open a
+  // wallet prompt that fails for want of gas (QA on DEV-589). Reopening the
+  // modal probes again, so a wallet funded meanwhile gets the button back.
+  const gasBlocked = !hasPendingRegistrationBatch(address, chainId) && !gaslessEligible && !quotedPlan && !publishStep && !!stuckMessage
+    && registrationBlockedByGas(gasless, { gaslessAllowed });
 
   /**
    * Escape, and it is UNCONDITIONAL.
@@ -755,7 +761,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
           // re-read rather than assume complete.
           setErrorMessage(null);
           try {
-            const identity = await keystoreStatusForChain(chainId);
+            const identity = await keystoreStatusForChain(chainId, { chainFallback: true });
             // The read follows the CURRENT identity: only store it under the
             // captured owner if that is still who it read.
             if (stillBound()) setReceiveSetup(owner, chainId, receiveSetupFromIdentity(identity), 'onchain');
@@ -824,7 +830,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
       // Gasless first, and awaited rather than read: a press that lands before
       // the probe resolves must still take the right branch, or a wallet with no
       // gas gets a wallet prompt it can only reject.
-      const eligibility = await resolveGasless();
+      const eligibility = hasPendingRegistrationBatch(address, chainId) ? null : await resolveGasless();
       if (eligibility?.kind === 'eligible') {
         // The first relayer contact of the whole flow, and only because the
         // user pressed. Price it, then STOP and show what it costs — nothing is
@@ -864,8 +870,23 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
         await new Promise((resolve) => setTimeout(resolve, AUTH_LAG_RETRY_MS));
         registration = await session.prepareRegisterKeystore();
       }
+      // SDK 1.0.2 answers "already registered" (or plans only the viewing key)
+      // for ANY auth policy on the address, never comparing it with these
+      // keys. Marking that 'complete' mirrored another unlock's registration
+      // as ours and let a deposit through under the wrong keys. Only go on
+      // when the hash the SDK's own check just read is this session's.
+      const refuseIfNotOurs = (result: typeof registration) => {
+        const refusal = ownRegistrationResultRefusal(chainId, sessionAddress ?? address, result);
+        if (!refusal) return;
+        if (refusal === REGISTRATION_INCOMPATIBLE_MESSAGE) {
+          setReceiveSetup(sessionAddress ?? address, chainId, 'incompatible', 'onchain');
+        }
+        throw new Error(refusal);
+      };
+      refuseIfNotOurs(registration);
       const finishAlreadyRegistered = async () => {
-        // Race / external registration: mark and exit cleanly.
+        // Race / external registration, confirmed ours above: mark and exit.
+        if (address) clearRegistrationBatch(address, chainId);
         setReceiveSetup(sessionAddress ?? address, chainId, 'complete', 'onchain');
         setStatus('registered');
         const home = await returnHome();
@@ -895,7 +916,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
       if (!publicClient) {
         throw new Error('Cannot confirm the registration transaction (no RPC client). Check the connection and try again.');
       }
-      // BOUNDED. `sendTransactionAsync` resolves when the wallet answers, and a
+      // BOUNDED. The send resolves when the wallet answers, and a
       // wallet that cannot pay (or whose background worker was suspended) may
       // simply never answer — which pinned `pending` true for the life of the
       // page. Reuses services/session-init-timeout.ts: same shape (cap this
@@ -904,6 +925,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
       // not what is happening here.
       let registrationLegSent = false;
       const runOwner = address;
+      if (!runOwner) throw new Error(REGISTRATION_OWNER_CHANGED);
       // Captured with the owner: a switch mid-run must not move the marker.
       const runSetupKey = sessionAddress ?? address;
       const sendRegistrationLeg = async (calldata: { to: string; data: string; value: string | number | bigint }) => {
@@ -937,7 +959,8 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
         if (ownsUi()) setAwaitingWallet(true);
         try {
           return await withSessionInitTimeout(
-            sendTransactionAsync({ ...tx, account: runOwner as ViemAddress, ...walletTxFields(plan) }),
+            // The wallet's refusal survives a 4200 answer to viem's retry (QA on DEV-589).
+            sendWalletTransaction(wagmiConfig, { ...tx, account: runOwner as ViemAddress, ...walletTxFields(plan) }),
             { timeoutMs: WALLET_PROMPT_TIMEOUT_MS },
           );
         } catch (err) {
@@ -947,7 +970,26 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
           if (ownsUi()) setAwaitingWallet(false);
         }
       };
-      if (keystoreCalldata) {
+      let batchClient: Awaited<ReturnType<typeof getConnectorClient>> | undefined;
+      const getBatchClient = async () => batchClient ??= await getConnectorClient(wagmiConfig, { account: runOwner, chainId });
+      const batch = await submitRegistrationBatch({
+        getCapabilities: async () => getCapabilities(await getBatchClient(), { account: runOwner, chainId }),
+        sendCalls: ({ calls, id }) => sendCalls(batchClient!, {
+          account: runOwner, chain: batchClient!.chain, forceAtomic: true, id,
+          calls: calls.map(call => ({ to: call.to as ViemAddress, data: call.data as Hex, value: BigInt(call.value ?? 0) })),
+        }),
+        getCallsStatus: async (id) => getCallsStatus(await getBatchClient(), { id }),
+      }, {
+        owner: runOwner, chainId,
+        calls: [keystoreCalldata, viewingKeyCalldata].filter((call) => call != null).map(call => ({ ...call, value: String(call.value) })),
+        beforeSend: () => {
+          if (!deliversToCaller()) throw new Error(REGISTRATION_CLOSED_BEFORE_PROMPT);
+          if (!registrationOwnerUnchanged({ owner: runOwner, chainId, current: getAccount(wagmiConfig) })) throw new Error(REGISTRATION_OWNER_CHANGED);
+        },
+        onAwaitingWallet: (waiting) => { if (ownsUi()) setAwaitingWallet(waiting); },
+      });
+      if (batch && !batch.success) throw new Error('The registration transaction failed onchain. Try again to finish.');
+      if (!batch && keystoreCalldata) {
         let keystoreHash: Hex | null = null;
         try {
           keystoreHash = await sendRegistrationLeg(keystoreCalldata);
@@ -961,6 +1003,9 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
           registrationLegSent = false;
           const fresh = await session.prepareRegisterKeystore();
           viewingKeyCalldata = fresh.alreadyRegistered ? null : fresh.viewingKeyCalldata;
+          // The wallet says a policy is set, so check it as one even if this
+          // read still plans the auth leg.
+          refuseIfNotOurs({ ...fresh, keystoreCalldata: null });
           if (!viewingKeyCalldata) {
             await finishAlreadyRegistered();
             return;
@@ -976,7 +1021,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
           }
         }
       }
-      if (viewingKeyCalldata) {
+      if (!batch && viewingKeyCalldata) {
         const viewingKeyHash = await sendRegistrationLeg(viewingKeyCalldata);
         sentUnconfirmed = true;
         sentHash = viewingKeyHash;
@@ -993,6 +1038,10 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
       } catch {
         // SDK already has it; duplicate marker calls are harmless.
       }
+      // Every leg above was confirmed by a successful receipt (or a successful
+      // batch): record it so a deposit resumed right after this does not wait
+      // for the ASP to index the registration.
+      confirmedRegistration(sessionAddress ?? address, chainId, true);
       setReceiveSetup(sessionAddress ?? address, chainId, 'complete', 'onchain');
       setStatus('registered');
       // Back on the app's chain before the caller resumes.
@@ -1002,14 +1051,16 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
       deliverRegistered(home);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if ((/already/i.test(message) && /policy|registered/i.test(message)) || isAuthPolicyAlreadySetError(collectErrorText(err))) {
+      if (err instanceof RegistrationBatchPendingError) {
+        if (ownsUi()) setErrorMessage(err.message);
+      } else if ((/already/i.test(message) && /policy|registered/i.test(message)) || isAuthPolicyAlreadySetError(collectErrorText(err))) {
         // Keystore_AuthPolicyAlreadySet: another tab / a deposit got there
         // first. That race can land the auth policy without the viewing key,
         // so re-read the identity rather than assuming 'complete' — otherwise
         // useReceiveSetup is left at a stale 'unknown'/'partial' while this
         // caller resumes as if setup finished.
         try {
-          const identity = await keystoreStatusForChain(chainId);
+          const identity = await keystoreStatusForChain(chainId, { chainFallback: true });
           setReceiveSetup(sessionAddress ?? address, chainId, receiveSetupFromIdentity(identity), 'onchain');
         } catch (readErr) {
           console.warn('[KeystoreRegistration] post-race identity re-read failed', readErr instanceof Error ? readErr.message : String(readErr));
@@ -1039,20 +1090,22 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
         // "Insufficient funds" is the one the QA screenshot was full of, and
         // the raw wallet string names neither the chain nor a way forward. Say
         // what is missing and where.
-        const insufficient = describeInsufficientGas(
-          message,
-          getChainConfig(chainId)?.nativeCurrency.symbol ?? 'ETH',
-          getChainConfig(chainId)?.displayName ?? 'this network',
-        );
+        // The whole error chain: wallets put the reason (rejected, underpriced,
+        // insufficient funds, node unreachable) in `cause`/`details`, so the
+        // message alone hid it behind the generic line (DEV-589).
+        const detail = collectErrorText(err);
+        const nativeSymbol = getChainConfig(chainId)?.nativeCurrency.symbol ?? 'ETH';
+        const chainName = getChainConfig(chainId)?.displayName ?? 'this network';
+        const insufficient = describeInsufficientGas(detail, nativeSymbol, chainName);
         // Never a raw viem dump on screen: keep it in the console for
         // debugging and show one line the user can act on.
-        const kind = classifyRegistrationError(message, sentUnconfirmed);
-        if (kind !== 'plain' && kind !== 'rejected') console.warn('[KeystoreRegistration] registration failed', message);
+        const kind = classifyRegistrationError(message, sentUnconfirmed, detail);
+        if (kind !== 'plain' && kind !== 'rejected') console.warn('[KeystoreRegistration] registration failed', { chainId, kind, detail });
         // A sent tx that may still land: Register stays off until its receipt
         // is seen (or the cap passes), across close and reopen.
         if (sentUnconfirmed && sentHash) watchSentRegistration(sentHash);
         setErrorMessage(kind === 'pending' || kind === 'rejected' || !insufficient
-          ? describeRegistrationError(message, sentUnconfirmed, getChainConfig(chainId)?.displayName ?? 'this network')
+          ? describeRegistrationError(message, sentUnconfirmed, chainName, { detail, nativeSymbol })
           : insufficient);
       }
       // The gasless path cancels at a SIGNATURE prompt, so a failed run leaves
@@ -1087,7 +1140,6 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
     publishViewingKey,
     quoteRegistration,
     resolveGasless,
-    sendTransactionAsync,
     sessionAddress,
     address,
     wagmiConfig,
@@ -1109,29 +1161,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
   return (
     <KeystoreRegistrationModalContext.Provider value={value}>
       {children}
-      <Modal animationType={isMobileSheet ? 'slide' : 'fade'} transparent visible={isOpen} onRequestClose={closeKeystoreRegistrationModal}>
-        <View className={`flex-1 items-center bg-[rgba(0,0,0,0.5)] ${isMobileSheet ? 'justify-end p-0' : 'justify-center p-[20px]'}`}>
-          <View className={`w-full gap-[14px] border border-border bg-card-background p-[24px] ${isMobileSheet ? 'max-w-full max-h-[94%] rounded-t-card rounded-b-none border-b-0 pt-[26px]' : 'max-w-[460px] rounded-card'}`}>
-            {/* nw-keep(data-color): sheet grabber fill is a runtime theme token (no class value) */}
-            {isMobileSheet && <View className="absolute top-[10px] z-[10] h-[4px] w-[44px] self-center rounded-[2px]" style={{ backgroundColor: colors.border }} />}
-            <View className="flex-row items-start justify-between gap-[12px]">
-              <View className="flex-1 gap-[6px]">
-                <Text className="font-pp-medium text-[11px] tracking-[2px] text-text-muted">PRIVACY POOLS V2</Text>
-                <Text className="font-pp-bold text-[22px] leading-[26px] text-text">{copy.title}</Text>
-              </View>
-              {/* NEVER disabled. A wallet that cannot sign leaves this modal
-                  pending forever, and a close button that does nothing is how
-                  QA ended up trapped under "Registering…". */}
-              <Pressable
-                className="h-[36px] w-[36px] items-center justify-center rounded-control border border-border-light"
-                onPress={closeKeystoreRegistrationModal}
-                accessibilityLabel="Close"
-              >
-                {/* nw-keep(data-color): close glyph color is the text theme token into the vector-icon sink */}
-                <Ionicons name="close" size={18} color={colors.text} />
-              </Pressable>
-            </View>
-
+      <RegistrationModalFrame visible={isOpen} title={copy.title} onClose={closeKeystoreRegistrationModal}>
             {/* Suppressed on the gasless path: every caller's body describes a
                 transaction the user pays for, which is exactly what is NOT
                 about to happen. The notice below says the whole thing instead. */}
@@ -1234,7 +1264,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
             {!gaslessEligible && !quotedPlan && stuckMessage && (
               <View className="gap-[6px] rounded-control border border-warning bg-warning-bg px-[12px] py-[10px]">
                 <Text className="font-pp-semi-bold text-[12px] text-warning">This wallet can&apos;t pay for registration</Text>
-                <Text className="font-pp-regular text-[12px] leading-[18px] text-warning">{stuckMessage}</Text>
+                <Text className="font-pp-regular text-[12px] leading-[18px] text-warning">{shareText(stuckMessage)}</Text>
               </View>
             )}
 
@@ -1244,7 +1274,7 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
             )}
             {errorMessage && (
               <View className="rounded-control border border-[#E11D48] px-[12px] py-[10px]">
-                <Text className="font-pp-medium text-[12px] leading-[17px] text-[#E11D48]">{errorMessage}</Text>
+                <Text className="font-pp-medium text-[12px] leading-[17px] text-[#E11D48]">{shareText(errorMessage)}</Text>
               </View>
             )}
 
@@ -1254,8 +1284,8 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
                 indicator would imply the flow had started. */}
             {pending && statusMessage
               ? (quotedPlan
-                ? <FlowProgress message={statusMessage} />
-                : <Text className="font-pp-regular text-[12px] leading-[18px] text-text-secondary">{statusMessage}</Text>)
+                ? <FlowProgress message={statusMessage} chainId={chainId} />
+                : <Text className="font-pp-regular text-[12px] leading-[18px] text-text-secondary">{shareText(statusMessage)}</Text>)
               : null}
 
             {/* The way out, said out loud while the wallet has the prompt. It
@@ -1286,18 +1316,17 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
                 </Text>
               </Pressable>
               <Pressable
-                className={`flex-1 items-center justify-center rounded-control bg-button-primary py-[12px] ${pending || txUnconfirmed ? 'opacity-60' : 'opacity-100'}`}
+                className={`flex-1 items-center justify-center rounded-control bg-button-primary py-[12px] ${pending || txUnconfirmed || gasBlocked ? 'opacity-60' : 'opacity-100'}`}
                 onPress={handleRegister}
-                disabled={pending || txUnconfirmed}
+                disabled={pending || txUnconfirmed || gasBlocked}
+                testID="keystore-register-primary"
               >
                 <Text className="font-pp-semi-bold text-[14px] text-button-primary-text">
                   {pending ? (publishStep ? 'Publishing…' : finishMode ? 'Finishing…' : 'Registering…') : copy.primary}
                 </Text>
               </Pressable>
             </View>
-          </View>
-        </View>
-      </Modal>
+      </RegistrationModalFrame>
     </KeystoreRegistrationModalContext.Provider>
   );
 }

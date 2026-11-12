@@ -31,14 +31,58 @@ import { FEE_COMMITMENT_EXPIRED_MESSAGE, isFeeCommitmentExpired } from '@/servic
 import { isNativeSwapDepositUnavailable, NATIVE_SWAP_DEPOSIT_UNAVAILABLE_TEXT } from '@/services/native-swap-executor';
 import { isSwapValueOverRelayerCap, SWAP_VALUE_CAP_TEXT } from '@/services/swap-error-copy';
 
-import { displayTokenSymbol } from '@/services/share-display';
+import { displayTokenSymbol, isShareSymbol } from '@/services/share-display';
+import { displayUnderlyingWei, type ShareRate } from '@/services/share-rates';
+import { formatShortfallAmount } from '@/services/relayed-payment-shortfall';
+import { formatTokenBalanceDown, isStablecoin, LOADING_FIGURE } from '@/services/token-format';
 
 export type ErrorAmountUnits = {
   /** Decimals of the asset the figures are denominated in. */
   decimals: number;
   /** Raw symbol; rendered through displayTokenSymbol, so a share names its underlying. */
   symbol: string;
+  /**
+   * Only for a SHARE side. The SDK's figures are share counts, and the symbol
+   * prints as the underlying, so without a conversion "9.639123" shares read as
+   * "9.63 USDT" at a 1.05 rate when they are worth 10.12 (review on #26).
+   * A rate converts them (integers, the share-rates display rules); null means
+   * the rate has not arrived, and the figure reads as loading ("… USDT"), never
+   * a share count under the coin's name. Left undefined, nothing is converted
+   * (a plain token, or a caller that has no rate to give).
+   */
+  rate?: ShareRate | null;
 };
+
+/** The rate a share side converts with: null (loading) for a share that has none, undefined for a plain token. */
+export function shareUnitsRate(symbol: string, rate: ShareRate | undefined): ShareRate | null | undefined {
+  return isShareSymbol(symbol) ? (rate ?? null) : undefined;
+}
+
+/** The symbol a side's figures print under: the underlying when they are converted. */
+function sideSymbol(side: ErrorAmountUnits): string {
+  return displayTokenSymbol(side.rate ? side.rate.underlyingSymbol : side.symbol);
+}
+
+/**
+ * One figure of a side, without its symbol. Converted shares read as the
+ * underlying they are worth: rounded DOWN for a stablecoin's two decimals
+ * (DEV-621), UP for a floor to reach (`round: 'up'`, the pool minimum).
+ */
+export function sideFigure(wei: bigint, side: ErrorAmountUnits, round?: 'up'): string {
+  if (side.rate === undefined) return round === 'up' ? ceilShort(wei, side.decimals) : short(wei, side.decimals);
+  const rate = side.rate;
+  if (rate === null || rate.shareDecimals !== side.decimals) return LOADING_FIGURE;
+  const symbol = displayTokenSymbol(rate.underlyingSymbol);
+  if (round === 'up') {
+    const one = 10n ** BigInt(rate.shareDecimals);
+    const product = wei * rate.assetsPerShare;
+    return formatShortfallAmount(product / one + (product % one > 0n ? 1n : 0n), rate.underlyingDecimals, true, symbol);
+  }
+  const assets = displayUnderlyingWei(wei, rate);
+  return isStablecoin(symbol)
+    ? formatTokenBalanceDown(formatUnits(assets, rate.underlyingDecimals), symbol)
+    : short(assets, rate.underlyingDecimals);
+}
 
 /**
  * Every asset an SDK figure can be denominated in, because these messages are
@@ -258,18 +302,18 @@ function fromStructured(amounts: SdkErrorAmounts, message: string, units: ErrorU
   const rule = CODES[amounts.code];
   const side = units[rule?.side ?? SDK_SIDE[amounts.side]];
   if (!usable(side)) return null;
-  const symbol = displayTokenSymbol(side.symbol);
+  const symbol = sideSymbol(side);
   const fmt: Fmt = (key, round) => {
     const value = amounts.values[key];
     if (typeof value !== 'bigint') throw new MissingFigure(key);
-    return `${round === 'up' ? ceilShort(value, side.decimals) : short(value, side.decimals)} ${symbol}`;
+    return `${sideFigure(value, side, round)} ${symbol}`;
   };
   const diff: Diff = (a, b) => {
     const x = amounts.values[a];
     const y = amounts.values[b];
     if (typeof x !== 'bigint' || typeof y !== 'bigint') throw new MissingFigure(`${a}-${b}`);
     const gap = x > y ? x - y : y - x;
-    return `${exact(gap, side.decimals)} ${symbol}`;
+    return `${side.rate === undefined ? exact(gap, side.decimals) : sideFigure(gap, side)} ${symbol}`;
   };
   if (rule) {
     try {
@@ -307,8 +351,8 @@ const RULES: readonly {
     side: 'output',
     match: /^Deposit value (\d+) is below the Entrypoint minimum (\d+)$/,
     rewrite: ([value, minimum], u) => {
-      const symbol = displayTokenSymbol(u.symbol);
-      return `This would deposit about ${short(value, u.decimals)} ${symbol}, below the pool's minimum of ${ceilShort(minimum, u.decimals)} ${symbol}. Try a larger amount.`;
+      const symbol = sideSymbol(u);
+      return `This would deposit about ${sideFigure(value, u)} ${symbol}, below the pool's minimum of ${sideFigure(minimum, u, 'up')} ${symbol}. Try a larger amount.`;
     },
   },
   {
@@ -399,4 +443,29 @@ export function sdkErrorText(err: unknown, units: ErrorUnits | null | undefined,
     // fall through to the raw message
   }
   return message || fallback;
+}
+
+/**
+ * The net deposit value a `depositBelowMinimum` refusal was computed on, in
+ * the OUTPUT asset's base units (`ErrorUnits.output`): what the swap would
+ * deposit after relayer and swap fees. Null for any other error. The Swap form
+ * shows this figure as "You receive privately" next to the refusal, so the
+ * headline and the minimum check name the same number (Pat's QA on #26).
+ */
+export function depositBelowMinimumValue(err: unknown): bigint | null {
+  const amounts = readErrorAmounts(err);
+  if (amounts?.code === 'depositBelowMinimum' && typeof amounts.values.value === 'bigint') return amounts.values.value;
+  let current: unknown = err;
+  for (let depth = 0; depth < 5 && current; depth++) {
+    const message = current instanceof Error ? current.message : typeof current === 'string' ? current : '';
+    const m = message.match(/Deposit value (\d+) is below the Entrypoint minimum (\d+)/);
+    if (m) return BigInt(m[1]!);
+    current = (current as { cause?: unknown }).cause;
+  }
+  return null;
+}
+
+/** `value` exactly as the depositBelowMinimum sentence prints it, without the symbol. */
+export function depositValueText(wei: bigint, decimals: number): string {
+  return short(wei, decimals);
 }

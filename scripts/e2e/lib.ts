@@ -8,7 +8,8 @@
 // auto-connects it, and every signature and broadcast happens node-side with
 // viem. That makes a run frictionless: no wallet popups to drive, nothing to
 // click except the app's own UI.
-import { chromium, type Browser, type Page } from 'playwright';
+import { type Browser, type Page } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 import type { CapturedRequest } from './network-privacy';
 import { startNetworkCapture } from './network-capture';
 import { existsSync, readFileSync } from 'node:fs';
@@ -19,6 +20,17 @@ import { mnemonicToAccount, privateKeyToAccount, type PrivateKeyAccount } from '
 import { installEvmWallet } from '../visual/evm-wallet';
 import { waitForApproval } from './approval-wait';
 import { FIXTURE_NOTE_ETH, PAYMENT_FEE_RESERVE_ETH } from './funding';
+import { installShareNameGuard, type ShareNameGuard } from './share-name-guard';
+
+// Every journey page carries the share-name guard (./share-name-guard.ts): it
+// watches the DOM for the whole run, so a toast or dialog that is up for a
+// second is caught, and the step helpers below (tab, clickButton, waitForText)
+// fail at the step where a share name was painted. A hit no step looked at
+// still fails the process on exit.
+const shareGuards = new WeakMap<Page, ShareNameGuard>();
+export async function shareNameStep(page: Page, step: string): Promise<void> {
+  await shareGuards.get(page)?.checkpoint(step);
+}
 
 export const ROOT = new URL('../..', import.meta.url).pathname.replace(/\/$/, '');
 // The relayer's CORS allowlist contains http://localhost:8081 and no other local
@@ -92,15 +104,8 @@ export async function openApp(
   startCapture: () => Promise<void>;
   stopCapture: () => Promise<void>;
 }> {
-  // Locally the browser is pinned under .pw-browsers; in CI `playwright install`
-  // puts it in its own cache, so fall back to playwright's resolution instead of
-  // failing on a path that only exists on one machine.
-  const pinned = `${ROOT}/.pw-browsers/chromium-1228/chrome-linux64/chrome`;
-  const browser = await chromium.launch({
-    headless: true,
-    ...(existsSync(pinned) ? { executablePath: pinned } : {}),
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  });
+  // Google Chrome stable, sandbox on, version-checked: see scripts/lib/chrome.mjs.
+  const browser = await launchChrome({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1200 }, reducedMotion: 'reduce', serviceWorkers: 'block' });
   const capture = startNetworkCapture(context, { enabled: false, file: process.env.E2E_RPC_CAPTURE, devServerOrigin: BASE });
   // Allow UI actions to finish while Metro and proof workers share the runner.
@@ -152,6 +157,7 @@ export async function openApp(
   // than on a balance read that races the block.
   const sent: `0x${string}`[] = [];
   await installEvmWallet(page, acct, { liveSend: true, onSend: (h) => sent.push(h) });
+  shareGuards.set(page, await installShareNameGuard(page, { label: opts.tag }));
   let n = 0;
   const shot = async (name: string) => {
     n += 1;
@@ -326,6 +332,7 @@ export async function tab(page: Page, label: Owner | 'Request', timeoutMs = 90_0
     }
   }
   await page.locator(`[data-testid="hub-page-${key}"]:not([aria-hidden="true"]):visible`).waitFor({ timeout: timeoutMs });
+  await shareNameStep(page, `tab ${label}`);
   return true;
 }
 
@@ -490,6 +497,8 @@ export async function savedBackups(page: Page): Promise<{ calls: number; files: 
 }
 
 export async function clickButton(page: Page, label: string): Promise<boolean> {
+  // The screen the press is made from, then whatever it raised by the next step.
+  await shareNameStep(page, `before "${label}"`);
   const name = new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
   const button = page.getByRole('button', { name }).filter({ visible: true });
   if (await button.count()) {
@@ -594,7 +603,10 @@ export async function waitForText(page: Page, re: RegExp, timeoutMs: number): Pr
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const t = await bodyText(page);
-    if (re.test(t)) return t;
+    if (re.test(t)) {
+      await shareNameStep(page, `"${String(re).slice(0, 60)}" on screen`);
+      return t;
+    }
     await sleep(2000);
   }
   return null;

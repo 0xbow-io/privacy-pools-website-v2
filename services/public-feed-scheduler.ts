@@ -105,6 +105,13 @@ export type PublicFeedDefinition<T = unknown> = {
    */
   retryMs?: number;
   /**
+   * Also use `retryMs` after a failed REFRESH (the feed holds older data), not
+   * only before the first success. For a feed whose consumers stop trusting
+   * the data once it ages out, e.g. the keystore registries a write waits on.
+   * Same wall-clock grid, so it still says nothing about the user.
+   */
+  retryOnError?: boolean;
+  /**
    * Fetch the feed. Takes NO arguments on purpose: a public feed is the same
    * for everyone, and a parameter is how it stops being one.
    */
@@ -323,7 +330,9 @@ export class PublicFeedScheduler {
 
   private periodOf(key: PublicFeedKey, feed: PublicFeedDefinition): number {
     if (feed.retryMs === undefined) return feed.intervalMs;
-    return feedData(this.read(key)) === undefined ? feed.retryMs : feed.intervalMs;
+    const state = this.read(key);
+    if (feed.retryOnError && state.status === 'error') return feed.retryMs;
+    return feedData(state) === undefined ? feed.retryMs : feed.intervalMs;
   }
 
   private run(key: PublicFeedKey): Promise<void> {
@@ -365,6 +374,8 @@ export class PublicFeedScheduler {
           ...(previous?.status === 'ready' ? { data: previous.data, dataAt: previous.at } : {}),
           ...(previous?.status === 'error' ? { data: previous.data, dataAt: previous.dataAt } : {}),
         });
+        // Opted-in feeds move the pending instant onto the retry grid.
+        if (feed.retryOnError && feed.retryMs !== undefined) this.schedule(key);
       })
       .finally(() => {
         // Identity, not presence: after a stop() the entry may belong to a

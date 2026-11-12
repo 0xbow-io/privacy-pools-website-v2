@@ -186,6 +186,7 @@ export function viewingKeyTxPlan(input: {
   priorityFeeWei?: bigint | null;
   baseFeeWei?: bigint | null;
   minPriorityFeeWei?: bigint | null;
+  minMaxFeeWei?: bigint | null;
   gasPriceWei: bigint;
 }): { gas: bigint; fees: ViewingKeyTxFees | null; costWei: bigint } {
   // The shared wallet fee policy (services/wallet-tx-fees.ts, DEV-542), with
