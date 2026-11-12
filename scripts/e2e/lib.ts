@@ -20,6 +20,8 @@ import { mnemonicToAccount, privateKeyToAccount, type PrivateKeyAccount } from '
 import { installEvmWallet } from '../visual/evm-wallet';
 import { waitForApproval } from './approval-wait';
 import { FIXTURE_NOTE_ETH, PAYMENT_FEE_RESERVE_ETH } from './funding';
+import { installUnlockGateHandler, unlockIfPrompted } from './unlock-gate';
+export { unlockIfPrompted } from './unlock-gate';
 import { installShareNameGuard, type ShareNameGuard } from './share-name-guard';
 
 // Every journey page carries the share-name guard (./share-name-guard.ts): it
@@ -139,6 +141,7 @@ export async function openApp(
   // Instrumentation can sit behind the unlock modal; a forced pointer click
   // would hit that modal instead. Dismiss only the debug control directly.
   await page.addLocatorHandler(debugClose, () => debugClose.evaluate(button => button.click()));
+  await installUnlockGateHandler(page);
   await capture.attachPage(page);
   page.on('pageerror', (e) => console.log('  [pageerror]', e.message.slice(0, 160)));
   const appLogs: string[] = [];
@@ -205,48 +208,6 @@ export async function signIn(page: Page): Promise<void> {
   }
   await sleep(6000);
   await unlockIfPrompted(page);
-}
-
-/**
- * Clear the keystore-unlock gate if it is on screen, via a real wallet signature
- * (a headless browser has no passkey).
- *
- * This cannot be done once at sign-in: the gate is raised by the first ACTION,
- * so a flow's CTA click gets answered by "Unlock with passkey" instead of by the
- * transaction. Returns whether a gate was present.
- */
-export async function unlockIfPrompted(page: Page, maxWaitMs = 120_000): Promise<boolean> {
-  const gate = /Unlock with passkey|Unlock your account/;
-  if (!gate.test(await bodyText(page))) return false;
-  console.log('  unlock gate: taking the wallet-signature path');
-  const walletPath = page.getByText('Use wallet signature instead', { exact: false }).first();
-  if (await walletPath.isVisible().catch(() => false)) {
-    await walletPath.click().catch(() => {});
-    await sleep(1500);
-  }
-  // "Sign in" also exists in the header, so target the overlay's own copy.
-  const clicked = await page.evaluate(() => {
-    const overlays = Array.from(document.querySelectorAll('div')).filter((d) => {
-      const s = getComputedStyle(d);
-      return s.position === 'fixed' && /Unlock (with passkey|your account)/.test(d.textContent || '');
-    });
-    const host = overlays.pop() ?? document.body;
-    for (const want of ['Sign in', 'Sign message', 'Continue']) {
-      const cta = Array.from(host.querySelectorAll('*')).find(
-        (el) => el.textContent?.trim() === want && el.children.length === 0,
-      ) as HTMLElement | undefined;
-      if (cta) { ((cta.closest('button,[role="button"]') as HTMLElement) ?? cta).click(); return want; }
-    }
-    return null;
-  });
-  console.log('  unlock gate: clicked', clicked ?? '(nothing found)');
-  const until = Date.now() + maxWaitMs;
-  while (Date.now() < until) {
-    await sleep(Math.min(2000, Math.max(0, until - Date.now())));
-    if (!gate.test(await bodyText(page))) { console.log('  unlock gate: cleared'); return true; }
-  }
-  console.log(`  unlock gate: STILL on screen after ${Math.round(maxWaitMs / 1000)}s`);
-  return true;
 }
 
 /**
