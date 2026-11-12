@@ -306,7 +306,7 @@ async function activeInput(page: Page, kind: 'amount' | 'recipient', owner?: Own
   );
   const field = kind === 'amount'
     ? root.locator('input[placeholder="0"], input[placeholder="0.0"]')
-    : root.locator('input[placeholder*="recipient address" i]');
+    : root.locator('input[data-testid="send-recipient-input"], input[data-testid="withdraw-recipient-input"], input[data-testid="hub-shield-recipient-input"]');
   return field.filter({ visible: true });
 }
 

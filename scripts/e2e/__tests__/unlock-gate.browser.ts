@@ -2,6 +2,7 @@
 import { expect } from 'bun:test';
 import { launchChrome } from '../../lib/chrome.mjs';
 import { installUnlockGateHandler, unlockIfPrompted } from '../unlock-gate';
+import { fillRecipient } from '../lib';
 
 const browser = await launchChrome({ headless: true });
 try {
@@ -28,6 +29,22 @@ try {
     expect(await page.locator('#pill').innerText()).toBe('Token picker opened');
     expect(await page.locator('#header').getAttribute('data-clicked')).toBeNull();
     console.log(`PASS delayed ${passkey ? 'passkey' : 'wallet'} gate: real pointer click reached token picker`);
+    await page.close();
+  }
+  for (const owner of ['Send', 'Withdraw'] as const) {
+    const page = await browser.newPage();
+    const key = owner.toLowerCase();
+    await page.setContent(`
+      <section data-testid="hub-page-${key}" aria-hidden="true" style="display:none">
+        <input id="hidden" data-testid="${key}-recipient-input" placeholder="recipient address">
+      </section>
+      <section data-testid="hub-page-${key}">
+        <input id="active" data-testid="${key}-recipient-input" placeholder="Recipient 0x address">
+      </section>`);
+    expect(await fillRecipient(page, '0x1234', owner)).toBe(true);
+    expect(await page.locator('#active').evaluate(el => (el as HTMLInputElement).value)).toBe('0x1234');
+    expect(await page.locator('#hidden').evaluate(el => (el as HTMLInputElement).value)).toBe('');
+    console.log(`PASS ${owner} recipient uses stable ID in active page, ignoring hidden sibling and placeholder copy`);
     await page.close();
   }
   const page = await browser.newPage();

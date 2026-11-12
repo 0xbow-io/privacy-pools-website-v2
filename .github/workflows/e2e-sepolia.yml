@@ -117,7 +117,7 @@ jobs:
       - name: Install the browser
         run: bunx playwright install --with-deps chrome
 
-      - name: Check late account-unlock recovery without spending
+      - name: Check journey UI helpers without spending
         run: bun scripts/e2e/__tests__/unlock-gate.browser.ts
 
       # The privacy gate, against a throwaway local server: no app, no wallet,
