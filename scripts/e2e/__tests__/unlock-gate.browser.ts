@@ -87,6 +87,26 @@ try {
   expect(await registration.locator('body').innerText()).toBe('Exit Successful');
   console.log('PASS fresh-wallet exit accepts registration and resumes');
   await registration.close();
+  for (const pending of ['Check your wallet…', 'Reconnecting…']) {
+    const page = await browser.newPage();
+    await page.setContent(`<button id="header" onclick="this.dataset.clicked='yes'">Sign in</button><div id="overlay" style="position:fixed;inset:0"><h2>Unlock your account</h2><button disabled>${pending}</button></div>`);
+    await page.evaluate(() => { setTimeout(() => document.querySelector('#overlay')!.remove(), 1500); });
+    expect(await unlockIfPrompted(page, 5000)).toBe(true);
+    expect(await page.locator('#header').getAttribute('data-clicked')).toBeNull();
+    console.log(`PASS pending ${pending} completes without a sign-in control or header click`);
+    await page.close();
+  }
+  const delayed = await browser.newPage();
+  await delayed.setContent('<div id="overlay" style="position:fixed;inset:0"><h2>Unlock your account</h2><button disabled>Sign in</button></div>');
+  await delayed.evaluate(() => {
+    const button = document.querySelector('button')!;
+    button.onclick = () => { document.body.dataset.clicks = String(Number(document.body.dataset.clicks || 0) + 1); setTimeout(() => document.querySelector('#overlay')!.remove(), 500); };
+    setTimeout(() => { button.disabled = false; }, 300);
+  });
+  expect(await unlockIfPrompted(delayed, 5000)).toBe(true);
+  expect(await delayed.locator('body').getAttribute('data-clicks')).toBe('1');
+  console.log('PASS delayed sign-in becomes enabled and is clicked only once');
+  await delayed.close();
   const page = await browser.newPage();
   await page.setContent('<div style="position:fixed;inset:0"><h2>Unlock your account</h2><button>Sign in</button></div>');
   await expect(unlockIfPrompted(page, 100)).rejects.toThrow('did not finish');

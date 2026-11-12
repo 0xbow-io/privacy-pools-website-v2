@@ -45,27 +45,36 @@ export async function unlockIfPrompted(page: Page, maxWaitMs = 120_000): Promise
     await walletPath.evaluate((button: HTMLElement) => button.click());
     await sleep(1500);
   }
-  // "Sign in" also exists in the header, so target the overlay's own copy.
-  const clicked = await page.evaluate(() => {
-    const overlays = Array.from(document.querySelectorAll('div')).filter((d) => {
-      const s = getComputedStyle(d);
-      return s.position === 'fixed' && /Unlock (with passkey|your account)/.test(d.textContent || '');
-    });
-    const host = overlays.pop() ?? document.body;
-    for (const want of ['Sign in', 'Sign message', 'Continue']) {
-      const cta = Array.from(host.querySelectorAll('*')).find(
-        (el) => el.textContent?.trim() === want && el.children.length === 0,
-      ) as HTMLElement | undefined;
-      if (cta) { ((cta.closest('button,[role="button"]') as HTMLElement) ?? cta).click(); return want; }
-    }
-    return null;
-  });
-  if (!clicked) throw new Error('Account unlock has no actionable sign-in control');
-  console.log('  unlock gate: clicked', clicked);
+  // Automatic signing/reconnection can already be in flight. Wait for either
+  // its completion or an enabled overlay CTA, and never click the header.
   const until = Date.now() + maxWaitMs;
+  let clicked: string | null = null;
   while (Date.now() < until) {
-    await sleep(Math.min(2000, Math.max(0, until - Date.now())));
     if (!(await heading.isVisible())) { console.log('  unlock gate: cleared'); return true; }
+    if (!clicked) {
+      clicked = await page.evaluate(() => {
+        const overlays = Array.from(document.querySelectorAll('div')).filter((d) => {
+          const s = getComputedStyle(d);
+          return s.position === 'fixed' && /Unlock (with passkey|your account)/.test(d.textContent || '');
+        });
+        const host = overlays.pop();
+        if (!host) return null;
+        for (const want of ['Sign in', 'Sign message', 'Continue']) {
+          const cta = Array.from(host.querySelectorAll('*')).find(
+            (el) => el.textContent?.trim() === want && el.children.length === 0,
+          ) as HTMLElement | undefined;
+          if (!cta) continue;
+          const button = (cta.closest('button,[role="button"]') as HTMLElement) ?? cta;
+          if (button.matches(':disabled') || button.getAttribute('aria-disabled') === 'true'
+            || button.getClientRects().length === 0) continue;
+          button.click();
+          return want;
+        }
+        return null;
+      });
+      if (clicked) console.log('  unlock gate: clicked', clicked);
+    }
+    await sleep(Math.min(250, Math.max(0, until - Date.now())));
   }
   console.log(`  unlock gate: STILL on screen after ${Math.round(maxWaitMs / 1000)}s`);
   throw new Error('Account unlock did not finish before the e2e deadline');
