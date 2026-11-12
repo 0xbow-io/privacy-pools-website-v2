@@ -22,15 +22,10 @@ import { useChainRouter } from '@/hooks/use-chain-router';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { useTabCloseGuard } from '@/hooks/use-tab-close-guard';
 import { decodeStellarClaim, stellarClaimTotal } from '@/services/stellar/stellar-claim';
-import { describeStellarStage, stellarErrorMessage } from '@/services/stellar/stellar-copy';
+import { describeStellarStage, stellarActionError } from '@/services/stellar/stellar-copy';
 
 function short(value: string): string {
   return value.length <= 12 ? value : `${value.slice(0, 6)}…${value.slice(-6)}`;
-}
-
-function errorText(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error);
-  return /reject|denied|cancel|declined/i.test(raw) ? 'Cancelled in Freighter.' : stellarErrorMessage(raw);
 }
 
 export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
@@ -95,7 +90,7 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
     try {
       await stellar.claim(claim.notes);
     } catch (e) {
-      setError(errorText(e));
+      setError(stellarActionError(e, 'Cancelled in Freighter.'));
     } finally {
       setBusy(null);
     }
@@ -103,8 +98,9 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
 
   const onKeep = async () => {
     if (!claim) return;
-    const scope = keepScope.current;
     setError(null);
+    if (!(await ensureReady())) return;
+    const scope = keepScope.current;
     setBusy(describeStellarStage('proving'));
     try {
       const { txHash } = await stellar.keepClaim(claim.notes.map((n) => n.commitment as `0x${string}`), {
@@ -113,7 +109,7 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
       });
       if (scope.active) setKeptTx(txHash);
     } catch (e) {
-      if (scope.active) setError(errorText(e));
+      if (scope.active) setError(stellarActionError(e, 'Cancelled in Freighter.'));
     } finally {
       setBusy(null);
     }

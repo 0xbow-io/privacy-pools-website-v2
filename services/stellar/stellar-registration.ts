@@ -23,6 +23,7 @@ export async function registerStellarAccount({ session, address, assertActive, r
   onStatus?.(stellarRegistrationStatus(registration));
   if (registration.alreadyRegistered) return;
   let error: string | undefined;
+  let submitted = false;
   while (true) {
     const assertConsent = await requestConsent({
       address,
@@ -36,7 +37,10 @@ export async function registerStellarAccount({ session, address, assertActive, r
       registration = await session.prepareRegisterKeystore();
       guard();
       onStatus?.(stellarRegistrationStatus(registration));
-      if (!registration.alreadyRegistered) await execute(registration, guard);
+      if (!registration.alreadyRegistered && !submitted) {
+        await execute(registration, guard);
+        submitted = true;
+      }
       let confirmed = registration.alreadyRegistered;
       for (let attempt = 0; attempt < 10 && !confirmed; attempt++) {
         guard();
@@ -46,7 +50,7 @@ export async function registerStellarAccount({ session, address, assertActive, r
         } catch {
           // Retry confirmation, never replay a transaction.
         }
-        if (!confirmed) await wait();
+        if (!confirmed && attempt < 9) await wait();
       }
       guard();
       if (!confirmed) throw new Error('Your account registration has not shown up on chain yet. Try again in a minute.');

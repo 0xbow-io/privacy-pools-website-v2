@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { StellarRegistrationCancelledError, StellarRegistrationPrompts, type StellarRegistrationPrompt } from '../stellar/stellar-registration-prompt';
+import { stellarActionError } from '../stellar/stellar-copy';
 import { registerStellarAccount } from '../stellar/stellar-registration';
 import type { StellarPoolSession } from '../stellar/stellar-account';
 
@@ -140,8 +141,15 @@ describe('Stellar registration', () => {
     expect((await failed).error).toContain('has not shown up');
     expect(h.statuses).not.toContain('compatible');
     expect(h.sent).toHaveLength(1);
-    h.prompts.cancel();
-    await expect(done).rejects.toBeInstanceOf(StellarRegistrationCancelledError);
+    const retried = h.nextPrompt();
+    h.prompts.approve();
+    expect((await retried).error).toContain('has not shown up');
+    expect(h.sent).toHaveLength(1);
+    h.control.state = missing(false, false);
+    h.prompts.approve();
+    await done;
+    expect(h.sent).toHaveLength(1);
+    expect(h.statuses.at(-1)).toBe('compatible');
   });
 
   test('already complete setup finishes without waiting for consent or submitting', async () => {
@@ -183,4 +191,11 @@ describe('Stellar registration', () => {
     await expect(h.run()).rejects.toBeInstanceOf(StellarRegistrationCancelledError);
     expect(h.sent).toEqual([]);
   });
+});
+
+test('registration dismissal is distinguished from wallet rejection', () => {
+  const dismissed = new StellarRegistrationCancelledError();
+  expect(stellarActionError(dismissed, 'Cancelled in Freighter.')).toBe(dismissed.message);
+  expect(stellarActionError(new Error('User rejected'), 'Cancelled in Freighter.')).toBe('Cancelled in Freighter.');
+  expect(stellarActionError(new Error('Error(Contract, #12): rejected balance'))).toContain('error #12');
 });

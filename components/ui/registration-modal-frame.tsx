@@ -32,6 +32,7 @@ export function RegistrationModalFrame({ visible, title, onClose, children }: {
               <Text className="font-pp-medium text-[11px] tracking-[2px] text-text-muted">PRIVACY POOLS V2</Text>
               <Text className="font-pp-bold text-[22px] leading-[26px] text-text">{title}</Text>
             </View>
+            {/* Keep Close enabled while the wallet is waiting for a response. */}
             <Pressable className="h-[36px] w-[36px] items-center justify-center rounded-control border border-border-light" onPress={onClose} accessibilityRole="button" accessibilityLabel="Close">
               {/* nw-keep(data-color): close glyph uses the runtime theme token */}
               <Ionicons name="close" size={18} color={colors.text} />
