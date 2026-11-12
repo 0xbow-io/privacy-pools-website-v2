@@ -1677,7 +1677,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       // nonzero check. The reshield mints the far note under this session's
       // keys, so the bulk registry must confirm they are the registered ones
       // (local read, waits for the grid, never fetches).
-      const refusal = ownRegistrationRefusal(await keystoreStatusForChain(destinationChainId, { chainFallback: true }), true);
+      const refusal = ownRegistrationRefusal(await keystoreStatusForChain(destinationChainId), true);
       if (!args.isCurrent()) return 'handled';
       if (refusal) {
         setSwapError(refusal);

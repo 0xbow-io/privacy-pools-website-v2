@@ -248,3 +248,17 @@ change can remove.
 
 References: `v2-monorepo/docs/PRIVACY_RPC_METADATA_AUDIT.md`,
 `v2-monorepo/docs/PRIVACY_RPC_METADATA_FIX_PLAN.md`, asp-v2 PR #115.
+
+## L2BEAT: registry outages and portfolio lookups
+
+An unavailable bulk registry must remain unknown. Own-account identity and
+viewing-key checks use only the grid’s local registry and confirmed registration
+records, including deposit, registration and payment-request preflight. There is
+no per-call override to ask the RPC about the owner during an outage. Existing
+write refusals remain in force until the bulk data can answer safely.
+
+The app no longer sends the connected address to Alchemy’s Portfolio API. The
+default token picker uses configured assets. Wider on-chain holdings discovery
+is limited to explicit custom-RPC builds; it does not silently substitute the
+shared Alchemy service. This removes automatic discovery of arbitrary holdings
+from the default picker rather than trading that privacy property for coverage.
