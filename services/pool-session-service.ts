@@ -449,7 +449,7 @@ export async function createPoolSession(params: CreatePoolSessionParams) {
   };
 
   // Forward the SDK's own warnings/errors to the console (see services/sdk-logger.ts).
-  // Own-account keystore reads ask the registries first, then the chain; never wait
+  // Session-account keystore reads use the registries only; unavailable data throws
   // (services/keystore-registry-reads.ts).
   return createEvmPoolSession(config, { logger: createSdkConsoleLogger() });
 }

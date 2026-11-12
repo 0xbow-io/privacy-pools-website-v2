@@ -132,6 +132,29 @@ describe('own-account reads never reach the chain when the registries answer', (
     await expect(sdkIsViewingKeySet(interactor)).rejects.toThrow(REGISTRY_SYNCING_MESSAGE);
   });
 
+  test('a stale viewing-key hit cannot answer because keys can rotate', async () => {
+    store.set(envScopedStorageKey(`ppv2_viewing_keys_v1_${CHAIN}`), JSON.stringify({
+      byAccount: { [OWNER]: VK }, lastSyncedId: '1',
+      lastSyncedAt: Date.now() - 24 * 3600_000, lastFullSyncedAt: Date.now() - 24 * 3600_000,
+    }));
+    const { interactor, calls } = fakeChain({ viewingKey: VK });
+    routeOwnKeystoreReads(interactor, { chainId: CHAIN, ownerAddress: OWNER });
+    await expect(sdkIsViewingKeySet(interactor)).rejects.toThrow(REGISTRY_SYNCING_MESSAGE);
+    expect(calls).toEqual([]);
+  });
+
+  test('a cold registry recovers after the background bulk feed seeds it', async () => {
+    const { interactor, calls } = fakeChain();
+    routeOwnKeystoreReads(interactor, { chainId: CHAIN, ownerAddress: OWNER });
+    await expect(sdkIsRegistered(interactor)).rejects.toThrow(REGISTRY_SYNCING_MESSAGE);
+    const outcome = await cache.syncNullifyingKeyHashes(CHAIN, undefined, async () => new Response(JSON.stringify({
+      entries: [{ account: OWNER, nullifyingKeyHash: MINE }], lastSyncedId: '1', hasMore: false,
+    })), async () => undefined);
+    expect(outcome.ok).toBe(true);
+    expect(await sdkIsRegistered(interactor)).toBe(true);
+    expect(calls).toEqual([]);
+  });
+
   test('a stale registry still answers a write-once hash hit, but not a miss', async () => {
     store.set(envScopedStorageKey(`ppv2_nullifying_key_hashes_v1_${CHAIN}`), JSON.stringify({ byAccount: { [OWNER]: MINE }, lastSyncedId: '1', lastSyncedAt: Date.now() - 24 * 3600_000 }));
     const { interactor, calls } = fakeChain();
