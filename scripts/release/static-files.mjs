@@ -32,3 +32,23 @@ export async function verifyCircuits(root, entries) {
     if (await sha256(full) !== expected) throw new Error(`Circuit digest mismatch: ${path}`);
   }
 }
+
+/** Re-check disk bytes immediately before publication, not just at build time. */
+export async function verifyReleaseOutputs(dir) {
+  const manifestPath = join(dir, 'release-manifest.json');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  const proof = JSON.parse(readFileSync(join(dir, 'reproducibility.json'), 'utf8'));
+  const manifestSha = await sha256(manifestPath);
+  if (proof.independentBuilds !== 2 || proof.commit !== manifest.commit || proof.manifestSha256 !== manifestSha) throw new Error('Invalid reproducibility proof');
+  const expectedPaths = ['bundle.tar', 'site.car'];
+  if (!Array.isArray(manifest.artifacts) || manifest.artifacts.length !== 2) throw new Error('Invalid release artifact inventory');
+  const checksums = [];
+  for (const [index, path] of expectedPaths.entries()) {
+    const entry = manifest.artifacts[index];
+    if (entry.path !== path || entry.sha256 !== await sha256(join(dir, path)) || entry.bytes !== lstatSync(join(dir, path)).size) throw new Error(`Release artifact digest mismatch: ${path}`);
+    checksums.push(`${entry.sha256}  ${path}\n`);
+  }
+  checksums.push(`${manifestSha}  release-manifest.json\n`);
+  if (readFileSync(join(dir, 'SHA256SUMS'), 'utf8') !== checksums.join('')) throw new Error('Release checksum list mismatch');
+  return { manifest, proof };
+}

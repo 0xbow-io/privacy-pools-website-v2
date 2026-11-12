@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { files, sha256, publicBuildEnv, verifyCircuits } from './static-files.mjs';
+import { files, sha256, publicBuildEnv, verifyCircuits, verifyReleaseOutputs } from './static-files.mjs';
 
 test('release environment is explicit public configuration, never inherited secrets or offloaded circuits', () => {
   assert.deepEqual(publicBuildEnv({ EXPO_PUBLIC_Z: 'true', EXPO_PUBLIC_A: 'prod' }), { EXPO_PUBLIC_A: 'prod', EXPO_PUBLIC_Z: 'true' });
@@ -32,5 +32,27 @@ test('file inventory is ordered and cannot follow a symlink outside the bundle',
     assert.deepEqual(files(root), ['nested/a', 'z']);
     symlinkSync('/etc/passwd', join(root, 'escape'));
     assert.throws(() => files(root), /Non-regular/);
+  } finally { rmSync(root, { recursive: true }); }
+});
+
+test('publication rechecks artifact bytes, proof binding and checksum list', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'pp-publish-'));
+  try {
+    writeFileSync(join(root, 'bundle.tar'), 'bundle'); writeFileSync(join(root, 'site.car'), 'car');
+    const artifacts = [];
+    for (const path of ['bundle.tar', 'site.car']) artifacts.push({ path, bytes: path === 'bundle.tar' ? 6 : 3, sha256: await sha256(join(root, path)) });
+    const manifest = { commit: 'a'.repeat(40), artifacts };
+    writeFileSync(join(root, 'release-manifest.json'), JSON.stringify(manifest));
+    const manifestSha256 = await sha256(join(root, 'release-manifest.json'));
+    writeFileSync(join(root, 'reproducibility.json'), JSON.stringify({ commit: manifest.commit, independentBuilds: 2, manifestSha256 }));
+    writeFileSync(join(root, 'SHA256SUMS'), [...artifacts, { path: 'release-manifest.json', sha256: manifestSha256 }].map(a => `${a.sha256}  ${a.path}\n`).join(''));
+    assert.equal((await verifyReleaseOutputs(root)).manifest.commit, manifest.commit);
+    writeFileSync(join(root, 'bundle.tar'), 'corrupt');
+    await assert.rejects(verifyReleaseOutputs(root), /digest mismatch/);
+    writeFileSync(join(root, 'bundle.tar'), 'bundle');
+    writeFileSync(join(root, 'SHA256SUMS'), 'changed');
+    await assert.rejects(verifyReleaseOutputs(root), /checksum list/);
+    writeFileSync(join(root, 'reproducibility.json'), JSON.stringify({ commit: manifest.commit, independentBuilds: 1, manifestSha256 }));
+    await assert.rejects(verifyReleaseOutputs(root), /reproducibility proof/);
   } finally { rmSync(root, { recursive: true }); }
 });
