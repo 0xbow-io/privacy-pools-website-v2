@@ -1,10 +1,10 @@
 // Run against a production export: PROBE_URL=http://localhost:8083 node scripts/e2e/landing-document.mjs
 // Check the delivered document, not an import of the content generator.
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 
 const base = process.env.PROBE_URL ?? 'http://localhost:8083';
-const browser = await chromium.launch({ headless: true });
+const browser = await launchChrome({ headless: true });
 try {
   const plain = await browser.newPage({ javaScriptEnabled: false });
   const response = await plain.goto(base);

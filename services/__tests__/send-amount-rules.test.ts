@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseUnits } from 'viem';
 
-import { capText, feeMovedUp, feeOverflowsCap, overCapReason, stableSendMax } from '../send-amount-rules';
+import { capText, feeMovedUp, feeOverflowsCap, overCapReason, sendFeeMode, stableSendMax } from '../send-amount-rules';
+import { resolveEffectiveReceiveExact } from '../withdraw-quotes';
 
 const ROOT = join(new URL('.', import.meta.url).pathname, '..', '..');
 const u = (v: string, d = 6) => parseUnits(v, d);
@@ -52,13 +53,12 @@ describe('DEV-437: the cap beside a rejected amount reads smaller than it', () =
 
 describe('DEV-490: a full-balance send just works, ticked or not', () => {
   const src = readFileSync(join(ROOT, 'components/transfer-modal-provider.tsx'), 'utf8');
-  // Evaluate the real maxGrossIntent expression with controlled inputs.
-  const start = src.indexOf('const maxGrossIntent = ');
-  const expr = src.slice(start + 'const maxGrossIntent = '.length, src.indexOf(');', start) + 1);
-  const gross = (receiveExact: boolean, enteredWei: bigint) => new Function(
-    'isSui', 'enteredAmountWei', 'maxSpendableWei', 'receiveExact', 'hideAddress', 'isSwapSend', 'feeOverflowsCap', 'relayFeeCeiled',
-    `return (${expr});`,
-  )(false, enteredWei, u('36.502932'), receiveExact, true, false, feeOverflowsCap, u('0.155523'));
+  // The form's rule (sendFeeMode, which the modal calls) for an ordinary entry:
+  // anything typed or Max, not an untouched amount a caller handed in.
+  const gross = (receiveExact: boolean, enteredWei: bigint) => sendFeeMode({
+    enteredWei, capWei: u('36.502932'), feeWei: u('0.155523'), requestedReceiveExact: receiveExact,
+    callerAmountUntouched: false, relayedSend: true, resolveReceiveExact: resolveEffectiveReceiveExact,
+  }).maxGrossIntent;
 
   test('ticked: an amount the fee overflows is netted, not an error', () => {
     expect(gross(true, u('36.5'))).toBe(true);
@@ -102,10 +102,14 @@ describe('the Send form uses them', () => {
   const src = readFileSync(join(ROOT, 'components/transfer-modal-provider.tsx'), 'utf8');
   test('gross on overflow, floored cap, one-tap max, right reason', () => {
     // Ticked or not since DEV-490.
-    expect(src).toContain('(hideAddress && !isSwapSend && feeOverflowsCap(enteredAmountWei, relayFeeCeiled, maxSpendableWei))');
-    expect(src).toContain('const effectiveReceiveExact = !maxGrossIntent && resolveEffectiveReceiveExact(');
-    expect(src).toContain('capText(maxSpendableWei, enteredAmountWei, selectedDecimals)');
-    expect(src).toContain('const displayAmountError = amountError?.replace(');
+    expect(src).toContain('const feeMode = sendFeeMode({');
+    expect(src).toContain('relayedSend: hideAddress && !isSwapSend,');
+    expect(src).toContain('resolveReceiveExact: resolveEffectiveReceiveExact,');
+    expect(src).toContain('const effectiveReceiveExact = !maxGrossIntent && feeMode.effectiveReceiveExact;');
+    expect(readFileSync(join(ROOT, 'services/send-amount-rules.ts'), 'utf8')).toContain('(relayedSend && feeOverflowsCap(enteredWei, feeWei, capWei))');
+    // The floored cap, through noteFigure so a share reads at the live rate.
+    expect(readFileSync(join(ROOT, 'services/note-figure.ts'), 'utf8')).toContain('capText(v, cap.enteredWei, d)');
+    expect(src).toContain('noteFigure(maxSpendableWei, { enteredWei: enteredAmountWei })');
     expect(src).toContain('onPress={() => setAmount(maxSpendableFormatted)}');
     expect(src).toContain("`Exceeds your shielded balance of ${cap}`");
     expect(src).not.toContain('parseFloat(maxSpendableFormatted).toFixed(4)');

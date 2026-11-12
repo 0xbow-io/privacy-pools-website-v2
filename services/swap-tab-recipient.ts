@@ -20,7 +20,7 @@ export type SwapTabRecipientRoute =
   /** A third party this output cannot reach privately. */
   | { kind: 'refused'; reason: string };
 
-export const SWAP_TAB_RECIPIENT_REFUSED = 'This asset can’t be sent privately to someone else. Pick a pool share, or use Withdraw.';
+export const SWAP_TAB_RECIPIENT_REFUSED = 'This asset can’t be sent privately to someone else. Pick a supported token, or use Withdraw.';
 
 const ADDRESS_RE =/^0x[0-9a-fA-F]{40}$/;
 const ZERO = '0x0000000000000000000000000000000000000000';

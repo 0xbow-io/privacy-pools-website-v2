@@ -103,7 +103,7 @@ export function toYieldDepositFor(
   if (!depositTx || typeof depositTx.data !== 'string') {
     throw new YieldDepositForError('Prepared deposit has no transaction.');
   }
-  if (inputs.shares <= 0n) throw new YieldDepositForError('The share amount must be positive.');
+  if (inputs.shares <= 0n) throw new YieldDepositForError('The deposit amount must be positive.');
   if (inputs.spendCap < inputs.underlyingNeeded) {
     // The SDK's own shape for this (InvalidYieldAmount, same wording), so the
     // flow's isCapBelowQuoteError shows the rate-moved guidance for it too.
@@ -116,7 +116,7 @@ export function toYieldDepositFor(
   // A share deposit is an ERC-20 deposit at the Entrypoint: any value means the
   // SDK built something else (a native-asset deposit), not the share leg.
   if (BigInt(depositTx.value ?? '0x0') !== 0n) {
-    throw new YieldDepositForError('Prepared share deposit carries a value; it is not the share leg.');
+    throw new YieldDepositForError('Prepared yield deposit carries a value; it is not the yield leg.');
   }
 
   let args: readonly unknown[];

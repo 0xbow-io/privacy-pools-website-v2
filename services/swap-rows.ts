@@ -24,6 +24,7 @@ import {
   type FundsProjection,
   type RegistrationStatus,
 } from '@/services/funds-state';
+import { LOADING_FIGURE } from '@/services/token-format';
 
 /** One leg of a two-leg action, in its own chain and token. */
 export type SwapLeg = {
@@ -239,7 +240,7 @@ export function ownLeg(tx: Pick<Transaction, 'chainId' | 'chain' | 'asset' | 'to
 }
 
 /** The two legs a row shows when it has two, with their captions. A recorded
- *  quote is approximate: a Shield input or a receive-as payout is marked ≈. */
+ *  quote is approximate: a Shield input or a receive-as payout is marked ~. */
 export type RowLegs = {
   from: SwapLeg;
   to: SwapLeg;
@@ -283,14 +284,15 @@ export function viaSwapRoute(tx: Transaction): boolean {
   return isSwapRow(tx) || (tx.type === 'Withdrawal' && (!!tx.receivedAs || !!tx.delivery || !!tx.viaSwap));
 }
 
-/** Each leg of a row with two legs as text, marked ≈ when it is a
+/** Each leg of a row with two legs as text, marked ~ when it is a
  *  quote; null for any other row. */
 export function swapLegTexts(tx: Transaction, format: (leg: SwapLeg) => string): { from: string; to: string } | null {
   const legs = rowLegs(tx);
   if (!legs) return null;
   const text = (leg: SwapLeg, approx: boolean) => {
     const value = format(leg);
-    return approx && !value.startsWith('\u2248') ? `\u2248 ${value}` : value;
+    // A loading figure has no number to mark yet.
+    return approx && !/^[~\u2248]/.test(value) && !value.startsWith(LOADING_FIGURE) ? `~${value}` : value;
   };
   return { from: text(legs.from, legs.fromApprox), to: text(legs.to, legs.toApprox) };
 }
@@ -329,7 +331,8 @@ export function debugSafeRow<T extends { swapOut?: unknown; receivedAs?: unknown
 
 /** A spend as a debug snapshot may record it: without its swap outputs or
  *  the labels of the notes it spent. */
-export function debugSafeSpend<T extends { swapOutputs?: unknown; inputLabels?: unknown }>(spend: T): Omit<T, 'swapOutputs' | 'inputLabels'> {
-  const { swapOutputs: _swapOutputs, inputLabels: _inputLabels, ...rest } = spend;
+export function debugSafeSpend<T extends { swapOutputs?: unknown; inputLabels?: unknown; recipients?: unknown }>(spend: T): Omit<T, 'swapOutputs' | 'inputLabels' | 'recipients'> {
+  // recipients: who this user paid (asp-v2#165), never in a debug capture.
+  const { swapOutputs: _swapOutputs, inputLabels: _inputLabels, recipients: _recipients, ...rest } = spend;
   return rest;
 }

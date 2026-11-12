@@ -20,7 +20,7 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { BASELINE_DIR, THRESHOLDS_PATH, SCREENSHOT_VARIANTS, surfaceShotInScope } from './config';
-import { assertBaselineFixtureConsistency } from './baseline-manifest';
+import { assertBaselineFixtureConsistency, readCaptureBrowser } from './baseline-manifest';
 import { diffPng, readPng } from './png';
 
 interface Thresholds {
@@ -64,7 +64,7 @@ function main(): void {
   if (!artifactsDir) artifactsDir = path.join(candidateDir, 'diff-artifacts');
 
   // GATES-01: baseline/fixture consistency, fail closed.
-  const baselineManifest = assertBaselineFixtureConsistency();
+  const baselineManifest = assertBaselineFixtureConsistency(readCaptureBrowser(candidateDir));
 
   const thresholds = JSON.parse(fs.readFileSync(THRESHOLDS_PATH, 'utf8')) as Thresholds;
   const { perChannelTolerance } = thresholds.policy;

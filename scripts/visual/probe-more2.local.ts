@@ -1,7 +1,7 @@
-import { chromium } from 'playwright';
+import { launchChrome } from '../lib/chrome.mjs';
 const BASE = process.env.PROBE_URL ?? 'http://localhost:8080';
 async function run(mode: 'touch' | 'mouse') {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchChrome({ headless: true });
   const ctx = await browser.newContext({
     viewport: { width: 390, height: 844 },
     hasTouch: mode === 'touch',

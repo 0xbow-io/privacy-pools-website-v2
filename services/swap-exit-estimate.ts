@@ -1,3 +1,5 @@
+import { formatTokenBalanceDown, isStablecoin } from './token-format';
+
 /**
  * The LiFi input for a FORM-TIME swap-exit estimate.
  *
@@ -35,12 +37,21 @@ export function swapExitEstimateInputWei(input: {
   return inflated >= grossWei ? 0n : grossWei - inflated;
 }
 
-/** Human figure for the estimate: trimmed to 6 fractional digits, never "0" for a non-zero amount. */
-export function formatSwapExitEstimate(toAmountWei: bigint, decimals: number): string {
+/**
+ * Human figure for the estimate. A stablecoin (pass its `symbol`) reads like
+ * money, exactly two decimals cut down (DEV-621): "1.00", "<0.01" below a
+ * cent. Any other asset is trimmed to 6 fractional digits, never "0" for a
+ * non-zero amount.
+ */
+export function formatSwapExitEstimate(toAmountWei: bigint, decimals: number, symbol?: string | null): string {
   if (toAmountWei <= 0n) return '0';
   const base = 10n ** BigInt(decimals);
   const whole = toAmountWei / base;
   const frac = toAmountWei % base;
+  if (symbol && isStablecoin(symbol)) {
+    const exact = frac === 0n ? whole.toString() : `${whole}.${frac.toString().padStart(decimals, '0')}`;
+    return formatTokenBalanceDown(exact, symbol);
+  }
   if (frac === 0n) return whole.toString();
   let fracStr = frac.toString().padStart(decimals, '0');
   const shown = fracStr.slice(0, 6).replace(/0+$/, '');

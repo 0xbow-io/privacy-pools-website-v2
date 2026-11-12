@@ -328,6 +328,10 @@ try {
   // slippage. At this size the bridge's fixed fee moves the quote by more than
   // the 0.5% default between Review and Confirm, so allow 3%.
   await hubPage('swap').getByText(SLIPPAGE, { exact: true }).click();
+  // The far-side fallback has no default any more (it used to be the
+  // connected wallet): name it, explicitly, as this account.
+  const fallbackField = page.getByTestId('swap-recipient-input').filter({ visible: true });
+  if (await fallbackField.count()) await fallbackField.first().fill(acct.address);
   await shot('swap-form');
 
   await submit(page, ['Review swap']);

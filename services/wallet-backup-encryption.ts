@@ -17,13 +17,30 @@ import {
   encryptAccountExportCore,
   parseAccountBackupCore,
   prepareAccountBackupCore,
+  type AddressBookImportResult,
+  type AddressBookStore,
   type BackupEnvelope,
   type PasswordEncryptedPayload,
   type PaymentRequestStateStore,
   type PreparedAccountBackup,
 } from '@/services/account-backup-core';
+import { mergeAddressBookBackup } from '@/services/address-book-core';
+import { readContacts, readRecipientRecords, writeContacts, writeRecipientRecords } from '@/services/address-book-store';
 
-export type { PreparedAccountBackup } from '@/services/account-backup-core';
+export type { AddressBookImportResult, PreparedAccountBackup } from '@/services/account-backup-core';
+
+/** The owner's saved names and recipient history (plus the device bucket), for the encrypted backup. */
+const deviceAddressBook: AddressBookStore = {
+  load(owner: string) {
+    return { contacts: readContacts(owner), recipients: [...readRecipientRecords(null), ...readRecipientRecords(owner)] };
+  },
+  restore(owner: string, backup) {
+    const merged = mergeAddressBookBackup({ contacts: readContacts(owner), recipients: readRecipientRecords(owner) }, backup, Date.now());
+    writeContacts(owner, merged.contacts);
+    writeRecipientRecords(owner, merged.recipients);
+    return { added: merged.added };
+  },
+};
 
 const deviceStore: PaymentRequestStateStore = {
   load(chainId: number, owner: string) {
@@ -56,7 +73,7 @@ export async function prepareAccountBackup(
   accountExport: AccountExport,
   password?: string,
 ): Promise<PreparedAccountBackup> {
-  return prepareAccountBackupCore(deviceStore, address, chainId, accountExport, password);
+  return prepareAccountBackupCore(deviceStore, address, chainId, accountExport, password, deviceAddressBook);
 }
 
 export async function parseAccountBackup(
@@ -64,6 +81,7 @@ export async function parseAccountBackup(
   chainId: number,
   rawPayload: string,
   password?: string,
+  onAddressBook?: (result: AddressBookImportResult) => void,
 ): Promise<AccountExport> {
-  return parseAccountBackupCore(deviceStore, address, chainId, rawPayload, password);
+  return parseAccountBackupCore(deviceStore, address, chainId, rawPayload, password, deviceAddressBook, onAddressBook);
 }
