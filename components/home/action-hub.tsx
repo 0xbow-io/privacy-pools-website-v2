@@ -130,6 +130,7 @@ import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { buildFeeBreakdown, gasCostUsd, type FeeGasReading } from '@/services/fee-warning';
 import { AddressAutocomplete } from '@/components/contacts/address-autocomplete';
 import { shieldElsewhere } from '@/services/shield-elsewhere';
+import { pagerResyncTarget } from '@/services/hub-pager-sync';
 
 // Shared content-zone floor = the tallest tab's natural height, so every tab
 // lands on the same card height. Keep this in step with the real tallest tab:
@@ -715,8 +716,22 @@ export function ActionHub({
     };
   }, [actionIndex, pagerW, pagerScrollX, reducedMotion, visibleActions, isFocused]);
   const onPagerScroll = useCallback((e: { nativeEvent: { contentOffset: { x: number } } }) => {
-    if (!pagerUserScrolling.current) return;
     const x = e.nativeEvent.contentOffset.x;
+    // The selected tab is the only truth: a scroll the user did not make (the
+    // browser revealing a focused field) is undone, so the bar and the form
+    // can never name different tabs.
+    const { pagerW: w, visibleActions: acts } = pagerGeometry.current;
+    const back = pagerResyncTarget({
+      offsetX: x,
+      actionIndex: acts.findIndex((v) => v.key === actionRef.current),
+      stride: pageStride(w),
+      userScrolling: pagerUserScrolling.current,
+    });
+    if (back !== null) {
+      pagerRef.current?.scrollTo({ x: back, animated: false });
+      return;
+    }
+    if (!pagerUserScrolling.current) return;
     pagerScrollX.setValue(x);
     if (pagerScrollTimer.current) clearTimeout(pagerScrollTimer.current);
     pagerScrollTimer.current = setTimeout(() => {
@@ -4698,7 +4713,12 @@ export function ActionHub({
               <View
                 key={x.key}
                 testID={`hub-page-${x.key}`}
-                ref={(node) => { pageNodes.current[x.key] = node; }}
+                ref={(node) => {
+                  pageNodes.current[x.key] = node;
+                  // Focus (a click, a paste) must never land in an off-screen
+                  // page: the browser would scroll the pager onto it.
+                  if (WEB && node) (node as unknown as HTMLElement).inert = x.key !== action;
+                }}
                 /* nw-keep(measured-or-inset): each page is exactly one measured pager width */
                 style={{ width: pageStride(pagerW), paddingLeft: PAGE_EDGE, paddingRight: PAGE_GUTTER, alignSelf: 'flex-start' }}
                 onLayout={(event) => {

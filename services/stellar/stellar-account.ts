@@ -186,6 +186,8 @@ class StellarAccount {
   // Bumped whenever the bound address changes: a flow started for one account
   // refuses to submit anything after another account binds.
   private generation = 0;
+  // The generation whose registration was confirmed on chain (-1: none yet).
+  private registeredGeneration = -1;
   private registrationGuard: (() => void) | null = null;
   // Memory only, like the session's own keys: matches this account's spends
   // in the pool's Transacted events (services/stellar-activity.ts).
@@ -617,6 +619,11 @@ class StellarAccount {
   }
 
   private async ensureRegistered(session: StellarPoolSession, generation: number, onStage?: StageListener, shouldContinue: () => boolean = () => true) {
+    if (this.registeredGeneration === generation && this.snapshot.registrationStatus === 'compatible') {
+      this.assertStillBound(generation);
+      if (!shouldContinue()) throw new Error('Superseded');
+      return;
+    }
     let attempted = false;
     try {
       await registerStellarAccount({
@@ -641,6 +648,7 @@ class StellarAccount {
       });
       this.assertStillBound(generation);
       if (!shouldContinue()) throw new Error('Superseded');
+      this.registeredGeneration = generation;
       this.set({ registered: true, registrationStatus: 'compatible' });
     } catch (error) {
       // Closing cannot undo a submitted step. Keep its status for the card,
