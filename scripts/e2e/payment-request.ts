@@ -11,6 +11,7 @@
 //
 // Separate browser contexts keep account storage isolated. The payer receives
 // only the shared /pay/ link; the payee discovers the resulting note itself.
+import { waitForUnlockedLink } from './unlock-gate';
 import { fixtureBarrier } from './fixture-barrier';
 import { envValue, paymentRequestEth } from './funding';
 import { parseEther } from 'viem';
@@ -38,34 +39,6 @@ const record = (name: string, ok: boolean, detail: string) => {
   results.push({ name, ok, detail });
   console.log(`\n>>> ${name}: ${ok ? 'PASS' : 'FAIL'} ${detail}\n`);
 };
-
-/** Poll for a link: waiting on card TEXT is unreliable, since "Total" is already
- *  on screen ("Total sent amount") and matched instantly, so the first read
- *  happened before the link had rendered. */
-async function waitForLink(
-  page: Awaited<ReturnType<typeof openApp>>['page'],
-  marker: string,
-  timeoutMs = 90_000,
-): Promise<string | null> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const found = await readLink(page, marker);
-    if (found) return found;
-    await sleep(2000);
-  }
-  return null;
-}
-
-/** Read a share/receipt link out of the card, which is where the user copies it from. */
-const readLink = async (page: Awaited<ReturnType<typeof openApp>>['page'], marker: string) => page.evaluate((m) => {
-  const fromInputs = Array.from(document.querySelectorAll('input'))
-    .map((i) => (i as HTMLInputElement).value)
-    .find((v) => v && v.includes(m));
-  if (fromInputs) return fromInputs;
-  const text = document.body.innerText || '';
-  const hit = text.match(new RegExp(`https?://\\\\S*${m}\\\\S+`));
-  return hit ? hit[0] : null;
-}, marker);
 
 console.log(`payee=${payeeAccount().address}`);
 console.log(`payer=${payerAccount().address}`);
@@ -124,7 +97,7 @@ try {
       if (!(await clickButton(payee.page, 'Create request'))) {
         record('create request', false, 'Create request not pressable');
       } else {
-        payUrl = await waitForLink(payee.page, '/pay#');
+        payUrl = await waitForUnlockedLink(payee.page, '/pay#');
         await payee.shot('request-created');
         record('create request', !!payUrl, payUrl ? `link ${payUrl}` : 'no /pay/ link appeared on the card');
       }

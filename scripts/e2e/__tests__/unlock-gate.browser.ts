@@ -1,7 +1,7 @@
 // Local browser regression; no RPC, wallet key, application server or spending.
 import { expect } from 'bun:test';
 import { launchChrome } from '../../lib/chrome.mjs';
-import { installUnlockGateHandler, unlockIfPrompted } from '../unlock-gate';
+import { installUnlockGateHandler, unlockIfPrompted, waitForUnlockedLink } from '../unlock-gate';
 import { fillRecipient } from '../lib';
 
 const browser = await launchChrome({ headless: true });
@@ -47,6 +47,24 @@ try {
     console.log(`PASS ${owner} recipient uses stable ID in active page, ignoring hidden sibling and placeholder copy`);
     await page.close();
   }
+  const polling = await browser.newPage();
+  await polling.setContent('<div id="result">Creating request</div>');
+  await installUnlockGateHandler(polling);
+  await polling.evaluate(() => {
+    setTimeout(() => {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0';
+      overlay.innerHTML = '<h2>Unlock your account</h2><button>Sign in</button>';
+      document.body.append(overlay);
+      overlay.querySelector('button')!.onclick = () => {
+        overlay.remove();
+        document.querySelector('#result')!.textContent = 'Copy this http://localhost/pay#test-link';
+      };
+    }, 100);
+  });
+  expect(await waitForUnlockedLink(polling, '/pay#', 10_000)).toBe('http://localhost/pay#test-link');
+  console.log('PASS read-only link polling clears a late gate and reads a text-only link');
+  await polling.close();
   const page = await browser.newPage();
   await page.setContent('<div style="position:fixed;inset:0"><h2>Unlock your account</h2><button>Sign in</button></div>');
   await expect(unlockIfPrompted(page, 100)).rejects.toThrow('did not finish');

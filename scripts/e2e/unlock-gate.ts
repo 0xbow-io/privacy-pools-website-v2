@@ -8,6 +8,25 @@ export async function installUnlockGateHandler(page: Page): Promise<void> {
   await page.addLocatorHandler(unlockHeading(page), () => unlockIfPrompted(page));
 }
 
+/** Read-only polling does not trigger Playwright locator handlers. */
+export async function waitForUnlockedLink(page: Page, marker: string, timeoutMs = 90_000): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await unlockIfPrompted(page);
+    const link = await page.evaluate((m) => {
+      const fields = Array.from(document.querySelectorAll('input,textarea')) as (HTMLInputElement | HTMLTextAreaElement)[];
+      const field = fields.map(el => el.value).find(value => value.includes(m));
+      if (field) return field;
+      const anchor = Array.from(document.querySelectorAll('a')).map(el => el.href).find(value => value.includes(m));
+      if (anchor) return anchor;
+      return (document.body.innerText || '').split(/\s+/).find(value => /^https?:\/\//.test(value) && value.includes(m)) ?? null;
+    }, marker);
+    if (link) return link;
+    await sleep(250);
+  }
+  return null;
+}
+
 /**
  * Clear the keystore-unlock gate if it is on screen, via a real wallet signature
  * (a headless browser has no passkey).

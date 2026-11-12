@@ -775,7 +775,7 @@ export async function payPrivateRequest(page: Page, logs: string[]) {
       const text = await bodyText(page);
       const current = logs.slice(from).join('\n');
       if (/Transfer Successful|Payment sent|sent via relay/i.test(text)) return;
-      if (/outcome unknown|transaction reverted|Payment cannot be funded|Insufficient value for transact/i.test(text + current)) {
+      if (/outcome unknown|transaction reverted|Payment cannot be funded|Insufficient value for transact|Relayer quote failed to fetch/i.test(text + current)) {
         throw new Error('Private payment failed; inspect the payment log and screenshot');
       }
       if (/ASP leaves root mismatch|ASP unavailable/i.test(text + current)) { stale = true; break; }
