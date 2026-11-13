@@ -15,6 +15,7 @@ import { HoverHint } from '@/components/ui/hover-hint';
 import { compactPhoneLayout } from '@/services/header-nav';
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, useSyncExternalStore } from 'react';
 import { destinationCallsVersion, reshieldDestinationStillValid, subscribeDestinationCalls } from '@/config/destination-calls';
+import { canPollBridgeStatus, statusBridgeFor } from '@/config/across-direct';
 import { ENS_UNSUPPORTED_MESSAGE, isPotentialEnsName } from '@/services/ens';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
 import { AlertCircleIcon, CaretDownIcon, CheckCircleIcon, CloseIcon } from '@/components/ui/modal-icons';
@@ -372,7 +373,13 @@ type QuoteSnapshot = {
  * landed while the money sat in their wallet on the other chain (QA,
  * 2026-09-23). `detail` is the destination transaction when there is one.
  */
-type DeliveryState = { status: 'pending' | 'done' | 'recovered' | 'failed'; detail?: string; refunded?: boolean } | null;
+type DeliveryState = {
+  status: 'pending' | 'done' | 'recovered' | 'failed';
+  detail?: string;
+  refunded?: boolean;
+  /** The provider that carried the route, for the status lookup (config/across-direct.ts). Unset for LiFi. */
+  bridge?: string;
+} | null;
 
 /**
  * Where the swapped output lands.
@@ -390,6 +397,12 @@ type DeliveryState = { status: 'pending' | 'done' | 'recovered' | 'failed'; deta
  *                Gated per pair by crossChainReshieldSupported.
  */
 type SwapMode = 'wallet' | 'reshield';
+
+/** Status-lookup routing for a delivery whose route went to `swapTarget` (empty for LiFi). */
+function withBridge(swapTarget: string | undefined | null): { bridge?: string } {
+  const bridge = statusBridgeFor(swapTarget);
+  return bridge ? { bridge } : {};
+}
 
 /**
  * Reshield's Review snapshot. Separate from QuoteSnapshot on purpose: a
@@ -1083,7 +1096,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     refreshNotesRef.current = refreshNotes;
   }, [ensureInitialized, refreshNotes]);
   const deliveryStatus = delivery?.status ?? null;
+  const deliveryBridge = delivery?.bridge;
   useEffect(() => {
+    if (!canPollBridgeStatus(deliveryBridge)) return;
     if (step !== 'success' || pendingDeliveryChainId === null || !txHash || deliveryStatus !== 'pending') return;
     let cancelled = false;
     const startedAt = Date.now();
@@ -1117,6 +1132,8 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
           // The SOURCE chain of the submitted tx, not the live selection.
           fromChainId: txChainId ?? chainId,
           toChainId: pendingDeliveryChainId,
+          // Ask the provider that carried it; unset keeps the LiFi lookup.
+          ...(deliveryBridge ? { bridge: deliveryBridge } : {}),
         });
         if (cancelled) return;
         // isTerminalSwapStatus is the single definition of "stop polling"
@@ -1172,7 +1189,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     };
     void poll().finally(schedule);
     return () => { cancelled = true; stop(); };
-  }, [step, pendingDeliveryChainId, txHash, deliveryStatus, chainId, txChainId]);
+  }, [step, pendingDeliveryChainId, txHash, deliveryStatus, deliveryBridge, chainId, txChainId]);
 
   const resetState = useCallback((options?: OpenSwapModalOptions) => {
     const chainInputs = inputTokensForChain(chainId);
@@ -2345,7 +2362,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       try { await refreshNotes(); } catch { /* balances refresh best-effort */ }
       // Confirmed write → refresh the shared tx/stats caches (codex round 1, P1).
       void invalidateTransactionCaches(queryClient);
-      if (snap.crossChain) setDelivery({ status: 'pending' });
+      if (snap.crossChain) setDelivery({ status: 'pending', ...withBridge(snap.prepared.swapTarget) });
       // Recipient history (backed up, feeds the autocomplete): the payout address.
       recordRecipientUseForActiveOwner(snap.recipient, chainId);
       if (live()) setStep('success');
@@ -2576,7 +2593,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         // Arm the delivery tracker: the far leg is a separate, later event, and
         // the poller resolves it to done/failed instead of leaving the user with
         // "can take a few minutes".
-        setDelivery({ status: 'pending' });
+        setDelivery({ status: 'pending', ...withBridge(crossResult.quote.swapTarget) });
         log('info', 'Swap', 'Cross-chain reshield relayed', {
           txHash: crossHash,
           destinationChainId: snap.destinationChainId,
@@ -2785,7 +2802,8 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
   const explorerUrl = txHash ? getExplorerTxUrl(txChainId ?? chainId, txHash) : null;
   // LI.FI Scan for the source leg while a cross-chain delivery is still in
   // flight, so a slow bridge can be watched (services/lifi-scan.ts).
-  const lifiScanLink = delivery?.status === 'pending' ? lifiScanUrl(txHash) : null;
+  // LI.FI Scan only knows LI.FI routes; a direct Across deposit is not on it.
+  const lifiScanLink = delivery?.status === 'pending' && !delivery.bridge ? lifiScanUrl(txHash) : null;
   // The chain the swap was SENT on, frozen with the tx: a refund lands there,
   // whatever the app's selection says now (#155 review).
   const sourceChainName = getChainConfig(txChainId ?? chainId)?.displayName ?? `chain ${txChainId ?? chainId}`;
@@ -3488,7 +3506,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                   <View className="flex-row flex-wrap items-center gap-[8px]">
                     {[
                       `${displayTokenSymbol(snapshot.fromToken.symbol)} · pool exit`,
-                      `LI.FI ${snapshot.prepared.swapTarget.slice(0, 6)}…${snapshot.prepared.swapTarget.slice(-4)}`,
+                      `${statusBridgeFor(snapshot.prepared.swapTarget) ? 'Across' : 'LI.FI'} ${snapshot.prepared.swapTarget.slice(0, 6)}…${snapshot.prepared.swapTarget.slice(-4)}`,
                       snapshot.crossChain ? `bridge → ${snapshot.destinationName}` : `${displayTokenSymbol(snapshot.outputToken.symbol)} → recipient`,
                     ].map((hop, i, arr) => (
                       <React.Fragment key={hop}>

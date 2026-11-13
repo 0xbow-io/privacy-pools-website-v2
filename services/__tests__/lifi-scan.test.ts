@@ -25,14 +25,15 @@ describe('the flows show it while the bridge runs', () => {
   test('cross-chain shield: set when the watch starts, kept on every update, shown while pending', () => {
     const deposit = readFileSync(join(ROOT, 'components/deposit-modal-provider.tsx'), 'utf8');
     const hub = readFileSync(join(ROOT, 'components/home/action-hub.tsx'), 'utf8');
-    expect(deposit).toMatch(/const scan = lifiScanUrl\(String\(swapHash\)\);/);
+    // A direct Across deposit is not on LI.FI Scan, so the link is kept for LI.FI routes only.
+    expect(deposit).toMatch(/const scan = bridge \? null : lifiScanUrl\(String\(swapHash\)\);/);
     expect(deposit.match(/\.\.\.\(scan \? \{ lifiScanUrl: scan \} : \{\}\)/g)?.length).toBe(3);
     expect(hub).toMatch(/bridgeProgress\?\.tone === 'pending' && depositFlow\.bridgeProgress\.lifiScanUrl/);
   });
 
   test('cross-chain swap and swap-send: shown on both receipts while delivery is pending', () => {
     const swap = readFileSync(join(ROOT, 'components/swap-modal-provider.tsx'), 'utf8');
-    expect(swap).toMatch(/const lifiScanLink = delivery\?\.status === 'pending' \? lifiScanUrl\(txHash\) : null;/);
+    expect(swap).toMatch(/const lifiScanLink = delivery\?\.status === 'pending' && !delivery\.bridge \? lifiScanUrl\(txHash\) : null;/);
     expect(swap.match(/testID="bridge-lifi-scan-link"/g)?.length).toBe(2);
   });
 });
