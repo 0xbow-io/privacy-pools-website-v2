@@ -162,3 +162,48 @@ test('public fee settings use anonymous RPC when active, without a direct fallba
     reader.mockRestore(); route.mockRestore(); direct.mockRestore();
   }
 });
+
+for (const anonymous of [false, true]) {
+  for (const stage of ['headers', 'body'] as const) {
+    test(`fee feed aborts stalled ${stage} over ${anonymous ? 'Tor' : 'direct RPC'} and can recover`, async () => {
+      let stalled = true;
+      const signals: AbortSignal[] = [];
+      const send = async (_url: unknown, init?: RequestInit): Promise<Response> => {
+        const signal = init?.signal;
+        if (!signal) throw new Error('Missing request deadline');
+        signals.push(signal);
+        const reply = { jsonrpc: '2.0', id: 1, result: { entries: [], latestLedger: 1 } };
+        if (!stalled) return new Response(JSON.stringify(reply));
+        if (stage === 'headers') return new Promise<never>((_, reject) => {
+          signal.addEventListener('abort', () => reject(new Error('request aborted')), { once: true });
+        });
+        return new Response(new ReadableStream({
+          start(controller) {
+            signal.addEventListener('abort', () => controller.error(new Error('request aborted')), { once: true });
+          },
+        }));
+      };
+      const route = spyOn(routing, 'torFetchIfActive').mockImplementation(() => anonymous ? send : null);
+      const direct = spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+        if (anonymous) throw new Error('Unexpected direct fallback');
+        return send(url, init);
+      });
+      const reader = spyOn(fees, 'readStellarFeeSettings').mockImplementation(async server => {
+        await server.getLedgerEntries(...sdk.stellarFeeSettingKeys());
+        return settings;
+      });
+      try {
+        await expect(fetchStellarFees()).rejects.toThrow('request aborted');
+        expect(signals).toHaveLength(1);
+        expect(signals[0].aborted).toBe(true);
+        stalled = false;
+        expect((await fetchStellarFees()).transfer[0]).toBe(317289n);
+        expect(signals).toHaveLength(2);
+        expect(signals[1].aborted).toBe(false);
+        expect(direct).toHaveBeenCalledTimes(anonymous ? 0 : 2);
+      } finally {
+        reader.mockRestore(); route.mockRestore(); direct.mockRestore();
+      }
+    }, 10_000);
+  }
+}

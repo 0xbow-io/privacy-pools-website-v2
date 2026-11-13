@@ -12,20 +12,27 @@ export async function fetchStellarFees(): Promise<StellarFeeEstimates> {
     import('@stellar/stellar-sdk'),
     import('@/vendor/stellar-fees'),
   ]);
-  const server = new rpc.Server(STELLAR_TESTNET_RPC_URL, { timeout: 5 });
-  // These fixed configuration keys use the public RPC route on dev and main.
-  const send = torFetchIfActive();
-  if (send) {
-    (server as unknown as { httpClient: unknown }).httpClient = {
-      async post(url: string, data: unknown) {
+  const server = new rpc.Server(STELLAR_TESTNET_RPC_URL);
+  // Match the EVM gas-price feed's five-second transport deadline. The SDK's
+  // rpc.Server ignores its timeout option, so bound both routes here instead.
+  const send = torFetchIfActive() ?? fetch;
+  (server as unknown as { httpClient: unknown }).httpClient = {
+    async post(url: string, data: unknown) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5_000);
+      try {
         const res = await send(url, {
           method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data),
+          signal: controller.signal,
         });
         if (!res.ok) throw new Error(`Soroban RPC HTTP ${res.status}`);
         return { data: await res.json(), status: res.status, statusText: res.statusText, headers: Object.fromEntries(res.headers.entries()) };
-      },
-    };
-  }
+      } finally {
+        // Keep the deadline active until the response body has also arrived.
+        clearTimeout(timer);
+      }
+    },
+  };
   const settings = await fees.readStellarFeeSettings(server);
   const resourceFee = (action: 'transfer' | 'relay' | 'register_and_relay', n: number, m: number) => {
     const resources = fees.stellarRelayResources(fees.STELLAR_RELAY_RESOURCE_TABLE, action, { n, m }, {
