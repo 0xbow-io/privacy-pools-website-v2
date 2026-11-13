@@ -4174,6 +4174,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                       // (SUI / XLM): offering the EVM token list would
                       // mislabel what the request emits.
                       <View className="flex-row items-center gap-[6px] rounded-control border border-text bg-card-background px-[12px] py-[8px]">
+                        <TokenMark symbol={requestTokenSymbol} size={16} />
                         <Text className="font-pp-medium text-[13px] text-text">{displayTokenSymbol(requestTokenSymbol)}</Text>
                       </View>
                     ) : (
