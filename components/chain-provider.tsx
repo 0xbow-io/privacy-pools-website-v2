@@ -98,7 +98,7 @@ export function ChainProvider({ children }: { children: React.ReactNode }) {
       }
       return 'declined';
     }
-    // Stellar testnet: debug gate or its own ?stellar=true opt-in.
+    // Stellar is available in staging; other builds retain the opt-in.
     if (getChainConfig(chainId)?.chainType === 'stellar' && !STELLAR_OPT_IN && !isDebugModeActive()) {
       if (typeof console !== 'undefined') {
         console.warn('[ChainProvider] Stellar selection requires ?stellar=true or debug mode');
@@ -201,7 +201,7 @@ export function ChainProvider({ children }: { children: React.ReactNode }) {
     }
   }, [suiAccount?.address, selectedChainId]);
 
-  // Same transition rule for the Stellar wallet (Varial).
+  // Connecting Varial selects Stellar; disconnecting keeps the chosen network.
   const prevStellarAddressRef = useRef<string | null>(null);
   const stellarAddress = stellarWallet.isConnected ? stellarWallet.address : null;
   useEffect(() => {
@@ -217,9 +217,6 @@ export function ChainProvider({ children }: { children: React.ReactNode }) {
       // cannot resolve late and overwrite this selection.
       ++switchReqRef.current;
       setSelectedChainId(STELLAR_TESTNET_ID);
-    } else if (prev && !curr && activeIsStellar) {
-      ++switchReqRef.current;
-      setSelectedChainId(defaultChainId);
     }
   }, [stellarAddress, selectedChainId]);
 

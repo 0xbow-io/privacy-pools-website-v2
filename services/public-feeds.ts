@@ -18,9 +18,9 @@ import { BULK_REGISTRY_INTERVAL_MS, refreshBulkKeystoreRegistry } from '@/servic
  * Adding a feed here costs every user a request they may not need. That is the
  * trade: a request set that varies per session is a fingerprint, and a request
  * set that is a build constant removes that choice from the session.
- * Stellar testnet is the page-load opt-in exception, avoiding its public RPC
- * for visitors who have not enabled it. Its cadence is still independent of
- * actions within the session. Only CALLER-INDEPENDENT data belongs here:
+ * Stellar testnet is enabled in staging; other environments retain the
+ * page-load opt-in, avoiding its public RPC for visitors who have not enabled it.
+ * Its cadence is still independent of actions within the session. Only CALLER-INDEPENDENT data belongs here:
  * the zero-argument signature does not prevent a closure from capturing user
  * state, so definitions need review.
  *
@@ -207,7 +207,7 @@ export function startPublicFeeds(): void {
       retryMs: ASP_PUBLIC_KEY_RETRY_MS,
       fetch: fetchAspPublicKey,
     });
-    // Stellar testnet is opt-in; the feed set stays fixed for this page load.
+    // Stellar is enabled in staging or by opt-in; the feed set stays fixed for this page load.
     if (STELLAR_FEED_ENABLED) {
       publicFeeds.register({
         key: FEED_STELLAR_FEES,

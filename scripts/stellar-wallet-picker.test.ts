@@ -43,9 +43,9 @@ function rowFixture({ stellar = true, connected = false, enabled = true } = {}) 
 }
 
 describe('Stellar wallet row', () => {
-  test('appears for Stellar selection or a connected Stellar wallet, within the chain gate', () => {
+  test('appears whenever Stellar is supported, including before network selection', () => {
     expect(rowFixture().output).not.toBeNull();
-    expect(rowFixture({ stellar: false }).output).toBeNull();
+    expect(rowFixture({ stellar: false }).output).not.toBeNull();
     expect(rowFixture({ stellar: false, connected: true }).output).not.toBeNull();
     expect(rowFixture({ enabled: false, connected: true }).output).toBeNull();
   });
