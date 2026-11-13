@@ -48,7 +48,9 @@ describe('Withdraw: empty recipient blocks, never the connected wallet', () => {
     // Review (EVM), Review (Sui/Stellar), Confirm (EVM), Confirm (Stellar), Confirm (Sui).
     expect((text.match(/explicitRecipient\(/g) ?? []).length).toBeGreaterThanOrEqual(5);
     expect((text.match(/RECIPIENT_REQUIRED_MESSAGE/g) ?? []).length).toBeGreaterThanOrEqual(5);
-    expect(text).toMatch(/const resolvedRecipient = explicitRecipient\(targetAddress/);
+    // The own-wallet withdrawal pays the wallet that sends it (the proof binds
+    // it as processor); every relayed route takes the explicit address only.
+    expect(text).toMatch(/const resolvedRecipient = (\(directMode && walletAddress\)\s*\?\s*walletAddress\s*:\s*)?explicitRecipient\(targetAddress/);
   });
   test('the Sui/Stellar CTA is disabled without a recipient', () => {
     expect(text).toMatch(/isSui\s*\?\s*\(spendabilityLoading \|\| enteredAmount <= 0 \|\| !targetAddress/);

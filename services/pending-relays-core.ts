@@ -219,19 +219,23 @@ export function spendsFromSnapshot(transacts: readonly Pick<SnapshotTransact, 't
 /**
  * Settle the record whose relayed hash mined: `status` true means it spent its
  * nullifiers, false means it reverted and spent nothing. Either way it is no
- * longer pending.
+ * longer pending. `minedHash` is the hash that actually mined when the wallet
+ * sped the transaction up under a new hash: the record (keyed by the hash that
+ * was sent) is cleared and the resolution names the mined one.
  */
 export function settleByReceipt(
   list: readonly PendingRelay[],
   txHash: string,
   status: boolean,
+  minedHash?: string,
 ): { kept: PendingRelay[]; settled: PendingRelayResolution[] } {
   const want = txHash.toLowerCase();
+  const mined = (minedHash ?? txHash).toLowerCase();
   const kept: PendingRelay[] = [];
   const settled: PendingRelayResolution[] = [];
   for (const r of list) {
     if (r.txHash !== want) { kept.push(r); continue; }
-    settled.push({ record: r, spent: status, spentBy: status ? want : null, ownHash: status });
+    settled.push({ record: r, spent: status, spentBy: status ? mined : null, ownHash: status });
   }
   return { kept, settled };
 }
@@ -246,7 +250,7 @@ export class PendingRelayBlockedError extends Error {
   constructor(record: PendingRelay, now = Date.now()) {
     const minutes = Math.max(1, Math.round((now - record.at) / 60_000));
     super(
-      `A transaction spending these funds was sent through the relayer ${minutes} min ago and has not confirmed yet. `
+      `A transaction spending these funds was sent ${record.method === 'selfWithdraw' ? 'from your wallet' : 'through the relayer'} ${minutes} min ago and has not confirmed yet. `
       + 'It can still land, so sending again now would only fail. Your balance updates on its own once it settles.'
       + (canOverride(record, now) ? ' If you believe it was dropped, choose "Send anyway" in the pending notice.' : ''),
     );

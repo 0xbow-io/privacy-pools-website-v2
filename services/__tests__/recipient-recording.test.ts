@@ -55,9 +55,9 @@ describe('every payout path records', () => {
   const transfer = code('components/transfer-modal-provider.tsx');
   const swap = code('components/swap-modal-provider.tsx');
 
-  test('Withdraw EVM: plain, delayed-confirm, batch and both swap-exit paths use the recording wrapper', () => {
+  test('Withdraw EVM: plain, delayed-confirm, batch, both swap-exit and the own-wallet paths use the recording wrapper', () => {
     const calls = withdraw.match(/recordWithdrawRecipient: recordWithdrawRecipientEverywhere \}/g) ?? [];
-    expect(calls.length).toBe(5);
+    expect(calls.length).toBe(6);
     expect(withdraw).not.toMatch(/recordWithdrawFee, recordWithdrawRecipient \}/);
     expect(withdraw).not.toMatch(/recordSwap, recordWithdrawRecipient \}/);
   });
