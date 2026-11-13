@@ -9,6 +9,8 @@ import type { ImportedAccountSummary, PickerAccount } from '@/services/passkey-e
 export type PasskeyAccountValue = {
   /** Native app with a passkey-capable OS. False on web, where nothing changes. */
   available: boolean;
+  /** A FIDO2 security key can be used here too, as the alternative to the passkey (Android). */
+  securityKeyAvailable: boolean;
   /** The signed-in passkey EOA (public), or null before the first sign-in. */
   passkeyAddress: Address | null;
   /** Passkey account first, then imported keys. */
@@ -20,15 +22,16 @@ export type PasskeyAccountValue = {
   /** Prompt the privacypools.com passkey and learn its address. `anyPasskey` skips the remembered one.
    * Resolves true once an account is in use (the caller can close), false on
    * failure or when imported keys mean the picker still has to choose. */
-  signIn: (opts?: { anyPasskey?: boolean }) => Promise<boolean>;
-  /** Create a privacypools.com passkey, then learn its address. Resolves like `signIn`. */
-  create: () => Promise<boolean>;
+  signIn: (opts?: { anyPasskey?: boolean; securityKey?: boolean }) => Promise<boolean>;
+  /** Create a privacypools.com passkey (or security-key credential), then learn its address. Resolves like `signIn`. */
+  create: (opts?: { securityKey?: boolean }) => Promise<boolean>;
   /** Use an account from the picker as the privacy account. Resolves true on success. */
   pick: (id: string) => Promise<boolean>;
 };
 
 export const PasskeyAccountContext = createContext<PasskeyAccountValue>({
   available: false,
+  securityKeyAvailable: false,
   passkeyAddress: null,
   accounts: [],
   activeId: null,

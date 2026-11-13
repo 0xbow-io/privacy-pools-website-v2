@@ -20,6 +20,11 @@ export interface EmbeddedWalletMeta {
     //           the passkey alone; nothing stored).
     //  'test' → e2e-only: a fixed key injected via window.__POOLS_TEST_PK__.
     derivation: 'prf' | 'test';
+    // Which authenticator holds it. Absent on metadata written before
+    // security keys were offered: those are device passkeys.
+    kind?: 'platform' | 'security-key';
+    // Transports the authenticator reported, named in allowCredentials on unlock.
+    transports?: AuthenticatorTransport[];
   };
   // Chains on which the smart account has been deployed/activated. Keyed by
   // chainId. (Reserved for the ERC-7579 smart-account integration.)

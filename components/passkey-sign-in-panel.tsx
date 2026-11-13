@@ -10,7 +10,7 @@ import { truncateAddress } from '@/services/hex-format';
  * nothing on the web or on a device without passkeys. Shows public data only.
  */
 export function PasskeySignInPanel({ colors, onDone }: { colors: typeof Colors.light; onDone?: () => void }) {
-  const { available, passkeyAddress, accounts, activeId, busy, error, signIn, create, pick } = usePasskeyAccount();
+  const { available, securityKeyAvailable, passkeyAddress, accounts, activeId, busy, error, signIn, create, pick } = usePasskeyAccount();
   if (!available) return null;
 
   const thenDone = (ok: boolean) => {
@@ -40,6 +40,23 @@ export function PasskeySignInPanel({ colors, onDone }: { colors: typeof Colors.l
           <Pressable onPress={() => { void create().then(thenDone); }} disabled={busy} accessibilityRole="button" className="h-[40px] items-center justify-center">
             <Text className="font-pp-medium text-[13px] text-text-secondary underline">Create a passkey</Text>
           </Pressable>
+          {securityKeyAvailable && (
+            <>
+              <Pressable
+                onPress={() => { void signIn({ securityKey: true }).then(thenDone); }}
+                disabled={busy}
+                accessibilityRole="button"
+                className={`h-[48px] flex-row items-center justify-center gap-[8px] rounded-inner border border-border ${busy ? 'opacity-70' : 'active:opacity-[0.88]'}`}
+              >
+                {/* nw-keep(data-color): key glyph color is the text theme token into the vector-icon sink */}
+                <Ionicons name="key-outline" size={18} color={colors.text} />
+                <Text className="font-pp-semi-bold text-[15px] text-text">Use a security key</Text>
+              </Pressable>
+              <Pressable onPress={() => { void create({ securityKey: true }).then(thenDone); }} disabled={busy} accessibilityRole="button" className="h-[40px] items-center justify-center">
+                <Text className="font-pp-medium text-[13px] text-text-secondary underline">Set up a security key</Text>
+              </Pressable>
+            </>
+          )}
         </>
       ) : (
         <>
@@ -67,6 +84,11 @@ export function PasskeySignInPanel({ colors, onDone }: { colors: typeof Colors.l
           <Pressable onPress={() => { void signIn({ anyPasskey: true }).then(thenDone); }} disabled={busy} accessibilityRole="button" className="h-[36px] items-center justify-center">
             <Text className="font-pp-medium text-[12px] text-text-secondary underline">Use another passkey</Text>
           </Pressable>
+          {securityKeyAvailable && (
+            <Pressable onPress={() => { void signIn({ securityKey: true }).then(thenDone); }} disabled={busy} accessibilityRole="button" className="h-[36px] items-center justify-center">
+              <Text className="font-pp-medium text-[12px] text-text-secondary underline">Use a security key</Text>
+            </Pressable>
+          )}
         </>
       )}
       {error && <Text className="text-center font-pp-regular text-[12px] text-[#E11D48]">{error}</Text>}
