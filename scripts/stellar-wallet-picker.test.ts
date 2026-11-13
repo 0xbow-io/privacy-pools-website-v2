@@ -103,3 +103,54 @@ describe('Stellar link action after connection', () => {
     const f = actionFixture(); f.render('link', true, false); expect(f.resumed()).toBe(0);
   });
 });
+
+test('an explicit EVM connection selects its chain; passive reconnection does not change the selection', () => {
+  const text = readFileSync('components/wallet-connect-modal-provider.tsx', 'utf8');
+  const source = ts.createSourceFile('picker.tsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let options = '';
+  function visit(node: ts.Node) {
+    if (ts.isCallExpression(node) && node.expression.getText(source) === 'useConnectionEffect') options = node.arguments[0].getText(source);
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  const code = ts.transpileModule(`return (${options}).onConnect;`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  for (const [isOpen, isReconnected, expected] of [[true, false, [11155111]], [true, true, []], [false, false, []]] as const) {
+    const selected: number[] = [];
+    let closed = false;
+    const onConnect = new Function('isOpen', 'selectChain', 'close', 'isSupportedEvmChainId', 'evmChainId', code)(isOpen,
+      (chainId: number) => selected.push(chainId), () => { closed = true; }, (id: number) => id === 11155111, 11155111);
+    onConnect({ chainId: 11155111, isReconnected });
+    expect(selected).toEqual([...expected]);
+    expect(closed).toBe(true);
+    selected.length = 0;
+    onConnect({ chainId: 999, isReconnected });
+    expect(selected).toEqual([...expected]);
+  }
+});
+
+test('selecting the chain of a newly connected EVM wallet does not switch that wallet again', async () => {
+  const text = readFileSync('components/chain-provider.tsx', 'utf8');
+  const source = ts.createSourceFile('chain-provider.tsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let callback = '';
+  function visit(node: ts.Node) {
+    if (ts.isVariableDeclaration(node) && node.name.getText(source) === 'selectChain'
+      && node.initializer && ts.isCallExpression(node.initializer)) callback = node.initializer.arguments[0].getText(source);
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  const code = ts.transpileModule(`return (${callback});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  const selected: number[] = [];
+  let switches = 0;
+  const scope = {
+    supportedChainIds: [1, 11155111], getChainConfig: () => ({ chainType: 'evm' }),
+    isDebugModeActive: () => false, STELLAR_OPT_IN: false, switchReqRef: { current: 0 },
+    cancelWalletChainExcursion: () => {}, setSelectedChainId: (id: number) => selected.push(id),
+    wagmiChainId: 1, wagmiConfig: {}, getConnection: () => ({ chainId: 11155111 }),
+    connectedRef: { current: true }, addChainParameterFor: () => ({}),
+    switchChainAsync: async () => { switches++; throw new Error('redundant wallet prompt'); },
+  };
+  const selectChain = new Function(...Object.keys(scope), code)(...Object.values(scope)) as (id: number) => Promise<string>;
+  expect(await selectChain(11155111)).toBe('committed');
+  expect(selected).toEqual([11155111]);
+  expect(switches).toBe(0);
+});

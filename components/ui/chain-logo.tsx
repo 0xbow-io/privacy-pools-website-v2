@@ -1,5 +1,6 @@
-import { View, Text, Image } from 'react-native';
+import { View, Image } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
+import { TestnetLabel } from './testnet-label';
 import { EthereumIcon } from './ethereum-icon';
 import { isTestnetChain, STELLAR_TESTNET_ID, SUI_TESTNET_ID } from '@/config/chains';
 import { SuiIcon } from './sui-icon';
@@ -44,31 +45,22 @@ type ChainLogoProps = {
 };
 
 /**
- * The yellow "testnet" watermark every test-network visual carries, exported
+ * The compact testnet marker every test-network visual carries, exported
  * so token/asset icons (TokenNetworkIcon's ChainBadge, the tx table's
  * AssetChainMark) render the SAME label as the network selector — a Sepolia
  * row must never read as plain Ethereum.
  */
 export function TestnetPill({ size }: { size: number }) {
-  const badgeFont = Math.max(6, Math.round(size * 0.34));
   return (
-    <Text
-      numberOfLines={1}
-      className="absolute -bottom-[4px] -right-[8px] overflow-hidden rounded-[3px] bg-[#F4B740] px-[2px] font-pp-medium text-[#1a1a1a]"
-      // nw-keep(svg-or-canvas): badge type scales with the size prop (fontSize/lineHeight derived at runtime)
-      style={{
-        fontSize: badgeFont,
-        lineHeight: badgeFont + 2,
-      }}
-    >
-      testnet
-    </Text>
+    <View pointerEvents="none" className="absolute -bottom-[2px] -right-[5px]">
+      <TestnetLabel compact size={size} />
+    </View>
   );
 }
 
 /**
  * Chain logo chip: Ethereum / Sui mark in a brand-colored circle, with a
- * "testnet" watermark bottom-right for test networks (Sepolia, Sui Testnet).
+ * "TEST" marker bottom-right for test networks (Sepolia, Sui Testnet).
  */
 export function ChainLogo({ chain, size = 18, testnetLabel = true }: ChainLogoProps) {
   // Inset symbols share one longest dimension; preserve each SVG's aspect

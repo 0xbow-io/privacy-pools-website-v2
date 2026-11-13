@@ -95,7 +95,7 @@ export function resolveReceiptChain(
       return {
         name,
         supported: true,
-        otherEnvironment: { id: env.id, label: env.label, query: env.switchQuery?.[chainId] ?? env.id },
+        otherEnvironment: { id: env.id, label: env.switchQuery?.[chainId] === 'staging-mainnet' ? 'Staging' : env.label, query: env.switchQuery?.[chainId] ?? env.id },
       };
     }
   }

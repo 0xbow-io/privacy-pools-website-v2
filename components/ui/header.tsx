@@ -23,6 +23,8 @@ import {
 import apiClient from '@/services/api-client';
 import { useTheme } from '@/components/theme-provider';
 import { Logo } from './logo';
+import { TestnetLabel } from './testnet-label';
+import { STAGING_MAINNET_OPT_IN } from '@/config/staging-mainnet';
 import { VersionSwitch } from './version-switch';
 import { ChainLogo, chainLogoChainFor, type ChainLogoChain } from './chain-logo';
 import { useWalletConnectModal } from '@/components/wallet-connect-modal-provider';
@@ -517,22 +519,11 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
         >
           <Pressable className="h-[41px] w-[41px] shrink-0 flex-row items-center justify-center rounded-[8px]" onPress={() => navigateTo('/')}>
             <Logo width={35} height={35} variant={colorScheme === 'dark' ? 'white' : 'black'} />
-            {/* Which world you are in, on the mark itself: a staging session looks
-                identical to prod otherwise, and a tester parked on staging has no
-                other cue in the bar (Pat, 2026-09-08). Prod stays unmarked. The
-                warning color pair holds its contrast in both themes; pointer
-                events off so the whole 41px
-                square still navigates home. */}
-            {ACTIVE_APP_ENVIRONMENT === 'staging' ? (
-              <View
-                pointerEvents="none"
-                className="absolute bottom-[-4px] left-[-7px] right-[-7px] items-center rounded-[4px] border border-warning bg-warning-bg py-[1px]"
-              >
-                <Text className="font-pp-bold text-[9px] uppercase leading-[11px] tracking-[0.3px] text-warning">
-                  staging
-                </Text>
+            {ACTIVE_APP_ENVIRONMENT === 'staging' && (
+              <View pointerEvents="none" className="absolute bottom-[-7px] left-[-5px] right-[-5px] items-center">
+                <TestnetLabel label={STAGING_MAINNET_OPT_IN ? 'STAGING' : 'TESTNET'} />
               </View>
-            ) : null}
+            )}
           </Pressable>
           {Platform.OS === 'web' && <VersionSwitch />}
         </View>
@@ -711,7 +702,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                               color={isActive ? colors.primary : colors.textMuted}
                             />
                             <Text className={`text-[14px] ${isActive ? 'font-pp-sans-semi-bold text-primary' : 'font-pp-sans text-text'}`}>
-                              {appEnvironmentLabel(env)}
+                              {appEnvironmentLabel(env, STAGING_MAINNET_OPT_IN)}
                             </Text>
                           </Pressable>
                         );
@@ -1028,7 +1019,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                       color={colors.text}
                     />
                     <Text className="flex-1 font-pp-sans text-[14px] text-text">
-                      {`Environment: ${appEnvironmentLabel(ACTIVE_APP_ENVIRONMENT)}`}
+                      {`Environment: ${appEnvironmentLabel(ACTIVE_APP_ENVIRONMENT, STAGING_MAINNET_OPT_IN)}`}
                     </Text>
                     <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
                   </Pressable>
