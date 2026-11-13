@@ -23,7 +23,7 @@ import { useChainRouter } from '@/hooks/use-chain-router';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { useTabCloseGuard } from '@/hooks/use-tab-close-guard';
 import { decodeStellarClaim, stellarClaimTotal } from '@/services/stellar/stellar-claim';
-import { describeStellarStage, stellarActionError } from '@/services/stellar/stellar-copy';
+import { describeStellarStage, stellarErrorMessage, stellarActionError } from '@/services/stellar/stellar-copy';
 
 function short(value: string): string {
   return value.length <= 12 ? value : `${value.slice(0, 6)}…${value.slice(-6)}`;

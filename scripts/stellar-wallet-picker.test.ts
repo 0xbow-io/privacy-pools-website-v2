@@ -9,7 +9,7 @@ function compile(path: string, name: string) {
     compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
   }).outputText;
 }
-const rowJs = compile('components/stellar-wallet-option.tsx', 'StellarWalletOption');
+const rowJs = compile('components/stellar-wallet-option.tsx', 'StellarWalletOption') + compile('components/stellar-wallet-option.tsx', 'StellarWalletRow');
 const actionJs = compile('hooks/use-stellar-connect-action.ts', 'useStellarConnectAction');
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 
@@ -18,12 +18,12 @@ function rowFixture({ stellar = true, connected = false, enabled = true } = {}) 
   let requests = 0, cancellations = 0, completions = 0;
   let resolve!: (v: { address: string | null; error: string | null }) => void;
   const reply = new Promise<{ address: string | null; error: string | null }>((ok) => { resolve = ok; });
-  const wallet = { isConnected: connected, isDevBurner: false, availabilityChecked: true, isAvailable: true, status: 'disconnected',
+  const wallet = { isConnected: connected, isDevBurner: false, availabilityChecked: true, isAvailable: true, walletAvailable: { freighter: true, metamask: false }, status: 'disconnected',
     cancelConnect: () => { cancellations++; },
     connectDetailed: () => { requests++; return reply; },
   };
   const context = {
-    React: { createElement: (type: unknown, props: unknown, ...children: unknown[]) => ({ type, props, children }) },
+    React: { Fragment: 'Fragment', createElement: (type: unknown, props: unknown, ...children: unknown[]): unknown => typeof type === 'function' ? type(props) : type === 'Fragment' ? children[0] : ({ type, props, children }) },
     useState: (value: unknown) => [value, () => {}], useRef: (current: unknown) => ({ current }),
     useEffect: (fn: () => (() => void)) => effects.push(fn),
     useStellarWallet: () => wallet, useDebug: () => ({ isDebugEnabled: false }),
@@ -31,6 +31,7 @@ function rowFixture({ stellar = true, connected = false, enabled = true } = {}) 
     useTheme: () => ({ colorScheme: 'light' }), Colors: { light: {} },
     supportedChainIds: [1], STELLAR_TESTNET_ID: 1, isChainSelectable: () => enabled,
     Platform: { OS: 'web' }, Pressable: 'Pressable', View: 'View', Text: 'Text', Image: 'Image', Ionicons: 'Icon', ChainLogo: 'Logo',
+    useToast: () => ({ toast() {} }), STELLAR_WALLET_NAMES: { freighter: 'Varial', metamask: 'MetaMask' },
     require: () => 'local-icon',
   };
   // The callback is injected separately so an unmounted row cannot report success.
