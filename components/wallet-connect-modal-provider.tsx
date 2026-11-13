@@ -616,7 +616,28 @@ export function WalletConnectModalProvider({ children }: { children: ReactNode }
   useBackHandler(isOpen, close);
 
   const value = useMemo(() => ({ open, close, isOpen }), [open, close, isOpen]);
-  const stellarWalletOption = <StellarWalletOption className="min-h-[68px] flex-row items-center gap-[12px] rounded-[8px] border border-border-light bg-background px-[16px] py-[14px] active:opacity-[0.85]" onConnected={onConnected} />;
+  const stellarWalletOption = <StellarWalletOption key="stellar" className="min-h-[68px] flex-row items-center gap-[12px] rounded-[8px] border border-border-light bg-background px-[16px] py-[14px] active:opacity-[0.85]" onConnected={onConnected} />;
+  const walletRows = shownOptions.map((option) => {
+    const isPending = isOptionPending(option);
+    const disabled = isOptionDisabled(option);
+    return (
+      <Pressable
+        key={option.uid}
+        onPress={() => select(option)}
+        disabled={disabled}
+        accessibilityRole="button"
+        accessibilityState={{ disabled, busy: isPending }}
+        // Fill/border are class-authored and the pressed dim is active:; a style
+        // FUNCTION on a className'd Pressable is arrayed by css-interop's web runtime
+        // and never invoked, which would drop the fill + pressed state.
+        className={`min-h-[68px] flex-row items-center gap-[12px] rounded-[8px] border border-border-light bg-background px-[16px] py-[14px] active:opacity-[0.85] ${disabled ? 'opacity-50' : 'opacity-100'}`}
+      >
+        <WalletOptionContent option={option} isPending={isPending} />
+      </Pressable>
+    );
+  });
+  const walletConnectIndex = shownOptions.findIndex((option) => option.connector.type === 'walletConnect');
+  walletRows.splice(walletConnectIndex < 0 ? walletRows.length : walletConnectIndex, 0, stellarWalletOption);
 
   return (
     <WalletConnectModalContext.Provider value={value}>
@@ -685,26 +706,7 @@ export function WalletConnectModalProvider({ children }: { children: ReactNode }
                 {/* Bounded: the expanded list scrolls inside the sheet. */}
                 {/* nw-keep(measured-or-inset): maxHeight is measured from the window height; the gap goes to the content-container sink */}
                 <ScrollView style={{ maxHeight: walletListMaxHeight(windowHeight), flexGrow: 0 }} contentContainerStyle={{ gap: 8 }} keyboardShouldPersistTaps="handled">
-                {shownOptions.map((option) => {
-                  const isPending = isOptionPending(option);
-                  const disabled = isOptionDisabled(option);
-                  return (
-                    <Pressable
-                      key={option.uid}
-                      onPress={() => select(option)}
-                      disabled={disabled}
-                      accessibilityRole="button"
-                      accessibilityState={{ disabled, busy: isPending }}
-                      // Fill/border are class-authored and the pressed dim is active:; a style
-                      // FUNCTION on a className'd Pressable is arrayed by css-interop's web runtime
-                      // and never invoked, which would drop the fill + pressed state.
-                      className={`min-h-[68px] flex-row items-center gap-[12px] rounded-[8px] border border-border-light bg-background px-[16px] py-[14px] active:opacity-[0.85] ${disabled ? 'opacity-50' : 'opacity-100'}`}
-                    >
-                      <WalletOptionContent option={option} isPending={isPending} />
-                    </Pressable>
-                  );
-                })}
-                {stellarWalletOption}
+                {walletRows}
                 </ScrollView>
                 {moreCount > 0 && <MoreWalletsButton label={moreLabel} onPress={expandMore} />}
                 {notOpened && <WalletNotOpened {...notOpened} />}
