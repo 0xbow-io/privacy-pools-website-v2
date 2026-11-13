@@ -13,6 +13,9 @@
  */
 import type { Hex } from 'viem';
 
+import type { StellarSdkPaymentRequest } from '@/services/payment-request-codec';
+import { loadStellarSdk } from '@/services/stellar/stellar-runtime';
+
 /** The slice of the session this path touches. */
 export interface TransferOnceSession {
   relayTransfer(option: Record<string, unknown>): Promise<{
@@ -32,7 +35,7 @@ export interface TransferOnceSession {
           feeAmount: Hex,
           tokenId: string,
           recipient: unknown,
-        ): { recipientNotes: Array<{ commitment: string; noteAddressHash: string; value: string; tokenId: string; label: string }> };
+        ): { recipientNotes: { commitment: string; noteAddressHash: string; value: string; tokenId: string; label: string }[] };
       };
     };
   };
@@ -52,16 +55,8 @@ export interface OneTimeRecipientNote {
   label: string;
 }
 
-export interface TransferOnceParams {
-  tokenId: string;
-  amount: bigint;
+export type TransferOnceAction = {
   inputCommitments: Hex[];
-  /** A registered recipient (announced to its viewing key) or a one-time link (no viewing key). */
-  recipient: { kind: 'registered' | 'oneTime'; address: string };
-  /** The most the relayer may charge; the inputs were selected for amount plus this. */
-  maxFee: bigint;
-  maxInputs: number;
-  maxOutputs: number;
   /**
    * One-time only: called with the notes the relayed transaction will create, BEFORE anything is
    * sent. Throwing here sends nothing.
@@ -70,7 +65,18 @@ export interface TransferOnceParams {
   /** Throws to stop before the relay request. */
   guard?: () => void;
   onRelaying?: () => void;
-}
+} & (
+  | { amount: bigint; recipient: { kind: 'registered' | 'oneTime'; address: string } }
+  | { paymentRequest: StellarSdkPaymentRequest }
+);
+
+export type TransferOnceParams = TransferOnceAction & {
+  tokenId: string;
+  /** The most the relayer may charge; the inputs were selected for amount plus this. */
+  maxFee: bigint;
+  maxInputs: number;
+  maxOutputs: number;
+};
 
 const toHex = (value: bigint): Hex => `0x${value.toString(16)}`;
 
@@ -79,7 +85,25 @@ export async function relayTransferOnce(
   relayer: TransferOnceRelayer,
   params: TransferOnceParams,
 ) {
-  const { tokenId, amount, inputCommitments } = params;
+  const { inputCommitments } = params;
+  let tokenId = params.tokenId;
+  let amount: bigint;
+  if ('paymentRequest' in params) {
+    const sdk = await loadStellarSdk();
+    // Match prepareFulfillPaymentRequest's validation before requesting a quote.
+    const schema = sdk.makePaymentRequestSchemas(sdk.StellarAddressSchema).fulfillPaymentRequestParamsSchema;
+    const validated = schema.safeParse({ paymentRequest: params.paymentRequest, inputCommitments });
+    if (!validated.success) throw new sdk.InvalidTransactParams(validated.error.issues[0].message);
+    const request = validated.data.paymentRequest;
+    if (request.expiresAt !== undefined) {
+      const nowMs = BigInt(Date.now());
+      if (nowMs > BigInt(request.expiresAt)) throw new sdk.PaymentRequestExpired(request.expiresAt, nowMs);
+    }
+    amount = BigInt(request.amount);
+    tokenId = request.tokenId;
+  } else {
+    amount = params.amount;
+  }
   const [relayerInfo] = await relayer.getRelayers();
   if (!relayerInfo) throw new Error('The relayer did not return a quote.');
   const count = inputCommitments.length;
@@ -94,7 +118,11 @@ export async function relayTransferOnce(
 
   const transfer = session.delegates.transfer;
   let recipient: Record<string, unknown>;
-  if (params.recipient.kind === 'registered') {
+  if ('paymentRequest' in params) {
+    // Use the validated request's slots and key; no address or secrets lookup.
+    const request = params.paymentRequest;
+    recipient = { noteAddressHash: request.noteAddressHashes, publicViewingKey: request.paymentPubKey, hint: request.tag };
+  } else if (params.recipient.kind === 'registered') {
     // The SDK resolves the viewing key here and throws RecipientViewingKeyUnregistered when there
     // is none, so no separate lookup naming the recipient is made beforehand. The secrets map stays:
     // relayTransfer builds the note data itself, and without it the notes are encoded blind.
@@ -139,7 +167,7 @@ export async function relayTransferOnce(
     amount: toHex(amount),
     tokenId,
     recipient,
-    recipientEvmAddress: params.recipient.address,
+    ...('recipient' in params ? { recipientEvmAddress: params.recipient.address } : {}),
     selectedQuote: { relayerInfo, quote },
   });
   if (result.spentNullifiersConfirmed === false) throw new Error('The relayer reported a transaction that is not this transfer.');

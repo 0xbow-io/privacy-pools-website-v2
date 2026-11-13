@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { STELLAR_TESTNET_CONTRACTS } from '@/config/stellar-deployment';
+import type { StellarSdkPaymentRequest } from '@/services/payment-request-codec';
+import { loadStellarSdk } from '@/services/stellar/stellar-runtime';
 
 import {
   relayTransferOnce,
@@ -17,6 +20,7 @@ function fakes(opts: { fee?: bigint; confirmed?: boolean } = {}) {
   const session = {
     // The only place a proof is built in the SDK: prepare* and relayTransfer. prepare* must never run.
     prepareTransfer: () => { calls.prepare++; calls.proofs++; throw new Error('prepare must not be called'); },
+    prepareFulfillPaymentRequest: () => { calls.prepare++; throw new Error('prepare must not be called'); },
     prepareColdStartTransfer: () => { calls.prepare++; calls.proofs++; throw new Error('prepare must not be called'); },
     relayTransfer: async (option: Record<string, unknown>) => {
       calls.proofs++;
@@ -121,5 +125,71 @@ describe('relayed Stellar transfer proves once (DEV-645)', () => {
       relayTransferOnce(session, relayer, { ...base, recipient: { kind: 'registered', address: A }, guard: () => { throw new Error('Superseded'); } }),
     ).rejects.toThrow('Superseded');
     expect(calls.proofs).toBe(0);
+  });
+});
+
+
+describe('Stellar payment requests use the same single-proof relay', () => {
+  const request: StellarSdkPaymentRequest = {
+    paymentId: '0x11', amount: '0x989680', tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
+    noteAddressHashes: ['0x21', '0x22'], paymentPubKey: '0x31', tag: '0x41',
+  };
+  const payment = { tokenId: request.tokenId, inputCommitments: commits, maxFee: FEE, maxInputs: 5, maxOutputs: 5, paymentRequest: request };
+
+  // Run the pinned SDK's original validation and recipient resolution, stopping
+  // at prepareTransfer so the reference path never proves or touches the network.
+  async function sdkRecipient(paymentRequest: StellarSdkPaymentRequest, inputCommitments = commits) {
+    const sdk = await loadStellarSdk();
+    const delegate = Object.create(sdk.PoolSessionTransfer.prototype);
+    delegate.fulfillPaymentRequestParamsSchema = sdk.makePaymentRequestSchemas(sdk.StellarAddressSchema).fulfillPaymentRequestParamsSchema;
+    delegate.prepareTransfer = async (params: { amount: string; tokenId: string }) => ({
+      amount: params.amount, tokenId: params.tokenId, recipient: await delegate.resolveRecipient(params),
+    });
+    return delegate.prepareFulfillPaymentRequest({ paymentRequest, inputCommitments });
+  }
+
+  test('matches the SDK recipient and amount, proves once, and quotes only asset/shape', async () => {
+    const { calls, session, relayer } = fakes();
+    session.delegates.transfer.resolveRecipient = async () => { throw new Error('must not look up a recipient'); };
+    session.delegates.transfer.generateNoteSecretsMap = () => { throw new Error('must not generate new slots'); };
+    const expected = await sdkRecipient(request);
+    await relayTransferOnce(session, relayer, payment);
+    expect(calls.prepare).toBe(0);
+    expect(calls.proofs).toBe(1);
+    expect(calls.relayed[0]).toMatchObject(expected);
+    expect(calls.relayed[0].recipient).toEqual({ noteAddressHash: request.noteAddressHashes, publicViewingKey: request.paymentPubKey, hint: request.tag });
+    expect('recipientEvmAddress' in calls.relayed[0]).toBe(false);
+    expect(calls.quotes).toEqual([{ asset: request.tokenId, commit: true, shape: { n: 2, m: 4 } }]);
+    expect(calls.outputs).toHaveLength(0);
+  });
+
+  test('preserves SDK schema/expiry refusals before any quote or proof', async () => {
+    const sdk = await loadStellarSdk();
+    for (const changed of [
+      { amount: '0x0' }, { tokenId: 'not-a-contract' }, { tag: 'invalid' },
+      { noteAddressHashes: [] }, { noteAddressHashes: ['0x21'] }, { expiresAt: '0x1' },
+    ]) {
+      const invalid = { ...request, ...changed } as StellarSdkPaymentRequest;
+      const expected = await sdkRecipient(invalid).catch((e: Error) => e);
+      const { calls, session, relayer } = fakes();
+      const actual = await relayTransferOnce(session, relayer, { ...payment, paymentRequest: invalid }).catch((e: Error) => e);
+      expect(expected).toBeInstanceOf(changed.expiresAt ? sdk.PaymentRequestExpired : sdk.InvalidTransactParams);
+      if (!(actual instanceof Error)) throw new Error('Expected payment validation to fail');
+      expect(actual.constructor).toBe(expected.constructor);
+      if (!changed.expiresAt) expect(actual.message).toBe(expected.message);
+      expect(calls.quotes).toHaveLength(0);
+      expect(calls.proofs).toBe(0);
+    }
+  });
+
+  test('retains fee, supersession, and confirmed-spend guards for payments', async () => {
+    for (const scenario of ['fee', 'superseded', 'unconfirmed']) {
+      const { calls, session, relayer } = fakes({ fee: scenario === 'fee' ? FEE + 1n : FEE, confirmed: scenario !== 'unconfirmed' });
+      await expect(relayTransferOnce(session, relayer, {
+        ...payment,
+        guard: () => { if (scenario === 'superseded') throw new Error('Superseded'); },
+      })).rejects.toThrow(scenario === 'fee' ? 'more than the fee shown' : scenario === 'superseded' ? 'Superseded' : 'not this transfer');
+      expect(calls.proofs).toBe(scenario === 'unconfirmed' ? 1 : 0);
+    }
   });
 });

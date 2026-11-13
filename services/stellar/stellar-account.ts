@@ -97,7 +97,7 @@ import {
 import { bumpPaymentRequestRevision } from '@/services/payment-request-revision';
 import { registerDebugSnapshot } from '@/services/debug-snapshots';
 import { blindClaimNote, blindNoteAddressHash, isUnregisteredRecipientError, toImportableNote, type StellarClaimNote } from '@/services/stellar/stellar-claim';
-import { relayTransferOnce, type TransferOnceParams, type TransferOnceRelayer, type TransferOnceSession } from '@/services/stellar/stellar-transfer-once';
+import { relayTransferOnce, type TransferOnceAction, type TransferOnceRelayer, type TransferOnceSession } from '@/services/stellar/stellar-transfer-once';
 import { findSentClaim, readSentClaims, saveSentClaim, SENT_CLAIMS_BASE_KEY, setSentClaimTx } from '@/services/stellar/stellar-sent-claims';
 import { CLAIMED_NOTES_BASE_KEY, DEPOSITS_FOR_BASE_KEY, readClaimedNotes, readDepositsFor, recordClaimedNotes, recordDepositFor } from '@/services/stellar/stellar-activity-records';
 import { isStellarAccountAddress, requestStates, type StellarRequestState } from '@/services/stellar/stellar-request';
@@ -337,7 +337,7 @@ class StellarAccount {
   private async relayOnce(
     session: StellarPoolSession,
     relayer: IRelayerInteractor<StellarAddress>,
-    params: Pick<TransferOnceParams, 'amount' | 'inputCommitments' | 'recipient' | 'beforeRelay' | 'guard' | 'onRelaying'>,
+    params: TransferOnceAction,
   ): Promise<TransferResult<StellarAddress, StellarLog>> {
     const sdk = await loadStellarSdk();
     return (await relayTransferOnce(
@@ -351,30 +351,6 @@ class StellarAccount {
         maxOutputs: sdk.MAX_OUTPUTS,
       },
     )) as unknown as TransferResult<StellarAddress, StellarLog>;
-  }
-
-  /** The first quoted option, bounded by the fee reserved in the form. */
-  private quotedRelayOption(prepared: Awaited<ReturnType<StellarPoolSession['prepareTransfer']>>) {
-    const option = prepared.relayOptions[0];
-    if (!option) throw new Error('The relayer did not return a quote.');
-    // Note selection and the UI reserve the estimate; a higher signed fee would come out of the slack.
-    if (BigInt(option.selectedQuote.quote.feeCommitment.feeAmount) > STELLAR_TRANSFER_RELAY_FEE_ESTIMATE) {
-      throw new Error('The relayer asks for more than the fee shown. Try again later.');
-    }
-    return option;
-  }
-
-  /** Relays the first quoted option; refuses a receipt that did not spend this transfer's notes. */
-  private async relayPreparedTransfer(
-    session: StellarPoolSession,
-    prepared: Awaited<ReturnType<StellarPoolSession['prepareTransfer']>>,
-  ): Promise<TransferResult<StellarAddress, StellarLog>> {
-    const option = this.quotedRelayOption(prepared);
-    // The recipient's noteSecretsMap must stay: relayTransfer builds the note data itself, and without
-    // the map it encodes blind (secretless) notes the recipient can neither discover nor spend.
-    const result = await session.relayTransfer(option);
-    if (result.spentNullifiersConfirmed === false) throw new Error('The relayer reported a transaction that is not this transfer.');
-    return result;
   }
 
   private async buildSession(address: string, signer: StellarWalletProvider): Promise<StellarPoolSession> {
@@ -1279,10 +1255,9 @@ class StellarAccount {
   }
 
   /**
-   * Pays a blind request: `prepareFulfillPaymentRequest` builds the transfer
-   * to the request's slots (encrypted to its payment key, tagged with its
-   * tag), then it is submitted like any Stellar transfer. Nothing about the
-   * recipient is looked up.
+   * Pays a blind request with one proof to its existing slots, encrypted to
+   * its payment key and tagged with its tag. Uses the same relay helper as
+   * other Stellar transfers; nothing about the recipient is looked up.
    */
   payPaymentRequest(params: {
     request: StellarSdkPaymentRequest;
@@ -1300,16 +1275,17 @@ class StellarAccount {
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       this.assertStillBound(generation);
       onStage?.('proving');
-      const result = await this.withTransferRelayer(relayer, async () => {
-        const prepared = await session.prepareFulfillPaymentRequest({
-          paymentRequest: params.request as Parameters<StellarPoolSession['prepareFulfillPaymentRequest']>[0]['paymentRequest'],
+      const result = await this.withTransferRelayer(relayer, () =>
+        this.relayOnce(session, relayer, {
+          paymentRequest: params.request,
           inputCommitments: params.inputCommitments,
-        });
-        if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
-        this.assertStillBound(generation);
-        onStage?.('relaying');
-        return this.relayPreparedTransfer(session, prepared);
-      });
+          guard: () => {
+            if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
+            this.assertStillBound(generation);
+          },
+          onRelaying: () => onStage?.('relaying'),
+        }),
+      );
       if (!result.txReceipt.status) throw new Error('The transfer transaction failed on-chain.');
       onStage?.('syncing');
       await this.refreshLocal(session, address);
