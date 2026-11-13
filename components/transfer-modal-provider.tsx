@@ -4176,18 +4176,10 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                       try {
                         const cfg = getChainConfig(checkedChainId);
                         if (!cfg?.contracts) throw new Error(`Unsupported chain: ${checkedChainId}`);
-                        const sdkSetup = await import('@/services/sdk-runtime');
                         const { lookupViewingKey } = await import('@/services/viewing-key-cache');
-                        const rpc = sdkSetup.createRPCInteractor(checkedChainId, Number(cfg.contracts.fromBlock));
-                        const ks = sdkSetup.createKeystoreInteractor(
-                          rpc,
-                          cfg.contracts.keystoreAddress as SdkAddress,
-                          cfg.contracts.keystoreFromBlock,
-                        );
                         const result = await lookupViewingKey(
                           checkedChainId,
                           checkedRecipient as SdkAddress,
-                          { getViewingKey: (a) => ks.getViewingKey(a) },
                           {
                             keystoreAddress: cfg.contracts.keystoreAddress,
                             useAspCache: IsDefaultPoolActive,
@@ -4213,9 +4205,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
                           reportTransferError(RECIPIENT_CHECK_FAILED_MESSAGE, undefined, 'recipient-check');
                           return;
                         }
-                        // The ASP registry's answer is the verdict (a miss already
-                        // triggered a full registry re-pull inside lookupViewingKey).
-                        // Confirming a miss on the pool RPC would name the recipient.
+                        // Both bulk sources answer locally, including a complete-registry miss.
                         const registered = result.viewingKey !== null;
                         setRecipientRegistrationCheck({
                           chainId: checkedChainId,

@@ -109,10 +109,8 @@ function usdFigure(value: string | undefined): number | null {
 
 /**
  * Tri-state recipient precheck for "Deposit to another address". 'unregistered'
- * only when the answer is definitive (ASP registry cache, or the chain returned
- * the zero key); a failed lookup is 'unknown' so a network blip never reads as
- * "the recipient is not set up". The SDK repeats the authoritative on-chain
- * check inside prepareDepositFor right before proving.
+ * only when a complete background registry answers. Missing or stale data is
+ * 'unknown', so a network blip never reads as "the recipient is not set up".
  */
 export async function checkRecipientRegistration(
   chainId: number,
@@ -121,26 +119,13 @@ export async function checkRecipientRegistration(
   const cfg = getChainConfig(chainId);
   if (!cfg?.contracts) return 'unknown';
   try {
-    const sdkSetup = await import('@/services/sdk-runtime');
     const { lookupViewingKey } = await import('@/services/viewing-key-cache');
-    const rpc = sdkSetup.createRPCInteractor(chainId, Number(cfg.contracts.fromBlock));
-    const ks = sdkSetup.createKeystoreInteractor(
-      rpc,
-      cfg.contracts.keystoreAddress as ViemAddress,
-      cfg.contracts.keystoreFromBlock,
-    );
     const result = await lookupViewingKey(
       chainId,
       recipient,
-      { getViewingKey: (a) => ks.getViewingKey(a) },
       { keystoreAddress: cfg.contracts.keystoreAddress },
     );
     if (result.viewingKey) return 'registered';
-    // The ASP registry answered (after a full re-pull on a miss, inside
-    // lookupViewingKey): that is the verdict. Confirming a miss on the pool
-    // RPC would name this recipient to the provider as the user types.
-    if (result.source === 'cache' && result.aspAvailable) return 'unregistered';
-    // Only reached with no ASP registry: the RPC answered, or it failed.
     return result.lookupFailed ? 'unknown' : 'unregistered';
   } catch {
     return 'unknown';
@@ -1957,7 +1942,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       // has not caught up with, and depositing would strand the note. Local
       // read only (it waits for the grid, never fetches).
       if (!recipientMode) {
-        const ownIdentity = await keystoreStatusForChain(depositChainId, { chainFallback: true });
+        const ownIdentity = await keystoreStatusForChain(depositChainId);
         if (!live()) { releaseTx(); log('warn', 'Deposit', 'Stale run aborted after the identity check'); return; }
         const refusal = ownRegistrationRefusal(ownIdentity, isRegistered);
         if (refusal) {

@@ -205,6 +205,8 @@ test('public price and gas price feeds register every build-supported EVM chain 
     fetchGasPrice: async (chain: number) => BigInt(chain),
     feedGasPrice: (chain: number) => `gas-price:${chain}`,
     GAS_PRICE_INTERVAL_MS: 60_000,
+    BULK_REGISTRY_INTERVAL_MS: 30_000,
+    refreshBulkKeystoreRegistry: async () => 'test',
     publicFeeds: { register: (feed: typeof registrations[number]) => target.push(feed), start() {} },
     getTokenPrices: (chain: string) => `raw:${chain}`, getAllPrices: (chain: string) => `map:${chain}`,
     feedLabelDecisions: (chain: number | string) => `label-decisions:${chain}`,

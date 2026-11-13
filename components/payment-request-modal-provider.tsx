@@ -1613,7 +1613,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
       // offering to register.
       let ownKey: Awaited<ReturnType<typeof lookupOwnViewingKey>>;
       try {
-        ownKey = await lookupOwnViewingKey(chainId, address, { chainFallback: true });
+        ownKey = await lookupOwnViewingKey(chainId, address);
       } catch (ownKeyErr) {
         log('warn', 'PaymentRequest', 'Seller viewing-key check failed; not guessing', ownKeyErr);
         throw new Error(REGISTRY_SYNCING_MESSAGE);
@@ -1658,7 +1658,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
             }
             // Still nothing local: the one chain read this re-check always made.
             if (!registeredViewingKey) {
-              const after = await lookupOwnViewingKey(chainId, address, { chainFallback: true });
+              const after = await lookupOwnViewingKey(chainId, address);
               if (after.state === 'registered') registeredViewingKey = after.viewingKey as Hex;
             }
           } catch (reReadErr) {
