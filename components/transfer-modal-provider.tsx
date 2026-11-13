@@ -1313,13 +1313,13 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     () => (isStellar ? (stellarSession.spendableNotes as unknown as StellarUiNote[]) : []),
     [isStellar, stellarSession.spendableNotes],
   );
-  // The user confirmed a one-time link for exactly this recipient.
+  // The user confirmed a one-time link for exactly this recipient (relayed like any send, same fee).
   // Case-insensitive: the shared check may hold a lowercased copy (a G address is uppercase only).
   const stellarOneTime = isStellar
     && recipientRegistrationCheck?.registered === false
     && recipientRegistrationCheck.chainId === STELLAR_TESTNET_ID
     && recipientRegistrationCheck.recipientAddress.toUpperCase() === recipientAddress.trim().toUpperCase();
-  // A relayed Stellar send (one-time links too) pays the relayer fee from the same notes.
+  // A relayed Stellar send pays the relayer fee from the same notes.
   const stellarSendFee = isStellar ? stellarTransferRelayFee() : 0n;
   const suiActiveTotal = useMemo(
     () => (isStellar
