@@ -1,6 +1,7 @@
 import { spendableBalanceLabel } from '@/services/spendable-balance-label';
 import { presetExceedsWithdrawMax } from '@/services/withdraw-preset-guard';
 import { useShareAmountField } from '@/hooks/use-share-amount-field';
+import { preparedAmountData } from '@/services/prepared-amount-data';
 import { formatUsdBalance } from '@/services/format-fiat';
 // RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
 // amounts, validation, quotes, relayer and on-chain values stay in shares
@@ -5172,6 +5173,10 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                             bumpSelection();
                           }}
                           keyboardType="numeric"
+                          testID="withdraw-amount-input"
+                          // The exact amount the withdrawal prepares (shares for a
+                          // share), for the browser smoke to check against the rate.
+                          {...preparedAmountData(amount)}
                         />
                         <Text className="text-[14px] text-[#999999] font-pp-regular">
                           {isShareSymbol(selectedToken) ? amountDollarLabel(amount) : dollarValue}

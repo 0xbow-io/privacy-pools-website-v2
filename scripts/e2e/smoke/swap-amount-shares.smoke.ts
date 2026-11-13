@@ -48,7 +48,7 @@ function rate() {
 /** The shares `typed` USDC must prepare on Swap: the boundary, unclamped, over a zero balance. */
 function expectedShares(typed: string): string | undefined {
   const r = rate();
-  return r ? shareAmountFromUnderlying({ text: typed, rate: r, maxSharesExact: '0', displayedMax: shareFieldFigure('0', r), clamp: false }) : undefined;
+  return r ? shareAmountFromUnderlying({ text: typed, rate: r, maxSharesExact: '0', displayedMax: shareFieldFigure('0', r), clamp: false, rounding: 'down' }) : undefined;
 }
 
 async function prepared(): Promise<string | null> {

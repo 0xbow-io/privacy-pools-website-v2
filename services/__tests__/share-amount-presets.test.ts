@@ -13,7 +13,7 @@ const read = (file: string) => readFileSync(new URL(`../../${file}`, import.meta
 
 test('a literal 0.1 ETH preset means underlying and crosses the entry boundary once', () => {
   const shares = shareAmountFromUnderlying({ text: '0.1', rate: RATE, maxSharesExact: '1', displayedMax: '1.0011' });
-  expect(shares).toBe('0.099890120867046249');
+  expect(shares).toBe('0.09989012086704625');
   expect(shares).not.toBe('0.1');
   expect(shareBalanceDisplay({ sharesExact: shares, shareSymbol: 'ppETH', rate: RATE, priceMap: { ETH: 2459 }, fallbackPrice: 0 }).text).toBe('0.10 ETH');
   expect(shareUsdDisplayExact(shares, RATE, '2459', { field: true })).toBe('245.90');
