@@ -11,6 +11,7 @@
  * Either way the recipient discovers the payment on their next sync and
  * nothing has to be handed back.
  */
+import { selectStellarTransferForRelay, selectStellarInputs } from '@/services/stellar-fee-selection';
 import React, { useMemo, useState } from 'react';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
 import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
@@ -20,14 +21,13 @@ import { useStellarConnectAction } from '@/hooks/use-stellar-connect-action';
 import { useStellarWallet } from '@/components/stellar-wallet-provider';
 import { useTransferModal } from '@/components/transfer-modal-provider';
 import { STELLAR_TESTNET_ID, getExplorerTxUrl } from '@/config/chains';
-import { STELLAR_XLM, stellarTransferRelayFee } from '@/config/stellar-deployment';
+import { STELLAR_XLM } from '@/config/stellar-deployment';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { useStellarSession } from '@/hooks/use-stellar-session';
-import { useStellarTransferFeeEstimate } from '@/hooks/use-stellar-fee-estimate';
+import { useStellarFeeFor } from '@/hooks/use-stellar-fee-estimate';
 import { toStellarSdkPaymentRequest } from '@/services/payment-request-codec';
 import { describeStellarStage, stellarErrorMessage, stellarActionError } from '@/services/stellar/stellar-copy';
 import { decodeStellarPayLink, isStellarRequestExpired, type DecodedStellarRequest } from '@/services/stellar/stellar-request';
-import { selectGreedyTransferInputs, TRANSFER_MAX_INPUTS, TRANSFER_MAX_LABELS } from '@/services/transfer-note-selection';
 import type { Note as UiNote } from '@/services/sdk-types';
 import { CARD_SHADOW } from '@/components/ui/web-style-shims';
 
@@ -59,14 +59,11 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
   const amountLabel = amountText ? `${amountText} XLM` : null;
   // Paid through the relayer: its fee comes on top of the amount.
   // Use the same input count and fee reserve as submission.
-  const feeSelection = useMemo(() => selectGreedyTransferInputs(
-    stellarSession.spendableNotes as unknown as UiNote[],
-    stroops !== null ? stroops + stellarTransferRelayFee() : 0n,
-    TRANSFER_MAX_INPUTS,
-    TRANSFER_MAX_LABELS,
-  ), [stellarSession.spendableNotes, stroops]);
-  const feeInputCount = stroops === null ? 0 : feeSelection.covered ? feeSelection.selectedNotes.length : 1;
-  const relayFee = useStellarTransferFeeEstimate(feeInputCount);
+  const feeFor = useStellarFeeFor();
+  const feeSelection = useMemo(() => selectStellarInputs(
+    stellarSession.spendableNotes as unknown as UiNote[], stroops ?? 0n, feeFor,
+  ), [stellarSession.spendableNotes, stroops, feeFor]);
+  const relayFee = feeSelection.fee;
   const totalLabel = stroops !== null && relayFee !== null
     ? `~${formatUnits(stroops + relayFee, STELLAR_XLM.decimals)} XLM`
     : 'Estimate unavailable';
@@ -147,24 +144,14 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
       await signIn();
       return;
     }
-    // A relayed payment pays the relayer's fee from the same notes.
-    const fee = stellarTransferRelayFee();
-    const need = stroops + fee;
-    const pick = feeSelection;
-    if (!pick.covered) {
-      const available = formatUnits(stellarSession.spendableTotal, STELLAR_XLM.decimals);
-      setError(stellarSession.spendableTotal < need
-        ? `Insufficient Stellar balance (${available} XLM available${fee > 0n ? `, plus a relayer fee of up to ${formatUnits(fee, STELLAR_XLM.decimals)} XLM` : ''}).`
-        : `One transfer can spend up to ${TRANSFER_MAX_INPUTS} notes from ${TRANSFER_MAX_LABELS} deposits.`);
-      return;
-    }
     setBusy(true);
     try {
-      if (relayFee === null) throw new Error('Estimate unavailable. Try again later.');
+      const selected = await selectStellarTransferForRelay(stellarSession.spendableNotes as unknown as UiNote[], stroops, stellarSession.quoteTransferFee);
+      if (!selected.covered) throw new Error("Your balance isn't high enough.");
       const result = await stellarSession.payPaymentRequest({
-        reviewedFee: relayFee,
+        maxFee: selected.accumulated - stroops,
         request: toStellarSdkPaymentRequest(link.request),
-        inputCommitments: pick.selectedNotes.map((n) => n.commitment as `0x${string}`),
+        inputCommitments: selected.selectedNotes.map((n) => n.commitment as `0x${string}`),
         onStage: (stage) => setStatus(describeStellarStage(stage)),
       });
       setPaidTx(result.txHash);

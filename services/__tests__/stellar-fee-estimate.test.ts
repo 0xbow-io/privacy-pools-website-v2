@@ -6,7 +6,6 @@ import * as fees from '@/vendor/stellar-fees';
 import * as routing from '@/services/tor-fetch';
 import { fetchStellarFees } from '@/services/stellar/stellar-fee-feed';
 import { readStellarTransferFee, readStellarWithdrawalFee, stellarRelayFeeFromResourceFee, STELLAR_FEE_INTERVAL_MS } from '@/services/stellar-fee-estimate';
-import { stellarTransferRelayFee, maxStellarTransferForInputs } from '@/config/stellar-deployment';
 import fixture from './fixtures/stellar-fee-settings.json';
 
 const settings = Object.fromEntries(Object.entries(fixture).map(([key, value]) =>
@@ -83,10 +82,8 @@ describe('Stellar display fee', () => {
     for (const n of [0, 6, 1.5, NaN]) expect(readStellarTransferFee(ready, n, 1000)).toBeNull();
     expect(readStellarTransferFee({ ...ready, data: { transfer: [], withdrawal: [] } }, 1, 1000)).toBeNull();
     expect(readStellarTransferFee({ ...ready, data: { transfer: [-1n], withdrawal: [-1n] } }, 1, 1000)).toBeNull();
-    // The estimate can exceed the limit: do not misrepresent it as an accepted quote.
+    // Estimates follow current pricing, including fees above the former fixed reserve.
     expect(readStellarTransferFee({ ...ready, data: { transfer: [900000n], withdrawal: [900000n] } }, 1, 1000)).toBe(900000n);
-    expect(stellarTransferRelayFee()).toBe(750000n);
-    expect(maxStellarTransferForInputs(10000000n, stellarTransferRelayFee())).toBe(9250000n);
   });
 
   test('the feed calculates every shape locally from one settings read', async () => {
@@ -128,7 +125,7 @@ describe('Stellar display fee', () => {
     expect(feeds).toMatch(/if \(STELLAR_FEED_ENABLED\) \{\s*publicFeeds.register\(\{\s*key: FEED_STELLAR_FEES,\s*intervalMs: STELLAR_FEE_INTERVAL_MS,\s*maxAgeMs: 2 \* STELLAR_FEE_INTERVAL_MS,\s*fetch: fetchStellarFees,/);
     const fetcher = source('services/stellar/stellar-fee-feed.ts');
     expect(fetcher).toContain('fetchStellarFees()');
-    expect(fetcher).not.toMatch(/\.simulateTransaction\(|fetch\(|apiClient/);
+    expect(fetcher.slice(0, fetcher.indexOf('function stellarFeeServer'))).not.toMatch(/\.simulateTransaction\(|fetch\(|apiClient/);
   });
 });
 

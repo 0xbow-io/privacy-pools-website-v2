@@ -40,7 +40,15 @@ quotes for a 1 XLM withdrawal matched all five local estimates: 445273, 492989,
 540703, 588420, and 636137 stroops.
 
 Send, payment requests, and saving a claimed link share the transfer estimates.
-Withdrawal fee, total, and remaining displays use the withdrawal estimate.
-The transfer ceiling of 750,000 stroops and the existing withdrawal reserve
-still determine affordability. Signed quotes must also stay within the displayed
-estimate plus the existing EVM reviewed-fee allowance (1%, with a 16-unit floor).
+As on EVM, transfer input selection reserves 25% over a fresh quote, falling back
+to the unpadded fee when funds are tight. The binding quote must fit the selected
+funds; the displayed estimate is not a fee ceiling. Unused funds return as change.
+Withdraw shows a signed quote and expiry at Review, then refreshes it before
+proving. Its shared EVM allowance (1%, with a 16-unit floor) permits small fee
+changes; a larger increase returns the user to review. There is no fixed
+application fee ceiling. PR81's single-proof transfer path remains shared by
+registered sends, one-time links, payment requests, and claim saving.
+
+These estimates do not repair an insufficient signed relayer quote. The observed
+`RelayFeeBelowCost` response requires a separate relayer pricing fix; the client
+preserves that error rather than reporting a wallet cancellation.

@@ -46,7 +46,7 @@ const RULES: [RegExp, string][] = [
   [/ASP is not configured/i, 'Stellar is not set up on this site yet.'],
   [/testnet indexer unreachable/i, 'The Stellar testnet indexer is not reachable. Try again later.'],
   [/ASPUnavailable|testnet ASP unreachable/i, 'The Stellar testnet ASP is not reachable. Try again later.'],
-  [/insufficient|underfunded|balance/i, 'Not enough XLM in the wallet to cover this and the network fee.'],
+  [/insufficient|underfunded/i, 'Not enough XLM in the wallet to cover this and the network fee.'],
   [/viewing key|not registered|KeystoreRecipient/i, 'The recipient has not set up a private account on Stellar yet.'],
 ];
 
@@ -81,6 +81,7 @@ export function stellarUnlockErrorTitle(caught: unknown): string {
 export function stellarActionError(caught: unknown, rejectionMessage = 'Transaction was rejected.'): string {
   if (caught instanceof StellarRegistrationCancelledError) return caught.message;
   const raw = caught instanceof Error ? caught.message : String(caught);
+  if (caught instanceof Error && caught.name === 'RelayerRejected') return stellarErrorMessage(raw);
   return /reject|denied|cancel|declined/i.test(raw) && !CONTRACT_ERROR.test(raw)
     ? rejectionMessage : stellarErrorMessage(raw);
 }

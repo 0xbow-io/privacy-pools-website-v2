@@ -113,8 +113,8 @@ export async function relayTransferOnce(
     shape: { n: Math.min(count, params.maxInputs), m: Math.min(2 * count, params.maxOutputs) },
   });
   const fee = BigInt(quote.feeCommitment.feeAmount);
-  // Note selection and the UI reserve the estimate; a higher signed fee would come out of the slack.
-  if (fee > params.maxFee) throw new Error('The relayer asks for more than the fee shown. Try again later.');
+  // As on EVM, the committed fee must fit the selected inputs after the recipient amount.
+  if (fee > params.maxFee) throw new Error("The notes picked for this payment can't cover it.");
 
   const transfer = session.delegates.transfer;
   let recipient: Record<string, unknown>;

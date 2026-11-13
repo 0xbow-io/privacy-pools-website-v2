@@ -115,61 +115,7 @@ export const STELLAR_ARTIFACT_BASE_URL = env(
  */
 export const STELLAR_KEY_APP_IDENTIFIER = 'privacy-pools/stellar/account-seed:v1';
 
-/**
- * Testnet relayer fee for a withdrawal, as our relayer (stellar/audit-readiness) prices it:
- * 50 bps of the amount (XLM `fee_bps: 50`) plus the transaction's cost for its proof shape
- * (0.040-0.059 XLM measured 2026-10-29), added on top, capped at the asset's on-chain
- * max_relay_fee (0.5 XLM on the 2026-10-29 deployment). The cost term here is a bound with
- * headroom for fee-setting drift; the relayer's signed quote is authoritative and anything
- * reserved beyond it returns as change. Only sizes note selection and the review line.
- */
+/** Native-XLM relayer policy; resource costs are read from the shared fee feed. */
 export const STELLAR_RELAYER_FEE_BPS = 50n;
-export const STELLAR_WITHDRAW_RELAY_COST_ESTIMATE = 900_000n;
+/** The deployed asset's on-chain maximum relay fee. */
 export const STELLAR_MAX_RELAY_FEE = 5_000_000n;
-
-export function estimateStellarRelayFee(amount: bigint): bigint {
-  const fee = (amount * STELLAR_RELAYER_FEE_BPS) / 10_000n + STELLAR_WITHDRAW_RELAY_COST_ESTIMATE;
-  return fee > STELLAR_MAX_RELAY_FEE ? STELLAR_MAX_RELAY_FEE : fee;
-}
-
-/**
- * The largest withdrawal amount whose amount + estimated relay fee fits in
- * `inputs` (the fee is added on top and paid from the same notes). What Max /
- * 100% offer, so they never fill an amount Review then has to refuse.
- */
-export function maxStellarWithdrawForInputs(inputs: bigint): bigint {
-  if (inputs <= 0n) return 0n;
-  // Uncapped fee: amount * (1 + bps/10000) + cost <= inputs.
-  const uncapped = inputs - STELLAR_WITHDRAW_RELAY_COST_ESTIMATE;
-  if (uncapped <= 0n) return 0n;
-  let best = (uncapped * 10_000n) / (10_000n + STELLAR_RELAYER_FEE_BPS);
-  // Capped fee: amount + MAX_FEE <= inputs, valid only where the cap binds.
-  const capped = inputs - STELLAR_MAX_RELAY_FEE;
-  if (capped > best && estimateStellarRelayFee(capped) === STELLAR_MAX_RELAY_FEE) best = capped;
-  // Floor rounding can leave the estimate one stroop high; step down to fit.
-  while (best > 0n && best + estimateStellarRelayFee(best) > inputs) best--;
-  return best;
-}
-
-/**
- * Private transfers (Send, one-time links, /pay "Pools Payment", keeping a
- * claimed link) are relayed: the v2 relayer submits the pool's own `transact`
- * as the gated processor, so the user's Varial account never appears on the
- * transfer and only the relayer's fee leaves the pool.
- *
- * The relayer charges its flat 0.02 XLM plus the transaction's cost for the proof shape
- * (0.032-0.048 XLM in total, measured 2026-10-29). This bound, with headroom for fee-setting
- * drift, sizes note selection and is the most a send pays: a higher signed quote is refused,
- * and anything reserved beyond the quote returns as change.
- */
-export const STELLAR_TRANSFER_RELAY_FEE_ESTIMATE = 750_000n;
-
-/** The relayer fee a Stellar transfer pays on top of its amount: the same for every send, a one-time link included. */
-export function stellarTransferRelayFee(): bigint {
-  return STELLAR_TRANSFER_RELAY_FEE_ESTIMATE;
-}
-
-/** The most a transfer can send when `coverable` is what its inputs hold: the fee comes off. */
-export function maxStellarTransferForInputs(coverable: bigint, fee: bigint): bigint {
-  return coverable > fee ? coverable - fee : 0n;
-}

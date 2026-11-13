@@ -52,8 +52,8 @@ describe('the hub Withdraw presets use the guard', () => {
     expect(src).toContain('amountField.presetExceedsMax(preset)');
     expect(src).toContain("${outOfReach ? 'opacity-40' : ''}");
     expect(src).toContain('accessibilityState={{ disabled: outOfReach');
-    const handler = src.slice(src.indexOf('if (outOfReach && withdrawMaxWei !== null)'), src.indexOf('// nw-keep(data-color): active chip'));
-    expect(handler).toContain('balanceDisplay(formatUnits(withdrawMaxWei, tokenMeta.decimals), tokenMeta.symbol, chainId).text');
+    const handler = src.slice(src.indexOf('if (outOfReach && withdrawPresetMaxWei !== null)'), src.indexOf('// nw-keep(data-color): active chip'));
+    expect(handler).toContain('balanceDisplay(formatUnits(withdrawPresetMaxWei, tokenMeta.decimals), tokenMeta.symbol, chainId).text');
     expect(handler).toContain("variant: 'warning'");
     expect(handler.indexOf('return;')).toBeLessThan(handler.indexOf('amountField.toShares(preset)'));
     expect(handler.indexOf('return;')).toBeLessThan(handler.indexOf('setAmount(next)'));
@@ -91,7 +91,7 @@ test('the hub evaluates share presets against the pre-clamp verdict and leaves o
   const expression = source.match(/const outOfReach = ([\s\S]*?);\n/)?.[1];
   expect(expression).toBeDefined();
   const evaluate = (a: string, preset: string, rate: ShareRate | null = RATE, blocked = false, max: bigint | null = ETH_MAX) => {
-    const env = { a, preset, withdrawBalanceBlocked: blocked, withdrawMaxWei: max, tokenMeta: { decimals: 18 },
+    const env = { a, preset, withdrawBalanceBlocked: blocked, withdrawPresetMaxWei: max, tokenMeta: { decimals: 18 },
       presetExceedsWithdrawMax, amountField: { presetExceedsMax: (text: string) => rate
         ? shareAmountFromUnderlying({ text, rate, maxSharesExact: '0.014', displayedMax: '0.028', preview: true }).exceedsMax
         : null } };

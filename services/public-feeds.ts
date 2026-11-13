@@ -106,8 +106,8 @@ import {
   LIFI_VERIFIED_TOKENS_INTERVAL_MS,
 } from '@/services/lifi-token-list';
 import { STELLAR_TESTNET_ID } from '@/config/stellar-deployment';
-import { fetchStellarFees } from '@/services/stellar/stellar-fee-feed';
-import { FEED_STELLAR_FEES, STELLAR_FEE_INTERVAL_MS } from '@/services/stellar-fee-estimate';
+import { fetchStellarFees, fetchStellarDepositVettingFee } from '@/services/stellar/stellar-fee-feed';
+import { FEED_STELLAR_DEPOSIT_FEE, FEED_STELLAR_FEES, STELLAR_FEE_INTERVAL_MS } from '@/services/stellar-fee-estimate';
 import { fetchGasPrice } from '@/services/gas-price';
 import { POINTS_ENABLED } from '@/config/points';
 import { feedPointsEpochs, fetchPointsFeed, POINTS_FEED_INTERVAL_MS, type PointsFeedValue } from '@/services/points-feed';
@@ -214,6 +214,12 @@ export function startPublicFeeds(): void {
         intervalMs: STELLAR_FEE_INTERVAL_MS,
         maxAgeMs: 2 * STELLAR_FEE_INTERVAL_MS,
         fetch: fetchStellarFees,
+      });
+      publicFeeds.register({
+        key: FEED_STELLAR_DEPOSIT_FEE,
+        intervalMs: STELLAR_FEE_INTERVAL_MS,
+        maxAgeMs: 2 * STELLAR_FEE_INTERVAL_MS,
+        fetch: fetchStellarDepositVettingFee,
       });
     }
     // Register a fixed scope set so chain selection never starts a new feed.

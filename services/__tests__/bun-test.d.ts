@@ -41,7 +41,7 @@ declare module 'bun:test' {
     mockResolvedValue(value: Awaited<ReturnType<T>>): Mock<T>;
   };
 
-  export type Spy<T extends (...args: never[]) => unknown> = Mock<T> & {
+  export type Spy<T extends (...args: never[]) => unknown> = Omit<Mock<T>, 'mockResolvedValue'> & T & {
     mockImplementation(fn: T): Spy<T>;
     mockResolvedValue(value: Awaited<ReturnType<T>>): Spy<T>;
     mockRestore(): void;

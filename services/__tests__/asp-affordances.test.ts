@@ -245,6 +245,7 @@ test('public price and gas price feeds register every build-supported EVM chain 
     STELLAR_OPT_IN: stellarOptIn, isDebugModeActive: () => debug,
     STELLAR_TESTNET_ID: 202, FEED_STELLAR_FEES: 'stellar-fees:202',
     STELLAR_FEE_INTERVAL_MS: 60_000, fetchStellarFees: () => 'stellar-fees-fetch',
+    FEED_STELLAR_DEPOSIT_FEE: 'stellar-deposit-fee:202', fetchStellarDepositVettingFee: () => 100,
     getChainConfig: (chain: number) => stellarEnabled && chain === 202 ? {} : undefined,
     LEGACY_CONFIG: undefined,
     feedYieldDeposits: (chain: number | string) => `yield-deposits:${chain}`,
@@ -363,6 +364,9 @@ test('public price and gas price feeds register every build-supported EVM chain 
     startStellar(); startStellar();
     const matches = stellar.filter(f => f.key === 'stellar-fees:202');
     expect(matches).toHaveLength(expected);
+    const deposit = stellar.filter(f => f.key === 'stellar-deposit-fee:202');
+    expect(deposit).toHaveLength(expected);
+    if (expected) { expect(deposit[0].fetch()).toBe(100); expect(deposit[0].maxAgeMs).toBe(120_000); }
     if (expected) {
       expect(matches[0].fetch()).toBe('stellar-fees-fetch');
       expect(matches[0].maxAgeMs).toBe(120_000);

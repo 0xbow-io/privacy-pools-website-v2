@@ -2,6 +2,7 @@ import { STELLAR_MAX_RELAY_FEE, STELLAR_RELAYER_FEE_BPS, STELLAR_TESTNET_ID } fr
 import type { FeedState } from '@/services/public-feed-scheduler';
 
 export const FEED_STELLAR_FEES = `stellar-fees:${STELLAR_TESTNET_ID}`;
+export const FEED_STELLAR_DEPOSIT_FEE = `stellar-deposit-fee:${STELLAR_TESTNET_ID}`;
 export const STELLAR_FEE_INTERVAL_MS = 60_000;
 /** Index n-1 holds the base fee for n inputs, before withdrawal's amount fee. */
 export type StellarFeeEstimates = {
@@ -40,4 +41,10 @@ export function readStellarWithdrawalFee(state: FeedState<StellarFeeEstimates>, 
   // The relayer floors the amount fee, then caps the complete fee on-chain.
   const fee = base + amount * STELLAR_RELAYER_FEE_BPS / 10_000n;
   return fee > STELLAR_MAX_RELAY_FEE ? STELLAR_MAX_RELAY_FEE : fee;
+}
+
+export function readStellarDepositVettingFee(state: FeedState<number>, now = Date.now()): number | null {
+  if (state.status === 'empty') return null;
+  const at = state.status === 'ready' ? state.at : state.dataAt;
+  return at !== undefined && now - at < 2 * STELLAR_FEE_INTERVAL_MS ? state.data ?? null : null;
 }

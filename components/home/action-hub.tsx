@@ -112,6 +112,7 @@ import { inlineWithdrawTokenToPush } from '@/services/inline-withdraw-token-sync
 import { hubTokenCatalog, preferredHubToken, heldSymbolsFor, isYieldShareOnChain, NO_HOLDINGS, emptySpendToken, type HubAction, type HubHoldings } from '@/services/hub-token-catalog';
 import { getChainConfig, isTestnetChain, supportedChainIds } from '@/config/chains';
 import { useStellarWallet } from '@/components/stellar-wallet-provider';
+import { useStellarDepositMax } from '@/hooks/use-stellar-fee-estimate';
 import { useStellarBalance } from '@/hooks/use-stellar-balance';
 import { useExplorePanel } from '@/components/home/explore-panel-context';
 import { useWalletUnlockGate } from '@/hooks/use-wallet-unlock-gate';
@@ -400,6 +401,7 @@ export function ActionHub({
   const stellarWallet = useStellarWallet();
   const { open: openStellarWalletPicker } = useWalletConnectModal();
   const { data: stellarBalance, refetch: refetchStellarBalance } = useStellarBalance(isStellar && stellarWallet.isConnected ? stellarWallet.address : null);
+  const stellarDepositMax = useStellarDepositMax(stellarBalance?.spendable ?? 0n);
   const { toast } = useToast();
   // Full asset/network picker for the deposit form — same sheet the modal
   // used; the sheet itself staying a layer is fine per product call.
@@ -1695,6 +1697,7 @@ export function ActionHub({
   // withdraw provider's flag could expose/fill an unproved balance.
   const withdrawSpendableWei = getWithdrawSpendableBalanceWei(tokenMeta.symbol);
   const withdrawMaxWei = getWithdrawMaxWei(tokenMeta.symbol);
+  const withdrawPresetMaxWei = getWithdrawMaxWei(tokenMeta.symbol, false);
   const withdrawBalanceUnavailable = withdrawSpendabilityError !== null;
   const withdrawBalanceLoading = !withdrawBalanceUnavailable && (
     withdrawSpendabilityLoading
@@ -2539,7 +2542,9 @@ export function ActionHub({
     query: { enabled: action === 'shield' && !isSui && walletConnected },
   });
   const shieldMaxWei = useMemo<bigint | null>(() => {
-    if (isSui || action !== 'shield') return null;
+    if (action !== 'shield') return null;
+    if (isStellar) return stellarDepositMax;
+    if (isSui) return null;
     // Native mock mode: size the max from the balance on screen.
     const balanceWei = mockWalletBalance != null
       ? parseUnits(mockWalletBalance, payMeta.decimals)
@@ -2555,7 +2560,7 @@ export function ActionHub({
       crossPay: crossPayShield,
       vettingFeeBps,
     });
-  }, [isSui, action, tokenAddress, erc20BalanceRaw, nativeBalance, crossPayShield, hubFeeData, vettingFeeBps, mockWalletBalance, payMeta.decimals, chainId]);
+  }, [isSui, isStellar, stellarDepositMax, action, tokenAddress, erc20BalanceRaw, nativeBalance, crossPayShield, hubFeeData, vettingFeeBps, mockWalletBalance, payMeta.decimals, chainId]);
   const shieldMaxText = shieldMaxWei != null ? formatUnits(shieldMaxWei, payMeta.decimals) : walletBalanceText;
 
   // Tap-to-max: the balance line is the max button. Shield fills the wallet
@@ -3255,17 +3260,17 @@ export function ActionHub({
       // and answers a tap with the ceiling instead of filling an
       // amount the form would only reject (QA 2026-09-18). An
       // unresolved ceiling leaves the chips as they were.
-      const outOfReach = a === 'withdraw' && !withdrawBalanceBlocked && withdrawMaxWei !== null
+      const outOfReach = a === 'withdraw' && !withdrawBalanceBlocked && withdrawPresetMaxWei !== null
         && (amountField.presetExceedsMax(preset)
-          ?? presetExceedsWithdrawMax(preset, withdrawMaxWei, tokenMeta.decimals));
+          ?? presetExceedsWithdrawMax(preset, withdrawPresetMaxWei, tokenMeta.decimals));
       return (
         <Pressable
           key={preset}
           accessibilityState={{ disabled: outOfReach || (a === 'withdraw' && withdrawBalanceBlocked) }}
           disabled={a === 'withdraw' && withdrawBalanceBlocked}
           onPress={() => {
-            if (outOfReach && withdrawMaxWei !== null) {
-              toast({ title: `You can withdraw up to ${spendableBalanceLabel(formatUnits(withdrawMaxWei, tokenMeta.decimals), tokenMeta.symbol, () => balanceDisplay(formatUnits(withdrawMaxWei, tokenMeta.decimals), tokenMeta.symbol, chainId).text)}.`, variant: 'warning' });
+            if (outOfReach && withdrawPresetMaxWei !== null) {
+              toast({ title: `You can withdraw up to ${spendableBalanceLabel(formatUnits(withdrawPresetMaxWei, tokenMeta.decimals), tokenMeta.symbol, () => balanceDisplay(formatUnits(withdrawPresetMaxWei, tokenMeta.decimals), tokenMeta.symbol, chainId).text)}.`, variant: 'warning' });
               return;
             }
             const next = a === 'withdraw' ? amountField.toShares(preset) : preset;

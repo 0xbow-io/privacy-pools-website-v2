@@ -108,9 +108,9 @@ describe('relayed Stellar transfer proves once (DEV-645)', () => {
     expect(calls.proofs).toBe(0);
   });
 
-  test('a fee above the estimate is refused before any proof', async () => {
+  test('a fee exceeding selected funds is refused before any proof', async () => {
     const { calls, session, relayer } = fakes({ fee: FEE + 1n });
-    await expect(relayTransferOnce(session, relayer, { ...base, recipient: { kind: 'registered', address: A } })).rejects.toThrow('more than the fee shown');
+    await expect(relayTransferOnce(session, relayer, { ...base, recipient: { kind: 'registered', address: A } })).rejects.toThrow("The notes picked for this payment can't cover it.");
     expect(calls.proofs).toBe(0);
   });
 
@@ -188,7 +188,7 @@ describe('Stellar payment requests use the same single-proof relay', () => {
       await expect(relayTransferOnce(session, relayer, {
         ...payment,
         guard: () => { if (scenario === 'superseded') throw new Error('Superseded'); },
-      })).rejects.toThrow(scenario === 'fee' ? 'more than the fee shown' : scenario === 'superseded' ? 'Superseded' : 'not this transfer');
+      })).rejects.toThrow(scenario === 'fee' ? "The notes picked for this payment can't cover it." : scenario === 'superseded' ? 'Superseded' : 'not this transfer');
       expect(calls.proofs).toBe(scenario === 'unconfirmed' ? 1 : 0);
     }
   });
