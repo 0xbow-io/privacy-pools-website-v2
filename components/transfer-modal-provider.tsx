@@ -70,6 +70,7 @@ import { useTxActivity } from '@/components/tx-activity-provider';
 import { getExplorerName, getExplorerTxUrl, getChainConfig, STELLAR_TESTNET_ID, SUI_TESTNET_ID } from '@/config/chains';
 import { useStellarSession } from '@/hooks/use-stellar-session';
 import { describeStellarStage, stellarActionError, stellarUnlockErrorTitle } from '@/services/stellar/stellar-copy';
+import { isRelayOutcomeUnknown } from '@/services/stellar/stellar-relayer';
 import type { Note as StellarUiNote } from '@/services/sdk-types';
 import { FlowProgress } from '@/components/ui/flow-progress';
 import { fetchTransferFeeQuote } from '@/services/transfer-fee-quote';
@@ -1804,6 +1805,9 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
       reportTransferError(null);
       transferPhaseRef.current = 'validate';
       setLoadingMessage('Preparing the transfer...');
+      // Set once sendOneTime resolves. An error after that (onSent, the caller's
+      // callback) comes after a landed send, so it must not drop the link.
+      let oneTimeSendSettled = false;
       try {
         if (recipientAddress === sender) throw new Error('That is your own address. Pick someone else to send to.');
         // No separate recipient lookup here: the SDK resolves the recipient's
@@ -1838,6 +1842,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
               setRecipientImportUrl(buildStellarClaimUrl(notes));
             },
           });
+          oneTimeSendSettled = true;
           if (live()) {
             setRecipientImportPayload(JSON.stringify({ notes: sent.notes }));
             setRecipientImportUrl(buildStellarClaimUrl(sent.notes));
@@ -1887,23 +1892,24 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
       } catch (err) {
         const raw = err instanceof Error ? err.message : String(err);
         log('error', 'Transfer', `Stellar transfer failed: ${raw}`, err);
-        const declined = /reject|denied|cancel|declined/i.test(raw);
-        // A one-time link was armed for this send. Refused by the relayer: the
-        // transfer never happened, so the link is dropped. Anything else after
-        // that point may have landed: keep the link on screen, framed as an
-        // unknown outcome (the sender also has the saved copy).
+        // A one-time link was armed for this send. sendOneTime decides by the
+        // relay, not by the message: RelayOutcomeUnknown means the relayer may
+        // have sent it, so the link stays on screen as an unknown outcome (the
+        // sender also has the saved copy). Any other error sent nothing, and
+        // the account already removed the saved copy, so the link is dropped.
         if (receiptLifecycleRef.current === 'at-risk') {
-          if (declined || /Superseded/.test(raw)) {
-            if (live()) {
-              setReceiptLifecycle('none');
-              setRecipientImportPayload(null);
-              setRecipientImportUrl(null);
-            }
-          } else {
+          // The send landed and the success screen is up: keep the link.
+          if (oneTimeSendSettled) return;
+          if (isRelayOutcomeUnknown(err)) {
             setIndeterminateAttempt(true);
             setOutcomeUnknown(true);
             if (live()) setStep('success');
             return;
+          }
+          if (live()) {
+            setReceiptLifecycle('none');
+            setRecipientImportPayload(null);
+            setRecipientImportUrl(null);
           }
         }
         if (!live() || /Superseded/.test(raw)) return;
