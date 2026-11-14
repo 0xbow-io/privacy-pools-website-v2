@@ -27,7 +27,7 @@ describe('QA 2026-09-24 UI', () => {
 
   test('Send shows no amount limits without an account', () => {
     const src = read('components/transfer-modal-provider.tsx');
-    const memo = src.slice(src.indexOf('const amountError = useMemo'), src.indexOf("const recipientError"));
+    const memo = src.slice(src.indexOf('const amountError ='), src.indexOf("const recipientError"));
     expect(memo).toContain('if (!connectedAddress) return null;');
     expect(src).toContain('{!!connectedAddress && enteredAmount > 0 && enteredAmountWei > maxSpendableWei && (');
   });

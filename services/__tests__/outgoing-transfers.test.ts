@@ -487,7 +487,7 @@ describe('own transfers are explained from every chain\'s notes', () => {
     const src = read('components/pools/transactions.tsx');
     expect(src).not.toContain('classifyTransfer(tx, allOwnedNotes');
     expect(src).not.toContain('computeUserTransferAmount(tx, allOwnedNotes');
-    expect(read('components/pools-provider.tsx')).toContain('[notes, sessionAddress, myAddress, syncedHoldings]');
+    expect(read('components/pools-provider.tsx')).toContain('[notes, evmIdentity, syncedHoldings]');
   });
 });
 

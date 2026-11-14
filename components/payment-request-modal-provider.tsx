@@ -1,3 +1,4 @@
+import { transferFeeBudget } from '@/services/relayer-fee-jitter';
 import { paymentRequestRecipientLabel } from '@/services/payment-request-disclosure';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 // RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
@@ -2850,7 +2851,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           error: feeErr instanceof Error ? feeErr.message : String(feeErr),
         });
       }
-      const feeBudget = feeQuoteWei != null ? feeQuoteWei + feeQuoteWei / 4n : 0n;
+      const feeBudget = feeQuoteWei != null ? transferFeeBudget(feeQuoteWei) : 0n;
       const paddedTarget = requestAmountWei + feeBudget;
       const trueTarget = requestAmountWei + (feeQuoteWei ?? 0n);
       const spendabilityReport = await verifyTransferSpendability({
@@ -4173,6 +4174,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                       // (SUI / XLM): offering the EVM token list would
                       // mislabel what the request emits.
                       <View className="flex-row items-center gap-[6px] rounded-control border border-text bg-card-background px-[12px] py-[8px]">
+                        <TokenMark symbol={requestTokenSymbol} size={16} />
                         <Text className="font-pp-medium text-[13px] text-text">{displayTokenSymbol(requestTokenSymbol)}</Text>
                       </View>
                     ) : (

@@ -1,3 +1,5 @@
+import { selectGreedyTransferInputs } from '@/services/transfer-note-selection';
+import { selectStellarInputs, maxStellarAmount, stellarFeeReserve, type StellarFeeFor } from '@/services/stellar-fee-selection';
 import { spendableBalanceLabel } from '@/services/spendable-balance-label';
 import { presetExceedsWithdrawMax } from '@/services/withdraw-preset-guard';
 import { useShareAmountField } from '@/hooks/use-share-amount-field';
@@ -59,7 +61,7 @@ import { useKeystoreRegistrationModal } from '@/components/keystore-registration
 import { useAllChainsPriceMap } from '@/hooks/use-all-chains-price-map';
 import { getChainConfig, getExplorerName, getExplorerTxUrl, STELLAR_TESTNET_ID, SUI_TESTNET_ID } from '@/config/chains';
 import { useStellarSession } from '@/hooks/use-stellar-session';
-import { estimateStellarRelayFee, maxStellarWithdrawForInputs } from '@/config/stellar-deployment';
+import { useStellarFeeFor } from '@/hooks/use-stellar-fee-estimate';
 import { describeStellarStage, stellarActionError } from '@/services/stellar/stellar-copy';
 import { SUI_TESTNET_RELAYER_URL } from '@/config/sui-deployment';
 import { useChainRouter } from '@/hooks/use-chain-router';
@@ -318,7 +320,7 @@ type WithdrawModalContextType = {
   /** Current association-set-gated balance for a token, or null while pending/unavailable. */
   getSpendableBalanceWei: (tokenSymbol: string) => bigint | null;
   /** Route-usable Max for a token, or null while spendability is pending/unavailable. */
-  getWithdrawMaxWei: (tokenSymbol: string) => bigint | null;
+  getWithdrawMaxWei: (tokenSymbol: string, reserveFee?: boolean) => bigint | null;
   /**
    * The amount the flow is working with. Inline the hub owns the visible
    * input, so it needs this to adopt an amount it never typed (a launcher's
@@ -613,7 +615,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   const altAccount = isStellar
     ? (stellarSession.wallet.isConnected ? stellarSession.wallet.address ?? undefined : undefined)
     : suiSession.account?.address;
-  const altRecipientPattern = isStellar ? /^G[A-Z2-7]{55}$/ : /^0x[0-9a-fA-F]{64}$/;
+  const altRecipientPattern = useMemo(() => isStellar ? /^G[A-Z2-7]{55}$/ : /^0x[0-9a-fA-F]{64}$/, [isStellar]);
   const queryClient = useQueryClient();
   const currentChainName = isStellar
     ? 'Stellar Testnet'
@@ -734,6 +736,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     setSelectionNonce((n) => n + 1);
   }, []);
   const [countdown, setCountdown] = useState(0);
+  const [stellarReviewInputs, setStellarReviewInputs] = useState<`0x${string}`[] | null>(null);
+  const [stellarQuoteExpiresAt, setStellarQuoteExpiresAt] = useState<number | null>(null);
   const [withdrawError, setWithdrawError] = useState<string | null>(null);
   const { toast: errorToast } = useToast();
   // Every flow error ALSO surfaces as a destructive toast — visible even
@@ -1039,6 +1043,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // Sui has no EVM association-set request here. Its local note store carries a
   // per-note ASP verdict; derive explicit approvals synchronously, while an
   // undefined verdict remains a real loading state rather than being trusted.
+  const liveStellarFeeFor = useStellarFeeFor(true);
+  const [reviewedStellarFeeFor, setReviewedStellarFeeFor] = useState<StellarFeeFor | null>(null);
+  const stellarFeeFor = (step === 'review' || step === 'loading') && reviewedStellarFeeFor ? reviewedStellarFeeFor : liveStellarFeeFor;
   const suiSpendability = useMemo(() => {
     if (!isSui) return {
       commitments: new Set<string>(),
@@ -1062,12 +1069,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       // One withdrawal proof spends up to WITHDRAW_MAX_INPUTS notes of any
       // label, and the relayer fee comes out of those same notes on top of
       // the amount, so the cap (Max, 100%) is the most whose amount + fee fits.
-      const maxInputsWei = [...active]
-        .map((n) => BigInt(n.value))
-        .sort((a, b) => (a > b ? -1 : a < b ? 1 : 0))
-        .slice(0, WITHDRAW_MAX_INPUTS)
-        .reduce((sum, v) => sum + v, 0n);
-      const maxSingleWei = maxStellarWithdrawForInputs(maxInputsWei);
+      const maxSingleWei = maxStellarAmount(active, stellarFeeFor, true);
       return {
         commitments,
         totalWei,
@@ -1091,7 +1093,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       approvalPending,
       storedNotes: suiStoredNotes,
     };
-  }, [isSui, isStellar, notes, stellarSession.unlocked, stellarSession.lastSyncedAt, suiStoredNotes]);
+  }, [isSui, isStellar, notes, stellarSession.unlocked, stellarSession.lastSyncedAt, suiStoredNotes, stellarFeeFor]);
 
   // Bind an association-set answer to the exact chain/session/note topology
   // that produced it. Without this key, a resolved empty/old Set remained
@@ -1457,13 +1459,14 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     if (isSui) return tokenSymbol === altSymbol ? suiSpendability.totalWei : 0n;
     return tokenBalances.get(tokenSymbol)?.active ?? 0n;
   }, [isSui, altSymbol, spendabilityBlocked, suiSpendability.totalWei, tokenBalances]);
-  const getWithdrawMaxWei = useCallback((tokenSymbol: string): bigint | null => {
+  const getWithdrawMaxWei = useCallback((tokenSymbol: string, reserveFee = true): bigint | null => {
     if (spendabilityBlocked) return null;
+    if (isStellar && !reserveFee) return tokenSymbol === altSymbol ? topNAcrossLabels(notes.filter(n => String(n.status) === 'ACTIVE'), WITHDRAW_MAX_INPUTS) : 0n;
     if (isSui) return tokenSymbol === altSymbol ? suiSpendability.maxSingleWei : 0n;
     // EVM inline Max is the full spendable balance: the plain 100% route keeps
     // its existing batch semantics when one proof cannot carry everything.
     return tokenBalances.get(tokenSymbol)?.active ?? 0n;
-  }, [isSui, altSymbol, spendabilityBlocked, suiSpendability.maxSingleWei, tokenBalances]);
+  }, [isSui, isStellar, altSymbol, spendabilityBlocked, suiSpendability.maxSingleWei, tokenBalances, notes]);
 
   // Keep BOTH caps materialized. `availableWei` is the current route's
   // single-proof cap, while route-change handlers need the destination route's
@@ -1478,12 +1481,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // two 0.004 ETH deposits (Pat, prod 2026-09-04); what it still cannot do is
   // BATCH several proofs, so the full-balance batch bypass stays withdraw-only.
   const availableWei = mixedLabelCapWei;
-  const availableNum = useMemo(
-    () => tokenBalanceNum(availableWei, withdrawTokenDecimals(selectedToken, chainId, isSui)),
-    [availableWei, selectedToken, chainId, isSui],
-  );
   // Total spendable across ALL lineages — the same leaf-gated figure the home
-  // screen shows. `availableNum` above is the current route's one-proof cap;
+  // screen shows. `availableWei` above is the current route's one-proof cap;
   // showing it as "Balance" hid notes beyond that cap and made the
   // two screens disagree (#214).
   const selectedTokenDecimals = useMemo(
@@ -1741,20 +1740,20 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // review can never accept an amount the submit path must reject, and so the
   // change display matches what will actually be spent.
   const suiWithdraw = useMemo(() => {
-    if (!isSui) return { want: 0n, selection: null as SuiNoteSelection | null, activeTotal: 0n, maxSingle: 0n };
+    if (!isSui) return { inputCount: 0, want: 0n, selection: null as SuiNoteSelection | null, activeTotal: 0n, maxSingle: 0n };
     let want = 0n;
     try { want = parseTokenAmount(amount, altDecimals); } catch { want = 0n; }
     if (isStellar) {
       // Same mixed-label, five-input rule the EVM withdraw uses; the shape is
       // reduced to "does one proof cover it" for the shared review gate.
       // The relayer fee is added on top, so the inputs must cover both.
-      const gross = want > 0n ? want + estimateStellarRelayFee(want) : 0n;
       const picked = want > 0n
-        ? selectWithdrawInputs(notes.filter((n) => String(n.status) === 'ACTIVE'), gross, 0n)
+        ? selectStellarInputs(notes.filter((n) => String(n.status) === 'ACTIVE'), want, stellarFeeFor, true)
         : null;
       return {
         want,
-        selection: picked && picked.total >= gross ? ({} as SuiNoteSelection) : null,
+        inputCount: picked?.covered ? picked.selectedNotes.length : 0,
+        selection: picked?.covered ? ({} as SuiNoteSelection) : null,
         activeTotal: suiSpendability.totalWei,
         maxSingle: suiSpendability.maxSingleWei,
       };
@@ -1762,14 +1761,15 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     const { approvedNotes } = partitionSuiWithdrawNotes(suiSpendability.storedNotes);
     return {
       want,
+      inputCount: 0,
       selection: want > 0n ? selectSuiNotes(approvedNotes, want) : null,
       activeTotal: suiSpendability.totalWei,
       maxSingle: suiSpendability.maxSingleWei,
     };
-  }, [amount, isSui, isStellar, altDecimals, notes, suiSpendability.maxSingleWei, suiSpendability.storedNotes, suiSpendability.totalWei]);
+  }, [amount, isSui, isStellar, altDecimals, notes, suiSpendability.maxSingleWei, suiSpendability.storedNotes, suiSpendability.totalWei, stellarFeeFor]);
   // Stellar: the relayer fee leaves the pool on top of the amount, so Review's
   // "Unshielding" and "left after" figures include it.
-  const stellarFeeWei = isStellar && suiWithdraw.want > 0n ? estimateStellarRelayFee(suiWithdraw.want) : 0n;
+  const stellarFeeWei = stellarFeeFor(suiWithdraw.inputCount || 1, suiWithdraw.want);
   const suiAmountError = useMemo(() => {
     if (!isSui || suiWithdraw.want <= 0n || suiWithdraw.selection) return null;
     if (suiWithdraw.want > suiWithdraw.activeTotal) {
@@ -1779,16 +1779,17 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       }
       return `Insufficient ${isStellar ? 'Stellar' : 'Sui'} balance (${(Number(suiWithdraw.activeTotal) / altScale).toFixed(4)} ${altSymbol} available)`;
     }
+    if (isStellar && suiWithdraw.want <= availableWei) return null;
     return isStellar
-      ? `One withdrawal can spend up to ${WITHDRAW_MAX_INPUTS} notes (${(Number(suiWithdraw.maxSingle) / altScale).toFixed(4)} ${altSymbol}). Withdraw that first, then the rest.`
+      ? `One withdrawal can spend up to ${WITHDRAW_MAX_INPUTS} notes (${(Number(availableWei) / altScale).toFixed(4)} ${altSymbol}). Withdraw that first, then the rest.`
       : SUI_SINGLE_NOTE_ERROR;
-  }, [isSui, isStellar, altScale, altSymbol, suiWithdraw, stellarSession.pendingTotal]);
+  }, [isSui, isStellar, altScale, altSymbol, suiWithdraw, stellarSession.pendingTotal, availableWei]);
   // Remaining means the WHOLE approved shielded balance, not just the selected
   // inputs' change. With mixed labels (or notes beyond the five-input cap),
   // subtracting from `availableWei` hid untouched notes on Review.
-  const remainingAmount = tokenBalanceNum(resolveRemainingBalanceWei({
+  const remainingAmount = isStellar && stellarFeeWei === null ? null : tokenBalanceNum(resolveRemainingBalanceWei({
     totalBalanceWei: currentBalance.active,
-    grossLeavingWei: isSui ? suiWithdraw.want + stellarFeeWei : grossLeavingWei,
+    grossLeavingWei: isSui ? suiWithdraw.want + (stellarFeeWei ?? 0n) : grossLeavingWei,
   }), selectedTokenDecimals);
   // What one Sui withdrawal can actually move: the largest single active note
   // (single-input transact cap). EVM: route-specific (codex P2) — the swap
@@ -1835,11 +1836,11 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   const batchFeeNum = batchPlan ? Number(batchPlan.totalFeeWei) / 10 ** tokenDecimalsForDisplay : 0;
   const reviewGross = batchPlan
     ? batchGrossNum
-    : isStellar ? grossWithdrawn + Number(stellarFeeWei) / altScale : grossWithdrawn;
+    : isStellar ? (stellarFeeWei === null ? null : grossWithdrawn + Number(stellarFeeWei) / altScale) : grossWithdrawn;
   const reviewNet = batchPlan ? Math.max(0, batchGrossNum - batchFeeNum) : netReceived;
   // Stellar bypasses the EVM quote, so its fee comes from the relay estimate
   // that the total above already includes.
-  const reviewFee = batchPlan ? batchFeeNum : isStellar ? Number(stellarFeeWei) / altScale : relayerFee;
+  const reviewFee = batchPlan ? batchFeeNum : isStellar ? (stellarFeeWei === null ? null : Number(stellarFeeWei) / altScale) : relayerFee;
   // A share's net figure is a SHARE count; what arrives is the vault's
   // previewRedeem of those shares (the router pays that, the relayer fee
   // already taken out in shares). Read it for the review/success headline so
@@ -1926,7 +1927,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // Every relayed EVM withdrawal: the relayer fee split into the gas it
   // re-bills and its margin, plus what a "Receive as" swap loses on the way.
   const withdrawFeeBreakdown = useMemo(() => {
-    if (isSui || isStellar || (!relayerQuote && !swapSnapshot && !batchPlan)) return null;
+    if (isSui || isStellar || reviewGross === null || reviewFee === null || (!relayerQuote && !swapSnapshot && !batchPlan)) return null;
     const poolChain = swapSnapshot?.poolChainId ?? chainId;
     // A yield share is priced through its vault rate; the price map alone reads it as $0.
     const inputUsd = swapSnapshot
@@ -2059,7 +2060,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
       return () => clearTimeout(timer);
     }
-    if (step === 'review' && countdown === 0 && (activeFeeCommitment || batchPlan || swapSnapshot)) {
+    if (step === 'review' && countdown === 0 && (activeFeeCommitment || batchPlan || swapSnapshot || (isStellar && stellarQuoteExpiresAt !== null))) {
       log('warn', 'Withdraw', 'Relayer quote expired, returning to input step');
       reportWithdrawError('Quote expired. Please request a new quote.');
       setStep('withdraw');
@@ -2070,7 +2071,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       setReviewContext(null);
       resetQuote();
     }
-  }, [step, countdown, activeFeeCommitment, batchPlan, swapSnapshot]);
+  }, [step, countdown, activeFeeCommitment, batchPlan, swapSnapshot, isStellar, stellarQuoteExpiresAt, log, reportWithdrawError, resetQuote]);
 
   // Step read-through for callbacks/effects that must observe the CURRENT
   // step without re-subscribing on every step change.
@@ -2259,6 +2260,43 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       setCountdown(0);
       reportWithdrawError(null);
       if (!canAdvanceToReview()) return;
+      if (isStellar) {
+        const requestKey = buildWithdrawQuoteKey({
+          sessionKey: `${altAccount.toLowerCase()}:${altChainId}`, epoch: modalEpochRef.current,
+          mode: 'sui', poolChainId: altChainId, inputToken: selectedTokenAddress,
+          outputToken: selectedTokenAddress, amount, recipient: altRecipient,
+          gasToken: false, receiveExact: true, spendabilityKey,
+        });
+        const requestToken = quoteGuardRef.current.begin(requestKey);
+        const isCurrent = () => quoteGuardRef.current.isCurrent(requestToken, requestKey)
+          && spendabilityKeyRef.current === spendabilityKey && canAdvanceToReview();
+        setIsQuoteLoading(true);
+        try {
+          const amountOut = parseTokenAmount(amount, altDecimals);
+          const active = stellarSession.spendableNotes as unknown as Note[];
+          let reviewed = false;
+          for (let count = 1; count <= Math.min(active.length, WITHDRAW_MAX_INPUTS); count++) {
+            if (!selectGreedyTransferInputs(active, amountOut, count).covered) continue;
+            const quote = await stellarSession.quoteWithdrawal({ amount: amountOut, recipient: altRecipient, inputCount: count });
+            if (!isCurrent()) return;
+            const fee = BigInt(quote.feeCommitment.feeAmount);
+            const picked = selectGreedyTransferInputs(active, amountOut + stellarFeeReserve(fee), count);
+            if (!picked.covered || picked.selectedNotes.length !== count) continue;
+            setStellarReviewInputs(picked.selectedNotes.map(n => n.commitment as `0x${string}`));
+            setReviewedStellarFeeFor(() => () => fee);
+            setStellarQuoteExpiresAt(quote.feeCommitment.expiration);
+            setCountdown(Math.floor((quote.feeCommitment.expiration - Date.now()) / 1000));
+            reviewed = true;
+            break;
+          }
+          if (!reviewed) throw new Error("Your XLM notes don't have enough active balance to cover the relayer fee.");
+        } catch (error) {
+          if (isCurrent()) reportWithdrawError(stellarActionError(error));
+          return;
+        } finally {
+          if (isCurrent()) setIsQuoteLoading(false);
+        }
+      }
       setReviewContext({
         // 'sui' = the non-EVM route; poolChainId + sessionKey pin the chain.
         mode: 'sui',
@@ -2823,7 +2861,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     } finally {
       if (isCurrent()) setIsQuoteLoading(false);
     }
-  }, [isSui, suiSession, suiAmountError, connectedAddress, walletAddress, targetAddress, amount, selectedToken, selectedTokenAddress, chainId, gasTokenChecked, getQuote, identityMode, log, sdkReady, poolSession, ensureInitialized, openKeystoreRegistrationModal, openSeedDerivationModal, resolveColdStartClaim, batchEnabled, fullBalanceRequested, grossWithdrawn, availableNum, availableWei, effectiveReceiveExact, spendabilityLoading, spendabilityError, spendabilityKey, spendableCommitments, noteManager, isSwapExit, receiveAsset, crossChainReceive, receiveChainId, receiveChainName]);
+  }, [altAccount, altChainId, altRecipientPattern, balanceDisplay, currentBalance.active, enteredAmountWei, fullWithdrawGroupCount, isStellar, stellarSession, altDecimals, maxSelected, reportWithdrawError, resetQuote, shownError, isSui, suiAmountError, connectedAddress, walletAddress, targetAddress, amount, selectedToken, selectedTokenAddress, chainId, gasTokenChecked, getQuote, identityMode, log, sdkReady, poolSession, ensureInitialized, openKeystoreRegistrationModal, openSeedDerivationModal, resolveColdStartClaim, batchEnabled, fullBalanceRequested, availableWei, effectiveReceiveExact, spendabilityLoading, spendabilityError, spendabilityKey, spendableCommitments, noteManager, isSwapExit, receiveAsset, crossChainReceive, receiveChainId, receiveChainName]);
 
   const handleConfirmUnlocked = useCallback(async () => {
     log('info', 'Withdraw', 'step 3/6 confirm pressed', {
@@ -2864,6 +2902,14 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       setStep('withdraw');
       return;
     }
+    if (isStellar && !isFreshCommitmentLive(stellarQuoteExpiresAt ?? undefined, Date.now())) {
+      setStellarReviewInputs(null);
+      setStellarQuoteExpiresAt(null);
+      setReviewContext(null);
+      reportWithdrawError('Fee quote has expired. Please request a new quote.');
+      setStep('withdraw');
+      return;
+    }
     // An old operation must never overwrite a reopened flow: terminal writes
     // check the epoch. (Close is additionally blocked while step==='loading',
     // so this is defense in depth.)
@@ -2889,13 +2935,16 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     // relayed withdraw (change note back to self, processor = the relay contract).
     if (reviewContext?.mode === 'sui' && reviewContext.poolChainId === STELLAR_TESTNET_ID) {
       try {
+        if (stellarFeeWei === null) throw new Error('No active fee quote. Please go back and request a new quote.');
         const amountOut = parseTokenAmount(amount, altDecimals);
         const active = stellarSession.spendableNotes as unknown as Note[];
         // The relayer fee comes on top: pick notes covering amount + fee.
-        const gross = amountOut + estimateStellarRelayFee(amountOut);
-        const selection = selectWithdrawInputs(active, gross, 0n);
-        if (selection.total < gross) {
-          throw new Error(`Not enough to cover the amount plus the relayer fee within ${WITHDRAW_MAX_INPUTS} notes. Withdraw a smaller amount.`);
+        const gross = amountOut + stellarFeeReserve(stellarFeeWei);
+        const reviewed = new Set(stellarReviewInputs ?? []);
+        const selectedNotes = active.filter(n => reviewed.has(n.commitment as `0x${string}`));
+        const selection = { notes: selectedNotes, total: selectedNotes.reduce((sum, n) => sum + BigInt(n.value), 0n) };
+        if (selectedNotes.length !== reviewed.size || selection.total < gross) {
+          throw new Error("Your XLM notes don't have enough active balance to cover this withdrawal + the relayer fee.");
         }
         // The reviewed recipient only, never the Varial account.
         const recipient = explicitRecipient(reviewContext.recipient, (a) => STELLAR_RECIPIENT_RE.test(a));
@@ -2903,6 +2952,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         if (!isSameOperation()) { log('warn', 'Withdraw', 'Stale run aborted before Stellar broadcast'); return; }
         submittedRef.current = true;
         const result = await stellarSession.withdraw({
+          reviewedFee: stellarFeeWei,
           amount: amountOut,
           recipient,
           inputCommitments: selection.notes.map((n) => n.commitment as `0x${string}`),
@@ -2921,7 +2971,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         log('error', 'Withdraw', `Stellar withdraw failed: ${raw}`, err);
         reportWithdrawError(message);
         submittedRef.current = false;
-        setStep('error');
+        setStep(err instanceof RelayFeeIncreasedError ? 'withdraw' : 'error');
       }
       return;
     }
@@ -4692,7 +4742,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       settleWatch.release();
       endTx();
     }
-  }, [isSui, suiSession, sdkReady, poolSession, noteManager, keystoreManager, notes, amount, effectiveReceiveExact, selectedToken, selectedTokenAddress, targetAddress, connectedAddress, activeFeeCommitment, batchPlan, swapSnapshot, reviewContext, getBatchWithdrawSession, withdrawalProcessorAddress, chainId, log, resetQuote, selectedPA, refetchNotes, exportAccount, preferredTransaction, preferredWithdrawNote, ensureInitialized, spendabilityKey, spendableCommitments, publicClient, queryClient, beginTx, endTx, coldStartClaim, getQuote, gasTokenChecked, signTypedDataAsync, markRegistered, crossChainReceive, receiveChainId]);
+  }, [altAccount, altChainId, altDecimals, balanceDisplay, isSwapExit, relayerFee, reportWithdrawError, shownError, stellarSession, stellarReviewInputs, stellarQuoteExpiresAt, isStellar, isSui, stellarFeeWei, suiSession, sdkReady, poolSession, noteManager, keystoreManager, notes, amount, effectiveReceiveExact, selectedToken, selectedTokenAddress, targetAddress, connectedAddress, activeFeeCommitment, batchPlan, swapSnapshot, reviewContext, getBatchWithdrawSession, withdrawalProcessorAddress, chainId, log, resetQuote, selectedPA, refetchNotes, exportAccount, preferredTransaction, preferredWithdrawNote, ensureInitialized, spendabilityKey, spendableCommitments, queryClient, beginTx, endTx, coldStartClaim, getQuote, gasTokenChecked, signTypedDataAsync, markRegistered, crossChainReceive, receiveChainId]);
 
   // Same-tick double-press guard — see hooks/use-op-lock.ts.
   const handleConfirm = useMemo(() => withOpLock(handleConfirmUnlocked), [withOpLock, handleConfirmUnlocked]);
@@ -5011,7 +5061,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // Quick presets are underlying literals when the rate is known, shares otherwise.
   const applyPresetAmount = (value: string) => {
     if (spendabilityBlocked) return;
-    const maxWei = getWithdrawMaxWei(selectedToken);
+    const maxWei = getWithdrawMaxWei(selectedToken, false);
     if (amountField.presetExceedsMax(value) ?? presetExceedsWithdrawMax(value, maxWei, selectedTokenDecimals)) {
       errorToast({ title: `You can withdraw up to ${spendableLabel(formatUnits(maxWei ?? 0n, selectedTokenDecimals), selectedToken, chainId)}.`, variant: 'warning' });
       return;
@@ -5267,7 +5317,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     {(usesNativeWithdrawPresets(selectedToken) ? QUICK_AMOUNTS_NATIVE : QUICK_AMOUNTS_STABLE).map((preset) => {
                       const active = isShareSymbol(selectedToken) ? amountField.value === preset : amount === preset;
                       const outOfReach = !spendabilityBlocked && (amountField.presetExceedsMax(preset)
-                        ?? presetExceedsWithdrawMax(preset, getWithdrawMaxWei(selectedToken), selectedTokenDecimals));
+                        ?? presetExceedsWithdrawMax(preset, getWithdrawMaxWei(selectedToken, false), selectedTokenDecimals));
                       return (
                         <Pressable
                           key={preset}
@@ -5613,7 +5663,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
               const outSym = swapSnapshot ? swapSnapshot.outputToken.symbol : shareUnderlyingSymbol;
               const outHue = TokenHues[colorScheme][outSym.toUpperCase()] ?? TokenHues[colorScheme].ETH;
               const grossNum = swapSnapshot ? swapReviewGrossNum : reviewGross;
-              const grossUsd = balanceDisplay(swapSnapshot ? formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals) : String(reviewGross), swapSnapshot ? swapReviewInputSymbol : selectedToken, swapSnapshot?.poolChainId ?? chainId).usd;
+              const grossUsd = grossNum === null ? null : balanceDisplay(swapSnapshot ? formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals) : String(reviewGross), swapSnapshot ? swapReviewInputSymbol : selectedToken, swapSnapshot?.poolChainId ?? chainId).usd;
               const netLabel = swapSnapshot
                 ? `~${balanceDisplay(swapSnapshot.display.estimatedOutput, outSym, swapSnapshot.destinationChainId).text}`
                 : reviewNetLabel;
@@ -5632,12 +5682,12 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     <View className="flex-1 gap-[1px]">
                       <Text className="font-pp-sans-medium text-[13px] text-text" numberOfLines={1}>Unshielding</Text>
                       <Text className="font-pp-sans text-[11.5px] text-text-muted" numberOfLines={1}>
-                        {poolName} · {groupThousands(balanceDisplay(batchPlan ? 0 : remainingAmount, selectedToken, chainId).text)} left after
+                        {poolName} · {remainingAmount === null ? 'Estimate unavailable' : `${groupThousands(balanceDisplay(batchPlan ? 0 : remainingAmount, selectedToken, chainId).text)} left after`}
                       </Text>
                     </View>
                     <View className="items-end gap-[1px]">
-                      <Text className="font-pp-mono text-[13px] text-text">{groupThousands(balanceDisplay(swapSnapshot ? formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals) : String(grossNum), swapSnapshot ? swapReviewInputSymbol : selectedToken, swapSnapshot?.poolChainId ?? chainId).text)}</Text>
-                      <Text className="font-pp-sans text-[11.5px] text-text-muted">${grossUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}</Text>
+                      <Text className="font-pp-mono text-[13px] text-text">{grossNum === null ? 'Estimate unavailable' : groupThousands(balanceDisplay(swapSnapshot ? formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals) : String(grossNum), swapSnapshot ? swapReviewInputSymbol : selectedToken, swapSnapshot?.poolChainId ?? chainId).text)}</Text>
+                      {grossUsd !== null && <Text className="font-pp-sans text-[11.5px] text-text-muted">${grossUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}</Text>}
                     </View>
                   </View>
                   <View className="h-[1px] self-stretch bg-border-light" />
@@ -5666,16 +5716,18 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     </View>
                   </View>
                   <View className="h-[1px] self-stretch bg-border-light" />
-                  {/* Fee · relayer · quote countdown, one quiet line. Stellar has
-                      no relayer yet: the withdrawal is sent from this account. */}
+                  {/* Fee, relayer and quote countdown. */}
                   {isStellar ? (
-                    <Text className="py-[9px] font-pp-sans text-[11.5px] text-text-muted">
-                      {`Relayer fee up to ${formatUnits(estimateStellarRelayFee(parseTokenAmount(amount, altDecimals)), altDecimals)} XLM (0.5% plus network cost), added on top; any unused part returns as change. Sent by the testnet relayer, not your account.`}
-                    </Text>
+                    <View className="flex-row flex-wrap items-center justify-between gap-[6px] py-[9px]">
+                      <Text className="font-pp-sans text-[11.5px] text-text-muted">
+                        Relayer fee: {stellarFeeWei === null ? 'Estimate unavailable' : `${formatUnits(stellarFeeWei, altDecimals)} XLM`}
+                      </Text>
+                      <Text className="font-pp-sans-medium text-[11.5px] text-warning">Quote expires in {countdown}s</Text>
+                    </View>
                   ) : (
                   <View className="flex-row flex-wrap items-center justify-between gap-[6px] py-[9px]">
                     <Text className="font-pp-sans text-[11.5px] text-text-muted">
-                      Relayer fee {groupThousands(swapSnapshot ? `${balanceDisplay(swapSnapshot.display.relayerFee, swapReviewInputSymbol, swapSnapshot.poolChainId).text}` : (batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text)} (~${groupThousands(balanceDisplay(swapSnapshot ? swapSnapshot.display.relayerFee : String(reviewFee), swapSnapshot ? swapReviewInputSymbol : (batchPlan || isStellar) ? selectedToken : resolvedFee.symbol, swapSnapshot?.poolChainId ?? chainId).usd.toFixed(2))})
+                      Relayer fee {reviewFee === null ? 'Estimate unavailable' : <>{groupThousands(swapSnapshot ? `${balanceDisplay(swapSnapshot.display.relayerFee, swapReviewInputSymbol, swapSnapshot.poolChainId).text}` : (batchPlan || isStellar) ? `${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text)} (~${groupThousands(balanceDisplay(swapSnapshot ? swapSnapshot.display.relayerFee : String(reviewFee), swapSnapshot ? swapReviewInputSymbol : (batchPlan || isStellar) ? selectedToken : resolvedFee.symbol, swapSnapshot?.poolChainId ?? chainId).usd.toFixed(2))})</>}
                     </Text>
                     <View className="flex-row items-center gap-[10px]">
                       <Pressable className="flex-row items-center gap-[3px]" onPress={() => setRelayerSelectorOpen((v) => !v)}>
@@ -5704,7 +5756,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       {/* nw-keep(data-color): bolt glyph tint token (vector-icon color prop) */}
                       <Ionicons name="flash-outline" size={13} color={colors.tint} />
                       <Text className="flex-1 font-pp-sans text-[11px] leading-[16px] text-text-secondary">
-                        {describeRelayedClaim((batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text)}
+                        {reviewFee === null ? 'Estimate unavailable' : describeRelayedClaim((batchPlan || isStellar) ? `${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text)}
                       </Text>
                     </View>
                   )}
@@ -5804,16 +5856,16 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       Total Withdrawn
                     </Text>
                     <Text className="text-text">
-                      <Text className="text-[20px] font-pp-regular">~</Text>
+                      <Text className="text-[20px] font-pp-regular">{reviewGross === null || isStellar ? '' : '~'}</Text>
                       <Text className="text-[20px] font-pp-bold">
                         {swapSnapshot
                           ? `${balanceDisplay(formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals), swapReviewInputSymbol, swapSnapshot.poolChainId).text}`
-                          : balanceDisplay(reviewGross, selectedToken, chainId).text}
+                          : reviewGross === null ? 'Estimate unavailable' : balanceDisplay(reviewGross, selectedToken, chainId).text}
                       </Text>
                     </Text>
-                    <Text className="text-[14px] text-text font-pp-regular">
+                    {reviewGross !== null && <Text className="text-[14px] text-text font-pp-regular">
                       ${(balanceDisplay(swapSnapshot ? formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals) : String(reviewGross), swapSnapshot ? swapReviewInputSymbol : selectedToken, swapSnapshot?.poolChainId ?? chainId).usd).toLocaleString('en-US', { maximumFractionDigits: 2 })}
-                    </Text>
+                    </Text>}
                   </View>
                   {/* Vertical Divider */}
                   <View className="w-[1px] self-stretch bg-border-light" />
@@ -5945,13 +5997,13 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       {/* The fee's OWN asset and decimals (services/relayer-fee.ts),
                           not the withdrawn token's. When they differ the symbol
                           says so instead of relabelling one asset as another. */}
-                      Relayer fee: {groupThousands(swapSnapshot ? `${balanceDisplay(swapSnapshot.display.relayerFee, swapReviewInputSymbol, swapSnapshot.poolChainId).text}` : (batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text)} (~${groupThousands(balanceDisplay(swapSnapshot ? swapSnapshot.display.relayerFee : String(reviewFee), swapSnapshot ? swapReviewInputSymbol : (batchPlan || isStellar) ? selectedToken : resolvedFee.symbol, swapSnapshot?.poolChainId ?? chainId).usd.toFixed(2))})
+                      Relayer fee: {reviewFee === null ? 'Estimate unavailable' : <>{groupThousands(swapSnapshot ? `${balanceDisplay(swapSnapshot.display.relayerFee, swapReviewInputSymbol, swapSnapshot.poolChainId).text}` : (batchPlan || isStellar) ? `${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text)} (~${groupThousands(balanceDisplay(swapSnapshot ? swapSnapshot.display.relayerFee : String(reviewFee), swapSnapshot ? swapReviewInputSymbol : (batchPlan || isStellar) ? selectedToken : resolvedFee.symbol, swapSnapshot?.poolChainId ?? chainId).usd.toFixed(2))})</>}
                     </Text>
                   </View>
                   <FeeWarning breakdown={withdrawFeeBreakdown} testID="withdraw-fee-warning" />
                   {coldStartClaim && (
                     <Text className="text-[13px] leading-[19px] text-[#737373] font-pp-regular">
-                      {describeRelayedClaim((batchPlan || isStellar) ? `${isStellar ? "\u2248 " : ""}${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text)}
+                      {reviewFee === null ? 'Estimate unavailable' : describeRelayedClaim((batchPlan || isStellar) ? `${balanceDisplay(reviewFee, selectedToken, chainId).text}` : balanceDisplay(resolvedFee.text.split(' ')[0], resolvedFee.symbol, chainId).text)}
                     </Text>
                   )}
                   {gasTopUp && (
@@ -6008,7 +6060,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     <Text className="font-pp-bold">{poolName}</Text>
                   </Text>
                   <Text className="text-[20px] text-text font-pp-regular">
-                    {balanceDisplay(batchPlan ? 0 : remainingAmount, selectedToken, chainId).text}
+                    {remainingAmount === null ? 'Estimate unavailable' : balanceDisplay(batchPlan ? 0 : remainingAmount, selectedToken, chainId).text}
                   </Text>
                 </View>
 

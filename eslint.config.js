@@ -5,6 +5,7 @@ const expoConfig = require('eslint-config-expo/flat');
 module.exports = defineConfig([
   expoConfig,
   {
-    ignores: ['dist/*'],
+    // Generated from the pinned SDK; checked by build-fee-module.mjs --check.
+    ignores: ['dist/*', 'vendor/stellar-fees/index.js'],
   },
 ]);

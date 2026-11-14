@@ -15,7 +15,7 @@ export function StellarWalletOption({ className, onConnected }: { className: str
   const { isDebugEnabled } = useDebug();
   const enabled = supportedChainIds.includes(STELLAR_TESTNET_ID) && isChainSelectable(STELLAR_TESTNET_ID, isDebugEnabled);
   const wallet = useStellarWallet();
-  const { selectChain, isStellar } = useChainRouter();
+  const { selectChain } = useChainRouter();
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const [pending, setPending] = useState(false);
@@ -33,7 +33,7 @@ export function StellarWalletOption({ className, onConnected }: { className: str
     };
   }, [cancelConnect]);
 
-  if (!enabled || (!isStellar && !wallet.isConnected)) return null;
+  if (!enabled) return null;
 
   const onPress = async () => {
     if (attempt.current.pending) return;

@@ -61,6 +61,7 @@ import { useAccountRecoveryModal } from '@/components/account-recovery-modal-pro
 import { getExplorerName, getExplorerTxUrl, getChainConfig, isChainSelectable, supportedChainIds, STELLAR_TESTNET_ID, SUI_TESTNET_ID } from '@/config/chains';
 import { STELLAR_TESTNET_CONTRACTS, STELLAR_XLM } from '@/config/stellar-deployment';
 import { useStellarSession } from '@/hooks/use-stellar-session';
+import { useStellarDepositMax } from '@/hooks/use-stellar-fee-estimate';
 import { useStellarBalance } from '@/hooks/use-stellar-balance';
 import { describeStellarStage, stellarErrorMessage, stellarActionError } from '@/services/stellar/stellar-copy';
 import { StellarLabelRetryNotice } from '@/components/stellar-label-retry';
@@ -659,6 +660,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
   const stellarSession = useStellarSession();
   const stellarOwner = isStellar && stellarSession.wallet.isConnected ? stellarSession.wallet.address : null;
   const { data: stellarBalanceData } = useStellarBalance(stellarOwner);
+  const stellarDepositMax = useStellarDepositMax(stellarBalanceData?.spendable ?? 0n);
   const chainConfig = getChainConfig(chainId);
   const chainDisplayName = isSui
     ? (activeChain?.displayName ?? (isStellar ? 'Stellar' : 'Sui'))
@@ -1415,14 +1417,14 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     // out of a separate coin selection); the EVM wei/gas-reserve math below is
     // wagmi-specific.
     if (isSui) {
-      if (enteredAmount > walletBalance) {
+      if (isStellar ? parseUnits(amount || '0', STELLAR_XLM.decimals) > stellarDepositMax : enteredAmount > walletBalance) {
         // The exact balance, rounded DOWN: a figure rounded up would be one the
         // user types and is refused again. The deposit catalog holds no shares
         // (getDepositableTokens(...).filter(!yieldShare)), so this figure is the
         // coin itself and never needs a rate.
         // isSui also covers Stellar, whose budget is the spendable XLM, not a Sui balance.
         const exact = isStellar
-          ? (stellarBalanceData ? formatUnits(stellarBalanceData.spendable, STELLAR_XLM.decimals) : '0')
+          ? (stellarBalanceData ? formatUnits(stellarDepositMax, STELLAR_XLM.decimals) : '0')
           : (suiBalanceData ? formatUnits(BigInt(suiBalanceData.totalBalance), suiDecimals) : '0');
         return `Insufficient balance (${tokenAmountLabel(formatTokenBalanceDown(exact, displaySymbol), displaySymbol)} available)`;
       }
@@ -1459,7 +1461,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       return formatDepositMinimum(depositMinPayWei, selectedToken.decimals, selectedToken.symbol);
     }
     return null;
-  }, [amount, enteredAmount, walletBalanceWei, spendableBalanceWei, spendableBalanceFormatted, walletBalance, selectedToken.decimals, selectedToken.symbol, isSui, isStellar, stellarBalanceData, suiBalanceData, suiDecimals, displaySymbol, swapDepositActive, depositMinPayWei, minPending, tokenPrice, priceLoading, yieldExitBlocked, depositCapUsd]);
+  }, [amount, enteredAmount, walletBalanceWei, spendableBalanceWei, spendableBalanceFormatted, walletBalance, selectedToken.decimals, selectedToken.symbol, selectedToken.isNative, depositVettingFeeBps, isSui, isStellar, stellarBalanceData, stellarDepositMax, suiBalanceData, suiDecimals, displaySymbol, swapDepositActive, depositMinPayWei, minPending, tokenPrice, priceLoading, yieldExitBlocked, depositCapUsd]);
 
   // True while the cap cannot be judged yet because the price is still
   // loading: shown quietly (not as a red error) and the inline auto-confirm

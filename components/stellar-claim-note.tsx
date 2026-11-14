@@ -18,9 +18,10 @@ import { formatUnits } from 'viem';
 import { useStellarConnectAction } from '@/hooks/use-stellar-connect-action';
 import { useStellarWallet } from '@/components/stellar-wallet-provider';
 import { STELLAR_TESTNET_ID, getExplorerTxUrl } from '@/config/chains';
-import { STELLAR_TRANSFER_RELAY_FEE_ESTIMATE, STELLAR_XLM } from '@/config/stellar-deployment';
+import { STELLAR_XLM } from '@/config/stellar-deployment';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { useStellarSession } from '@/hooks/use-stellar-session';
+import { useStellarTransferFeeEstimate } from '@/hooks/use-stellar-fee-estimate';
 import { useTabCloseGuard } from '@/hooks/use-tab-close-guard';
 import { decodeStellarClaim, stellarClaimTotal } from '@/services/stellar/stellar-claim';
 import { describeStellarStage, stellarActionError } from '@/services/stellar/stellar-copy';
@@ -54,6 +55,7 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
     }
   }, [encoded]);
   const claim = decoded.claim;
+  const relayFee = useStellarTransferFeeEstimate(claim?.notes.length ?? 0);
   const owner = claim?.notes[0]?.ownerAddress ?? null;
   const amountLabel = claim ? `${formatUnits(stellarClaimTotal(claim), STELLAR_XLM.decimals)} XLM` : null;
   const isOwner = !!owner && wallet.isConnected && wallet.address === owner;
@@ -157,7 +159,7 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
               {spendable
                 ? 'Claimed. Save it to your account so it shows on any device. Until then keep this link.'
                 : 'Claimed. It turns spendable after the next sync. Keep this link until you save it.'}
-              {` Saving is relayed: a fee of up to ${formatUnits(STELLAR_TRANSFER_RELAY_FEE_ESTIMATE, STELLAR_XLM.decimals)} XLM comes out of it.`}
+              {relayFee === null ? ' Relayer fee: Estimate unavailable.' : ` Relayer fee: ~${formatUnits(relayFee, STELLAR_XLM.decimals)} XLM.`}
             </Text>
             <Pressable
               disabled={!spendable || !!busy}
