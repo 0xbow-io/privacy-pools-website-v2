@@ -192,7 +192,9 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
   // so the new account asks for its first signature and switching back needs none. A real
   // revocation is treated the same way on purpose, because it cannot be told apart. Nothing can
   // sign meanwhile: the store has no bound account and no signer, and a kept session signs only
-  // while its own account is bound. Disconnect is the one action that forgets every session.
+  // while its own account is bound. Disconnect is the one action that forgets every session, and
+  // the header keeps a Sign Out button for it while sessions are kept and no account is connected
+  // (showStellarSignOut in services/stellar/stellar-wallet-binding.ts).
   const watch = useCallback(async (current: VarialAccount, generation: number) => {
     if (isDevBurner) return;
     stopWatching();

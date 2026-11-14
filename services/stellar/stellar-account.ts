@@ -144,6 +144,11 @@ export interface StellarAccountSnapshot {
   paymentRequests: StellarRequestState[];
   lastSyncedAt: number | null;
   error: string | null;
+  /**
+   * Other accounts' unlocked sessions are held in memory (see bind). Only this flag leaves the
+   * store, so the header can offer Sign Out while the wallet has no active account.
+   */
+  keptSessions: boolean;
 }
 
 export type StellarFlowStage =
@@ -172,6 +177,7 @@ const EMPTY: StellarAccountSnapshot = {
   paymentRequests: [],
   lastSyncedAt: null,
   error: null,
+  keptSessions: false,
 };
 
 class StellarAccount {
@@ -229,6 +235,7 @@ class StellarAccount {
       this.signer = signer;
       // A sign-out after the active account was already lost still forgets the kept sessions.
       if (!address && !opts.keepSessions) this.unlockedSessions.clear();
+      if (this.snapshot.keptSessions !== this.unlockedSessions.size > 0) this.set({ keptSessions: this.unlockedSessions.size > 0 });
       return;
     }
     // Signing out or switching away: the requests the user is proven to hold
@@ -259,6 +266,7 @@ class StellarAccount {
       address,
       notes: address ? readCachedNotes(address) : [],
       paymentRequests: address ? readCachedRequests(address) : [],
+      keptSessions: this.unlockedSessions.size > 0,
       ...(restored ? { unlocked: true, status: 'ready' as const, noteOrigins: restored.noteOrigins } : {}),
     };
     for (const listener of this.listeners) listener();

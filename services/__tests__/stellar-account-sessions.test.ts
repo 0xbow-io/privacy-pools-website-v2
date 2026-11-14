@@ -2,6 +2,7 @@
 // memory under its own address (DEV-644). The key derivation is stubbed (one
 // call = one wallet signature); everything else is the real StellarAccount.
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 
 mock.module('react-native', () => ({
   Platform: { OS: 'web', select: (o: Record<string, unknown>) => o.web ?? o.default },
@@ -10,6 +11,7 @@ process.env.EXPO_PUBLIC_TEST_MODE = 'true';
 
 const { stellarAccount } = await import('@/services/stellar/stellar-account');
 const { watchVarial } = await import('@/services/stellar/varial-watch');
+const { bindStellarWallet, showStellarSignOut } = await import('@/services/stellar/stellar-wallet-binding');
 
 const A = 'GAIH3ULLFQ4DGSECF2AR555KZ4KNDGEKN4AFI4SU2M7B43MGK3QJZNSR';
 const B = 'GCFONE23AB7Y6C5YZOMKUKGETPIAJA4QOYLS5VNS4JHBGKRZCPYHDLW7';
@@ -305,5 +307,69 @@ describe('Varial selecting an account this site is not allowed for yet', () => {
     expect(internals.unlockedSessions.size).toBe(0);
     stellarAccount.bind(A, signer);
     expect(stellarAccount.getSnapshot().unlocked).toBe(false);
+  });
+});
+
+describe('Sign Out stays reachable while sessions are kept', () => {
+  // The wallet states the provider produces (scripts/stellar-wallet-provider.test.ts): connected,
+  // after the watcher's revoked path (drop, signedOut stays false), and after Disconnect.
+  const connected = (address: string) => ({ address, signer, isConnected: true, signedOut: false });
+  const lost = { address: null, signer: null, isConnected: false, signedOut: false };
+  const disconnected = { address: null, signer: null, isConnected: false, signedOut: true };
+  const header = (wallet: { isConnected: boolean; signedOut: boolean }) => showStellarSignOut({
+    activeIsStellar: true,
+    walletConnected: wallet.isConnected,
+    signedOut: wallet.signedOut,
+    keptSessions: stellarAccount.getSnapshot().keptSessions,
+  });
+
+  test('a revoke with kept sessions shows Sign Out, and using it makes A sign again', async () => {
+    bindStellarWallet(stellarAccount, connected(A));
+    await stellarAccount.ensureSession();
+    bindStellarWallet(stellarAccount, connected(B));
+    await stellarAccount.ensureSession();
+    expect(header(connected(B))).toBe(false);
+
+    // Revoked in Varial, or an account the site is not allowed for: no account is connected.
+    bindStellarWallet(stellarAccount, lost);
+    expect(stellarAccount.getSnapshot().address).toBeNull();
+    expect(stellarAccount.getSnapshot().keptSessions).toBe(true);
+    expect(header(lost)).toBe(true);
+
+    // Sign Out (the provider's disconnect) forgets every kept session.
+    bindStellarWallet(stellarAccount, disconnected);
+    expect(internals.unlockedSessions.size).toBe(0);
+    expect(stellarAccount.getSnapshot().keptSessions).toBe(false);
+    expect(header(disconnected)).toBe(false);
+
+    bindStellarWallet(stellarAccount, connected(A));
+    expect(stellarAccount.getSnapshot().unlocked).toBe(false);
+    await stellarAccount.ensureSession();
+    expect(signatures).toEqual([A, B, A]);
+  });
+
+  test('a lost account with nothing unlocked offers no Sign Out', () => {
+    bindStellarWallet(stellarAccount, connected(A));
+    bindStellarWallet(stellarAccount, lost);
+    expect(stellarAccount.getSnapshot().keptSessions).toBe(false);
+    expect(header(lost)).toBe(false);
+  });
+
+  test('the rule: Stellar selected, no connected account, not signed out, sessions kept', () => {
+    const base = { activeIsStellar: true, walletConnected: false, signedOut: false, keptSessions: true };
+    expect(showStellarSignOut(base)).toBe(true);
+    expect(showStellarSignOut({ ...base, activeIsStellar: false })).toBe(false);
+    expect(showStellarSignOut({ ...base, walletConnected: true })).toBe(false);
+    expect(showStellarSignOut({ ...base, signedOut: true })).toBe(false);
+    expect(showStellarSignOut({ ...base, keptSessions: false })).toBe(false);
+  });
+
+  test('the header renders the button from the rule and it calls Disconnect', () => {
+    const src = readFileSync('components/ui/header.tsx', 'utf8');
+    expect(src).toMatch(/showStellarSignOut\(\{\s*activeIsStellar,\s*walletConnected: stellarWallet\.isConnected,\s*signedOut: stellarWallet\.signedOut,\s*keptSessions: stellarKeptSessions,\s*\}\)/);
+    const button = src.slice(src.indexOf('{showStandaloneStellarSignOut && ('), src.indexOf('testID="header-stellar-sign-out"'));
+    expect(button).toContain('stellarWallet.disconnect()');
+    const hook = readFileSync('hooks/use-stellar-session.ts', 'utf8');
+    expect(hook).toContain('bindStellarWallet(stellarAccount, { address, signer, isConnected, signedOut })');
   });
 });
