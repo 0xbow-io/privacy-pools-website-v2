@@ -12,6 +12,8 @@ type ShareEntryArgs = {
   maxSharesExact: string;
   displayedMax: string;
   denomination?: 'underlying' | 'usd';
+  /** Payout entry rounds up; an exact-input swap budget rounds down. */
+  rounding?: 'up' | 'down';
   usdPriceExact?: string;
   /**
    * Default true: an entry above the cap is cut to the cap (Withdraw, Send).
@@ -57,7 +59,11 @@ export function shareAmountFromUnderlying(args: ShareEntryArgs & { preview?: boo
   const cap = parseTokenAmount(maxSharesExact, rate.shareDecimals);
   if (assets === 0n) return result('0');
   if (isDisplayedMax) return result(formatUnits(cap, rate.shareDecimals));
-  const shares = assets * 10n ** BigInt(rate.shareDecimals) / rate.assetsPerShare;
+  // The entered coin amount is a minimum payout. Round shares up so redeeming
+  // them cannot leave the payee one underlying base unit short. MAX above keeps
+  // the exact existing shares, and the cap below still prevents overspending.
+  const numerator = assets * 10n ** BigInt(rate.shareDecimals);
+  const shares = numerator / rate.assetsPerShare + (args.rounding !== 'down' && numerator % rate.assetsPerShare > 0n ? 1n : 0n);
   const kept = args.clamp === false || shares <= cap ? shares : cap;
   return result(formatUnits(kept, rate.shareDecimals), shares > cap);
 }

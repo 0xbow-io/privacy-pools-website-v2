@@ -1,3 +1,4 @@
+import { BULK_REGISTRY_INTERVAL_MS, refreshBulkKeystoreRegistry } from '@/services/keystore-bulk-feed';
 /**
  * THE list of public feeds this app fetches.
  *
@@ -16,9 +17,12 @@
  *
  * Adding a feed here costs every user a request they may not need. That is the
  * trade: a request set that varies per session is a fingerprint, and a request
- * set that is a build constant removes that choice from the session. Only
- * CALLER-INDEPENDENT data belongs here: the zero-argument signature does not
- * prevent a closure from capturing user state, so definitions need review.
+ * set that is a build constant removes that choice from the session.
+ * Stellar testnet is enabled in staging; other environments retain the
+ * page-load opt-in, avoiding its public RPC for visitors who have not enabled it.
+ * Its cadence is still independent of actions within the session. Only CALLER-INDEPENDENT data belongs here:
+ * the zero-argument signature does not prevent a closure from capturing user
+ * state, so definitions need review.
  *
  * See services/public-feed-scheduler.ts for the timing argument in full.
  *
@@ -27,6 +31,7 @@
  * from here in components; never import this from a test.
  */
 import apiClient from '@/services/api-client';
+import { isDebugModeActive } from '@/components/debug-provider';
 import { publicFeeds } from '@/services/public-feed-scheduler';
 import { aspBackoff, probeAsp, startAspRequests, stopAspRequests } from '@/services/egress-fetch';
 import { ASP_BACKOFF_PROBE_MS } from '@/services/asp-backoff';
@@ -54,7 +59,7 @@ import {
 } from '@/services/yield-feed-grid';
 import { getConfiguredYieldDeployments } from '@/config/yield';
 import { getAllPrices, getTokenPrices } from '@/services/price-service';
-import { getChainConfig, supportedEvmChainIds } from '@/config/chains';
+import { getChainConfig, STELLAR_OPT_IN, supportedEvmChainIds } from '@/config/chains';
 import {
   feedLabelDecisions,
   LABEL_DECISIONS_INTERVAL_MS,
@@ -100,6 +105,9 @@ import {
   fetchLifiVerifiedTokens,
   LIFI_VERIFIED_TOKENS_INTERVAL_MS,
 } from '@/services/lifi-token-list';
+import { STELLAR_TESTNET_ID } from '@/config/stellar-deployment';
+import { fetchStellarFees, fetchStellarDepositVettingFee } from '@/services/stellar/stellar-fee-feed';
+import { FEED_STELLAR_DEPOSIT_FEE, FEED_STELLAR_FEES, STELLAR_FEE_INTERVAL_MS } from '@/services/stellar-fee-estimate';
 import { fetchGasPrice } from '@/services/gas-price';
 import { POINTS_ENABLED } from '@/config/points';
 import { feedPointsEpochs, fetchPointsFeed, POINTS_FEED_INTERVAL_MS, type PointsFeedValue } from '@/services/points-feed';
@@ -121,6 +129,8 @@ import {
 
 /** One minute, the cadence the hand-rolled queries already used. */
 const MINUTE = 60_000;
+// Snapshot at page load: enabling debug or changing networks later cannot start polling.
+const STELLAR_FEED_ENABLED = !!getChainConfig(STELLAR_TESTNET_ID) && (STELLAR_OPT_IN || isDebugModeActive());
 
 export const FEED_ASSETS_STATS_ALL = 'assets-stats:all';
 export const FEED_GLOBAL_STATISTICS = 'global-statistics';
@@ -197,6 +207,21 @@ export function startPublicFeeds(): void {
       retryMs: ASP_PUBLIC_KEY_RETRY_MS,
       fetch: fetchAspPublicKey,
     });
+    // Stellar is enabled in staging or by opt-in; the feed set stays fixed for this page load.
+    if (STELLAR_FEED_ENABLED) {
+      publicFeeds.register({
+        key: FEED_STELLAR_FEES,
+        intervalMs: STELLAR_FEE_INTERVAL_MS,
+        maxAgeMs: 2 * STELLAR_FEE_INTERVAL_MS,
+        fetch: fetchStellarFees,
+      });
+      publicFeeds.register({
+        key: FEED_STELLAR_DEPOSIT_FEE,
+        intervalMs: STELLAR_FEE_INTERVAL_MS,
+        maxAgeMs: 2 * STELLAR_FEE_INTERVAL_MS,
+        fetch: fetchStellarDepositVettingFee,
+      });
+    }
     // Register a fixed scope set so chain selection never starts a new feed.
     // Raw and mapped views share the same cached, in-flight price response.
     for (const chainId of supportedEvmChainIds) {
@@ -329,6 +354,11 @@ export function startPublicFeeds(): void {
       // to the same interval, so an extra tick before that window elapses is
       // a cheap no-op read, not a second request.
       const chainKeystoreAddress = LEGACY_CONFIG?.keystore ?? getChainConfig(chainId)?.contracts?.keystoreAddress;
+      publicFeeds.register<string>({
+        key: `bulk-keystore-registry:${chainId}`,
+        intervalMs: BULK_REGISTRY_INTERVAL_MS,
+        fetch: () => refreshBulkKeystoreRegistry(chainId, chainKeystoreAddress),
+      });
       publicFeeds.register<SyncOutcome>({
         key: feedViewingKeyRegistry(chainId),
         intervalMs: FULL_RESYNC_INTERVAL_MS,

@@ -406,8 +406,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
             onStage: (stage) => { if (live()) setLoadingMessage(describeStellarStage(stage)); },
           });
           log('info', 'Ragequit', 'Stellar ragequit submitted', { txHash: hash });
-          setTxHash(hash);
-          setTxChainId(STELLAR_TESTNET_ID);
+          if (live()) { setTxHash(hash); setTxChainId(STELLAR_TESTNET_ID); }
           refetchNotes();
           if (live()) setStep('success');
         } catch (err) {
@@ -430,8 +429,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
         setLoadingMessage('Submitting ragequit transaction...');
         const { txDigest } = await suiSession.ragequit({ note: target, coinType: target.coinType, shouldContinue: live });
         log('info', 'Ragequit', 'Sui ragequit submitted', { txDigest });
-        setTxHash(txDigest);
-        setTxChainId(SUI_TESTNET_ID);
+        if (live()) { setTxHash(txDigest); setTxChainId(SUI_TESTNET_ID); }
         refetchNotes();
         await invalidateTransactionCaches(queryClient);
         if (live()) setStep('success');

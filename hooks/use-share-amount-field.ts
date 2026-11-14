@@ -15,8 +15,8 @@ import { underlyingFeedPrice } from '@/services/share-rates';
 // kept and converted once the rate arrives.
 // Only explicit Withdraw/Send edits cross the tested entry boundary, including
 // USD edits using an exact decimal price snapshot. Untouched MAX stays shares.
-export function useShareAmountField(args: { amount: string; symbol: string; chainId: number; maxSharesExact: string; capKnown: boolean; onAmountResolved: (shares: string) => void; underlyingEntry?: boolean; clampToMax?: boolean }) {
-  const { amount, symbol, chainId, maxSharesExact, capKnown, onAmountResolved, underlyingEntry = true, clampToMax = true } = args;
+export function useShareAmountField(args: { amount: string; symbol: string; chainId: number; maxSharesExact: string; capKnown: boolean; onAmountResolved: (shares: string) => void; underlyingEntry?: boolean; clampToMax?: boolean; sessionKey?: string | number }) {
+  const { amount, symbol, chainId, maxSharesExact, capKnown, onAmountResolved, underlyingEntry = true, clampToMax = true, sessionKey = '' } = args;
   const { rateFor } = useShareRates();
   const prices = useAllChainsPriceMap(chainId);
   const rate = underlyingEntry && isShareSymbol(symbol) ? rateFor(chainId, getTokenMetadataBySymbol(symbol, chainId)?.address) : undefined;
@@ -29,7 +29,10 @@ export function useShareAmountField(args: { amount: string; symbol: string; chai
   // A share field with no rate yet: the exact amount is known, its worth is not.
   const waitingRate = !rate && underlyingEntry && isShareSymbol(symbol);
   const rateKey = shareRateSnapshotKey(rate);
-  const fieldKey = `${chainId}:${symbol}:${underlyingEntry}`;
+  // sessionKey: a form that closes and reopens (the Swap modal) starts a new
+  // session, so a draft typed in the last one, still waiting on a rate, never
+  // converts into the next one's amount.
+  const fieldKey = `${chainId}:${symbol}:${underlyingEntry}:${sessionKey}`;
   const [edit, setEdit] = useState<{ shares: string; text: string; rateKey: string; priceExact?: string; denomination: 'underlying' | 'usd'; tooSmall: boolean; fieldKey: string; maxSharesExact: string; capKnown: boolean; pending: boolean } | null>(null);
   // Rounded DOWN from the exact converted decimal (cubic on #324), the balance
   // view's own figure (shareFieldFigure): MAX reads what the balance reads.
@@ -55,7 +58,7 @@ export function useShareAmountField(args: { amount: string; symbol: string; chai
         fieldKey, maxSharesExact, capKnown, pending: true });
       return amount;
     }
-    const shares = cleaned ? shareAmountFromUnderlying({ text: cleaned, rate, maxSharesExact, displayedMax: denomination === 'usd' ? usdDisplay(maxSharesExact) : numericDisplay(maxSharesExact), denomination, usdPriceExact: priceExact, clamp: clampToMax }) : '';
+    const shares = cleaned ? shareAmountFromUnderlying({ text: cleaned, rate, maxSharesExact, displayedMax: denomination === 'usd' ? usdDisplay(maxSharesExact) : numericDisplay(maxSharesExact), denomination, usdPriceExact: priceExact, clamp: clampToMax, rounding: clampToMax ? 'up' : 'down' }) : '';
     const cap = formatUnits(parseTokenAmount(maxSharesExact, rate.shareDecimals), rate.shareDecimals);
     const clampedText = denomination === 'usd' ? usdDisplay(maxSharesExact) : numericDisplay(maxSharesExact);
     setEdit({ shares, text: shares && shares === cap && cap !== '0' ? clampedText : cleaned, rateKey, priceExact, denomination,
@@ -85,7 +88,7 @@ export function useShareAmountField(args: { amount: string; symbol: string; chai
       if (!rate) return null; // Raw-unit presets use the existing share guard.
       if (!capKnown) return null;
       return shareAmountFromUnderlying({ text, rate, maxSharesExact,
-        displayedMax: numericDisplay(maxSharesExact), preview: true }).exceedsMax;
+        displayedMax: numericDisplay(maxSharesExact), rounding: clampToMax ? 'up' : 'down', preview: true }).exceedsMax;
     },
     toShares,
   };

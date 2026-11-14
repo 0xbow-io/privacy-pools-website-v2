@@ -248,3 +248,32 @@ change can remove.
 
 References: `v2-monorepo/docs/PRIVACY_RPC_METADATA_AUDIT.md`,
 `v2-monorepo/docs/PRIVACY_RPC_METADATA_FIX_PLAN.md`, asp-v2 PR #115.
+
+## L2BEAT: registry outages and portfolio lookups
+
+An unavailable bulk registry must remain unknown. Identity, recipient and SDK
+account reads use only the grid’s local registry and confirmed registration
+records. There is no per-call override to ask the RPC about an account during an
+outage, and a lookup no longer triggers an ASP delta request either.
+
+The fallback runs on the 30-second background grid for every configured
+keystore. If both ASP registries are current it sends nothing. Otherwise it
+reconstructs the whole registry from `AuthPolicySet` and `ViewingKeySet` public
+logs, without indexed account filters. A tick reads at most eight configured
+block ranges. Bootstrap can take multiple ticks, especially on chains with
+small RPC range limits; no partial registry authorizes absence. Subsequent
+sweeps replay a shared aligned tail from a saved baseline, so rotated or deleted
+viewing keys cannot be revived by overlapping ranges. A detected reorg or RPC
+failure invalidates the fallback. Its age is measured from the sweep's head
+capture, not its completion, so a slow bootstrap cannot masquerade as fresh.
+Once current, it refreshes every five minutes while the ASP is unavailable.
+Requests remain public background data; RPC operators still see client network
+metadata. No account, key hash, commitment, nullifier or user action selects a
+range or starts a scan. Existing write refusals remain until a complete source
+can answer safely.
+
+The app no longer sends the connected address to Alchemy’s Portfolio API. The
+default token picker uses configured assets. Wider on-chain holdings discovery
+is limited to explicit custom-RPC builds; it does not silently substitute the
+shared Alchemy service. This removes automatic discovery of arbitrary holdings
+from the default picker rather than trading that privacy property for coverage.

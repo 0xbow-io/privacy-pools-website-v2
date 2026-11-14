@@ -1,4 +1,4 @@
-// Switching the Freighter account keeps each unlocked account's session in
+// Switching the Varial account keeps each unlocked account's session in
 // memory under its own address (DEV-644). The key derivation is stubbed (one
 // call = one wallet signature); everything else is the real StellarAccount.
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
@@ -9,7 +9,7 @@ mock.module('react-native', () => ({
 process.env.EXPO_PUBLIC_TEST_MODE = 'true';
 
 const { stellarAccount } = await import('@/services/stellar/stellar-account');
-const { watchFreighter } = await import('@/services/stellar/freighter-watch');
+const { watchVarial } = await import('@/services/stellar/varial-watch');
 
 const A = 'GAIH3ULLFQ4DGSECF2AR555KZ4KNDGEKN4AFI4SU2M7B43MGK3QJZNSR';
 const B = 'GCFONE23AB7Y6C5YZOMKUKGETPIAJA4QOYLS5VNS4JHBGKRZCPYHDLW7';
@@ -17,7 +17,7 @@ const C = 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H';
 const TESTNET = 'Test SDF Network ; September 2015';
 
 // The wallet: every transaction it is asked to sign, and a gate that holds the
-// approval open (the Freighter popup) while a test switches accounts.
+// approval open (the Varial popup) while a test switches accounts.
 let walletSigned: string[] = [];
 let walletGate: Promise<void> | null = null;
 let onWalletAsked: (() => void) | null = null;
@@ -46,7 +46,7 @@ let signatures: string[] = [];
 let gate: Promise<void> | null = null;
 
 // Only the SDK session is faked: it signs through the store's real session
-// wallet, the way the SDK's FreighterWalletInteractor does on submission.
+// wallet, the way the SDK's wallet interactor does on submission.
 function fakeSession(owner: string, n: number, wallet: Wallet) {
   return {
     owner,
@@ -224,10 +224,10 @@ describe('Signing with a kept session after switching back', () => {
   });
 });
 
-describe('Freighter selecting an account this site is not allowed for yet', () => {
-  // Freighter scopes site access per account: an account the site was never
+describe('Varial selecting an account this site is not allowed for yet', () => {
+  // Varial scopes site access per account: an account the site was never
   // allowed for reads as "" with isAllowed false, the same as a revoked site.
-  function fakeFreighter() {
+  function fakeVarial() {
     const state = { selected: A, allowed: new Set([A, B]) };
     const api = {
       getAddress: async () => ({ address: state.allowed.has(state.selected) ? state.selected : '' }),
@@ -243,42 +243,42 @@ describe('Freighter selecting an account this site is not allowed for yet', () =
   // the account signed in, and only Disconnect signs out.
   function follow(api: never, start: string) {
     stellarAccount.bind(start, signer);
-    return watchFreighter(api, { address: start, passphrase: TESTNET }, {
+    return watchVarial(api, { address: start, passphrase: TESTNET }, {
       change: ({ address }) => stellarAccount.bind(address, signer),
       revoked: () => stellarAccount.bind(null, null, { keepSessions: true }),
     }, 2, 20);
   }
 
   test('A to B to unregistered C, then C registers: A and B stay unlocked, C signs once', async () => {
-    const freighter = fakeFreighter();
-    const watcher = follow(freighter.api, A);
+    const varial =fakeVarial();
+    const watcher = follow(varial.api, A);
     try {
       await stellarAccount.ensureSession();
-      freighter.state.selected = B;
+      varial.state.selected = B;
       await settle();
       expect(stellarAccount.getSnapshot().address).toBe(B);
       await stellarAccount.ensureSession();
 
-      freighter.state.selected = C;
+      varial.state.selected = C;
       await settle();
       expect(stellarAccount.getSnapshot().address).toBeNull();
       expect(stellarAccount.getSnapshot().unlocked).toBe(false);
 
-      // The user allows the site for C in Freighter.
-      freighter.state.allowed.add(C);
+      // The user allows the site for C in Varial.
+      varial.state.allowed.add(C);
       await settle();
       expect(stellarAccount.getSnapshot().address).toBe(C);
       expect(stellarAccount.getSnapshot().unlocked).toBe(false);
       await stellarAccount.ensureSession();
       expect(signatures).toEqual([A, B, C]);
 
-      freighter.state.selected = A;
+      varial.state.selected = A;
       await settle();
       expect(stellarAccount.getSnapshot().address).toBe(A);
       expect(stellarAccount.getSnapshot().unlocked).toBe(true);
       expect(await exit()).toEqual({ txHash: 'signed:exit-GA-0x1' });
 
-      freighter.state.selected = B;
+      varial.state.selected = B;
       await settle();
       expect(stellarAccount.getSnapshot().address).toBe(B);
       expect(stellarAccount.getSnapshot().unlocked).toBe(true);
@@ -290,11 +290,11 @@ describe('Freighter selecting an account this site is not allowed for yet', () =
   });
 
   test('signing out after the active account was lost forgets every kept session', async () => {
-    const freighter = fakeFreighter();
-    const watcher = follow(freighter.api, A);
+    const varial =fakeVarial();
+    const watcher = follow(varial.api, A);
     try {
       await stellarAccount.ensureSession();
-      freighter.state.selected = C;
+      varial.state.selected = C;
       await settle();
       expect(stellarAccount.getSnapshot().address).toBeNull();
       expect(internals.unlockedSessions.has(A)).toBe(true);

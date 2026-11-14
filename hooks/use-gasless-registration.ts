@@ -428,7 +428,7 @@ export function useGaslessRegistration(options?: {
     // Auth set without a viewing key is not "already registered": it needs a top-up.
     let mode: GaslessRegistrationMode;
     try {
-      const status = await keystoreStatusForChain(chainId, { chainFallback: true });
+      const status = await keystoreStatusForChain(chainId);
       if (status === 'unknown') throw new Error(`Registration on chain ${chainId} is still syncing. Try again in a moment.`);
       setReceiveSetup(sessionAddress ?? owner, chainId, receiveSetupFromIdentity(status), 'onchain');
       // 'incompatible' is registered under another unlock: nothing to register or finish.
@@ -563,7 +563,7 @@ export function useGaslessRegistration(options?: {
 
   /** Re-checks onchain that the plan's mode still matches the account's state. */
   const assertModeStillApplies = useCallback(async (mode: GaslessRegistrationMode) => {
-    const status = await keystoreStatusForChain(chainId, { chainFallback: true });
+    const status = await keystoreStatusForChain(chainId);
     if (status === 'unknown') {
       throw new Error('Could not read this wallet\'s registration just now. Nothing was sent. Retry in a moment.');
     }

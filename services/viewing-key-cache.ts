@@ -1,3 +1,4 @@
+import { readBulkRegistry } from '@/services/keystore-bulk-fallback';
 import { policedFetch } from '@/services/egress-fetch';
 // Local cache of the on-chain Keystore's (account → viewing key)
 // registry, kept in sync with the ASP's /viewing-keys delta endpoint.
@@ -9,12 +10,9 @@ import { policedFetch } from '@/services/egress-fetch';
 // the chain RPC. The privacy property the protocol relies on demands
 // the lookup happen locally.
 //
-// Failover: if the ASP endpoint returns 404 (not deployed yet on
-// this environment), we mark the endpoint unavailable for the
-// session and fall back to the chain RPC's `Keystore.viewingKeys()`
-// — privacy-leaking, but the only correct thing while we wait for
-// the rollout. Once the endpoint is up, the cache populates on
-// first sync and stays current via id-cursor deltas.
+// Failover: the fixed background grid reconstructs a complete registry from
+// public keystore events. Lookups never start a request and unknown stays
+// unknown until either bulk source is current.
 //
 // Storage: per-chain + per-keystore entry in the platform's persistent store
 // (web localStorage, native SecureStore). Cursor is the `keystore_event.id`
@@ -23,7 +21,7 @@ import { policedFetch } from '@/services/egress-fetch';
 import { Platform } from 'react-native';
 import { envScopedStorageKey } from '@/config/app-environment';
 import * as SecureStore from 'expo-secure-store';
-import type { Address, Hex, PublicKey } from '@/services/sdk-types';
+import type { Address, PublicKey } from '@/services/sdk-types';
 import { ASP_URL } from '@/config/env';
 import { notifyRegistrySynced } from '@/services/keystore-registry-events';
 import { resolveConfiguredEntrypoint } from '@/services/pool-entrypoint';
@@ -306,122 +304,31 @@ export async function syncViewingKeys(
  * freshness, or use `lookupViewingKey` for the full pre-flight flow.
  */
 export function getCachedViewingKey(chainId: number, account: Address | string, keystoreAddress?: string): PublicKey | null {
+  const bulk = readBulkRegistry(chainId, keystoreAddress);
+  if (!isAspViewingRegistryFresh(chainId, keystoreAddress) && bulk) return (bulk.viewing[account.toLowerCase()] as PublicKey | undefined) ?? null;
   const registry = readRegistry(chainId, keystoreAddress);
   const key = registry.byAccount[account.toLowerCase()];
   return (key as PublicKey | undefined) ?? null;
 }
 
-export interface RpcFallback {
-  /** Last-resort lookup against `Keystore.viewingKeys(account)`. */
-  getViewingKey(account: Address): Promise<Hex | string>;
-}
-
 export interface LookupResult {
   viewingKey: PublicKey | null;
-  /** Where the answer came from, useful for error reporting/UI. */
-  source: 'cache' | 'rpc';
-  /** True when the ASP endpoint is responding. False after a 404. */
+  source: 'cache';
   aspAvailable: boolean;
-  /** The RPC fallback threw: a null `viewingKey` means unknown, not unregistered. */
   lookupFailed?: boolean;
 }
-
 export interface LookupViewingKeyOptions {
-  /**
-   * Keystore contract whose registry is being queried. Required for profile
-   * safety: Sepolia's current and legacy pool profiles use different keystores.
-   */
   keystoreAddress?: Address | string;
-  /**
-   * Set false when the ASP bulk endpoint is not known to serve this keystore.
-   * The lookup then skips local/ASP cache data and asks the selected keystore
-   * contract through the caller's RPC fallback.
-   */
   useAspCache?: boolean;
 }
-
-function isZeroLikeKey(key: string | null | undefined): boolean {
-  if (!key) return true;
-  return /^0x0*$/i.test(key);
-}
-
-/**
- * Pre-flight lookup: sync deltas from the ASP, look up locally, and
- * fall through to RPC only when the endpoint isn't deployed yet.
- *
- * Privacy: when the ASP is available, neither the ASP nor the chain
- * RPC ever sees the recipient address — sync pulls the whole
- * registry slice (same payload for everyone), lookup is a local
- * map read. RPC fallback fires while the endpoint is being rolled out, after a
- * cache miss on a transient sync failure, or when a caller disables ASP cache
- * for a keystore the endpoint is not known to serve.
- */
-export async function lookupViewingKey(
-  chainId: number,
-  account: Address,
-  rpcFallback: RpcFallback,
-  options: LookupViewingKeyOptions = {},
-): Promise<LookupResult> {
+/** Pure local preflight. Neither a miss nor opening a form starts a request. */
+export async function lookupViewingKey(chainId: number, account: Address, options: LookupViewingKeyOptions = {}): Promise<LookupResult> {
   const { keystoreAddress, useAspCache = true } = options;
-  const sync: SyncOutcome = useAspCache
-    ? await syncViewingKeys(chainId, keystoreAddress)
-    : { ok: false, reason: 'disabled' };
-
-  // A synced registry answers straight from the local map: a HIT is always
-  // trustworthy (the account really is registered). A MISS is only
-  // trustworthy as 'unregistered' when the most recent full re-pull for this
-  // scope actually succeeded — the delta cursor alone can skip entries, and a
-  // FAILED full pull means the registry may still be incomplete in a way
-  // this miss cannot tell apart from "really unregistered". Reporting that
-  // as a confident answer could route a registered recipient through the
-  // unregistered / one-time-link flow (review of #130), so it falls through
-  // to the stale-cache/RPC handling below instead.
-  //
-  // The full pull itself no longer runs from here: it used to fire on the
-  // first miss of the throttle window, which made THIS lookup's timing
-  // announce the moment a specific recipient was checked, even though the
-  // bulk payload hides who. It now runs on the fixed background feed grid
-  // (services/public-feeds.ts refreshViewingKeyRegistry) on the same schedule
-  // for every client regardless of what anyone looks up.
-  if (sync.ok) {
-    const cached = getCachedViewingKey(chainId, account, keystoreAddress);
-    if (cached) {
-      return { viewingKey: isZeroLikeKey(cached) ? null : cached, source: 'cache', aspAvailable: true };
-    }
-    if (!fullResyncFailed.get(cacheScope(chainId, keystoreAddress))) {
-      return { viewingKey: null, source: 'cache', aspAvailable: true };
-    }
-  }
-
-  if (!sync.ok && sync.reason !== 'not-deployed' && sync.reason !== 'disabled') {
-    // Stale-cache path: ASP is up but the delta fetch hit a transient error.
-    // Trusting whatever's in localStorage gives the privacy-correct answer
-    // for hits; misses fall through to RPC because we can't tell whether
-    // they're "unregistered" or "a sync we missed would have added them."
-    const cached = getCachedViewingKey(chainId, account, keystoreAddress);
-    if (cached) {
-      return {
-        viewingKey: isZeroLikeKey(cached) ? null : cached,
-        source: 'cache',
-        aspAvailable: true,
-      };
-    }
-  }
-
-  // 404 (endpoint not deployed) or stale-cache miss: ask the chain
-  // RPC. This is per-recipient and leaks intent to the chain RPC
-  // provider, but it's the only way to get a definitive answer
-  // without the ASP endpoint.
-  try {
-    const key = await rpcFallback.getViewingKey(account);
-    return {
-      viewingKey: isZeroLikeKey(key) ? null : (key as PublicKey),
-      source: 'rpc',
-      aspAvailable: sync.ok,
-    };
-  } catch {
-    return { viewingKey: null, source: 'rpc', aspAvailable: sync.ok, lookupFailed: true };
-  }
+  const aspAvailable = useAspCache && isAspViewingRegistryFresh(chainId, keystoreAddress);
+  const bulk = readBulkRegistry(chainId, keystoreAddress);
+  if (aspAvailable) return { viewingKey: (readRegistry(chainId, keystoreAddress).byAccount[account.toLowerCase()] as PublicKey | undefined) ?? null, source: 'cache', aspAvailable };
+  if (bulk) return { viewingKey: (bulk.viewing[account.toLowerCase()] as PublicKey | undefined) ?? null, source: 'cache', aspAvailable: false };
+  return { viewingKey: null, source: 'cache', aspAvailable, lookupFailed: true };
 }
 
 /**
@@ -451,6 +358,10 @@ export function clearViewingKeysCache(chainId: number, keystoreAddress?: string)
  * (a hit is current, a miss means unregistered). Pure local state, no request.
  */
 export function isViewingKeyRegistryFresh(chainId: number, keystoreAddress?: string, now = Date.now()): boolean {
+  return isAspViewingRegistryFresh(chainId, keystoreAddress, now) || readBulkRegistry(chainId, keystoreAddress, now) !== null;
+}
+
+export function isAspViewingRegistryFresh(chainId: number, keystoreAddress?: string, now = Date.now()): boolean {
   const scope = cacheScope(chainId, keystoreAddress);
   // The persisted stamp lets a reload inside the window answer at once; this
   // process's own failed full pull still wins.

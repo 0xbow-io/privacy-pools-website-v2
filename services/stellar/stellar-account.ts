@@ -30,6 +30,9 @@
  * (stellar-request-storage.ts), since nothing else can rebuild a blind
  * request's note secrets, and making one downloads a request backup.
  */
+import { feeWithinReviewed, transferFeeBudget } from '@/services/relayer-fee-jitter';
+import { RelayFeeIncreasedError } from '@/services/relayed-withdrawal';
+import { stellarWithdrawalQuote } from '@/services/stellar/stellar-withdrawal-quote';
 import type {
   Hex,
   IRelayerInteractor,
@@ -45,13 +48,11 @@ import type {
 
 import {
   STELLAR_KEY_APP_IDENTIFIER,
-  estimateStellarRelayFee,
   STELLAR_RELAYER_CHAIN_ID,
   STELLAR_TESTNET_CONTRACTS,
   STELLAR_TESTNET_DEPLOYMENT_LEDGER,
   STELLAR_TESTNET_NETWORK,
   STELLAR_TESTNET_RPC_URL,
-  STELLAR_TRANSFER_RELAY_FEE_ESTIMATE,
   requireStellarRelayerUrl,
 } from '@/config/stellar-deployment';
 import { STELLAR_TESTNET_ID } from '@/config/chains';
@@ -97,12 +98,13 @@ import {
 import { bumpPaymentRequestRevision } from '@/services/payment-request-revision';
 import { registerDebugSnapshot } from '@/services/debug-snapshots';
 import { blindClaimNote, blindNoteAddressHash, isUnregisteredRecipientError, toImportableNote, type StellarClaimNote } from '@/services/stellar/stellar-claim';
+import { relayTransferOnce, type TransferOnceAction, type TransferOnceRelayer, type TransferOnceSession } from '@/services/stellar/stellar-transfer-once';
 import { findSentClaim, readSentClaims, saveSentClaim, SENT_CLAIMS_BASE_KEY, setSentClaimTx } from '@/services/stellar/stellar-sent-claims';
 import { CLAIMED_NOTES_BASE_KEY, DEPOSITS_FOR_BASE_KEY, readClaimedNotes, readDepositsFor, recordClaimedNotes, recordDepositFor } from '@/services/stellar/stellar-activity-records';
 import { isStellarAccountAddress, requestStates, type StellarRequestState } from '@/services/stellar/stellar-request';
 import type { StellarSdkPaymentRequest } from '@/services/payment-request-codec';
 import { envScopedStorageKey } from '@/config/app-environment';
-import { buildStellarNoteOrigins, reconstructStellarSpends, type StellarNoteOrigins } from '@/services/stellar-activity';
+import { buildStellarNoteOrigins, canonicalCommitment, reconstructStellarSpends, type StellarNoteOrigins } from '@/services/stellar-activity';
 import { withSigningWindow } from '@/services/stellar/stellar-signing-window';
 
 import { rowStatus, type RowStatus } from '@/services/registration-rows';
@@ -130,7 +132,7 @@ export interface StellarAccountSnapshot {
   /**
    * Where each of these notes came from on chain (deposit + depositor, or a
    * transact output) and when, read from the pool's event history in bulk on
-   * the sync clock. Null until the first sync reads it. Local derivation input
+   * the sync clock, or from our own confirmed deposit receipt. Local derivation input
    * for the activity rows (services/stellar-activity.ts).
    */
   noteOrigins: StellarNoteOrigins | null;
@@ -196,6 +198,8 @@ class StellarAccount {
   // moment it was built: switching away and back cancels the operation, never
   // the kept session.
   private operation: { generation: number } | null = null;
+  // The generation whose registration was confirmed on chain (-1: none yet).
+  private registeredGeneration = -1;
   private registrationGuard: (() => void) | null = null;
   // Memory only, like the session's own keys: matches this account's spends
   // in the pool's Transacted events (services/stellar-activity.ts).
@@ -217,7 +221,7 @@ class StellarAccount {
   /**
    * Follows the wallet. A different address keeps the previous account's unlocked session in
    * memory and restores the new one's if it has one. A null address signs out and forgets every
-   * kept session, unless `keepSessions`: the wallet lost its active account (Freighter switched to
+   * kept session, unless `keepSessions`: the wallet lost its active account (Varial switched to
    * an account this site is not allowed for yet) but the user did not sign out here.
    */
   bind(address: string | null, signer: StellarWalletProvider | null, opts: { keepSessions?: boolean } = {}) {
@@ -362,22 +366,24 @@ class StellarAccount {
     return true;
   }
 
-  /** Relays the first quoted option; refuses a receipt that did not spend this transfer's notes. */
-  private async relayPreparedTransfer(
+  /** One quote, one proof, one relay request (DEV-645); see stellar-transfer-once.ts. */
+  private async relayOnce(
     session: StellarPoolSession,
-    prepared: Awaited<ReturnType<StellarPoolSession['prepareTransfer']>>,
+    relayer: IRelayerInteractor<StellarAddress>,
+    params: TransferOnceAction & { maxFee: bigint },
   ): Promise<TransferResult<StellarAddress, StellarLog>> {
-    const option = prepared.relayOptions[0];
-    if (!option) throw new Error('The relayer did not return a quote.');
-    // Note selection and the UI reserve the estimate; a higher signed fee would come out of the slack.
-    if (BigInt(option.selectedQuote.quote.feeCommitment.feeAmount) > STELLAR_TRANSFER_RELAY_FEE_ESTIMATE) {
-      throw new Error('The relayer asks for more than the fee shown. Try again later.');
-    }
-    // The recipient's noteSecretsMap must stay: relayTransfer builds the note data itself, and without
-    // the map it encodes blind (secretless) notes the recipient can neither discover nor spend.
-    const result = await session.relayTransfer(option);
-    if (result.spentNullifiersConfirmed === false) throw new Error('The relayer reported a transaction that is not this transfer.');
-    return result;
+    const sdk = await loadStellarSdk();
+    return (await relayTransferOnce(
+      session as unknown as TransferOnceSession,
+      relayer as unknown as TransferOnceRelayer,
+      {
+        ...params,
+        tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
+        maxFee: params.maxFee,
+        maxInputs: sdk.MAX_INPUTS,
+        maxOutputs: sdk.MAX_OUTPUTS,
+      },
+    )) as unknown as TransferResult<StellarAddress, StellarLog>;
   }
 
   /**
@@ -431,7 +437,7 @@ class StellarAccount {
       // Required by the config schema even with an ASP override; never fetched.
       ipfsGatewayUrl: 'http://unused.invalid',
       protocolKeys,
-      // Each transaction's validity window starts when Freighter is asked to sign it
+      // Each transaction's validity window starts when Varial is asked to sign it
       // (stellar-signing-window.ts). The key derivation above signs through the bare signer.
       walletInteractor: { type: 'freighter', provider: this.sessionWallet(address, signer) },
       // In-memory: the account is persisted below via export/import after every
@@ -614,7 +620,7 @@ class StellarAccount {
           // it, so how many notes discovery finds changes no request.
           const rpc = this.rpc;
           const pass = <T,>(fn: () => Promise<T>) => (rpc ? rpc.withEventPage(fn) : fn());
-          const { exported, registered, noteOrigins } = await pass(async () => {
+          const { registered, noteOrigins } = await pass(async () => {
             await session.discoverNotes();
             if (address) await this.persist(session, address);
             const [exportedNow, registeredNow] = await Promise.all([
@@ -628,9 +634,17 @@ class StellarAccount {
               console.warn('[stellar] could not read the pool event history for activity', error);
               return null;
             });
-            return { exported: exportedNow, registered: registeredNow, noteOrigins: origins };
+            return { registered: registeredNow, noteOrigins: origins };
           });
+          // A deposit may finish while the event history is being read. Export
+          // again locally so this sync cannot replace its note with an older view.
+          const exported = await session.exportAccount();
           if (this.snapshot.address !== address) return;
+          if (noteOrigins) {
+            // Confirmed origins are immutable; a lagging index must not erase
+            // a receipt we already have. Indexed entries supply canonical times.
+            noteOrigins.byCommitment = { ...this.snapshot.noteOrigins?.byCommitment, ...noteOrigins.byCommitment };
+          }
           this.set({
             notes: exported.notes,
             paymentRequests: requestStates(exported),
@@ -680,6 +694,11 @@ class StellarAccount {
   }
 
   private async ensureRegistered(session: StellarPoolSession, generation: number, onStage?: StageListener, shouldContinue: () => boolean = () => true) {
+    if (this.registeredGeneration === generation && this.snapshot.registrationStatus === 'compatible') {
+      this.assertStillBound(generation);
+      if (!shouldContinue()) throw new Error('Superseded');
+      return;
+    }
     let attempted = false;
     try {
       await registerStellarAccount({
@@ -704,6 +723,7 @@ class StellarAccount {
       });
       this.assertStillBound(generation);
       if (!shouldContinue()) throw new Error('Superseded');
+      this.registeredGeneration = generation;
       this.set({ registered: true, registrationStatus: 'compatible' });
     } catch (error) {
       // Closing cannot undo a submitted step. Keep its status for the card,
@@ -815,6 +835,22 @@ class StellarAccount {
       }
       onStage?.('syncing');
       await this.refreshLocal(session, address);
+      if (!params.recipient && this.generation === generation) {
+        const closedAt = Date.parse(receipt.logs[0]?.ledgerClosedAt ?? '');
+        const previous = this.snapshot.noteOrigins;
+        this.set({ noteOrigins: {
+          ...previous,
+          complete: previous?.complete ?? false,
+          byCommitment: {
+            ...previous?.byCommitment,
+            [canonicalCommitment(prepared.pendingNote.commitment)]: {
+              kind: 'deposit', depositor: address, txHash,
+              ledger: Number(BigInt(receipt.blockNumber)),
+              time: Number.isFinite(closedAt) ? Math.floor(closedAt / 1000) : 0,
+            },
+          },
+        } });
+      }
       return {
         txHash,
         claimNotes: claim ? claim.notes.map((n) => ({ ...n, txHash })) : null,
@@ -826,7 +862,24 @@ class StellarAccount {
     });
   }
 
+  async quoteTransferFee(inputCount: number) {
+    const relayer = await this.connectRelayer(await loadStellarSdk());
+    const [info] = await relayer.getRelayers();
+    if (!info) throw new Error('The relayer did not return a quote.');
+    const quote = await relayer.getTransferQuote(info, {
+      asset: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId, commit: false,
+      shape: { n: inputCount, m: Math.min(2 * inputCount, 5) },
+    });
+    return BigInt(quote.feeAmount);
+  }
+
+  async quoteWithdrawal(params: { amount: bigint; recipient: string; inputCount: number }) {
+    const relayer = await this.connectRelayer(await loadStellarSdk());
+    return (await stellarWithdrawalQuote(relayer, params)).quote;
+  }
+
   withdraw(params: {
+    reviewedFee: bigint;
     amount: bigint;
     recipient: string;
     inputCommitments: Hex[];
@@ -854,28 +907,20 @@ class StellarAccount {
         // here. relayWithdraw checks the quote against the asset, recipient
         // and amount before it proves.
         const tokenId = STELLAR_TESTNET_CONTRACTS.nativeAssetContractId;
-        const [relayerInfo] = await relayer.getRelayers();
-        if (!relayerInfo) throw new Error('The relayer did not return a quote.');
-        const quote = await relayer.getWithdrawalQuote(relayerInfo, {
-          asset: tokenId,
-          commit: true,
-          recipient: params.recipient,
-          extraGas: false,
-          amount: params.amount.toString(),
-          // Priced by proof shape, as the SDK asks for it (n = m = inputs).
-          shape: { n: Math.min(params.inputCommitments.length, 5), m: Math.min(params.inputCommitments.length, 5) },
+        const selectedQuote = await stellarWithdrawalQuote(relayer, {
+          amount: params.amount, recipient: params.recipient, inputCount: params.inputCommitments.length,
         });
-        // The inputs were selected for amount + this estimate; a higher fee would not be covered.
-        if (BigInt(quote.feeAmount) > estimateStellarRelayFee(params.amount)) {
-          throw new Error('The relayer asks for more than the fee shown. Try again later.');
-        }
+        const { quote } = selectedQuote;
+        // Selection reserved the reviewed fee and the shared EVM allowance.
+        const fee = BigInt(quote.feeAmount);
+        if (!feeWithinReviewed(fee, params.reviewedFee)) throw new RelayFeeIncreasedError(params.reviewedFee, fee);
         const option = {
           inputCommitments: params.inputCommitments,
           amount: toHex(params.amount),
           tokenId,
           recipientAddress: params.recipient,
           extraGas: false,
-          selectedQuote: { relayerInfo, quote },
+          selectedQuote,
         };
         if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
         this.assertStillBound(generation);
@@ -892,6 +937,7 @@ class StellarAccount {
   }
 
   transfer(params: {
+    maxFee: bigint;
     amount: bigint;
     recipient: string;
     inputCommitments: Hex[];
@@ -911,21 +957,20 @@ class StellarAccount {
       // The recipient's viewing key is resolved by the SDK here (it throws
       // RecipientViewingKeyUnregistered when there is none), so no separate
       // lookup naming the recipient is made beforehand.
-      const result = await this.withTransferRelayer(relayer, async () => {
-        // Relayed: the relayer submits, its fee comes on top of `amount`.
-        const prepared = await session.prepareTransfer({
-          tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
-          amount: toHex(params.amount),
+      const result = await this.withTransferRelayer(relayer, () =>
+        // Relayed: the relayer submits, its fee comes on top of `amount`. One quote, one proof.
+        this.relayOnce(session, relayer, {
+          maxFee: params.maxFee,
+          amount: params.amount,
           inputCommitments: params.inputCommitments,
-          // The field name is EVM-flavoured; the Stellar SDK resolves the
-          // recipient's viewing key from the Stellar keystore by this G-address.
-          recipientDiscoveryData: { evmAddress: params.recipient },
-        });
-        if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
-        this.assertStillBound(generation);
-        onStage?.('relaying');
-        return this.relayPreparedTransfer(session, prepared);
-      });
+          recipient: { kind: 'registered', address: params.recipient },
+          guard: () => {
+            if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
+            this.assertStillBound(generation);
+          },
+          onRelaying: () => onStage?.('relaying'),
+        }),
+      );
       if (!result.txReceipt.status) throw new Error('The transfer transaction failed on-chain.');
       onStage?.('syncing');
       await this.refreshLocal(session, address);
@@ -938,9 +983,11 @@ class StellarAccount {
    * announces the note, so its secret goes to the recipient in a one-time link
    * (services/stellar/stellar-claim.ts). The notes are saved for the sender
    * (stellar-sent-claims.ts) BEFORE the transfer is submitted; if that save
-   * fails nothing is sent.
+   * fails nothing is sent. Relayed like any send, so Varial only signs
+   * the registration, if any.
    */
   sendOneTime(params: {
+    maxFee: bigint;
     amount: bigint;
     recipient: string;
     inputCommitments: Hex[];
@@ -955,57 +1002,60 @@ class StellarAccount {
       if (!isStellarAccountAddress(params.recipient)) throw new Error('Not a Stellar account address.');
       if (params.recipient === address) throw new Error('That is your own address. Pick someone else to send to.');
       const session = await this.ensureSession(onStage);
+      // The relayer is read before registration, so an unreachable one fails before the wallet signs.
+      const relayer = await this.connectRelayer(await loadStellarSdk());
       await this.ensureRegistered(session, generation, onStage, params.shouldContinue);
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       this.assertStillBound(generation);
       onStage?.('proving');
-      const prepared = await session.prepareColdStartTransfer({
-        tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
-        amount: toHex(params.amount),
-        inputCommitments: params.inputCommitments,
-        recipientEvmAddress: params.recipient as StellarAddress,
-      });
-      const opts = prepared.executeOptions;
-      const secrets = opts.recipient.noteSecretsMap;
-      if (!secrets) throw new Error('The transfer could not be prepared for a one-time link.');
-      const notes: StellarClaimNote[] = opts.recipientPendingNotes.map((n) => ({
-        commitment: String(n.commitment),
-        noteAddressHash: `0x${BigInt(n.noteAddressHash).toString(16).padStart(64, '0')}`,
-        noteSecret: String(secrets.get(n.noteAddressHash) ?? ''),
-        value: String(n.value),
-        tokenId: String(n.tokenId),
-        label: String(n.label),
-        ownerAddress: params.recipient,
-        txHash: '0x0',
-      }));
-      if (notes.length === 0 || notes.some((n) => !n.noteSecret)) {
-        throw new Error('The transfer could not be prepared for a one-time link.');
-      }
-      const id = `${Date.now().toString(36)}-${notes[0].commitment.slice(-8)}`;
-      saveSentClaim(sentClaimsStorage(), SENT_CLAIMS_KEY, {
-        id,
-        sender: address,
-        recipient: params.recipient,
-        amount: params.amount.toString(),
-        notes,
-        txHash: null,
-        createdAt: Date.now(),
-      });
-      params.onClaimReady?.(notes);
-      if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
-      this.assertStillBound(generation);
-      onStage?.('signing');
-      // The claim notes are already built above, so the SDK's own rebuild of
-      // them (one commitment-keyed timestamp read per note, after the
-      // transfer) is skipped: without the secrets map it returns the receipt
-      // only. The change notes are persisted exactly as on any transfer.
-      const result = await session.executeTransfer({ ...opts, recipient: { ...opts.recipient, noteSecretsMap: undefined } });
+      let claim: { id: string; notes: StellarClaimNote[] } | null = null;
+      // Relayed like any transfer: the relayer submits through the relay contract, so this
+      // account does not appear on the transaction. One quote, one proof.
+      const result = await this.withTransferRelayer(relayer, () =>
+        this.relayOnce(session, relayer, {
+          maxFee: params.maxFee,
+          amount: params.amount,
+          inputCommitments: params.inputCommitments,
+          recipient: { kind: 'oneTime', address: params.recipient },
+          beforeRelay: (recipientNotes) => {
+            const notes: StellarClaimNote[] = recipientNotes.map((n) => ({
+              commitment: n.commitment,
+              noteAddressHash: `0x${BigInt(n.noteAddressHash).toString(16).padStart(64, '0')}`,
+              noteSecret: n.noteSecret,
+              value: n.value,
+              tokenId: n.tokenId,
+              label: n.label,
+              ownerAddress: params.recipient,
+              txHash: '0x0',
+            }));
+            const id = `${Date.now().toString(36)}-${notes[0].commitment.slice(-8)}`;
+            saveSentClaim(sentClaimsStorage(), SENT_CLAIMS_KEY, {
+              id,
+              sender: address,
+              recipient: params.recipient,
+              amount: params.amount.toString(),
+              notes,
+              txHash: null,
+              createdAt: Date.now(),
+            });
+            claim = { id, notes };
+            params.onClaimReady?.(notes);
+          },
+          guard: () => {
+            if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
+            this.assertStillBound(generation);
+          },
+          onRelaying: () => onStage?.('relaying'),
+        }),
+      );
+      const saved = claim as { id: string; notes: StellarClaimNote[] } | null;
+      if (!saved) throw new Error('The transfer could not be prepared for a one-time link.');
       if (!result.txReceipt.status) throw new Error('The transfer transaction failed on-chain.');
       const txHash = String(result.txReceipt.txHash);
-      setSentClaimTx(sentClaimsStorage(), SENT_CLAIMS_KEY, id, txHash);
+      setSentClaimTx(sentClaimsStorage(), SENT_CLAIMS_KEY, saved.id, txHash);
       onStage?.('syncing');
       await this.refreshLocal(session, address);
-      return { txHash, notes: notes.map((n) => ({ ...n, txHash })) };
+      return { txHash, notes: saved.notes.map((n) => ({ ...n, txHash })) };
     });
   }
 
@@ -1018,7 +1068,7 @@ class StellarAccount {
     return this.enqueue(async () => {
       const { address, generation } = this.requireSigner();
       if (notes.some((n) => n.ownerAddress !== address)) {
-        throw new Error('This link is for another Stellar account. Switch accounts in Freighter.');
+        throw new Error('This link is for another Stellar account. Switch accounts in your wallet.');
       }
       const session = await this.ensureSession();
       this.assertStillBound(generation);
@@ -1047,14 +1097,14 @@ class StellarAccount {
    * Saves claimed notes to this account for good: a private transfer to
    * itself, announced to its own viewing key, so any device finds it by sync
    * and the link is no longer needed. Registers the account first if needed
-   * (Freighter pays; relayed registration is not available on Stellar).
+   * (Varial pays; relayed registration is not available on Stellar).
    */
-  keepClaim(commitments: readonly Hex[], params?: { onStage?: StageListener; shouldContinue?: () => boolean }) {
+  keepClaim(commitments: readonly Hex[], params: { onStage?: StageListener; shouldContinue?: () => boolean } = {}) {
     return this.enqueue(async () => {
       const { address, generation } = this.requireSigner();
-      const session = await this.ensureSession(params?.onStage);
+      const session = await this.ensureSession(params.onStage);
       const relayer = await this.connectRelayer(await loadStellarSdk());
-      await this.ensureRegistered(session, generation, params?.onStage, params?.shouldContinue);
+      await this.ensureRegistered(session, generation, params.onStage, params.shouldContinue);
       await this.stampClaimedNotes(session, commitments, true);
       const { notes } = await session.exportAccount();
       const wanted = new Set(commitments.map((c) => BigInt(c)));
@@ -1063,24 +1113,29 @@ class StellarAccount {
         throw new Error('Not spendable yet. Try again after the next sync.');
       }
       this.assertStillBound(generation);
-      params?.onStage?.('proving');
+      params.onStage?.('proving');
       const total = claimed.reduce((sum, n) => sum + BigInt(n.value), 0n);
       const result = await this.withTransferRelayer(relayer, async () => {
         // Relayed: the fee comes out of the claimed notes, and whatever the
         // estimate over-reserves returns to this account as change.
-        if (total <= STELLAR_TRANSFER_RELAY_FEE_ESTIMATE) throw new Error('This link holds less than the relayer fee.');
-        const prepared = await session.prepareTransfer({
-          tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
-          amount: toHex(total - STELLAR_TRANSFER_RELAY_FEE_ESTIMATE),
+        const quotedFee = await this.quoteTransferFee(claimed.length);
+        const budget = transferFeeBudget(quotedFee);
+        const reserve = budget < total ? budget : quotedFee;
+        if (total <= reserve) throw new Error('This link holds less than the relayer fee.');
+        return this.relayOnce(session, relayer, {
+          maxFee: reserve,
+          amount: total - reserve,
           inputCommitments: claimed.map((n) => n.commitment as Hex),
-          recipientDiscoveryData: { evmAddress: address },
+          recipient: { kind: 'registered', address },
+          guard: () => {
+            if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
+            this.assertStillBound(generation);
+          },
+          onRelaying: () => params.onStage?.('relaying'),
         });
-        this.assertStillBound(generation);
-        params?.onStage?.('relaying');
-        return this.relayPreparedTransfer(session, prepared);
       });
       if (!result.txReceipt.status) throw new Error('The transaction failed on-chain.');
-      params?.onStage?.('syncing');
+      params.onStage?.('syncing');
       await this.refreshLocal(session, address);
       return { txHash: String(result.txReceipt.txHash) };
     });
@@ -1284,12 +1339,12 @@ class StellarAccount {
   }
 
   /**
-   * Pays a blind request: `prepareFulfillPaymentRequest` builds the transfer
-   * to the request's slots (encrypted to its payment key, tagged with its
-   * tag), then it is submitted like any Stellar transfer. Nothing about the
-   * recipient is looked up.
+   * Pays a blind request with one proof to its existing slots, encrypted to
+   * its payment key and tagged with its tag. Uses the same relay helper as
+   * other Stellar transfers; nothing about the recipient is looked up.
    */
   payPaymentRequest(params: {
+    maxFee: bigint;
     request: StellarSdkPaymentRequest;
     inputCommitments: Hex[];
     onStage?: StageListener;
@@ -1305,16 +1360,18 @@ class StellarAccount {
       if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
       this.assertStillBound(generation);
       onStage?.('proving');
-      const result = await this.withTransferRelayer(relayer, async () => {
-        const prepared = await session.prepareFulfillPaymentRequest({
-          paymentRequest: params.request as Parameters<StellarPoolSession['prepareFulfillPaymentRequest']>[0]['paymentRequest'],
+      const result = await this.withTransferRelayer(relayer, () =>
+        this.relayOnce(session, relayer, {
+          maxFee: params.maxFee,
+          paymentRequest: params.request,
           inputCommitments: params.inputCommitments,
-        });
-        if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
-        this.assertStillBound(generation);
-        onStage?.('relaying');
-        return this.relayPreparedTransfer(session, prepared);
-      });
+          guard: () => {
+            if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
+            this.assertStillBound(generation);
+          },
+          onRelaying: () => onStage?.('relaying'),
+        }),
+      );
       if (!result.txReceipt.status) throw new Error('The transfer transaction failed on-chain.');
       onStage?.('syncing');
       await this.refreshLocal(session, address);

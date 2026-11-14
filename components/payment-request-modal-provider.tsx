@@ -1,3 +1,4 @@
+import { transferFeeBudget } from '@/services/relayer-fee-jitter';
 import { paymentRequestRecipientLabel } from '@/services/payment-request-disclosure';
 import { ShareCountHint } from '@/components/pools/share-count-hint';
 // RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
@@ -1442,7 +1443,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
     // the payment through it. No viewing key has to be published.
     if (isStellar) {
       const stellarAddress = stellarSession.wallet.isConnected ? stellarSession.wallet.address : null;
-      if (!stellarAddress) { setErrorMessage('Connect Freighter first.'); return; }
+      if (!stellarAddress) { setErrorMessage('Connect a Stellar wallet first.'); return; }
       if (!amountInput.trim()) { setErrorMessage('Enter an amount first.'); return; }
       setIsBusy(true); setStatusMessage(null); setWarningMessage(null); setErrorMessage(null);
       try {
@@ -1493,7 +1494,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
       } catch (error) {
         setStatusMessage(null);
         const raw = error instanceof Error ? error.message : String(error);
-        setErrorMessage(/reject|denied|cancel|declined/i.test(raw) ? 'Request cancelled in Freighter.' : stellarErrorMessage(raw));
+        setErrorMessage(/reject|denied|cancel|declined/i.test(raw) ? 'Request cancelled in your wallet.' : stellarErrorMessage(raw));
       } finally {
         setIsBusy(false);
       }
@@ -1613,7 +1614,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
       // offering to register.
       let ownKey: Awaited<ReturnType<typeof lookupOwnViewingKey>>;
       try {
-        ownKey = await lookupOwnViewingKey(chainId, address, { chainFallback: true });
+        ownKey = await lookupOwnViewingKey(chainId, address);
       } catch (ownKeyErr) {
         log('warn', 'PaymentRequest', 'Seller viewing-key check failed; not guessing', ownKeyErr);
         throw new Error(REGISTRY_SYNCING_MESSAGE);
@@ -1658,7 +1659,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
             }
             // Still nothing local: the one chain read this re-check always made.
             if (!registeredViewingKey) {
-              const after = await lookupOwnViewingKey(chainId, address, { chainFallback: true });
+              const after = await lookupOwnViewingKey(chainId, address);
               if (after.state === 'registered') registeredViewingKey = after.viewingKey as Hex;
             }
           } catch (reReadErr) {
@@ -2850,7 +2851,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           error: feeErr instanceof Error ? feeErr.message : String(feeErr),
         });
       }
-      const feeBudget = feeQuoteWei != null ? feeQuoteWei + feeQuoteWei / 4n : 0n;
+      const feeBudget = feeQuoteWei != null ? transferFeeBudget(feeQuoteWei) : 0n;
       const paddedTarget = requestAmountWei + feeBudget;
       const trueTarget = requestAmountWei + (feeQuoteWei ?? 0n);
       const spendabilityReport = await verifyTransferSpendability({
@@ -4173,6 +4174,7 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
                       // (SUI / XLM): offering the EVM token list would
                       // mislabel what the request emits.
                       <View className="flex-row items-center gap-[6px] rounded-control border border-text bg-card-background px-[12px] py-[8px]">
+                        <TokenMark symbol={requestTokenSymbol} size={16} />
                         <Text className="font-pp-medium text-[13px] text-text">{displayTokenSymbol(requestTokenSymbol)}</Text>
                       </View>
                     ) : (

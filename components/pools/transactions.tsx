@@ -30,7 +30,6 @@ import { useRouter } from 'expo-router';
 // Web-only style: position 'fixed' is valid in react-native-web but not in RN types.
 import Svg, { Path, Circle } from 'react-native-svg';
 import { ScrollView } from 'react-native';
-import { useMultiChainWallet } from '@/hooks/use-multi-chain-wallet';
 import { usePoolSession } from '@/hooks/use-pool-session';
 import { useWalletUnlockGate } from '@/hooks/use-wallet-unlock-gate';
 import { useStellarWallet } from '@/components/stellar-wallet-provider';
@@ -1399,36 +1398,13 @@ export function Transactions({
     });
   }, [selectedChainId, sessionChainId, openRowAction, selectChain, tryPendingRowAction, toast]);
 
-  // Chain-aware connection: wagmi's address is empty when a Sui wallet drives
-  // the session, which hid the All | My Transactions tabs on Sui entirely.
-  const { address: connectedAddress } = useMultiChainWallet();
-  // The identity whose STORED note export this table should read. Balances
-  // already use exactly this precedence (pools-provider.tsx:1313), and the
-  // mismatch was visible: the same account showed 30 rows through its wallet
-  // and ZERO through its account key, while the balance read 0.2131 ETH in
-  // both (Pat, 2026-09-01). The live feed alone cannot classify historical
-  // deposits/withdrawals; that needs the export, which was being loaded for a
-  // wallet address a key session does not have.
-  // EVM-only below, so preferring the session address cannot mis-scope Sui.
-  // getCommittedManagers: the row menu's "Recover claim link" reads the
-  // signed-in viewing key at click time to trial-decrypt the sender's own
-  // on-chain backup (services/blind-deposit-recovery.ts). Read on click, never
-  // held in render state.
-  const { sessionAddress, identityMode, getCommittedManagers } = usePoolSession();
-  // The identity a DEPOSIT row is matched against when note-matching does not
-  // resolve it. isDepositMine tries the notes first and then falls back to
-  // `tx.fullAddress === ownAddress`, and that fallback is what actually claims
-  // most historical deposits. With the wallet address alone it was null for a
-  // key session, so 30 rows collapsed to 2 even once the notes were loaded
-  // (Pat, 2026-09-01, measured: liveNotes 30 + storedNotes 31, still 2 rows).
-  // BRANCHED on identityMode, not `wallet ?? session`: a key session can have a
-  // funding wallet connected at a DIFFERENT address (depositing needs one), and
-  // that payer must not claim the key account's rows, nor lend its own. Same
-  // correction as 1310d10 made in pools-provider; this file was missed. The
-  // non-key branch keeps the wallet address, so Sui is untouched: there the
-  // wallet hook carries the Sui address and a Sui deposit row must compare
-  // against that one.
-  const ownAddress = identityMode === 'key' ? (sessionAddress ?? connectedAddress) : connectedAddress;
+  const { getCommittedManagers } = usePoolSession();
+  // Ownership of a row (notes on every chain by tx hash or label, deposits by
+  // the identity's address, deposits made FOR someone else excluded) comes
+  // from the hook every mine-scoped surface shares, so the home preview and
+  // the bell agree with this table (hooks/use-my-transaction-ownership.ts).
+  const { ownAddress, isDepositMine, isDepositAuthoredByMe, isDepositRecoverable, isMine, sentTxHashes, filterMineEvents, notesByChain } = useMyTransactionOwnership();
+
   // Returning tab: the note cache rehydrates (deposit rows and balances
   // render) but the session keystore isn't rebuilt without a fresh
   // signature — nothing re-syncs, and the user's own transfers/withdrawals
@@ -1442,7 +1418,7 @@ export function Transactions({
   const stellarWallet = useStellarWallet();
   const stellarWalletAddress = stellarWallet.isConnected ? stellarWallet.address ?? null : null;
   const { openSeedDerivationModal: openEvmSignIn } = useSeedDerivationModal();
-  // Stellar's locked session: same banner, Freighter unlock as the action.
+  // Stellar's locked session: same banner, Varial unlock as the action.
   const requiresWalletUnlock = evmRequiresUnlock || stellarLocked;
   const openSeedDerivationModal = stellarLocked ? unlockStellar : () => openEvmSignIn();
   const sessionLocked = requiresWalletUnlock || keyInitFailed;
@@ -1501,12 +1477,6 @@ export function Transactions({
     [assetFilterUpper, chainScope, inScope],
   );
   const allTransactions = useMemo(() => scoped(data.transactions), [data.transactions, scoped]);
-
-  // Ownership of a row (notes on every chain by tx hash or label, deposits by
-  // the identity's address, deposits made FOR someone else excluded) comes
-  // from the hook every mine-scoped surface shares, so the home preview and
-  // the bell agree with this table (hooks/use-my-transaction-ownership.ts).
-  const { isDepositMine, isDepositAuthoredByMe, isDepositRecoverable, isMine, sentTxHashes, filterMineEvents, notesByChain } = useMyTransactionOwnership();
 
   // Deposits whose entire lineage has no ACTIVE value left (fully withdrawn
   // or exited). Partial withdrawals leave a non-zero ACTIVE change note

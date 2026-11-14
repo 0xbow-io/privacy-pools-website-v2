@@ -1,4 +1,5 @@
-// The connected wallet's holdings, fetched for the APP's lifetime rather than
+// Configured assets remain the default; no portfolio service receives the owner.
+// Explicit custom-RPC holdings are fetched for the APP's lifetime rather than
 // for whichever screen currently mounts a reader.
 //
 // hooks/use-wallet-tokens.ts used to run its `useQuery`/`useQueries` directly
@@ -15,15 +16,13 @@
 // reads — keeps the timer running whether or not anything is currently
 // reading its data.
 import { createContext, useCallback, useContext, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react';
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useQueries } from '@tanstack/react-query';
 import { useAccount } from 'wagmi';
 
 import { getChainConfig } from '@/config/chains';
 import { feedLifiVerifiedTokens } from '@/services/lifi-token-list';
 import { EMPTY_FEED_STATE, feedData, publicFeeds, type FeedState } from '@/services/public-feed-scheduler';
 import {
-  ALCHEMY_WALLET_CHAIN_IDS,
-  fetchWalletTokensByChain,
   markSuspiciousTokens,
   ONCHAIN_WALLET_CHAIN_IDS,
   WALLET_TOKEN_MAINNET_IDS,
@@ -67,30 +66,12 @@ const noTokens: WalletTokensLookup = () => EMPTY;
 const WalletTokensContext = createContext<WalletTokensLookup>(noTokens);
 
 /**
- * Mounted once, at the app root (app/_layout.tsx), next to PoolsProvider —
- * NOT inside a screen. The connected wallet's holdings on every chain this
- * build lists wallet tokens for, with scams marked. A chain on the user's own
- * RPC is read on-chain through it instead, once LiFi's list for it is in
- * hand. The chain being looked at never changes what is fetched or when: one
- * request covers every chain, when a wallet is connected and then on a fixed
- * cadence that keeps running regardless of which screen (if any) is reading it.
+ * The default picker uses configured assets and sends no portfolio-by-address
+ * request. Explicit custom-RPC holdings stay mounted for the app's lifetime,
+ * so a screen/tab cannot start or stop their fixed-cadence reader.
  */
 export function WalletTokensProvider({ children }: { children: ReactNode }) {
   const { address: owner } = useAccount();
-  const { data } = useQuery({
-    queryKey: ['wallet-tokens', owner?.toLowerCase()],
-    enabled: !!owner && ALCHEMY_WALLET_CHAIN_IDS.length > 0,
-    queryFn: ({ signal }) => fetchWalletTokensByChain(owner!, ALCHEMY_WALLET_CHAIN_IDS, signal),
-    // Balances on the visible rows are read on-chain by the sheet, so this
-    // list mostly decides which tokens get a row; it need not be fast.
-    refetchInterval: WALLET_TOKENS_INTERVAL_MS,
-    refetchIntervalInBackground: true,
-    staleTime: WALLET_TOKENS_INTERVAL_MS,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    refetchOnMount: false,
-    retry: 1,
-  });
   const verifiedStates = useVerifiedTokenFeeds();
   const verifiedOn = useCallback((chainId: number) => {
     const feedIndex = WALLET_TOKEN_MAINNET_IDS.indexOf(chainId);
@@ -115,7 +96,7 @@ export function WalletTokensProvider({ children }: { children: ReactNode }) {
     combine: dataOnly,
   });
   const marked = useMemo(() => {
-    const byChain: Record<number, WalletToken[]> = { ...(data ?? {}) };
+    const byChain: Record<number, WalletToken[]> = {};
     ONCHAIN_WALLET_CHAIN_IDS.forEach((chainId, i) => {
       const tokens = onChainData[i];
       if (tokens) byChain[chainId] = tokens;
@@ -126,7 +107,7 @@ export function WalletTokensProvider({ children }: { children: ReactNode }) {
       out[chainId] = markSuspiciousTokens(tokens, chainId, verifiedOn(chainId));
     }
     return out;
-  }, [data, verifiedOn, onChainData]);
+  }, [verifiedOn, onChainData]);
   const tokensFor = useCallback((chainId: number) => marked[chainId] ?? EMPTY, [marked]);
   return <WalletTokensContext.Provider value={tokensFor}>{children}</WalletTokensContext.Provider>;
 }

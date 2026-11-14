@@ -1,0 +1,21 @@
+{
+  "latestLedger": 5681871,
+  "feeRatePerInstructionsIncrement": "3",
+  "txMaxInstructions": "400000000",
+  "feeDiskReadLedgerEntry": "781",
+  "feeWriteLedgerEntry": "1250",
+  "feeDiskRead1Kb": "223",
+  "sorobanStateTargetSizeBytes": "7000000000",
+  "rentFee1KbSorobanStateSizeLow": "-17000",
+  "rentFee1KbSorobanStateSizeHigh": "10000",
+  "sorobanStateRentFeeGrowthFactor": 5000,
+  "feeWrite1Kb": "437",
+  "feeHistorical1Kb": "2029",
+  "feeContractEvents1Kb": "2500",
+  "feeTxSize1Kb": "203",
+  "minPersistentTtl": 120960,
+  "minTemporaryTtl": 720,
+  "persistentRentRateDenominator": "1215",
+  "tempRentRateDenominator": "2430",
+  "averageSorobanStateSize": "4566032238"
+}

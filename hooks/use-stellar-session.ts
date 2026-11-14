@@ -66,6 +66,8 @@ const STABLE_ACTIONS = {
   sync: () => stellarAccount.sync(),
   deposit: stellarAccount.deposit.bind(stellarAccount),
   withdraw: stellarAccount.withdraw.bind(stellarAccount),
+  quoteWithdrawal: stellarAccount.quoteWithdrawal.bind(stellarAccount),
+  quoteTransferFee: stellarAccount.quoteTransferFee.bind(stellarAccount),
   transfer: stellarAccount.transfer.bind(stellarAccount),
   ragequit: stellarAccount.ragequit.bind(stellarAccount),
   ensureCanReceive: stellarAccount.ensureCanReceive.bind(stellarAccount),
@@ -104,7 +106,7 @@ export function useStellarSession() {
   // memos on EVERY chain, so a fresh array per render would re-run every
   // notes-keyed effect in the app on every render.
   // The store switches accounts in a passive effect, so for one render after a
-  // Freighter account change it still holds the previous account's notes.
+  // Varial account change it still holds the previous account's notes.
   // Show nothing until the store and the wallet agree.
   const walletAddress = wallet.isConnected ? wallet.address ?? null : null;
   const storeMatchesWallet = snapshot.address === walletAddress;

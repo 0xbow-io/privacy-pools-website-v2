@@ -200,11 +200,13 @@ test('public price and gas price feeds register every build-supported EVM chain 
   const code = feeds.statements.filter((n) => !ts.isImportDeclaration(n))
     .map((n) => n.getText(feeds).replace(/^export /, '')).join('\n');
   const registrations: { key: string; fetch: () => unknown; maxAgeMs?: number; retryMs?: number; retryOnError?: boolean; enabled?: unknown }[] = [];
-  const env = (pointsEnabled: boolean, target: typeof registrations): Record<string, unknown> => ({
+  const env = (pointsEnabled: boolean, target: typeof registrations, stellarEnabled = false, stellarOptIn = false, debug = false): Record<string, unknown> => ({
     supportedEvmChainIds: [1, 10, 11155111], apiClient: {},
     fetchGasPrice: async (chain: number) => BigInt(chain),
     feedGasPrice: (chain: number) => `gas-price:${chain}`,
     GAS_PRICE_INTERVAL_MS: 60_000,
+    BULK_REGISTRY_INTERVAL_MS: 30_000,
+    refreshBulkKeystoreRegistry: async () => 'test',
     publicFeeds: { register: (feed: typeof registrations[number]) => target.push(feed), start() {} },
     getTokenPrices: (chain: string) => `raw:${chain}`, getAllPrices: (chain: string) => `map:${chain}`,
     feedLabelDecisions: (chain: number | string) => `label-decisions:${chain}`,
@@ -240,7 +242,11 @@ test('public price and gas price feeds register every build-supported EVM chain 
     NULLIFYING_KEY_HASH_RETRY_MS: 30_000,
     NULLIFYING_KEY_HASH_MAX_AGE_MS: 660_000,
     syncNullifyingKeyHashes: async (chain: number) => ({ ok: true, appliedEntries: 0, lastSyncedId: `nullifying-key-hash-sync:${chain}` }),
-    getChainConfig: () => undefined,
+    STELLAR_OPT_IN: stellarOptIn, isDebugModeActive: () => debug,
+    STELLAR_TESTNET_ID: 202, FEED_STELLAR_FEES: 'stellar-fees:202',
+    STELLAR_FEE_INTERVAL_MS: 60_000, fetchStellarFees: () => 'stellar-fees-fetch',
+    FEED_STELLAR_DEPOSIT_FEE: 'stellar-deposit-fee:202', fetchStellarDepositVettingFee: () => 100,
+    getChainConfig: (chain: number) => stellarEnabled && chain === 202 ? {} : undefined,
     LEGACY_CONFIG: undefined,
     feedYieldDeposits: (chain: number | string) => `yield-deposits:${chain}`,
     feedYieldRateHistory: (chain: number | string, share: string) => `yield-rate-history:${chain}:${share.toLowerCase()}`,
@@ -344,6 +350,28 @@ test('public price and gas price feeds register every build-supported EVM chain 
     ['lifi-verified-tokens:1', 'lifi-verified-fetch:1'],
     ['lifi-verified-tokens:56', 'lifi-verified-fetch:56'],
   ]);
+
+  // Page-load opt-in and debug both work; later state does not change the feed set.
+  for (const [build, optIn, debug, expected] of [
+    [false, false, false, 0], [false, true, true, 0],
+    [true, false, false, 0], [true, true, false, 1], [true, false, true, 1],
+  ] as const) {
+    const stellar: typeof registrations = [];
+    let debugActive = debug;
+    const inputs = { ...env(true, stellar, build, optIn, debug), isDebugModeActive: () => debugActive };
+    const startStellar = evaluate(`${code}; return startPublicFeeds;`, inputs);
+    debugActive = !debug;
+    startStellar(); startStellar();
+    const matches = stellar.filter(f => f.key === 'stellar-fees:202');
+    expect(matches).toHaveLength(expected);
+    const deposit = stellar.filter(f => f.key === 'stellar-deposit-fee:202');
+    expect(deposit).toHaveLength(expected);
+    if (expected) { expect(deposit[0].fetch()).toBe(100); expect(deposit[0].maxAgeMs).toBe(120_000); }
+    if (expected) {
+      expect(matches[0].fetch()).toBe('stellar-fees-fetch');
+      expect(matches[0].maxAgeMs).toBe(120_000);
+    }
+  }
 
   // With points disabled, no chain registers a points feed.
   const disabled: typeof registrations = [];

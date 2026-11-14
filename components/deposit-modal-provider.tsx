@@ -61,6 +61,7 @@ import { useAccountRecoveryModal } from '@/components/account-recovery-modal-pro
 import { getExplorerName, getExplorerTxUrl, getChainConfig, isChainSelectable, supportedChainIds, STELLAR_TESTNET_ID, SUI_TESTNET_ID } from '@/config/chains';
 import { STELLAR_TESTNET_CONTRACTS, STELLAR_XLM } from '@/config/stellar-deployment';
 import { useStellarSession } from '@/hooks/use-stellar-session';
+import { useStellarDepositMax } from '@/hooks/use-stellar-fee-estimate';
 import { useStellarBalance } from '@/hooks/use-stellar-balance';
 import { describeStellarStage, stellarErrorMessage, stellarActionError } from '@/services/stellar/stellar-copy';
 import { StellarLabelRetryNotice } from '@/components/stellar-label-retry';
@@ -109,10 +110,8 @@ function usdFigure(value: string | undefined): number | null {
 
 /**
  * Tri-state recipient precheck for "Deposit to another address". 'unregistered'
- * only when the answer is definitive (ASP registry cache, or the chain returned
- * the zero key); a failed lookup is 'unknown' so a network blip never reads as
- * "the recipient is not set up". The SDK repeats the authoritative on-chain
- * check inside prepareDepositFor right before proving.
+ * only when a complete background registry answers. Missing or stale data is
+ * 'unknown', so a network blip never reads as "the recipient is not set up".
  */
 export async function checkRecipientRegistration(
   chainId: number,
@@ -121,26 +120,13 @@ export async function checkRecipientRegistration(
   const cfg = getChainConfig(chainId);
   if (!cfg?.contracts) return 'unknown';
   try {
-    const sdkSetup = await import('@/services/sdk-runtime');
     const { lookupViewingKey } = await import('@/services/viewing-key-cache');
-    const rpc = sdkSetup.createRPCInteractor(chainId, Number(cfg.contracts.fromBlock));
-    const ks = sdkSetup.createKeystoreInteractor(
-      rpc,
-      cfg.contracts.keystoreAddress as ViemAddress,
-      cfg.contracts.keystoreFromBlock,
-    );
     const result = await lookupViewingKey(
       chainId,
       recipient,
-      { getViewingKey: (a) => ks.getViewingKey(a) },
       { keystoreAddress: cfg.contracts.keystoreAddress },
     );
     if (result.viewingKey) return 'registered';
-    // The ASP registry answered (after a full re-pull on a miss, inside
-    // lookupViewingKey): that is the verdict. Confirming a miss on the pool
-    // RPC would name this recipient to the provider as the user types.
-    if (result.source === 'cache' && result.aspAvailable) return 'unregistered';
-    // Only reached with no ASP registry: the RPC answered, or it failed.
     return result.lookupFailed ? 'unknown' : 'unregistered';
   } catch {
     return 'unknown';
@@ -674,6 +660,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
   const stellarSession = useStellarSession();
   const stellarOwner = isStellar && stellarSession.wallet.isConnected ? stellarSession.wallet.address : null;
   const { data: stellarBalanceData } = useStellarBalance(stellarOwner);
+  const stellarDepositMax = useStellarDepositMax(stellarBalanceData?.spendable ?? 0n);
   const chainConfig = getChainConfig(chainId);
   const chainDisplayName = isSui
     ? (activeChain?.displayName ?? (isStellar ? 'Stellar' : 'Sui'))
@@ -1239,7 +1226,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     : selectedToken.isNative
       ? nativeBalance == null
       : erc20BalanceRaw == null;
-  const walletBalanceFormatted = walletBalanceLoading ? '—' : tokenAmountLabel(walletBalance.toFixed(4), displaySymbol);
+  const walletBalanceFormatted = walletBalanceLoading ? '—' : tokenAmountLabel(formatTokenBalanceDown(walletBalance, displaySymbol), displaySymbol);
 
   // --- Gas reserve (native deposits) ---
 
@@ -1430,14 +1417,14 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     // out of a separate coin selection); the EVM wei/gas-reserve math below is
     // wagmi-specific.
     if (isSui) {
-      if (enteredAmount > walletBalance) {
+      if (isStellar ? parseUnits(amount || '0', STELLAR_XLM.decimals) > stellarDepositMax : enteredAmount > walletBalance) {
         // The exact balance, rounded DOWN: a figure rounded up would be one the
         // user types and is refused again. The deposit catalog holds no shares
         // (getDepositableTokens(...).filter(!yieldShare)), so this figure is the
         // coin itself and never needs a rate.
         // isSui also covers Stellar, whose budget is the spendable XLM, not a Sui balance.
         const exact = isStellar
-          ? (stellarBalanceData ? formatUnits(stellarBalanceData.spendable, STELLAR_XLM.decimals) : '0')
+          ? (stellarBalanceData ? formatUnits(stellarDepositMax, STELLAR_XLM.decimals) : '0')
           : (suiBalanceData ? formatUnits(BigInt(suiBalanceData.totalBalance), suiDecimals) : '0');
         return `Insufficient balance (${tokenAmountLabel(formatTokenBalanceDown(exact, displaySymbol), displaySymbol)} available)`;
       }
@@ -1474,7 +1461,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       return formatDepositMinimum(depositMinPayWei, selectedToken.decimals, selectedToken.symbol);
     }
     return null;
-  }, [amount, enteredAmount, walletBalanceWei, spendableBalanceWei, spendableBalanceFormatted, walletBalance, selectedToken.decimals, selectedToken.symbol, isSui, isStellar, stellarBalanceData, suiBalanceData, suiDecimals, displaySymbol, swapDepositActive, depositMinPayWei, minPending, tokenPrice, priceLoading, yieldExitBlocked, depositCapUsd]);
+  }, [amount, enteredAmount, walletBalanceWei, spendableBalanceWei, spendableBalanceFormatted, walletBalance, selectedToken.decimals, selectedToken.symbol, selectedToken.isNative, depositVettingFeeBps, isSui, isStellar, stellarBalanceData, stellarDepositMax, suiBalanceData, suiDecimals, displaySymbol, swapDepositActive, depositMinPayWei, minPending, tokenPrice, priceLoading, yieldExitBlocked, depositCapUsd]);
 
   // True while the cap cannot be judged yet because the price is still
   // loading: shown quietly (not as a red error) and the inline auto-confirm
@@ -1630,7 +1617,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     }
     // === Stellar path ===
     // The shared Stellar account (services/stellar/stellar-account.ts) derives
-    // keys on first use, proves, submits pool.deposit via Freighter, then
+    // keys on first use, proves, submits pool.deposit via Varial, then
     // registers the label ciphertext with the ASP registry.
     if (isStellar) {
       if (!stellarOwner) {
@@ -1657,7 +1644,9 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       setStep('loading');
       reportDepositError(null);
       depositErrorReportRef.current.phase = 'wallet-connect';
-      setLoadingMessage(describeStellarStage('unlocking'));
+      // Neutral until the session says otherwise: 'unlocking' (which names
+      // Freighter) arrives through onStage only when the account is really locked.
+      setLoadingMessage('Preparing your deposit...');
       try {
         const { buildStellarClaimUrl } = await import('@/services/stellar/stellar-claim-url');
         if (!live()) return;
@@ -1955,7 +1944,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       // has not caught up with, and depositing would strand the note. Local
       // read only (it waits for the grid, never fetches).
       if (!recipientMode) {
-        const ownIdentity = await keystoreStatusForChain(depositChainId, { chainFallback: true });
+        const ownIdentity = await keystoreStatusForChain(depositChainId);
         if (!live()) { releaseTx(); log('warn', 'Deposit', 'Stale run aborted after the identity check'); return; }
         const refusal = ownRegistrationRefusal(ownIdentity, isRegistered);
         if (refusal) {
@@ -4286,7 +4275,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
     });
   }, [isSui, isStellar, enteredAmount, tokenPrice, feePricing, chainId, crossChainShieldActive, crossChainPoolId, crossChainVetting, selectedToken.address, selectedToken.symbol, swapDepositActive, depositVettingFeeBps, swapRoute]);
 
-  // Re-sends the registration from an explicit tap (one Freighter approval);
+  // Re-sends the registration from an explicit tap (one Varial approval);
   // the next manual Sync does the same for any deposit this card is not for.
   const retryStellarLabels = stellarSession.retryPendingLabels;
   const stellarLabelRetry = useMemo(() => (stellarLabelPending && stellarLabelPending.owner === stellarOwner ? {
@@ -4300,7 +4289,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
       } catch (caught) {
         const raw = caught instanceof Error ? caught.message : String(caught);
         errorToast({
-          title: /reject|denied|cancel|declined/i.test(raw) ? 'Cancelled in Freighter.' : stellarErrorMessage(raw),
+          title: /reject|denied|cancel|declined/i.test(raw) ? 'Cancelled in your wallet.' : stellarErrorMessage(raw),
           variant: 'destructive',
         });
         return false;
@@ -4887,7 +4876,7 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
           chainId={chainId}
           // Non-EVM: no EVM balance reads or swap routes. Stellar shows no
           // wallet figure here (the sheet's native read is Sui's), the form
-          // below shows the Freighter balance.
+          // below shows the Varial balance.
           isSui={isSui}
           balanceMode={isStellar ? 'none' : 'wallet'}
           onSelectToken={(t) => {

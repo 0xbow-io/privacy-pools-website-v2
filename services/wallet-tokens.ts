@@ -1,21 +1,7 @@
-// The user's REAL wallet holdings for the shield widget's pay-token picker,
-// via Alchemy's Portfolio API (getTokensByAddress). Env-gated on
-// EXPO_PUBLIC_ALCHEMY_KEY and per-network support — chains Alchemy doesn't
-// serve (Citrea) or keyless builds get nothing, and the picker falls back to
-// the chain's configured pool assets.
-//
-// Client-side by design for this build: the key ships in the bundle either
-// way (it already backs RPC URLs), bounded by Alchemy's per-key domain
-// allowlist. Every chain this build serves is asked for in one request, so
-// the request says nothing about which network the user is looking at.
-//
-// Airdropped-scam handling (MAINNETS ONLY, markSuspiciousTokens): anything
-// that fails services/token-spam-filter (Alchemy's price plus LiFi's
-// `verified` status — Alchemy's token API has no spam flag) is MARKED
-// `suspicious` rather than removed, so the picker can offer it behind an
-// explicit reveal and a false positive is never a dead end. Test networks are
-// never marked: nothing there is priced, so the rules would flag the very
-// tokens a tester needs.
+// Wallet-token catalog and offline metadata helpers. The default picker uses
+// configured assets: it never sends the connected wallet address to Alchemy's
+// Portfolio API. Only explicit custom-RPC configurations scan wider holdings.
+// Historical Alchemy row parsing remains pure and does not make requests.
 import { ALCHEMY_KEY } from '@/config/env';
 import { getChainConfig, isTestnetChain, supportedEvmChainIds, usesCustomRpc } from '@/config/chains';
 import { getActionableTokens } from '@/config/tokens';
@@ -74,10 +60,6 @@ export interface WalletToken {
 }
 
 const NATIVE_SENTINEL = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
-
-// Alchemy pages at 100 rows. An airdrop-heavy wallet fills the first pages with
-// junk, so a few are read before giving up on the tail.
-const MAX_PAGES = 5;
 
 interface AlchemyTokenRow {
   network?: string;
@@ -144,12 +126,11 @@ export const WALLET_TOKEN_MAINNET_IDS: readonly number[] = [
 ];
 
 /**
- * A chain the user pointed at their own RPC is never asked about through
- * Alchemy: its holdings are read on-chain through that RPC instead. A test
- * network has no verified-token list, so with a custom RPC it lists pool
- * assets only.
+ * Address-based portfolio discovery is disabled for all builds, even when an
+ * Alchemy key is configured for ordinary RPC. Explicit custom-RPC mainnets
+ * retain their separate on-chain reader; testnets use configured pool assets.
  */
-export const ALCHEMY_WALLET_CHAIN_IDS: readonly number[] = WALLET_TOKEN_CHAIN_IDS.filter((id) => !usesCustomRpc(id));
+export const ALCHEMY_WALLET_CHAIN_IDS: readonly number[] = [];
 export const ONCHAIN_WALLET_CHAIN_IDS: readonly number[] = CUSTOM_RPC_MAINNET_IDS;
 
 /** Only an https URL is worth rendering; anything else (data:, http:, junk) is dropped. */
@@ -159,48 +140,10 @@ export function safeLogoUrl(raw: string | null | undefined): string | undefined 
   return /^https:\/\/[^\s"'<>]+$/i.test(value) ? value : undefined;
 }
 
-/**
- * Non-zero wallet holdings on every chain in `chainIds` Alchemy serves, keyed
- * by chain, largest USD first. Unmarked: markSuspiciousTokens applies the spam
- * rules once LiFi's list is at hand. Throws when nothing could be read.
- */
-export async function fetchWalletTokensByChain(
-  ownerAddress: string,
-  chainIds: readonly number[],
-  signal?: AbortSignal,
-): Promise<Record<number, WalletToken[]>> {
-  const chainByNetwork = new Map<string, number>();
-  for (const id of chainIds) {
-    const network = ALCHEMY_NETWORK_BY_CHAIN[id];
-    if (network) chainByNetwork.set(network, id);
-  }
-  if (!ALCHEMY_KEY || chainByNetwork.size === 0) return {};
-  const rows: AlchemyTokenRow[] = [];
-  let pageKey: string | undefined;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const res = await fetch(`https://api.g.alchemy.com/data/v1/${ALCHEMY_KEY}/assets/tokens/by-address`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        addresses: [{ address: ownerAddress, networks: [...chainByNetwork.keys()] }],
-        withMetadata: true,
-        withPrices: true,
-        ...(pageKey ? { pageKey } : {}),
-      }),
-      signal: signal ?? (typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(10_000) : undefined),
-    });
-    if (!res.ok) {
-      if (page === 0) throw new Error(`Alchemy tokens ${res.status}`);
-      break;
-    }
-    const data = (await res.json()) as { data?: { tokens?: AlchemyTokenRow[]; pageKey?: string | null } };
-    rows.push(...(data.data?.tokens ?? []));
-    pageKey = data.data?.pageKey ?? undefined;
-    if (!pageKey) break;
-  }
-  return parseAlchemyTokenRows(rows, chainByNetwork);
-}
-
+// Portfolio-by-address discovery is intentionally absent. Sending the owner to
+// a portfolio service discloses wallet identity even if all chains are batched.
+// The picker uses configured assets; explicit custom-RPC builds may use their
+// on-chain holdings reader. The parser below is offline legacy data handling.
 export function parseAlchemyTokenRows(
   rows: AlchemyTokenRow[],
   chainByNetwork: ReadonlyMap<string, number>,

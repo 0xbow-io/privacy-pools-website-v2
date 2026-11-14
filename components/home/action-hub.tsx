@@ -4,6 +4,7 @@ import { DEPOSIT_FAQ_URL } from '@/config/support';
 import { spendableBalanceLabel } from '@/services/spendable-balance-label';
 import { pendingPoolReopenStep, type PendingPoolReopen } from '@/services/pool-pick-reopen';
 import { useShareAmountField } from '@/hooks/use-share-amount-field';
+import { preparedAmountData } from '@/services/prepared-amount-data';
 import { quotedNetFigure } from '@/services/swap-quoted-net';
 import { formatUsdBalance } from '@/services/format-fiat';
 import { useBalanceDisplay } from '@/hooks/use-balance-display';
@@ -54,7 +55,7 @@ import { ACTIVE_ENVIRONMENT } from '@/config/environments';
 import { cappedQuickAmounts, checkDepositCap } from '@/services/deposit-cap';
 import { useAllChainsPriceMap } from '@/hooks/use-all-chains-price-map';
 import { resolveConfiguredEntrypoint } from '@/services/pool-entrypoint';
-import { MoreWalletsButton, useWalletPicker, WalletConnectQr, WalletDeepLinkList, WalletLinksPreparing, WalletNotOpened, WalletOptionContent } from '@/components/wallet-connect-modal-provider';
+import { MoreWalletsButton, useWalletConnectModal, useWalletPicker, WalletConnectQr, WalletDeepLinkList, WalletLinksPreparing, WalletNotOpened, WalletOptionContent } from '@/components/wallet-connect-modal-provider';
 import { PasskeySignInPanel } from '@/components/passkey-sign-in-panel';
 import { usePasskeyAccount } from '@/components/passkey-account-context';
 import { AccountKeySignIn } from '@/components/account-key-sign-in';
@@ -92,6 +93,7 @@ import { compactPhoneLayout } from '@/services/header-nav';
 import { ctaRevealDelta } from '@/services/action-hub-fit';
 import { ShieldYieldSummary } from '@/components/home/shield-yield-summary';
 import { FlowProgress } from '@/components/ui/flow-progress';
+import { AssetSelector } from '@/components/ui/asset-selector';
 import { TokenMark, TokenNetworkIcon } from '@/components/ui/token-network-icon';
 import { PairArrow } from '@/components/ui/pair-arrow';
 import { holdingsChainName, isHoldingsOnlyChain, WALLET_ROW_CHAIN_IDS, type WalletToken } from '@/services/wallet-tokens';
@@ -112,6 +114,7 @@ import { inlineWithdrawTokenToPush } from '@/services/inline-withdraw-token-sync
 import { hubTokenCatalog, preferredHubToken, heldSymbolsFor, isYieldShareOnChain, NO_HOLDINGS, emptySpendToken, type HubAction, type HubHoldings } from '@/services/hub-token-catalog';
 import { getChainConfig, isTestnetChain, supportedChainIds } from '@/config/chains';
 import { useStellarWallet } from '@/components/stellar-wallet-provider';
+import { useStellarDepositMax } from '@/hooks/use-stellar-fee-estimate';
 import { useStellarBalance } from '@/hooks/use-stellar-balance';
 import { useExplorePanel } from '@/components/home/explore-panel-context';
 import { useWalletUnlockGate } from '@/hooks/use-wallet-unlock-gate';
@@ -130,6 +133,7 @@ import { useFeePricing } from '@/hooks/use-fee-pricing';
 import { buildFeeBreakdown, gasCostUsd, type FeeGasReading } from '@/services/fee-warning';
 import { AddressAutocomplete } from '@/components/contacts/address-autocomplete';
 import { shieldElsewhere } from '@/services/shield-elsewhere';
+import { pagerResyncTarget } from '@/services/hub-pager-sync';
 
 // Shared content-zone floor = the tallest tab's natural height, so every tab
 // lands on the same card height. Keep this in step with the real tallest tab:
@@ -397,7 +401,9 @@ export function ActionHub({
   // `isSuiChain` / `isStellar` explicitly.
   const isSui = isSuiChain || isStellar;
   const stellarWallet = useStellarWallet();
+  const { open: openStellarWalletPicker } = useWalletConnectModal();
   const { data: stellarBalance, refetch: refetchStellarBalance } = useStellarBalance(isStellar && stellarWallet.isConnected ? stellarWallet.address : null);
+  const stellarDepositMax = useStellarDepositMax(stellarBalance?.spendable ?? 0n);
   const { toast } = useToast();
   // Full asset/network picker for the deposit form — same sheet the modal
   // used; the sheet itself staying a layer is fine per product call.
@@ -715,8 +721,22 @@ export function ActionHub({
     };
   }, [actionIndex, pagerW, pagerScrollX, reducedMotion, visibleActions, isFocused]);
   const onPagerScroll = useCallback((e: { nativeEvent: { contentOffset: { x: number } } }) => {
-    if (!pagerUserScrolling.current) return;
     const x = e.nativeEvent.contentOffset.x;
+    // The selected tab is the only truth: a scroll the user did not make (the
+    // browser revealing a focused field) is undone, so the bar and the form
+    // can never name different tabs.
+    const { pagerW: w, visibleActions: acts } = pagerGeometry.current;
+    const back = pagerResyncTarget({
+      offsetX: x,
+      actionIndex: acts.findIndex((v) => v.key === actionRef.current),
+      stride: pageStride(w),
+      userScrolling: pagerUserScrolling.current,
+    });
+    if (back !== null) {
+      pagerRef.current?.scrollTo({ x: back, animated: false });
+      return;
+    }
+    if (!pagerUserScrolling.current) return;
     pagerScrollX.setValue(x);
     if (pagerScrollTimer.current) clearTimeout(pagerScrollTimer.current);
     pagerScrollTimer.current = setTimeout(() => {
@@ -808,7 +828,6 @@ export function ActionHub({
   // one asset, so its symbol is unambiguous. Everywhere else the address is what
   // identifies a pool, because ppETH and legacy ETH share the display name.
   const tokenMetaAddress = 'address' in tokenMeta ? tokenMeta.address : undefined;
-  const hue = TokenHues[colorScheme][tokenMeta.symbol] ?? TokenHues[colorScheme].ETH;
 
   // (Moved below the shield-pool block: on the Shield tab the figure tracks
   // the DESTINATION pool, not the pay token.)
@@ -1480,7 +1499,7 @@ export function ActionHub({
   // initializes itself, so it is never "locked" in this sense.
   // EVM session lock only: Sui and Stellar unlock inside their own flows.
   const sessionLocked = !isSui && identityMode === 'wallet' && !keysReady;
-  // Stellar: Freighter connected but the account not unlocked yet, so the
+  // Stellar: Varial connected but the account not unlocked yet, so the
   // shielded figures are not known. Say so instead of showing 0.
   const { stellarLocked, unlockStellar } = useWalletUnlockGate();
   // Cross-chain shield: the pool sits on a different chain than the wallet and
@@ -1679,6 +1698,7 @@ export function ActionHub({
   // withdraw provider's flag could expose/fill an unproved balance.
   const withdrawSpendableWei = getWithdrawSpendableBalanceWei(tokenMeta.symbol);
   const withdrawMaxWei = getWithdrawMaxWei(tokenMeta.symbol);
+  const withdrawPresetMaxWei = getWithdrawMaxWei(tokenMeta.symbol, false);
   const withdrawBalanceUnavailable = withdrawSpendabilityError !== null;
   const withdrawBalanceLoading = !withdrawBalanceUnavailable && (
     withdrawSpendabilityLoading
@@ -2258,7 +2278,7 @@ export function ActionHub({
     void refetchNativeBalance();
     void refetchErc20Balance();
     void refetchSuiBalance();
-    // The Freighter account's own balance after its own deposit: the network
+    // The Varial account's own balance after its own deposit: the network
     // already saw that deposit come from this account, so this read adds
     // nothing an observer did not have (same reasoning as the EVM reads).
     if (isStellar) void refetchStellarBalance();
@@ -2523,7 +2543,9 @@ export function ActionHub({
     query: { enabled: action === 'shield' && !isSui && walletConnected },
   });
   const shieldMaxWei = useMemo<bigint | null>(() => {
-    if (isSui || action !== 'shield') return null;
+    if (action !== 'shield') return null;
+    if (isStellar) return stellarDepositMax;
+    if (isSui) return null;
     // Native mock mode: size the max from the balance on screen.
     const balanceWei = mockWalletBalance != null
       ? parseUnits(mockWalletBalance, payMeta.decimals)
@@ -2539,7 +2561,7 @@ export function ActionHub({
       crossPay: crossPayShield,
       vettingFeeBps,
     });
-  }, [isSui, action, tokenAddress, erc20BalanceRaw, nativeBalance, crossPayShield, hubFeeData, vettingFeeBps, mockWalletBalance, payMeta.decimals, chainId]);
+  }, [isSui, isStellar, stellarDepositMax, action, tokenAddress, erc20BalanceRaw, nativeBalance, crossPayShield, hubFeeData, vettingFeeBps, mockWalletBalance, payMeta.decimals, chainId]);
   const shieldMaxText = shieldMaxWei != null ? formatUnits(shieldMaxWei, payMeta.decimals) : walletBalanceText;
 
   // Tap-to-max: the balance line is the max button. Shield fills the wallet
@@ -2803,12 +2825,7 @@ export function ActionHub({
     const canLaunchWithAccountKey = !isSui && identityMode === 'key';
     if (!walletConnected && !canLaunchWithAccountKey) {
       if (isStellar) {
-        // Active Stellar chain: Freighter, or send the user to get it.
-        if (stellarWallet.isAvailable) {
-          void stellarWallet.connect();
-        } else if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          window.open('https://www.freighter.app', '_blank', 'noopener');
-        }
+        void openStellarWalletPicker();
         return;
       }
       if (isSui) {
@@ -3244,17 +3261,17 @@ export function ActionHub({
       // and answers a tap with the ceiling instead of filling an
       // amount the form would only reject (QA 2026-09-18). An
       // unresolved ceiling leaves the chips as they were.
-      const outOfReach = a === 'withdraw' && !withdrawBalanceBlocked && withdrawMaxWei !== null
+      const outOfReach = a === 'withdraw' && !withdrawBalanceBlocked && withdrawPresetMaxWei !== null
         && (amountField.presetExceedsMax(preset)
-          ?? presetExceedsWithdrawMax(preset, withdrawMaxWei, tokenMeta.decimals));
+          ?? presetExceedsWithdrawMax(preset, withdrawPresetMaxWei, tokenMeta.decimals));
       return (
         <Pressable
           key={preset}
           accessibilityState={{ disabled: outOfReach || (a === 'withdraw' && withdrawBalanceBlocked) }}
           disabled={a === 'withdraw' && withdrawBalanceBlocked}
           onPress={() => {
-            if (outOfReach && withdrawMaxWei !== null) {
-              toast({ title: `You can withdraw up to ${spendableBalanceLabel(formatUnits(withdrawMaxWei, tokenMeta.decimals), tokenMeta.symbol, () => balanceDisplay(formatUnits(withdrawMaxWei, tokenMeta.decimals), tokenMeta.symbol, chainId).text)}.`, variant: 'warning' });
+            if (outOfReach && withdrawPresetMaxWei !== null) {
+              toast({ title: `You can withdraw up to ${spendableBalanceLabel(formatUnits(withdrawPresetMaxWei, tokenMeta.decimals), tokenMeta.symbol, () => balanceDisplay(formatUnits(withdrawPresetMaxWei, tokenMeta.decimals), tokenMeta.symbol, chainId).text)}.`, variant: 'warning' });
               return;
             }
             const next = a === 'withdraw' ? amountField.toShares(preset) : preset;
@@ -3462,7 +3479,7 @@ export function ActionHub({
                     {presetChips}
                   </View>
                 </View>
-              ) : (a === 'swap' || a === 'request' || a === 'send') && !isSui ? null : tokens.map((t) => {
+              ) : isStellar || ((a === 'swap' || a === 'request' || a === 'send') && !isSui) ? null : tokens.map((t) => {
                 const selected = t.symbol === tokenMeta.symbol;
                 const h = TokenHues[colorScheme][t.symbol] ?? TokenHues[colorScheme].ETH;
                 return (
@@ -3566,6 +3583,9 @@ export function ActionHub({
               else if (transferInline) pushTransferAmount(shares);
             }}
             testID="hub-amount-input"
+            // The exact amount the flow prepares (shares for a share), for the
+            // browser smoke to check against the rate. Web only.
+            {...preparedAmountData(amount)}
             // React does not deliver onBlur when reconciliation REMOVES a
             // focused input (a deposit-success swap, a resize that changes
             // which pages exist). Without this the page would stay in typing
@@ -3600,76 +3620,35 @@ export function ActionHub({
               (2026-08-18 layout): withdraw/send/swap = the source POOL
               (chain-grouped sheet); shield = the PAY token (Alchemy-fed
               sheet). */}
-          {(a === 'withdraw' || a === 'send' || a === 'swap') && !isSui ? (
-            <Pressable
+          {isStellar ? (
+            <AssetSelector symbol="XLM" chainId={activeChainId} />
+          ) : (a === 'withdraw' || a === 'send' || a === 'swap') && !isSui ? (
+            <AssetSelector
+              symbol={tokenMeta.symbol}
+              chainId={chainId}
+              label={amountField.unitLabel}
               onPress={() => { setPoolSheetMode(a as 'withdraw' | 'send' | 'swap'); setPoolSheetOpen(true); }}
-              accessibilityRole="button"
               accessibilityLabel={`${a === 'withdraw' ? 'Withdraw from' : a === 'send' ? 'Send from' : 'Swap from'} pool: ${poolDisplayLabel(tokenMeta.symbol, chainId)} on ${getChainConfig(chainId)?.displayName ?? ''}`}
               testID="hub-withdraw-pool"
-              className="flex-row items-center gap-[6px] rounded-pill border px-[10px] py-[5px]"
-              // nw-keep(data-color): asset tint background with the shared neutral control border
-              style={{ backgroundColor: hue.bg, borderColor: colors.border }}
-            >
-              {/* Symbol only: the chain lives in the icon's badge (bigger mark
-                  = bigger badge); the full pool/chain wording stays in the
-                  accessibility label. */}
-              <TokenNetworkIcon symbol={tokenMeta.symbol} size={28} badgeSize={16} badgeTestnetLabel={false} chainId={chainId} />
-              {/* nw-keep(data-color): per-asset runtime hue */}
-              <Text className="font-pp-sans-semi-bold text-[15px]" style={{ color: hue.fg }}>
-                {amountField.unitLabel}
-              </Text>
-              {/* nw-keep(data-color): caret color is a runtime theme token (vector-icon sink) */}
-              <Ionicons name="chevron-down" size={14} color={colors.text} />
-            </Pressable>
+            />
           ) : a === 'shield' && !shieldBusy && !isSui ? (
-            <Pressable
+            <AssetSelector
+              symbol={payMeta.symbol}
+              chainId={chainId}
+              logoUri={payMeta.logoUrl}
               onPress={() => setTokenSheetOpen(true)}
-              accessibilityRole="button"
               accessibilityLabel={`Pay token: ${displayTokenSymbol(payMeta.symbol)}`}
               testID="hub-shield-pay-token"
-              className="flex-row items-center gap-[6px] rounded-pill border px-[10px] py-[5px]"
-              // nw-keep(data-color): asset tint background with the shared neutral control border
-              style={{
-                backgroundColor: (TokenHues[colorScheme][payMeta.symbol] ?? TokenHues[colorScheme].ETH).bg,
-                borderColor: colors.border,
-              }}
-            >
-              <TokenNetworkIcon symbol={payMeta.symbol} size={28} badgeSize={16} badgeTestnetLabel={false} chainId={chainId} logoUri={payMeta.logoUrl} />
-              {/* nw-keep(data-color): pill text uses the runtime per-asset hue */}
-              <Text className="font-pp-sans-semi-bold text-[15px]" style={{ color: (TokenHues[colorScheme][payMeta.symbol] ?? TokenHues[colorScheme].ETH).fg }}>
-                {displayTokenSymbol(payMeta.symbol)}
-              </Text>
-              {/* nw-keep(data-color): caret color is a runtime theme token (vector-icon sink) */}
-              <Ionicons name="chevron-down" size={14} color={colors.text} />
-            </Pressable>
+            />
           ) : a === 'request' && !isSui ? (
-            // Sui/Stellar: the header chip names the one token already, and
-            // this picker was inert there, so showing both read as a duplicate.
-            <Pressable
-              onPress={isSui || requestOverlayOwns ? undefined : () => setRequestSheetOpen(true)}
-              disabled={isSui || requestOverlayOwns}
-              accessibilityRole="button"
+            <AssetSelector
+              symbol={requestToken.symbol}
+              chainId={requestToken.chainId}
+              onPress={() => setRequestSheetOpen(true)}
+              disabled={requestOverlayOwns}
               accessibilityLabel={`Request in ${displayTokenSymbol(requestToken.symbol)}`}
               testID="hub-request-token"
-              className="flex-row items-center gap-[6px] rounded-pill border px-[10px] py-[5px]"
-              // nw-keep(data-color): asset tint background with the shared neutral control border
-              style={{
-                backgroundColor: (TokenHues[colorScheme][requestToken.symbol] ?? TokenHues[colorScheme].ETH).bg,
-                borderColor: colors.border,
-              }}
-            >
-              <TokenNetworkIcon symbol={requestToken.symbol} size={28} badgeSize={16} badgeTestnetLabel={false} chainId={requestToken.chainId} />
-              {/* nw-keep(data-color): pill text uses the runtime per-asset hue */}
-              <Text className="font-pp-sans-semi-bold text-[15px]" style={{ color: (TokenHues[colorScheme][requestToken.symbol] ?? TokenHues[colorScheme].ETH).fg }}>
-                {displayTokenSymbol(requestToken.symbol)}
-              </Text>
-              {/* Sui requests are always native SUI (the create path emits
-                  0x2::sui::SUI): no sheet, so no caret. */}
-              {isSui ? null : (
-                /* nw-keep(data-color): caret color is a runtime theme token (vector-icon sink) */
-                <Ionicons name="chevron-down" size={14} color={colors.text} />
-              )}
-            </Pressable>
+            />
           ) : null}
           </View>
 
@@ -4698,7 +4677,12 @@ export function ActionHub({
               <View
                 key={x.key}
                 testID={`hub-page-${x.key}`}
-                ref={(node) => { pageNodes.current[x.key] = node; }}
+                ref={(node) => {
+                  pageNodes.current[x.key] = node;
+                  // Focus (a click, a paste) must never land in an off-screen
+                  // page: the browser would scroll the pager onto it.
+                  if (WEB && node) (node as unknown as HTMLElement).inert = x.key !== action;
+                }}
                 /* nw-keep(measured-or-inset): each page is exactly one measured pager width */
                 style={{ width: pageStride(pagerW), paddingLeft: PAGE_EDGE, paddingRight: PAGE_GUTTER, alignSelf: 'flex-start' }}
                 onLayout={(event) => {
