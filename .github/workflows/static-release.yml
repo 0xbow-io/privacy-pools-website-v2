@@ -12,21 +12,29 @@ on:
         required: true
         type: string
 permissions:
-  contents: write
-concurrency:
-  group: reproducible-static-release
-  cancel-in-progress: false
+  contents: read
+# No workflow-level concurrency. Every push to main runs `decide`, and a shared
+# group would let a later non-release run replace a queued release run. Only the
+# publish job takes a group, keyed on its release tag.
 jobs:
-  publish:
+  decide:
     if: github.repository_owner == '0xbow-io' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      sha: ${{ steps.release.outputs.sha }}
+    env:
+      GIT_LFS_SKIP_SMUDGE: '1'
     steps:
+      # Commits, refs and the checked-out tree only. No LFS objects and no
+      # historical blobs, so a non-release push stays cheap.
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.event.workflow_run.head_sha || inputs.tag }}
           fetch-depth: 0
-          lfs: true
+          filter: blob:none
+          lfs: false
           persist-credentials: false
       - name: Verify release identity and main ancestry
         id: release
@@ -51,13 +59,42 @@ jobs:
           git merge-base --is-ancestor HEAD origin/main
           gh release view "$tag" --json isDraft,isPrerelease --jq 'if .isDraft or .isPrerelease then error("not stable") else . end'
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  publish:
+    needs: decide
+    if: needs.decide.outputs.tag != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    # Keyed on the tag: runs for different releases never replace each other, and
+    # a second run for the same tag waits for the first. Publication is idempotent.
+    concurrency:
+      group: reproducible-static-release-${{ needs.decide.outputs.tag }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.decide.outputs.sha }}
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: false
+      - name: Recheck release identity at the built commit
+        env:
+          RELEASE_TAG: ${{ needs.decide.outputs.tag }}
+          RELEASE_SHA: ${{ needs.decide.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ "$(git rev-parse HEAD)" = "$RELEASE_SHA" ]
+          [ "v$(node -p "require('./package.json').version")" = "$RELEASE_TAG" ]
+          [ "$(git rev-parse "$RELEASE_TAG^{commit}")" = "$RELEASE_SHA" ]
+          git merge-base --is-ancestor HEAD origin/main
       - name: Build twice with pinned tools and bundled circuits
-        if: steps.release.outputs.tag != ''
         run: node scripts/release/reproducible.mjs
       - name: Publish verified bundle, CAR, hashes and CIDs
-        if: steps.release.outputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_TAG: ${{ needs.decide.outputs.tag }}
         run: node scripts/release/publish-static.mjs

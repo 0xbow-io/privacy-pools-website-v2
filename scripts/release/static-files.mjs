@@ -33,6 +33,12 @@ export async function verifyCircuits(root, entries) {
   }
 }
 
+/**
+ * Upload order for release assets. Uploads are one at a time with no rollback, so
+ * the files that bind the manifest go last and only appear once the rest are up.
+ */
+export const RELEASE_ASSETS = Object.freeze(['bundle.tar', 'site.car', 'release-manifest.json', 'reproducibility.json', 'SHA256SUMS']);
+
 /** Re-check disk bytes immediately before publication, not just at build time. */
 export async function verifyReleaseOutputs(dir) {
   const manifestPath = join(dir, 'release-manifest.json');

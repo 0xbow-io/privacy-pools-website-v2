@@ -4,9 +4,60 @@ import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { files, sha256, publicBuildEnv, verifyCircuits, verifyReleaseOutputs } from './static-files.mjs';
+import { files, sha256, publicBuildEnv, verifyCircuits, verifyReleaseOutputs, RELEASE_ASSETS } from './static-files.mjs';
 
-const releaseEnvPath = join(dirname(fileURLToPath(import.meta.url)), '../../config/release-env.json');
+const here = dirname(fileURLToPath(import.meta.url));
+const releaseEnvPath = join(here, '../../config/release-env.json');
+const workflow = readFileSync(join(here, '../../.github/workflows/static-release.yml'), 'utf8');
+
+/** Split the workflow into its top-level header and one text block per job. */
+function workflowParts(text) {
+  const lines = text.split('\n');
+  const jobsAt = lines.indexOf('jobs:');
+  assert.ok(jobsAt > 0, 'workflow has a jobs section');
+  const jobs = {};
+  let current;
+  for (const line of lines.slice(jobsAt + 1)) {
+    const name = /^ {2}([A-Za-z0-9_-]+):\s*$/.exec(line)?.[1];
+    if (name) jobs[(current = name)] = [];
+    else if (current) jobs[current].push(line);
+  }
+  return { header: lines.slice(0, jobsAt).join('\n'), jobs: Object.fromEntries(Object.entries(jobs).map(([k, v]) => [k, v.join('\n')])) };
+}
+
+// Every main push runs this workflow. Only a release may pay for LFS and full
+// history, and a non-release run must not be able to replace a queued release run.
+test('static release decides cheaply before the LFS build', () => {
+  const { header, jobs } = workflowParts(workflow);
+  assert.deepEqual(Object.keys(jobs), ['decide', 'publish']);
+  assert.doesNotMatch(header, /^concurrency:/m, 'no workflow-level concurrency group');
+  assert.doesNotMatch(jobs.decide, /lfs:\s*true/);
+  assert.match(jobs.decide, /lfs:\s*false/);
+  assert.match(jobs.decide, /filter:\s*blob:none/);
+  assert.doesNotMatch(jobs.decide, /concurrency:/);
+  assert.match(jobs.decide, /ref: \$\{\{ github\.event\.workflow_run\.head_sha \|\| inputs\.tag \}\}/);
+  assert.match(jobs.decide, /refs\/tags\/\$tag/);
+  assert.match(jobs.decide, /"\$\(git rev-parse "\$tag\^\{commit\}"\)" != "\$\(git rev-parse HEAD\)"/);
+  assert.match(jobs.decide, /git merge-base --is-ancestor HEAD origin\/main/);
+  assert.match(jobs.publish, /^ {4}needs: decide$/m);
+  assert.match(jobs.publish, /^ {4}if: needs\.decide\.outputs\.tag != ''$/m);
+  assert.match(jobs.publish, /lfs:\s*true/);
+  assert.match(jobs.publish, /ref: \$\{\{ needs\.decide\.outputs\.sha \}\}/);
+  assert.match(jobs.publish, /concurrency:\n\s+group: reproducible-static-release-\$\{\{ needs\.decide\.outputs\.tag \}\}\n\s+cancel-in-progress: false/);
+  for (const job of Object.values(jobs)) {
+    assert.equal((job.match(/persist-credentials: false/g) ?? []).length, (job.match(/actions\/checkout@/g) ?? []).length);
+  }
+  const build = jobs.publish.split('- name: Build twice')[1].split('- name:')[0];
+  assert.doesNotMatch(build, /TOKEN/);
+});
+
+test('release assets upload the manifest-binding files last', () => {
+  assert.deepEqual([...RELEASE_ASSETS].sort(), ['SHA256SUMS', 'bundle.tar', 'release-manifest.json', 'reproducibility.json', 'site.car']);
+  assert.deepEqual(RELEASE_ASSETS.slice(-2), ['reproducibility.json', 'SHA256SUMS']);
+  const publish = readFileSync(join(here, 'publish-static.mjs'), 'utf8');
+  assert.match(publish, /for \(const name of RELEASE_ASSETS\)/);
+  assert.doesNotMatch(publish, /'bundle\.tar'/, 'no second inline asset list');
+});
 
 // Production runs the egress allowlist in enforce mode. Anything else here makes
 // the released bundle send requests that production refuses.
