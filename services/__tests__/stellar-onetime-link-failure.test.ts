@@ -164,10 +164,11 @@ const atRiskCode = ts.transpileModule(
 ).outputText;
 
 /** What the modal does with the link on screen when sendOneTime throws `err`. */
-function modalDecision(err: unknown): 'kept-unknown' | 'dropped' {
+function modalDecision(err: unknown, oneTimeSendSettled = false): 'kept-sent' | 'kept-unknown' | 'dropped' {
   const calls: string[] = [];
   const env = {
     err,
+    oneTimeSendSettled,
     log: () => {},
     live: () => true,
     receiptLifecycleRef: { current: 'at-risk' },
@@ -180,6 +181,7 @@ function modalDecision(err: unknown): 'kept-unknown' | 'dropped' {
     isRelayOutcomeUnknown: relayerModule.isRelayOutcomeUnknown,
   };
   const ended = new Function(...Object.keys(env), atRiskCode)(...Object.values(env));
+  if (ended === undefined && calls.length === 0) return 'kept-sent';
   if (ended === undefined && calls.includes('unknown:true') && calls.includes('step:success')) return 'kept-unknown';
   if (ended === 'continued' && calls.includes('url:null') && calls.includes('lifecycle:none')) return 'dropped';
   throw new Error(`unexpected modal path: ${calls.join(', ')}`);
@@ -285,6 +287,17 @@ test('Superseded before the relay drops the link and the saved copy, and the rel
   expect(stopped.relayCalls).toBe(0);
   expect(stopped.stored).toEqual([]);
   expect(modalDecision(stopped.error)).toBe('dropped');
+});
+
+test('an error after the send landed (the caller callback throwing) keeps the link and the success screen', async () => {
+  stubRelayerHttp({ expiresInMs: 60_000, relay: () => Response.json({ txHash: '0xfeed' }) });
+  const run = await send({});
+  expect(run.error).toBeNull();
+  expect(run.stored[0].txHash).toBe('0xfeed');
+  // The same plain error that drops the link before the send must not drop it after.
+  const afterSend = new Error('onSent handler failed');
+  expect(modalDecision(afterSend, false)).toBe('dropped');
+  expect(modalDecision(afterSend, true)).toBe('kept-sent');
 });
 
 test('a relayed send stores its hash on the saved copy', async () => {

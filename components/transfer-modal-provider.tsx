@@ -1805,6 +1805,9 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
       reportTransferError(null);
       transferPhaseRef.current = 'validate';
       setLoadingMessage('Preparing the transfer...');
+      // Set once sendOneTime resolves. An error after that (onSent, the caller's
+      // callback) comes after a landed send, so it must not drop the link.
+      let oneTimeSendSettled = false;
       try {
         if (recipientAddress === sender) throw new Error('That is your own address. Pick someone else to send to.');
         // No separate recipient lookup here: the SDK resolves the recipient's
@@ -1839,6 +1842,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
               setRecipientImportUrl(buildStellarClaimUrl(notes));
             },
           });
+          oneTimeSendSettled = true;
           if (live()) {
             setRecipientImportPayload(JSON.stringify({ notes: sent.notes }));
             setRecipientImportUrl(buildStellarClaimUrl(sent.notes));
@@ -1894,6 +1898,8 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         // sender also has the saved copy). Any other error sent nothing, and
         // the account already removed the saved copy, so the link is dropped.
         if (receiptLifecycleRef.current === 'at-risk') {
+          // The send landed and the success screen is up: keep the link.
+          if (oneTimeSendSettled) return;
           if (isRelayOutcomeUnknown(err)) {
             setIndeterminateAttempt(true);
             setOutcomeUnknown(true);
