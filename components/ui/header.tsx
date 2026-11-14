@@ -29,6 +29,8 @@ import { VersionSwitch } from './version-switch';
 import { ChainLogo, chainLogoChainFor, type ChainLogoChain } from './chain-logo';
 import { useWalletConnectModal } from '@/components/wallet-connect-modal-provider';
 import { useStellarWallet } from '@/components/stellar-wallet-provider';
+import { useStellarKeptSessions } from '@/hooks/use-stellar-session';
+import { showStellarSignOut } from '@/services/stellar/stellar-wallet-binding';
 import { useSupportedWalletConnection } from '@/hooks/use-supported-wallet-connection';
 import { usePoolSession } from '@/hooks/use-pool-session';
 import { useChainRouter } from '@/hooks/use-chain-router';
@@ -192,6 +194,15 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
   const menuActive = isConnected || keySession;
   // Keep a way back to an existing session when the selected chain has no wallet.
   const showSessionControls = evmConnected || !!suiAccount || stellarWallet.isConnected || keySession;
+  // The wallet lost its active account but other accounts are still unlocked in this tab: the
+  // account menu is gone with the connection, so Sign Out gets its own button.
+  const stellarKeptSessions = useStellarKeptSessions();
+  const showStandaloneStellarSignOut = showStellarSignOut({
+    activeIsStellar,
+    walletConnected: stellarWallet.isConnected,
+    signedOut: stellarWallet.signedOut,
+    keptSessions: stellarKeptSessions,
+  });
 
   // Shared breakpoints decide which destinations fit in the top bar.
   //
@@ -578,6 +589,19 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
           {/* Debug mode only: record everything the debug console logs. Next
               to the Actions menu, never inside it (Pat, 2026-09-24). */}
           <DebugRecordButton />
+          {showStandaloneStellarSignOut && (
+            <Pressable
+              className="h-[32px] flex-row items-center justify-center gap-[6px] rounded-pill bg-background-secondary px-[12px]"
+              onPress={() => { setActionsDropdownOpen(false); stellarWallet.disconnect(); }}
+              testID="header-stellar-sign-out"
+              accessibilityRole="button"
+              accessibilityLabel="Sign Out"
+            >
+              {/* nw-keep(data-color): glyph color is a theme token into the vector-icon sink */}
+              <Ionicons name="log-out-outline" size={16} color={colors.text} />
+              {width >= 400 && <Text className="font-pp-sans-medium text-[14px] text-text">Sign Out</Text>}
+            </Pressable>
+          )}
           <View className="relative z-[99999]">
             <Pressable
               className="h-[32px] flex-row items-center justify-center gap-[10px] rounded-pill bg-button-primary px-[14px] py-[4px]"

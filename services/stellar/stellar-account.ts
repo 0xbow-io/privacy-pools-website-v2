@@ -144,6 +144,11 @@ export interface StellarAccountSnapshot {
   paymentRequests: StellarRequestState[];
   lastSyncedAt: number | null;
   error: string | null;
+  /**
+   * Other accounts' unlocked sessions are held in memory (see bind). Only this flag leaves the
+   * store, so the header can offer Sign Out while the wallet has no active account.
+   */
+  keptSessions: boolean;
 }
 
 export type StellarFlowStage =
@@ -172,6 +177,7 @@ const EMPTY: StellarAccountSnapshot = {
   paymentRequests: [],
   lastSyncedAt: null,
   error: null,
+  keptSessions: false,
 };
 
 class StellarAccount {
@@ -179,6 +185,11 @@ class StellarAccount {
   private readonly listeners = new Set<() => void>();
   private signer: StellarWalletProvider | null = null;
   private sessionPromise: Promise<StellarPoolSession> | null = null;
+  // Unlocked accounts the user switched away from, by address. Memory only.
+  private readonly unlockedSessions = new Map<
+    string,
+    { sessionPromise: Promise<StellarPoolSession>; rpc: IndexedStellarRpcInteractor | null; nullifyingKey: string | null; noteOrigins: StellarNoteOrigins | null }
+  >();
   // The relayer, set only while a relayed withdrawal or transfer runs (see buildSession).
   private activeRelayer: IRelayerInteractor<StellarAddress> | null = null;
   private rpc: IndexedStellarRpcInteractor | null = null;
@@ -188,6 +199,11 @@ class StellarAccount {
   // Bumped whenever the bound address changes: a flow started for one account
   // refuses to submit anything after another account binds.
   private generation = 0;
+  // The flow running now (see enqueue), with the generation it started under. A
+  // session signs for the operation running when it is asked, not for the
+  // moment it was built: switching away and back cancels the operation, never
+  // the kept session.
+  private operation: { generation: number } | null = null;
   // The generation whose registration was confirmed on chain (-1: none yet).
   private registeredGeneration = -1;
   private registrationGuard: (() => void) | null = null;
@@ -208,10 +224,18 @@ class StellarAccount {
     for (const listener of this.listeners) listener();
   }
 
-  /** Follows the wallet. A different address drops the previous account entirely. */
-  bind(address: string | null, signer: StellarWalletProvider | null) {
+  /**
+   * Follows the wallet. A different address keeps the previous account's unlocked session in
+   * memory and restores the new one's if it has one. A null address signs out and forgets every
+   * kept session, unless `keepSessions`: the wallet lost its active account (Varial switched to
+   * an account this site is not allowed for yet) but the user did not sign out here.
+   */
+  bind(address: string | null, signer: StellarWalletProvider | null, opts: { keepSessions?: boolean } = {}) {
     if (address === this.snapshot.address) {
       this.signer = signer;
+      // A sign-out after the active account was already lost still forgets the kept sessions.
+      if (!address && !opts.keepSessions) this.unlockedSessions.clear();
+      if (this.snapshot.keptSessions !== this.unlockedSessions.size > 0) this.set({ keptSessions: this.unlockedSessions.size > 0 });
       return;
     }
     // Signing out or switching away: the requests the user is proven to hold
@@ -221,14 +245,30 @@ class StellarAccount {
     this.signer = signer;
     this.generation++;
     stellarRegistrationPrompts.cancel();
-    this.sessionPromise = null;
-    this.nullifyingKey = null;
+    // Switching away from an unlocked account keeps its session in memory under
+    // its own address. Signing out clears every one. Never persisted.
+    if (previous && this.sessionPromise && this.snapshot.unlocked) {
+      this.unlockedSessions.set(previous, { sessionPromise: this.sessionPromise, rpc: this.rpc, nullifyingKey: this.nullifyingKey, noteOrigins: this.snapshot.noteOrigins });
+    }
+    if (!address && !opts.keepSessions) this.unlockedSessions.clear();
+    const restored = address ? this.unlockedSessions.get(address) : undefined;
+    if (address) this.unlockedSessions.delete(address);
+    this.sessionPromise = restored?.sessionPromise ?? null;
+    this.rpc = restored?.rpc ?? null;
+    this.nullifyingKey = restored?.nullifyingKey ?? null;
     this.syncPromise = null;
     // Show the last synced notes straight away (read-only): keys are memory
     // only, so without this every reload reads a zero balance until the user
     // signs again. Spending still unlocks first.
     if (address && restoreStoredRows(address)) bumpPaymentRequestRevision();
-    this.snapshot = { ...EMPTY, address, notes: address ? readCachedNotes(address) : [], paymentRequests: address ? readCachedRequests(address) : [] };
+    this.snapshot = {
+      ...EMPTY,
+      address,
+      notes: address ? readCachedNotes(address) : [],
+      paymentRequests: address ? readCachedRequests(address) : [],
+      keptSessions: this.unlockedSessions.size > 0,
+      ...(restored ? { unlocked: true, status: 'ready' as const, noteOrigins: restored.noteOrigins } : {}),
+    };
     for (const listener of this.listeners) listener();
   }
 
@@ -354,10 +394,39 @@ class StellarAccount {
     )) as unknown as TransferResult<StellarAddress, StellarLog>;
   }
 
+  /**
+   * The wallet a session signs through. It checks the operation running when it is asked and
+   * the account bound right now, both before and after the wallet answers. Never the moment the
+   * session was built: a kept session restored by switching back must sign the account's next
+   * transaction, while an operation the switch cancelled stays cancelled, also when the user
+   * switched away and back while the wallet was asking.
+   */
+  private sessionWallet(owner: string, signer: StellarWalletProvider): StellarWalletProvider {
+    const assertMaySign = (operation: { generation: number } | null) => {
+      if (this.snapshot.address !== owner || (operation && operation.generation !== this.generation)) {
+        throw new Error('The connected Stellar account changed. Start again.');
+      }
+    };
+    return withSigningWindow({
+      ...signer,
+      signTransaction: async (xdr, opts) => {
+        const operation = this.operation;
+        assertMaySign(operation);
+        this.registrationGuard?.();
+        const signed = await signer.signTransaction(xdr, opts);
+        assertMaySign(operation);
+        this.registrationGuard?.();
+        return signed;
+      },
+    });
+  }
+
   private async buildSession(address: string, signer: StellarWalletProvider): Promise<StellarPoolSession> {
-    const generation = this.generation;
     const sdk = await loadStellarSdk();
-    this.rpc = createIndexedRpcInteractor(sdk, ASP_URL);
+    const rpc = createIndexedRpcInteractor(sdk, ASP_URL);
+    // Only the bound account may own the live rpc: a build for an account the
+    // user switched away from must not replace the current one's.
+    if (this.snapshot.address === address) this.rpc = rpc;
     const protocolKeys = await deriveProtocolKeys(sdk, address, signer);
     if (this.snapshot.address === address) this.nullifyingKey = String(protocolKeys.privateNullifyingKey);
     const session = await sdk.StellarPoolSessionBuilder.create({
@@ -367,7 +436,7 @@ class StellarAccount {
       // Event history from the testnet indexer (every event since the
       // deployment); everything else is plain Soroban RPC. A relayed
       // transfer's receipt is confirmed from pool events, never by its hash.
-      rpcInteractor: this.confirmingRpc(this.rpc),
+      rpcInteractor: this.confirmingRpc(rpc),
       networkPassphrase: STELLAR_TESTNET_NETWORK.networkPassphrase,
       poolContractId: STELLAR_TESTNET_CONTRACTS.poolContractId,
       deploymentLedger: STELLAR_TESTNET_DEPLOYMENT_LEDGER,
@@ -378,17 +447,7 @@ class StellarAccount {
       protocolKeys,
       // Each transaction's validity window starts when Varial is asked to sign it
       // (stellar-signing-window.ts). The key derivation above signs through the bare signer.
-      walletInteractor: { type: 'freighter', provider: withSigningWindow({
-        ...signer,
-        signTransaction: async (xdr, opts) => {
-          this.assertStillBound(generation);
-          this.registrationGuard?.();
-          const signed = await signer.signTransaction(xdr, opts);
-          this.assertStillBound(generation);
-          this.registrationGuard?.();
-          return signed;
-        },
-      }) },
+      walletInteractor: { type: 'freighter', provider: this.sessionWallet(address, signer) },
       // In-memory: the account is persisted below via export/import after every
       // sync (one JSON blob per account), which also restores notes saved by
       // builds from before the SDK's storage schema fix.
@@ -459,9 +518,21 @@ class StellarAccount {
     }
   }
 
-  /** Runs `fn` after every earlier flow has settled. */
+  /**
+   * Runs `fn` after every earlier flow has settled, as the current operation: it may sign until
+   * the bound account changes, and switching back later does not revive it.
+   */
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.queue.then(fn, fn);
+    const start = async () => {
+      const operation = { generation: this.generation };
+      this.operation = operation;
+      try {
+        return await fn();
+      } finally {
+        if (this.operation === operation) this.operation = null;
+      }
+    };
+    const run = this.queue.then(start, start);
     this.queue = run.catch(() => undefined);
     return run;
   }

@@ -10,7 +10,15 @@ import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 
 import { useStellarWallet } from '@/components/stellar-wallet-provider';
 import { stellarAccount, type StellarNote, type StellarRequestState } from '@/services/stellar/stellar-account';
+import { bindStellarWallet } from '@/services/stellar/stellar-wallet-binding';
 import { NoteStatus } from '@/services/sdk-types';
+
+const keptSessionsSnapshot = () => stellarAccount.getSnapshot().keptSessions;
+
+/** Whether other accounts' unlocked sessions are held in memory. The flag only, never a key. */
+export function useStellarKeptSessions(): boolean {
+  return useSyncExternalStore(stellarAccount.subscribe, keptSessionsSnapshot, keptSessionsSnapshot);
+}
 
 // Fixed wall-clock grid, never paused or gated on UI state (see
 // docs/privacy-request-discipline.md and services/public-feed-scheduler.ts):
@@ -30,10 +38,10 @@ export function msUntilNextSyncTick(now: number, intervalMs: number = STELLAR_SY
  * wallet provider.
  */
 export function useStellarAccountBinding() {
-  const { address, signer, isConnected } = useStellarWallet();
+  const { address, signer, isConnected, signedOut } = useStellarWallet();
   useEffect(() => {
-    stellarAccount.bind(isConnected ? address : null, isConnected ? signer : null);
-  }, [address, signer, isConnected]);
+    bindStellarWallet(stellarAccount, { address, signer, isConnected, signedOut });
+  }, [address, signer, isConnected, signedOut]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;

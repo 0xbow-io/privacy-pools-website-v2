@@ -47,7 +47,8 @@ function fixture() {
     connect(): Promise<string | null>; disconnect(): void; cancelConnect(): void;
   };
   return { value, state, effects, replies, requests: () => requests, passiveReads: () => passiveReads,
-    flag: () => flag, setFlag: () => { flag = true; }, change: () => watchCallbacks.change({ address: 'G-next', passphrase: 'other-network' }) };
+    flag: () => flag, setFlag: () => { flag = true; }, change: () => watchCallbacks.change({ address: 'G-next', passphrase: 'other-network' }),
+    revoke: () => watchCallbacks.revoked() };
 }
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 describe('Stellar provider lifecycle', () => {
@@ -102,6 +103,19 @@ test('cancelling preserves a prior reconnect preference and discards the late re
   expect(await f.value.connect()).toBe('G-account');
   f.value.cancelConnect(); expect(f.state.status).toBe('connected');
   f.value.disconnect(); expect(f.flag()).toBe(false);
+});
+
+test('a revoke drops the account but is no sign-out, Disconnect is', async () => {
+  const f = fixture();
+  expect(await f.value.connect()).toBe('G-account');
+  expect(f.state.signedOut).toBe(false);
+  f.revoke();
+  expect(f.state.status).toBe('disconnected');
+  expect(f.state.address).toBeNull();
+  expect(f.state.signedOut).toBe(false);
+  f.value.disconnect();
+  expect(f.state.signedOut).toBe(true);
+  expect(f.flag()).toBe(false);
 });
 
 test('cancelling a first connection does not enable reconnect', async () => {
