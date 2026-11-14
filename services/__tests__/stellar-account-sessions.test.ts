@@ -9,13 +9,33 @@ mock.module('react-native', () => ({
 process.env.EXPO_PUBLIC_TEST_MODE = 'true';
 
 const { stellarAccount } = await import('@/services/stellar/stellar-account');
+const { watchFreighter } = await import('@/services/stellar/freighter-watch');
 
 const A = 'GAIH3ULLFQ4DGSECF2AR555KZ4KNDGEKN4AFI4SU2M7B43MGK3QJZNSR';
 const B = 'GCFONE23AB7Y6C5YZOMKUKGETPIAJA4QOYLS5VNS4JHBGKRZCPYHDLW7';
-const signer = {} as never;
+const C = 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H';
+const TESTNET = 'Test SDF Network ; September 2015';
 
+// The wallet: every transaction it is asked to sign, and a gate that holds the
+// approval open (the Freighter popup) while a test switches accounts.
+let walletSigned: string[] = [];
+let walletGate: Promise<void> | null = null;
+let onWalletAsked: (() => void) | null = null;
+const signer = {
+  getAddress: async () => '',
+  getNetworkPassphrase: async () => TESTNET,
+  signTransaction: async (xdr: string) => {
+    onWalletAsked?.();
+    if (walletGate) await walletGate;
+    walletSigned.push(xdr);
+    return `signed:${xdr}`;
+  },
+} as never;
+
+type Wallet = { signTransaction: (xdr: string, opts: { networkPassphrase: string }) => Promise<string> };
 type Internals = {
-  buildSession: (address: string) => Promise<unknown>;
+  buildSession: (address: string, signer: unknown) => Promise<unknown>;
+  sessionWallet: (owner: string, signer: unknown) => Wallet;
   sessionPromise: Promise<unknown> | null;
   unlockedSessions: Map<string, unknown>;
   snapshot: Record<string, unknown>;
@@ -25,14 +45,32 @@ const internals = stellarAccount as unknown as Internals;
 let signatures: string[] = [];
 let gate: Promise<void> | null = null;
 
+// Only the SDK session is faked: it signs through the store's real session
+// wallet, the way the SDK's FreighterWalletInteractor does on submission.
+function fakeSession(owner: string, n: number, wallet: Wallet) {
+  return {
+    owner,
+    n,
+    prepareRegisterKeystore: async () => ({ alreadyRegistered: true }),
+    rageQuit: async ({ commitment }: { commitment: string }) => ({
+      status: true,
+      txHash: await wallet.signTransaction(`exit-${owner.slice(0, 2)}-${commitment}`, { networkPassphrase: TESTNET }),
+    }),
+    exportAccount: async () => ({ notes: [], paymentRequests: [] }),
+  };
+}
+
 beforeEach(() => {
   signatures = [];
   gate = null;
+  walletSigned = [];
+  walletGate = null;
+  onWalletAsked = null;
   stellarAccount.bind(null, null);
-  internals.buildSession = async (address: string) => {
+  internals.buildSession = async (address: string, boundSigner: unknown) => {
     signatures.push(address);
     if (gate) await gate;
-    return { owner: address, n: signatures.length };
+    return fakeSession(address, signatures.length, internals.sessionWallet(address, boundSigner));
   };
 });
 
@@ -128,5 +166,144 @@ describe('Stellar account sessions across a wallet account switch', () => {
     stellarAccount.bind(A, signer);
     expect(stellarAccount.getSnapshot().unlocked).toBe(false);
     expect(internals.unlockedSessions.has(A)).toBe(false);
+  });
+});
+
+const exit = () => stellarAccount.ragequit({ commitment: '0x1' as `0x${string}` });
+
+describe('Signing with a kept session after switching back', () => {
+  test('A to B to A: the restored session signs a new transaction', async () => {
+    stellarAccount.bind(A, signer);
+    await stellarAccount.ensureSession();
+    stellarAccount.bind(B, signer);
+    stellarAccount.bind(A, signer);
+    expect(stellarAccount.getSnapshot().unlocked).toBe(true);
+
+    expect(await exit()).toEqual({ txHash: 'signed:exit-GA-0x1' });
+    expect(walletSigned).toEqual(['exit-GA-0x1']);
+    expect(signatures).toEqual([A]);
+  });
+
+  test('switching away and back while the wallet is asked keeps that operation cancelled, the next one signs', async () => {
+    stellarAccount.bind(A, signer);
+    await stellarAccount.ensureSession();
+
+    let approve!: () => void;
+    walletGate = new Promise<void>((resolve) => (approve = resolve));
+    const asked = new Promise<void>((resolve) => (onWalletAsked = resolve));
+    const stale = exit();
+    await asked;
+
+    // The popup is open: the user switches to B and back to A, then approves.
+    stellarAccount.bind(B, signer);
+    stellarAccount.bind(A, signer);
+    approve();
+    walletGate = null;
+    onWalletAsked = null;
+    await expect(stale).rejects.toThrow('The connected Stellar account changed. Start again.');
+
+    // A fresh operation on the restored session goes through.
+    expect(stellarAccount.getSnapshot().unlocked).toBe(true);
+    expect(await exit()).toEqual({ txHash: 'signed:exit-GA-0x1' });
+    expect(signatures).toEqual([A]);
+  });
+
+  test('an operation started on A never signs while B is bound', async () => {
+    stellarAccount.bind(A, signer);
+    await stellarAccount.ensureSession();
+    let approve!: () => void;
+    walletGate = new Promise<void>((resolve) => (approve = resolve));
+    const asked = new Promise<void>((resolve) => (onWalletAsked = resolve));
+    const stale = exit();
+    await asked;
+
+    stellarAccount.bind(B, signer);
+    approve();
+    await expect(stale).rejects.toThrow('The connected Stellar account changed. Start again.');
+    expect(stellarAccount.getSnapshot().address).toBe(B);
+  });
+});
+
+describe('Freighter selecting an account this site is not allowed for yet', () => {
+  // Freighter scopes site access per account: an account the site was never
+  // allowed for reads as "" with isAllowed false, the same as a revoked site.
+  function fakeFreighter() {
+    const state = { selected: A, allowed: new Set([A, B]) };
+    const api = {
+      getAddress: async () => ({ address: state.allowed.has(state.selected) ? state.selected : '' }),
+      getNetworkDetails: async () => ({ network: '', networkUrl: '', networkPassphrase: TESTNET }),
+      isAllowed: async () => ({ isAllowed: state.allowed.has(state.selected) }),
+    };
+    return { state, api: api as never };
+  }
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 40));
+
+  // The wallet provider's wiring (components/stellar-wallet-provider.tsx and
+  // hooks/use-stellar-session.ts): a change adopts the account, losing it keeps
+  // the account signed in, and only Disconnect signs out.
+  function follow(api: never, start: string) {
+    stellarAccount.bind(start, signer);
+    return watchFreighter(api, { address: start, passphrase: TESTNET }, {
+      change: ({ address }) => stellarAccount.bind(address, signer),
+      revoked: () => stellarAccount.bind(null, null, { keepSessions: true }),
+    }, 2, 20);
+  }
+
+  test('A to B to unregistered C, then C registers: A and B stay unlocked, C signs once', async () => {
+    const freighter = fakeFreighter();
+    const watcher = follow(freighter.api, A);
+    try {
+      await stellarAccount.ensureSession();
+      freighter.state.selected = B;
+      await settle();
+      expect(stellarAccount.getSnapshot().address).toBe(B);
+      await stellarAccount.ensureSession();
+
+      freighter.state.selected = C;
+      await settle();
+      expect(stellarAccount.getSnapshot().address).toBeNull();
+      expect(stellarAccount.getSnapshot().unlocked).toBe(false);
+
+      // The user allows the site for C in Freighter.
+      freighter.state.allowed.add(C);
+      await settle();
+      expect(stellarAccount.getSnapshot().address).toBe(C);
+      expect(stellarAccount.getSnapshot().unlocked).toBe(false);
+      await stellarAccount.ensureSession();
+      expect(signatures).toEqual([A, B, C]);
+
+      freighter.state.selected = A;
+      await settle();
+      expect(stellarAccount.getSnapshot().address).toBe(A);
+      expect(stellarAccount.getSnapshot().unlocked).toBe(true);
+      expect(await exit()).toEqual({ txHash: 'signed:exit-GA-0x1' });
+
+      freighter.state.selected = B;
+      await settle();
+      expect(stellarAccount.getSnapshot().address).toBe(B);
+      expect(stellarAccount.getSnapshot().unlocked).toBe(true);
+      expect(await exit()).toEqual({ txHash: 'signed:exit-GC-0x1' });
+      expect(signatures).toEqual([A, B, C]);
+    } finally {
+      watcher.stop();
+    }
+  });
+
+  test('signing out after the active account was lost forgets every kept session', async () => {
+    const freighter = fakeFreighter();
+    const watcher = follow(freighter.api, A);
+    try {
+      await stellarAccount.ensureSession();
+      freighter.state.selected = C;
+      await settle();
+      expect(stellarAccount.getSnapshot().address).toBeNull();
+      expect(internals.unlockedSessions.has(A)).toBe(true);
+    } finally {
+      watcher.stop();
+    }
+    stellarAccount.bind(null, null);
+    expect(internals.unlockedSessions.size).toBe(0);
+    stellarAccount.bind(A, signer);
+    expect(stellarAccount.getSnapshot().unlocked).toBe(false);
   });
 });

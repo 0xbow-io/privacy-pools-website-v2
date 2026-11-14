@@ -49,6 +49,12 @@ export interface StellarWalletContextValue {
   /** Interactive connect that also says why it failed (for a toast). */
   connectDetailed: () => Promise<{ address: string | null; error: string | null }>;
   disconnect: () => void;
+  /**
+   * True until an account connects and again after Disconnect. Losing the active account
+   * (Freighter switched to an account this site is not allowed for) leaves it false, so the
+   * accounts unlocked in this tab stay unlocked.
+   */
+  signedOut: boolean;
   /** Signer for the SDK; null until connected. */
   signer: StellarSigner | null;
 }
@@ -149,6 +155,7 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
   const lastErrorRef = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [signer, setSigner] = useState<StellarSigner | null>(null);
+  const [signedOut, setSignedOut] = useState(true);
   const watcherRef = useRef<{ stop: () => void } | null>(null);
 
   const stopWatching = useCallback(() => {
@@ -161,6 +168,7 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
     setNetworkPassphrase(next.passphrase);
     setSigner(next.signer);
     setStatus('connected');
+    setSignedOut(false);
     setError(null);
   }, []);
 
@@ -177,8 +185,16 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
   }, [drop, stopWatching]);
 
   // Follows Freighter's account and network until an explicit disconnect. An empty or slow read
-  // is not a disconnect (see services/stellar/freighter-watch.ts); a revoked site is, and watching
-  // continues so an unlock or re-allow reconnects.
+  // is not a disconnect (see services/stellar/freighter-watch.ts). A site that is not allowed
+  // drops the active account, and watching continues so an unlock or re-allow reconnects.
+  //
+  // Freighter scopes site access per account, so selecting an account this site was never
+  // allowed for reads exactly like a revoked site. Neither is a sign-out here: `signedOut` stays
+  // false and the accounts unlocked in this tab keep their sessions (memory only, gone on reload),
+  // so the new account asks for its first signature and switching back needs none. A real
+  // revocation is treated the same way on purpose, because it cannot be told apart. Nothing can
+  // sign meanwhile: the store has no bound account and no signer, and a kept session signs only
+  // while its own account is bound. Disconnect is the one action that forgets every session.
   const watch = useCallback(async (current: FreighterAccount) => {
     if (isDevBurner) return;
     stopWatching();
@@ -279,6 +295,7 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
   const disconnect = useCallback(() => {
     writeFlag(false);
     reset();
+    setSignedOut(true);
   }, [reset]);
 
   const value = useMemo<StellarWalletContextValue>(() => ({
@@ -296,8 +313,9 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
     connect,
     connectDetailed,
     disconnect,
+    signedOut,
     signer,
-  }), [address, status, networkPassphrase, isAvailable, availabilityChecked, isDevBurner, error, connect, connectDetailed, disconnect, signer]);
+  }), [address, status, networkPassphrase, isAvailable, availabilityChecked, isDevBurner, error, connect, connectDetailed, disconnect, signedOut, signer]);
 
   return <StellarWalletContext.Provider value={value}>{children}</StellarWalletContext.Provider>;
 }
@@ -315,6 +333,7 @@ const DISCONNECTED: StellarWalletContextValue = {
   connect: async () => null,
   connectDetailed: async () => ({ address: null, error: null }),
   disconnect: () => {},
+  signedOut: true,
   signer: null,
 };
 

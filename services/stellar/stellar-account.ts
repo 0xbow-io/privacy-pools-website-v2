@@ -191,6 +191,11 @@ class StellarAccount {
   // Bumped whenever the bound address changes: a flow started for one account
   // refuses to submit anything after another account binds.
   private generation = 0;
+  // The flow running now (see enqueue), with the generation it started under. A
+  // session signs for the operation running when it is asked, not for the
+  // moment it was built: switching away and back cancels the operation, never
+  // the kept session.
+  private operation: { generation: number } | null = null;
   private registrationGuard: (() => void) | null = null;
   // Memory only, like the session's own keys: matches this account's spends
   // in the pool's Transacted events (services/stellar-activity.ts).
@@ -209,10 +214,17 @@ class StellarAccount {
     for (const listener of this.listeners) listener();
   }
 
-  /** Follows the wallet. A different address drops the previous account entirely. */
-  bind(address: string | null, signer: StellarWalletProvider | null) {
+  /**
+   * Follows the wallet. A different address keeps the previous account's unlocked session in
+   * memory and restores the new one's if it has one. A null address signs out and forgets every
+   * kept session, unless `keepSessions`: the wallet lost its active account (Freighter switched to
+   * an account this site is not allowed for yet) but the user did not sign out here.
+   */
+  bind(address: string | null, signer: StellarWalletProvider | null, opts: { keepSessions?: boolean } = {}) {
     if (address === this.snapshot.address) {
       this.signer = signer;
+      // A sign-out after the active account was already lost still forgets the kept sessions.
+      if (!address && !opts.keepSessions) this.unlockedSessions.clear();
       return;
     }
     // Signing out or switching away: the requests the user is proven to hold
@@ -223,11 +235,11 @@ class StellarAccount {
     this.generation++;
     stellarRegistrationPrompts.cancel();
     // Switching away from an unlocked account keeps its session in memory under
-    // its own address; signing out (null) clears every one. Never persisted.
+    // its own address. Signing out clears every one. Never persisted.
     if (previous && this.sessionPromise && this.snapshot.unlocked) {
       this.unlockedSessions.set(previous, { sessionPromise: this.sessionPromise, rpc: this.rpc, nullifyingKey: this.nullifyingKey, noteOrigins: this.snapshot.noteOrigins });
     }
-    if (!address) this.unlockedSessions.clear();
+    if (!address && !opts.keepSessions) this.unlockedSessions.clear();
     const restored = address ? this.unlockedSessions.get(address) : undefined;
     if (address) this.unlockedSessions.delete(address);
     this.sessionPromise = restored?.sessionPromise ?? null;
@@ -368,8 +380,34 @@ class StellarAccount {
     return result;
   }
 
+  /**
+   * The wallet a session signs through. It checks the operation running when it is asked and
+   * the account bound right now, both before and after the wallet answers. Never the moment the
+   * session was built: a kept session restored by switching back must sign the account's next
+   * transaction, while an operation the switch cancelled stays cancelled, also when the user
+   * switched away and back while the wallet was asking.
+   */
+  private sessionWallet(owner: string, signer: StellarWalletProvider): StellarWalletProvider {
+    const assertMaySign = (operation: { generation: number } | null) => {
+      if (this.snapshot.address !== owner || (operation && operation.generation !== this.generation)) {
+        throw new Error('The connected Stellar account changed. Start again.');
+      }
+    };
+    return withSigningWindow({
+      ...signer,
+      signTransaction: async (xdr, opts) => {
+        const operation = this.operation;
+        assertMaySign(operation);
+        this.registrationGuard?.();
+        const signed = await signer.signTransaction(xdr, opts);
+        assertMaySign(operation);
+        this.registrationGuard?.();
+        return signed;
+      },
+    });
+  }
+
   private async buildSession(address: string, signer: StellarWalletProvider): Promise<StellarPoolSession> {
-    const generation = this.generation;
     const sdk = await loadStellarSdk();
     const rpc = createIndexedRpcInteractor(sdk, ASP_URL);
     // Only the bound account may own the live rpc: a build for an account the
@@ -395,17 +433,7 @@ class StellarAccount {
       protocolKeys,
       // Each transaction's validity window starts when Freighter is asked to sign it
       // (stellar-signing-window.ts). The key derivation above signs through the bare signer.
-      walletInteractor: { type: 'freighter', provider: withSigningWindow({
-        ...signer,
-        signTransaction: async (xdr, opts) => {
-          this.assertStillBound(generation);
-          this.registrationGuard?.();
-          const signed = await signer.signTransaction(xdr, opts);
-          this.assertStillBound(generation);
-          this.registrationGuard?.();
-          return signed;
-        },
-      }) },
+      walletInteractor: { type: 'freighter', provider: this.sessionWallet(address, signer) },
       // In-memory: the account is persisted below via export/import after every
       // sync (one JSON blob per account), which also restores notes saved by
       // builds from before the SDK's storage schema fix.
@@ -476,9 +504,21 @@ class StellarAccount {
     }
   }
 
-  /** Runs `fn` after every earlier flow has settled. */
+  /**
+   * Runs `fn` after every earlier flow has settled, as the current operation: it may sign until
+   * the bound account changes, and switching back later does not revive it.
+   */
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.queue.then(fn, fn);
+    const start = async () => {
+      const operation = { generation: this.generation };
+      this.operation = operation;
+      try {
+        return await fn();
+      } finally {
+        if (this.operation === operation) this.operation = null;
+      }
+    };
+    const run = this.queue.then(start, start);
     this.queue = run.catch(() => undefined);
     return run;
   }

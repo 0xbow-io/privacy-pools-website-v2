@@ -30,10 +30,12 @@ export function msUntilNextSyncTick(now: number, intervalMs: number = STELLAR_SY
  * wallet provider.
  */
 export function useStellarAccountBinding() {
-  const { address, signer, isConnected } = useStellarWallet();
+  const { address, signer, isConnected, signedOut } = useStellarWallet();
   useEffect(() => {
-    stellarAccount.bind(isConnected ? address : null, isConnected ? signer : null);
-  }, [address, signer, isConnected]);
+    // Losing the active account without a Disconnect keeps the unlocked
+    // sessions (see the wallet provider's watch). Disconnect forgets them.
+    stellarAccount.bind(isConnected ? address : null, isConnected ? signer : null, { keepSessions: !signedOut });
+  }, [address, signer, isConnected, signedOut]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
