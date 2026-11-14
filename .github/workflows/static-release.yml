@@ -1,0 +1,100 @@
+name: Reproducible static release
+on:
+  # Releases created by GITHUB_TOKEN do not emit a new release/tag workflow event.
+  workflow_run:
+    workflows: [tag-release]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing published stable release tag to reproduce
+        required: true
+        type: string
+permissions:
+  contents: read
+# No workflow-level concurrency. Every push to main runs `decide`, and a shared
+# group would let a later non-release run replace a queued release run. Only the
+# publish job takes a group, keyed on its release tag.
+jobs:
+  decide:
+    if: github.repository_owner == '0xbow-io' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      sha: ${{ steps.release.outputs.sha }}
+    env:
+      GIT_LFS_SKIP_SMUDGE: '1'
+    steps:
+      # Commits, refs and the checked-out tree only. No LFS objects and no
+      # historical blobs, so a non-release push stays cheap.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || inputs.tag }}
+          fetch-depth: 0
+          filter: blob:none
+          lfs: false
+          persist-credentials: false
+      - name: Verify release identity and main ancestry
+        id: release
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          tag="v$version"
+          if [ -n "$REQUESTED_TAG" ] && [ "$REQUESTED_TAG" != "$tag" ]; then exit 1; fi
+          if ! git rev-parse --verify "refs/tags/$tag" >/dev/null 2>&1; then
+            echo 'No release tag for this push'
+            exit 0
+          fi
+          if [ "$(git rev-parse "$tag^{commit}")" != "$(git rev-parse HEAD)" ]; then
+            echo 'This push did not create the release tag'
+            exit 0
+          fi
+          git merge-base --is-ancestor HEAD origin/main
+          gh release view "$tag" --json isDraft,isPrerelease --jq 'if .isDraft or .isPrerelease then error("not stable") else . end'
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  publish:
+    needs: decide
+    if: needs.decide.outputs.tag != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    # Keyed on the tag: runs for different releases never replace each other, and
+    # a second run for the same tag waits for the first. Publication is idempotent.
+    concurrency:
+      group: reproducible-static-release-${{ needs.decide.outputs.tag }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.decide.outputs.sha }}
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: false
+      - name: Recheck release identity at the built commit
+        env:
+          RELEASE_TAG: ${{ needs.decide.outputs.tag }}
+          RELEASE_SHA: ${{ needs.decide.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ "$(git rev-parse HEAD)" = "$RELEASE_SHA" ]
+          [ "v$(node -p "require('./package.json').version")" = "$RELEASE_TAG" ]
+          [ "$(git rev-parse "$RELEASE_TAG^{commit}")" = "$RELEASE_SHA" ]
+          git merge-base --is-ancestor HEAD origin/main
+      - name: Build twice with pinned tools and bundled circuits
+        run: node scripts/release/reproducible.mjs
+      - name: Publish verified bundle, CAR, hashes and CIDs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.decide.outputs.tag }}
+        run: node scripts/release/publish-static.mjs

@@ -122,3 +122,8 @@ scripts/stellar/.state/
 
 # staged copy for scripts/deploy-artifacts.mjs
 .artifacts-stage
+
+# Reproducible release scratch inputs, verified outputs and circuit cache
+/release-out/
+/scripts/release/anchor/cache/
+/scripts/release/anchor/out/
