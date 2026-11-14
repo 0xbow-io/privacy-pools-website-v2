@@ -1,9 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { files, sha256, publicBuildEnv, verifyCircuits, verifyReleaseOutputs } from './static-files.mjs';
+
+const releaseEnvPath = join(dirname(fileURLToPath(import.meta.url)), '../../config/release-env.json');
+
+// Production runs the egress allowlist in enforce mode. Anything else here makes
+// the released bundle send requests that production refuses.
+test('release environment enforces the egress policy like production', () => {
+  const env = publicBuildEnv(JSON.parse(readFileSync(releaseEnvPath, 'utf8')));
+  assert.equal(env.EXPO_PUBLIC_EGRESS_POLICY, 'enforce');
+  assert.equal(env.EXPO_PUBLIC_APP_ENV, 'prod');
+});
 
 test('release environment is explicit public configuration, never inherited secrets or offloaded circuits', () => {
   assert.deepEqual(publicBuildEnv({ EXPO_PUBLIC_Z: 'true', EXPO_PUBLIC_A: 'prod' }), { EXPO_PUBLIC_A: 'prod', EXPO_PUBLIC_Z: 'true' });

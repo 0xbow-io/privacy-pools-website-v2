@@ -38,6 +38,42 @@ enter the container. The source archive contains tracked files only. No private
 build secret is necessary to reproduce it. This bundle is its own public build
 profile; it does not claim byte identity with an independently built Vercel deploy.
 
+### Where the bundle differs from production
+
+The bundle sets only the keys in `config/release-env.json`. Everything else falls
+back to the default in code. The release workflow cannot read Vercel, so it does
+not copy production values, and nothing below claims what production sets.
+
+- `EXPO_PUBLIC_EGRESS_POLICY` is `enforce`, as in production. The allowlist in
+  `services/egress-policy.ts` refuses an undeclared request instead of reporting
+  it. `scripts/release/static-files.test.mjs` fails if this key is missing or has
+  any other value.
+- `EXPO_PUBLIC_MAX_DEPOSIT_USD` is not set. The deposit cap shown and checked in
+  the UI is the prod default of $100 (`config/environments.ts`). If production sets
+  another cap, the bundle shows $100 anyway. The ASP enforces its own cap
+  separately.
+- `EXPO_PUBLIC_YIELD_DEPOSITS_PAUSED` is not set, so no yield vault deposit is
+  paused in the bundle. A pause set on Vercel does not reach the bundle. It is a
+  build-time value, so a pause only applies to a bundle built with it.
+- `EXPO_PUBLIC_ALCHEMY_KEY` and the `EXPO_PUBLIC_PROD_*_RPC_URL` overrides are not
+  set. Every chain uses the public endpoint in `config/prod-deployments.ts`, with
+  the narrower `eth_getLogs` windows set there for public endpoints, so history
+  scans are slower than on an Alchemy-backed build.
+- `EXPO_PUBLIC_STELLAR_ENABLED` is not set, so Stellar is not offered.
+- `EXPO_PUBLIC_SENTRY_DSN` is not set, so the DSN default in `config/env.ts`
+  applies, the same Sentry project as the code default. Error reports are on
+  unless the user turns them off in settings.
+
+### Chains in the keyless bundle
+
+Ethereum, Citrea, Optimism, Base, Arbitrum and Robinhood run on their public RPC
+endpoints, with the log windows probed for those endpoints. The public Base
+endpoint rate-limits, so scans there can be slow. BNB Chain does not work: `bsc-dataseed.binance.org` does not serve
+`eth_getLogs` at any range (comment in `config/prod-deployments.ts`), so pool
+history and balances cannot load there. BNB Chain needs a build with
+`EXPO_PUBLIC_ALCHEMY_KEY` or `EXPO_PUBLIC_PROD_BSC_RPC_URL` pointing at an
+endpoint that serves logs.
+
 The script uses at most 8 GiB memory and 1.8 CPUs per container and serializes both
 builds. `--sudo` is available locally if Docker requires it. `--host-network` is available for hosts whose Docker bridge cannot reach npm;
 it changes container networking, not build inputs. Circuit inputs may be
