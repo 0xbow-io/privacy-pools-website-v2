@@ -35,3 +35,11 @@ Semver, from the PR titles since the last release:
   ```bash
   TAG_RELEASE_DRY_RUN=1 bash scripts/release/tag-release.sh
   ```
+
+## Static bundles and verification
+
+After tagging, the reproducible-static-release workflow builds the production
+source twice and attaches the complete static frontend, circuits, hashes, CID
+manifest and CAR file to the release. It refuses non-matching builds or changed
+release assets. See [static-releases.md](static-releases.md) for reproduction,
+IPFS import/pinning and the optional multisig anchor.
