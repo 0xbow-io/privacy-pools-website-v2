@@ -17,8 +17,7 @@ export function StellarWalletOption({ className, onConnected }: { className: str
   const { isDebugEnabled } = useDebug();
   const enabled = supportedChainIds.includes(STELLAR_TESTNET_ID) && isChainSelectable(STELLAR_TESTNET_ID, isDebugEnabled);
   const wallet = useStellarWallet();
-  const { selectChain, isStellar } = useChainRouter();
-  if (!enabled || (!isStellar && !wallet.isConnected)) return null;
+  if (!enabled) return null;
   return <>
     <StellarWalletRow kind="freighter" className={className} onConnected={onConnected} />
     {wallet.walletAvailable.metamask && !wallet.isDevBurner ? <StellarWalletRow kind="metamask" className={className} onConnected={onConnected} /> : null}

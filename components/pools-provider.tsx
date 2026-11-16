@@ -724,14 +724,16 @@ function mergeFeedChains(
 
 function RealPoolsProvider({ children }: { children: ReactNode }) {
   const defaultChain = useActiveEvmChain();
+  const { activeChainId, isEvm: isEvmActive } = useChainRouter();
   const { address, status: accountStatus } = useAccount();
   // Address to attribute "my" activity (deposit/transfer/withdrawal counts) to:
-  // the active-chain account, so a Sui session counts its Sui address instead
-  // of the (empty) wagmi EVM address. Falls back to the EVM address.
+  // the active-chain account, so a non-EVM session never inherits a connected
+  // EVM wallet's activity.
   const { address: multiChainAddress } = useMultiChainWallet();
-  const myAddress = multiChainAddress ?? address;
+  const myAddress = multiChainAddress;
   const { notes } = useNotes();
   const { keystoreManager, identityMode, keysReady, sessionAddress, syncedHoldings, poolSession, sessionTarget } = usePoolSession();
+  const evmIdentity = isEvmActive ? sessionAddress ?? myAddress : null;
   // The identity "my" activity is attributed to. An ACCOUNT-KEY session has no
   // wallet at all, so the wallet-only myAddress left it with none: its own
   // history rows were never built, and the deposit / transfer / withdrawal
@@ -743,7 +745,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
   // one), and that wallet is a payer, not the account whose history this is.
   // The non-key branch keeps myAddress, so on Sui it stays the Sui address and
   // an existing wallet session is byte-identical.
-  const myActivityAddress = identityMode === 'key' ? sessionAddress : myAddress;
+  const myActivityAddress = identityMode === 'key' && isEvmActive ? sessionAddress : myAddress;
   // Keystore registration drives the Claim projection: an approved, spendable
   // note on an UNREGISTERED wallet is claimable, not ready.
   const { status: registrationStatus } = useKeystoreRegistrationModal();
@@ -821,7 +823,6 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
   // Events are chain-scoped: query the ACTIVE chain (SUI testnet = 102 when the
   // Sui wallet drives the session), not the EVM default — otherwise SUI deposits
   // indexed by the ASP (and their pending/approved reviewStatus) never surface.
-  const { activeChainId } = useChainRouter();
   // Transactions (All) is a multi-chain aggregate — the app serves Sui + EVM
   // pools, so the feed shows activity from every VISIBLE chain, not just the
   // active one (product direction). Sui is gated strictly behind debug
@@ -1081,15 +1082,14 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
   // another chain mine but unexplained: "Transfer · Private" with no amount
   // (Mike, 2026-09-24). Same identity precedence as the balances below.
   const storedNoteSets = useMemo(() => {
-    const identity = sessionAddress ?? myAddress;
-    if (!identity) return [];
+    if (!evmIdentity) return [];
     return supportedChainIds
       .filter((cid) => getChainConfig(cid)?.chainType === 'evm')
-      .map((cid) => ({ chainId: cid, notes: (loadStoredAccountExport(identity, cid)?.notes ?? []) as unknown as typeof notes }));
+      .map((cid) => ({ chainId: cid, notes: (loadStoredAccountExport(evmIdentity, cid)?.notes ?? []) as unknown as typeof notes }));
     // syncedHoldings: another chain's stored export is written by a background
     // sync without the live notes changing, and its spends must be picked up.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notes, sessionAddress, myAddress, syncedHoldings]);
+  }, [notes, evmIdentity, syncedHoldings]);
   // Note: matched with the session's nullifying key. Prod chains share one
   // (HKDF) scheme; a staging Sepolia keccak keystore simply matches nothing,
   // so its rows keep their previous rendering.
@@ -1098,10 +1098,10 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
   const liveChainId = useLiveNotesChainId();
   const freshSpendNotes = useMemo(
     () => mergeNotesByCommitment(
-      liveChainId === null ? [] : notes.map((n) => ({ ...n, chainId: liveChainId })),
+      !isEvmActive || liveChainId === null ? [] : notes.map((n) => ({ ...n, chainId: liveChainId })),
       storedNoteSets.map((set) => set.notes.map((n) => ({ ...n, chainId: set.chainId }))),
     ),
-    [notes, storedNoteSets, liveChainId],
+    [notes, storedNoteSets, liveChainId, isEvmActive],
   );
   // The same notes, tagged with their chain, for the received rows. Stellar's
   // are classified by services/stellar-activity.ts instead.
@@ -1128,7 +1128,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
     && !spendsReady && !(userSpends.failed && spendsForCurrentInputs);
   // The last completed run's spends, still usable while the next is pending
   // for the same identity: what they say about txs they saw stays true.
-  const spendIdentity = (sessionAddress ?? myAddress ?? '').toLowerCase();
+  const spendIdentity = (evmIdentity ?? '').toLowerCase();
   const spendsUsable = spendsReady
     || (spendClassificationPending && userSpends.ready && userSpends.forIdentity === spendIdentity);
   useEffect(() => {
@@ -1153,7 +1153,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
       const hashService = await createHashService();
       if (cancelled) return;
       const nullifyingKey = keystoreManager.getPrivateNullifyingKey();
-      const anchorOwner = (identityMode === 'key' ? sessionAddress : address)?.toLowerCase() ?? null;
+      const anchorOwner = myActivityAddress?.toLowerCase() ?? null;
       const anchorTxHashes = anchorOwner ? readAnchorTxHashesForChains(anchorOwner, supportedChainIds) : undefined;
       const crossChainOutputCommitments = new Set(readAllSwapRecords().flatMap((r) => (r.kind === 'cross-chain' ? [r.commitment] : [])));
       // Received notes this device claimed (DEV-574): their spend is the claim.
@@ -1169,7 +1169,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [spendNotes, eventSnapshot, keystoreManager, identityMode, sessionAddress, address, defaultChain.id, log, spendIdentity]);
+  }, [spendNotes, eventSnapshot, keystoreManager, myActivityAddress, log, spendIdentity]);
 
   // Relays still pending on this device settle here once the snapshot shows
   // their nullifiers spent. The snapshot is already polled on a fixed cadence,
@@ -1467,7 +1467,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
   const noteCiphertextsRevision = useSyncExternalStore(subscribeNoteCiphertexts, getNoteCiphertextsRevision, getNoteCiphertextsRevision);
   const [viewingKeyOwnershipState, setViewingKeyOwnership] = useState<ViewingKeyOwnership>(NO_VIEWING_KEY_OWNERSHIP);
   const viewingKeyVerdictCacheRef = useRef(new Map<string, boolean>());
-  const ownershipWallet = identityMode === 'wallet' ? (address?.toLowerCase() ?? null) : null;
+  const ownershipWallet = isEvmActive && identityMode === 'wallet' ? (address?.toLowerCase() ?? null) : null;
   const ownershipIdentity = ownershipWallet && keystoreManager
     ? `${ownershipWallet}:${keystoreManager.getViewingKeyPair().publicKey.toLowerCase()}`
     : null;
@@ -1897,7 +1897,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
     // address is the account, plus owned commitments (deposits funded into
     // this account by a different payer). EVM-only: the snapshot carries no
     // Sui events, so a Sui wallet gets empty lists.
-    const walletIdentityLc = identityMode === 'wallet' ? (address?.toLowerCase() ?? null) : null;
+    const walletIdentityLc = isEvmActive && identityMode === 'wallet' ? (address?.toLowerCase() ?? null) : null;
     // Canonical form on BOTH sides. Notes carry 0x-hex, the ASP snapshot
     // carries DECIMAL, and a bare .toLowerCase() can never bridge two number
     // bases — so this set never matched a snapshot commitment and the
@@ -1937,7 +1937,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
       connectedAddress: walletIdentityLc ?? null,
       viewingKeyMatches,
     };
-    const myDeposits = identityMode
+    const myDeposits = isEvmActive && identityMode
       ? (eventSnapshot?.deposits ?? []).filter((d) => {
           const ownership = resolveDepositOwnership(
             { txHash: d.txHash, commitment: d.outputCommitment, depositor: d.depositAddress },
@@ -1947,7 +1947,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
           return ownership.mine && (ownership.definitive || !ownershipPending(d.txHash, true));
         })
       : [];
-    const myExits = identityMode
+    const myExits = isEvmActive && identityMode
       ? (eventSnapshot?.ragequits ?? []).filter((r) =>
           (walletIdentityLc != null && r.ragequitter?.toLowerCase() === walletIdentityLc)
           || ownedCommitments.has(normalizeCommitment(r.commitment) ?? ''))
@@ -2049,7 +2049,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
     // Identity the note exports are persisted under: the SESSION address (in
     // key mode the connected wallet is only the payer, so the wallet address
     // reads an empty bucket — kimi review, finding 5).
-    const exportIdentity = sessionAddress ?? myAddress;
+    const exportIdentity = isEvmActive ? evmIdentity : myAddress;
     // ONE account-export read per chain per pass. Three loops below each reload
     // the same per-(address, chainId) buckets, so a single execution of this memo
     // was doing 14 synchronous sessionStorage reads in wallet mode and 9 in an
@@ -2122,7 +2122,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
     // (no local note matched). Filled inside the loop that decides the row.
     const unmatchedApprovedDeposits: PendingDeposit[] = [];
     // just-submitted discovery fallback remains available when it is needed.
-    if (identityMode === 'wallet' && keysReady && address) {
+    if (isEvmActive && identityMode === 'wallet' && keysReady && address) {
       const connectedAddress = address.toLowerCase();
       const noteTxHashes = new Set<string>();
       for (const note of notes) {
@@ -2325,10 +2325,9 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
     // Transfer Out and Withdrawal row it has.
     // BRANCHED on identityMode, not a null-coalesce: a key session can have a
     // funding wallet connected (deposits require one) and that wallet is a
-    // payer, not the account being viewed. The non-key branch keeps the wagmi
-    // address, so an existing wallet session is byte-identical. Companion to
-    // the feed-supplement gate fixed in 2652413.
-    const connectedAddress = (identityMode === 'key' ? sessionAddress : address)?.toLowerCase() ?? null;
+    // payer, not the account being viewed. Wallet sessions use the active
+    // chain's wallet, even when another wallet remains connected.
+    const connectedAddress = myActivityAddress?.toLowerCase() ?? null;
     // My own confirmed anchors, read once per pass. This is the LOCAL signal
     // that does not wait on the ASP: the reconstructed spends below need the event
     // SNAPSHOT, which lags the activity FEED by a minute or two after a claim,
@@ -2955,6 +2954,8 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
     rateFor,
     eventSnapshot,
     activeChainId,
+    isEvmActive,
+    evmIdentity,
     address,
     identityMode,
     keysReady,

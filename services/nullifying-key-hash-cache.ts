@@ -1,4 +1,5 @@
 import { policedFetch } from '@/services/egress-fetch';
+import { readBulkRegistry } from '@/services/keystore-bulk-fallback';
 // Local copy of the on-chain Keystore's (account → nullifying-key hash)
 // registry, kept in sync with the ASP's bulk /nullifying-key-hashes feed.
 //
@@ -206,11 +207,17 @@ export async function syncNullifyingKeyHashes(
 
 /** Pure local read. Never touches the network. */
 export function getCachedNullifyingKeyHash(chainId: number, account: string, keystoreAddress?: string): string | null {
+  const bulk = readBulkRegistry(chainId, keystoreAddress);
+  if (!isAspHashRegistryFresh(chainId, keystoreAddress) && bulk) return bulk.hashes[account.toLowerCase()] ?? null;
   return readRegistry(chainId, keystoreAddress).byAccount[account.toLowerCase()] ?? null;
 }
 
 /** True when a sync succeeded recently enough that a miss means "not registered". */
 export function isNullifyingKeyRegistryFresh(chainId: number, keystoreAddress?: string, now = Date.now()): boolean {
+  return isAspHashRegistryFresh(chainId, keystoreAddress, now) || readBulkRegistry(chainId, keystoreAddress, now) !== null;
+}
+
+export function isAspHashRegistryFresh(chainId: number, keystoreAddress?: string, now = Date.now()): boolean {
   const at = Math.max(lastSyncOk.get(cacheScope(chainId, keystoreAddress)) ?? 0, readRegistry(chainId, keystoreAddress).lastSyncedAt);
   return at > 0 && now - at <= NULLIFYING_KEY_HASH_MAX_AGE_MS;
 }

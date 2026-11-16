@@ -62,7 +62,7 @@ describe('no per-recipient viewing-key read on the pool RPC when the ASP registr
     const deposit = read('components/deposit-modal-provider.tsx');
     const fnStart = deposit.indexOf('export async function checkRecipientRegistration');
     const fn = stripComments(deposit.slice(fnStart, fnStart + 2500));
-    expect(fn).toContain("if (result.source === 'cache' && result.aspAvailable) return 'unregistered';");
+    expect(fn).toContain("return result.lookupFailed ? 'unknown' : 'unregistered';");
     expect(fn).not.toContain('await ks.getViewingKey(recipient)');
   });
 });

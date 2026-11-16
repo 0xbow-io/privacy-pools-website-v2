@@ -284,40 +284,26 @@ export async function buildTransferRecipient(
   }
 }
 
-/** The SDK's note math, the Keystore read and its error classes, for this chain. */
-export async function loadTransferRecipientDeps(
-  chainId: number,
-  /**
-   * The signed-in account. A transfer to yourself (a consolidation, a claim's
-   * anchor) reads its OWN viewing key: that read is answered from the bulk
-   * registry, not the chain. Any other recipient is still read from the chain.
-   */
-  ownerAddress?: string,
-): Promise<TransferRecipientDeps> {
-  const [{ getChainConfig }, { LEGACY_CONFIG }, sdk, { routeOwnKeystoreReads }] = await Promise.all([
+/** Note math and registry-only recipient resolution for this chain. */
+export async function loadTransferRecipientDeps(chainId: number, _ownerAddress?: string): Promise<TransferRecipientDeps> {
+  const [{ getChainConfig }, { LEGACY_CONFIG }, sdk, { readRegistryView, REGISTRY_SYNCING_MESSAGE }] = await Promise.all([
     import('@/config/chains'), import('@/config/env'), import('@/services/sdk-runtime'),
-    import('@/services/keystore-registry-reads'),
+    import('@/services/nullifying-key-hash-cache'),
   ]);
   const contracts = getChainConfig(chainId)?.contracts;
   if (!contracts) throw new Error(`Unsupported chain: ${chainId}`);
   const noteComputation = await sdk.createNoteComputationService();
   const crypto = sdk.createCryptoService();
-  const keystore = sdk.createKeystoreInteractor(
-    sdk.createRPCInteractor(chainId, Number(contracts.fromBlock)),
-    // The legacy host's session reads its own keystore (components/sdk-provider.tsx).
-    (LEGACY_CONFIG?.keystore ?? contracts.keystoreAddress) as Address,
-    contracts.keystoreFromBlock,
-  );
-  if (ownerAddress) {
-    routeOwnKeystoreReads(keystore, { chainId, keystoreAddress: LEGACY_CONFIG?.keystore ?? contracts.keystoreAddress, ownerAddress });
-  }
   return {
     generateSecret: () => crypto.generateSecret() as Hex,
     // EVM's AddressFieldConverter is the identity for addresses and token ids.
     noteAddressHash: (evmAddress, secret) => noteComputation.computeNoteAddressHash(evmAddress, secret) as Hash,
     commitment: (note) => noteComputation.computeFullCommitment(note) as Hash,
-    // A registry hit answers with no request; otherwise the chain, never a wait.
-    getViewingKey: async (evmAddress) => (await keystore.getViewingKey(evmAddress)) as Hex,
+    getViewingKey: async (evmAddress) => {
+      const view = readRegistryView(chainId, evmAddress, LEGACY_CONFIG?.keystore ?? contracts.keystoreAddress);
+      if (!view.viewingFresh) throw new Error(REGISTRY_SYNCING_MESSAGE);
+      return (view.viewingKey ?? `0x${'0'.repeat(64)}`) as Hex;
+    },
     errors: {
       unregistered: (evmAddress) => new sdk.RecipientViewingKeyUnregistered(evmAddress),
       expired: (expiresAt, nowMs) => new sdk.PaymentRequestExpired(expiresAt, nowMs),

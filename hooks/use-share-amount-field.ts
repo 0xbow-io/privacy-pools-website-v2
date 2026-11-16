@@ -58,7 +58,7 @@ export function useShareAmountField(args: { amount: string; symbol: string; chai
         fieldKey, maxSharesExact, capKnown, pending: true });
       return amount;
     }
-    const shares = cleaned ? shareAmountFromUnderlying({ text: cleaned, rate, maxSharesExact, displayedMax: denomination === 'usd' ? usdDisplay(maxSharesExact) : numericDisplay(maxSharesExact), denomination, usdPriceExact: priceExact, clamp: clampToMax }) : '';
+    const shares = cleaned ? shareAmountFromUnderlying({ text: cleaned, rate, maxSharesExact, displayedMax: denomination === 'usd' ? usdDisplay(maxSharesExact) : numericDisplay(maxSharesExact), denomination, usdPriceExact: priceExact, clamp: clampToMax, rounding: clampToMax ? 'up' : 'down' }) : '';
     const cap = formatUnits(parseTokenAmount(maxSharesExact, rate.shareDecimals), rate.shareDecimals);
     const clampedText = denomination === 'usd' ? usdDisplay(maxSharesExact) : numericDisplay(maxSharesExact);
     setEdit({ shares, text: shares && shares === cap && cap !== '0' ? clampedText : cleaned, rateKey, priceExact, denomination,
@@ -88,7 +88,7 @@ export function useShareAmountField(args: { amount: string; symbol: string; chai
       if (!rate) return null; // Raw-unit presets use the existing share guard.
       if (!capKnown) return null;
       return shareAmountFromUnderlying({ text, rate, maxSharesExact,
-        displayedMax: numericDisplay(maxSharesExact), preview: true }).exceedsMax;
+        displayedMax: numericDisplay(maxSharesExact), rounding: clampToMax ? 'up' : 'down', preview: true }).exceedsMax;
     },
     toShares,
   };

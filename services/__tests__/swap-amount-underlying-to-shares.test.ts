@@ -25,7 +25,7 @@ const RATE: ShareRate = {
 
 /** What the conversion boundary itself makes of a typed coin amount on Swap. */
 const expectedShares = (text: string, cap = '0') =>
-  shareAmountFromUnderlying({ text, rate: RATE, maxSharesExact: cap, displayedMax: shareFieldFigure(cap, RATE), clamp: false });
+  shareAmountFromUnderlying({ text, rate: RATE, maxSharesExact: cap, displayedMax: shareFieldFigure(cap, RATE), clamp: false, rounding: 'down' });
 
 // Runs the REAL hook (hooks/use-share-amount-field.ts) with local state/effect
 // adapters, called with the exact arguments the Swap modal passes.

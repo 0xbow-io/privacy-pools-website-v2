@@ -5,9 +5,9 @@
  * the SDK re-derives every field and refuses another owner's note). The fixed
  * sync clock then marks them spendable. "Save to my account" makes it
  * permanent: one private transfer to itself, announced to its own viewing
- * key, so any device finds it and the link is no longer needed. Varial pays
- * for that and for registering the account first (relayed registration is not
- * available on Stellar).
+ * key, so any device finds it and the link is no longer needed. That transfer
+ * is relayed; Varial only signs the account's registration first, if needed
+ * (relayed registration is not available on Stellar).
  */
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ExplorerPrivacyHint } from '@/components/ui/explorer-privacy-hint';
@@ -18,9 +18,10 @@ import { formatUnits } from 'viem';
 import { useStellarConnectAction } from '@/hooks/use-stellar-connect-action';
 import { useStellarWallet } from '@/components/stellar-wallet-provider';
 import { STELLAR_TESTNET_ID, getExplorerTxUrl } from '@/config/chains';
-import { STELLAR_TRANSFER_RELAY_FEE_ESTIMATE, STELLAR_XLM } from '@/config/stellar-deployment';
+import { STELLAR_XLM } from '@/config/stellar-deployment';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { useStellarSession } from '@/hooks/use-stellar-session';
+import { useStellarTransferFeeEstimate } from '@/hooks/use-stellar-fee-estimate';
 import { useTabCloseGuard } from '@/hooks/use-tab-close-guard';
 import { decodeStellarClaim, stellarClaimTotal } from '@/services/stellar/stellar-claim';
 import { describeStellarStage, stellarErrorMessage, stellarActionError } from '@/services/stellar/stellar-copy';
@@ -54,6 +55,7 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
     }
   }, [encoded]);
   const claim = decoded.claim;
+  const relayFee = useStellarTransferFeeEstimate(claim?.notes.length ?? 0);
   const owner = claim?.notes[0]?.ownerAddress ?? null;
   const amountLabel = claim ? `${formatUnits(stellarClaimTotal(claim), STELLAR_XLM.decimals)} XLM` : null;
   const isOwner = !!owner && wallet.isConnected && wallet.address === owner;
@@ -157,7 +159,7 @@ export function StellarClaimNoteScreen({ encoded }: { encoded: string }) {
               {spendable
                 ? 'Claimed. Save it to your account so it shows on any device. Until then keep this link.'
                 : 'Claimed. It turns spendable after the next sync. Keep this link until you save it.'}
-              {` Saving is relayed: a fee of up to ${formatUnits(STELLAR_TRANSFER_RELAY_FEE_ESTIMATE, STELLAR_XLM.decimals)} XLM comes out of it.`}
+              {relayFee === null ? ' Relayer fee: Estimate unavailable.' : ` Relayer fee: ~${formatUnits(relayFee, STELLAR_XLM.decimals)} XLM.`}
             </Text>
             <Pressable
               disabled={!spendable || !!busy}

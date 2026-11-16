@@ -9,7 +9,10 @@ const calculate = (price: number, vettingBps = 0n) => paymentRequestAmount({
 });
 
 test('Nov 12 CI price fits without raising the cap or cutting the fee reserve', () => {
-  expect(calculate(2052)).toBe('0.0007');
+  for (const price of [2012.28, 2017.22, 2018.79, 2052]) {
+    expect(calculate(price)).toBe('0.0007');
+    expect(Number(calculate(price)) * price).toBeGreaterThan(1.15 * 1.1);
+  }
   expect(parseEther(calculate(2052)) + parseEther('0.0003')).toBe(parseEther('0.001'));
   expect(Number(calculate(2052)) * 2052).toBeGreaterThan(1.15 * 1.1);
 });

@@ -52,8 +52,8 @@ export function parseAppEnvironment(raw: string | null | undefined): AppEnvironm
   return value === 'prod' || value === 'staging' ? value : undefined;
 }
 
-export function appEnvironmentLabel(env: AppEnvironment): string {
-  return env === 'prod' ? 'Prod' : 'Staging';
+export function appEnvironmentLabel(env: AppEnvironment, mainnet = false): string {
+  return env === 'prod' ? 'Prod' : mainnet ? 'Staging' : 'Testnet';
 }
 
 /** Pure precedence: query > stored > build default > prod. Garbage at any level is skipped. */

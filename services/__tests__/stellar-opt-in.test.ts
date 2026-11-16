@@ -47,14 +47,19 @@ test('?stellar=true stays on when storage throws', () => {
 });
 
 // config/chains cannot be imported under bun (react-native), so its gate is
-// pinned by source: ?stellar=true only counts where the environment includes
-// Stellar (staging), and it never adds the chain by itself.
-describe('Stellar opt-in is staging only', () => {
+// evaluated from source: staging enables Stellar, while an opt-in never
+// adds a chain that the environment does not include.
+describe('Stellar availability follows the environment', () => {
   const { readFileSync } = require('node:fs') as typeof import('node:fs');
   const source = readFileSync(require.resolve('../../config/chains.ts'), 'utf8');
 
-  test('the opt-in is read only when the environment includes Stellar', () => {
-    expect(source).toMatch(/export const STELLAR_OPT_IN: boolean = ACTIVE_ENVIRONMENT\.includesStellar && resolveRuntimeStellarOptIn\(\);/);
+  test('staging enables Stellar without flags; production retains explicit opt-in', () => {
+    const expression = source.match(/export const STELLAR_OPT_IN: boolean = ([\s\S]*?);/)![1];
+    const enabled = new Function('ACTIVE_ENVIRONMENT', 'resolveRuntimeStellarOptIn', `return ${expression};`);
+    expect(enabled({ id: 'staging', includesStellar: true }, () => false)).toBe(true);
+    expect(enabled({ id: 'prod', includesStellar: true }, () => false)).toBe(false);
+    expect(enabled({ id: 'prod', includesStellar: true }, () => true)).toBe(true);
+    expect(enabled({ id: 'prod', includesStellar: false }, () => true)).toBe(false);
   });
 
   test('the supported chain list is not widened by the opt-in', () => {

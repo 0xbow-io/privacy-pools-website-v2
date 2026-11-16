@@ -199,3 +199,9 @@ test('registration dismissal is distinguished from wallet rejection', () => {
   expect(stellarActionError(new Error('User rejected'), 'Cancelled in Freighter.')).toBe('Cancelled in Freighter.');
   expect(stellarActionError(new Error('Error(Contract, #12): rejected balance'))).toContain('error #12');
 });
+
+test('relayer rejections preserve their reason instead of becoming wallet cancellations', () => {
+  const error = new Error("Stellar transfer rejected: the relay fee does not cover the transaction's simulated fee (2849562 stroops).");
+  error.name = 'RelayerRejected';
+  expect(stellarActionError(error)).toBe(error.message);
+});

@@ -76,7 +76,7 @@ describe('P2 the net figure is cleared when the form changes or resets', () => {
 describe('P2 Swap amount is the coin it names', () => {
   const rate: ShareRate = { ...RATE, assetsPerShare: 1_050_000n };
   const enter = (text: string, cap: string, displayedMax = cap, clamp?: boolean) =>
-    shareAmountFromUnderlying({ text, rate, maxSharesExact: cap, displayedMax, clamp });
+    shareAmountFromUnderlying({ text, rate, maxSharesExact: cap, displayedMax, clamp, rounding: clamp === false ? 'down' : 'up' });
 
   test('10 USDT at 1.05 is 9.523809523809523809 shares, not 10 shares', () => {
     expect(enter('10', '100', '105', false)).toBe('9.523809523809523809');

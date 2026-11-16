@@ -122,7 +122,7 @@ export type EnvironmentConfig = {
   /** Whether the Sui chain is served (debug-gated in the UI as before). */
   includesSui: boolean;
   /**
-   * Whether Stellar testnet is served (debug-gated in the UI, like Sui). On in
+   * Whether Stellar testnet is served. Available by default in
    * staging; `EXPO_PUBLIC_STELLAR_ENABLED=true` also turns it on in the prod
    * environment, so it can be tried next to exactly what prod serves.
    */

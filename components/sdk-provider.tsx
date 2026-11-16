@@ -1,6 +1,6 @@
 import { getVerifiedPoolAssociationSetLeaves } from '@/services/public-association-set';
 import { setPendingRelayOwner } from '@/services/pending-relays-store';
-import { identityStatusWithChainFallback, type ChainIdentityReads } from '@/services/keystore-identity-status';
+import { identityStatusFromRegistry } from '@/services/keystore-identity-status';
 import { onConfirmedRegistration } from '@/services/keystore-registry-events';
 import {
   awaitKeystoreRegistries,
@@ -714,13 +714,6 @@ async function resolveKeystoreIdentityStatus(
   chainId: number,
   /** Wait up to this long for the grid to bring the registries current. */
   waitMs = 0,
-  /**
-   * The registries still answer first. When they cannot, ask the chain (the
-   * read this check made before the registries existed) instead of 'unknown'.
-   * Per call, never shared: deposit and registration checks pass it, sign-in
-   * does not.
-   */
-  chainFallback = false,
 ): Promise<KeystoreIdentityStatus> {
   // Answered from the bulk ASP registries the background grid keeps current,
   // never from a per-account chain read: getNullifyingKeyHash(addr) /
@@ -736,20 +729,7 @@ async function resolveKeystoreIdentityStatus(
     const view = readRegistryView(chainId, addr, keystoreAddr);
     const hashService = await sdkSetup.createHashService();
     const activeNull = String(hashService.hash([km.getPrivateNullifyingKey()]));
-    let reads: ChainIdentityReads | null = null;
-    if (chainFallback) {
-      const rpc = sdkSetup.createRPCInteractor(chainId, Number(chain.contracts.fromBlock));
-      const ks = sdkSetup.createKeystoreInteractor(
-        rpc,
-        keystoreAddr as `0x${string}`,
-        chain.contracts.keystoreFromBlock ?? chain.contracts.fromBlock,
-      );
-      reads = {
-        readNullifyingKeyHash: async () => (await ks.getNullifyingKeyHash(addr)) as string | null,
-        readViewingKey: async () => (await ks.getViewingKey(addr)) as string | null,
-      };
-    }
-    return await identityStatusWithChainFallback(view, activeNull, km.getViewingKeyPair().publicKey, reads);
+    return identityStatusFromRegistry(view, activeNull, km.getViewingKeyPair().publicKey);
   } catch {
     return 'unknown'; // sign-in and discovery stay available; write guards reject unknown
   }
@@ -918,7 +898,7 @@ interface SdkContextValue {
    * from 'unregistered'. 'unknown' when no session is committed or the read
    * failed; it never throws.
    */
-  keystoreStatusForChain: (chainId: number, opts?: { chainFallback?: boolean }) => Promise<KeystoreIdentityStatus>;
+  keystoreStatusForChain: (chainId: number) => Promise<KeystoreIdentityStatus>;
 }
 
 const SdkContext = createContext<SdkContextValue | null>(null);
@@ -3044,8 +3024,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
       managers.keystoreManager as IKeystoreManager,
       owner,
       targetChainId,
-      0,
-      true,
+      REGISTRY_WAIT_MS,
     );
     if (!opts?.discoveryOnly) {
       const purpose = opts?.purpose ?? 'deposit';
@@ -4251,11 +4230,10 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
       committed.keystoreManager,
       committed.address as `0x${string}`,
       committed.chainId,
-      0,
-      true,
+      REGISTRY_WAIT_MS,
     );
-    // Re-validate after the async on-chain read: a wallet/chain switch while
-    // the RPC was pending tears the commit down or replaces it.
+    // Re-validate after the registry wait: a wallet/chain switch while it
+    // was pending tears the commit down or replaces it.
     if (committedSessionRef.current !== committed) {
       throw new Error('Network changed since sign-in. Close the modal and try the deposit again.');
     }
@@ -4302,19 +4280,16 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     }).catch(() => { /* the next registry sync answers */ });
   }), []);
 
-  const keystoreStatusForChain = useCallback(async (targetChainId: number, opts?: { chainFallback?: boolean }): Promise<KeystoreIdentityStatus> => {
+  const keystoreStatusForChain = useCallback(async (targetChainId: number): Promise<KeystoreIdentityStatus> => {
     if (!isSupportedEvmChainId(targetChainId)) return 'unknown';
     const identity = pickStatusIdentity(committedSessionRef.current, derivedIdentityRef.current);
     if (!identity) return 'unknown';
-    // Deposit and registration flows pass chainFallback: the registries answer
-    // first, and with no current data the chain is asked at once (no wait).
-    // Display reads (status card, receive prompts) keep the bounded wait.
-    const chainFallback = opts?.chainFallback === true;
+    // Read only the fixed-grid registry. An outage never names this account to RPC.
     try {
       const sdkSetup = await getSdkSetup();
       // One registry wait across both attempts: the retry (DEV-439, keys not
       // ready yet) reads again without waiting a second time.
-      let waitMs = chainFallback ? 0 : REGISTRY_WAIT_MS;
+      let waitMs = REGISTRY_WAIT_MS;
       return await readStatusWithRetry(() => {
         const wait = waitMs;
         waitMs = 0;
@@ -4324,7 +4299,6 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
           identity.address as `0x${string}`,
           targetChainId,
           wait,
-          chainFallback,
         );
       });
     } catch {

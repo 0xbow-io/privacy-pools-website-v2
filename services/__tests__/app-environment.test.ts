@@ -139,7 +139,8 @@ describe('staging-only hostnames (the dev-branch test domain)', () => {
 describe('labels and storage scoping', () => {
   test('labels are the two words the menu shows', () => {
     expect(appEnvironmentLabel('prod')).toBe('Prod');
-    expect(appEnvironmentLabel('staging')).toBe('Staging');
+    expect(appEnvironmentLabel('staging')).toBe('Testnet');
+    expect(appEnvironmentLabel('staging', true)).toBe('Staging');
   });
 
   test('staging keeps the bare key, prod gets a suffix that SecureStore accepts', () => {

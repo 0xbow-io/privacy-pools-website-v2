@@ -2,7 +2,7 @@
 
 The website runs the Privacy Pools v2 Stellar (Soroban) testnet deployment through
 the same UI as the EVM pools: the home action hub, the pool page, and the deposit,
-withdraw, transfer and exit modals. Stellar is one more network in the selector, shown on staging with `?stellar=true` (remembered in the browser, `?stellar=false` forgets it) or with the debug gate (`?debug=1`). It has no swap or cross-chain routes; payment requests work (XLM only).
+withdraw, transfer and exit modals. Stellar is one more network in the selector, available by default in staging. `?stellar=true` optionally selects it on page load. It has no swap or cross-chain routes; payment requests work (XLM only).
 
 ## What it talks to
 
@@ -42,21 +42,22 @@ max relay fee). The app keeps a 1 XLM deposit floor.
    only. `EXPO_PUBLIC_STELLAR_RELAYER_URL` names the relayer (see `.env.production`);
    without it withdrawals and sends refuse.
 
-3. Start the app and open it with `?stellar=true`, pick **Stellar Testnet** in the chain
-   selector, and connect Varial (set to Testnet, account funded with friendbot).
+3. Start the app in staging, pick **Stellar Testnet** in the chain selector or
+   **Varial** in Connect Wallet (set to Testnet, account funded with friendbot).
 
    ```bash
    bun run web
    ```
 
-   Staging only: the prod environment ignores `?stellar=true`. A prod build shows
-   Stellar only when built with `EXPO_PUBLIC_STELLAR_ENABLED=true`.
+   Production still requires `EXPO_PUBLIC_STELLAR_ENABLED=true` and the runtime
+   opt-in (`?stellar=true`) or debug mode.
 
 ## Hosted preview (Vercel)
 
 Every visitor's browser calls the ASP (`EXPO_PUBLIC_ASP_URL`) and the relayer
 (`EXPO_PUBLIC_STELLAR_RELAYER_URL`) directly; both are public https services whose CORS
-allows the website origins. Use the branch preview URL with `?env=staging&stellar=true`.
+allows the website origins. Use the branch preview URL with `?env=staging`. Add `&stellar=true` only to start
+on Stellar rather than selecting it in the app.
 
 ## How a deposit becomes spendable
 
@@ -121,7 +122,7 @@ whole-history pool read in the pass, and the activity index's, is answered from 
 The relayer is the v2 relayer (`packages/relayer/relayer`), built from the same
 `stellar/audit-readiness` commit as the contracts and the SDK, run by us for testnet with a
 Stellar-only config. A withdrawal is proved against the relay contract as processor and a
-send (Send, `/pay`, keeping a claimed link) against the relayer itself as the pool's gated
+send (Send, a one-time link, `/pay`, keeping a claimed link) against the relayer itself as the pool's gated
 processor; the relayer submits both, so the user's account never appears on them. The
 withdrawal fee is 50 bps plus the transaction's cost for its proof shape, a send's is 0.02 XLM
 plus that cost, both capped at XLM's on-chain `max_relay_fee` (0.5 XLM on the 2026-10-29
@@ -149,9 +150,8 @@ sync fails rather than silently scanning a clamped RPC window.
 
 ## Not done yet
 
-- Private transfers are still self-submitted (the pool sees the sender's account as
-  processor): the Stellar SDK refuses to relay a transfer. Withdrawals are relayed. The
-  Send review says so. Exits (ragequit) are public by design, as on EVM.
+- Freighter still signs deposits, the keystore registration and exits (ragequit, public by
+  design, as on EVM). Every send and withdrawal is relayed.
 - Sending names the recipient to the Soroban RPC once, inside the SDK's own
   `transfer()` (it reads the recipient's viewing key to encrypt to it). The app makes no
   separate lookup, but that one read is upstream and stays until the SDK can take a

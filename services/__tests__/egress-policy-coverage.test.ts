@@ -589,7 +589,6 @@ describe('app-owned network boundary coverage', () => {
       'services/stellar/stellar-runtime.ts': 2, // asp-v2 events + ASP data, and circuit artifacts
       'services/sui-witness/asp-labels.ts': 1,
       'services/tor-fetch.ts': 1, // anon-rpc specifier read, allowlist-checked, before Tor exists
-      'services/wallet-tokens.ts': 1, // Alchemy token REST API, not JSON-RPC
     });
   });
 });

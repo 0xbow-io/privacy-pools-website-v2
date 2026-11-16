@@ -134,11 +134,11 @@ export function createStellarRelayer(
         txCost: string;
         gasPrice: string;
         feeCommitment?: TransferRelayerQuote<StellarAddress>['feeCommitment'];
-      }>(`${base}/quote/${path}/transfer`, { asset: params.asset, commit: true, ...(params.shape && { shape: params.shape }) }).catch((error: unknown) => {
+      }>(`${base}/quote/${path}/transfer`, { asset: params.asset, commit: params.commit ?? true, ...(params.shape && { shape: params.shape }) }).catch((error: unknown) => {
         throw new sdk.RelayerRequestFailed(error instanceof Error ? error.message : String(error));
       });
-      if (!quote.feeCommitment) throw new sdk.RelayerRequestFailed('The relayer returned no fee commitment');
-      return { txCost: quote.txCost, gasPrice: quote.gasPrice, feeAmount: quote.feeAmount, feeCommitment: quote.feeCommitment };
+      if (params.commit !== false && !quote.feeCommitment) throw new sdk.RelayerRequestFailed('The relayer returned no fee commitment');
+      return { txCost: quote.txCost, gasPrice: quote.gasPrice, feeAmount: quote.feeAmount, feeCommitment: quote.feeCommitment } as TransferRelayerQuote<StellarAddress>;
     },
 
     async relayTransfer(relayer, params: TransferRelayParams<StellarAddress>): Promise<Hex> {

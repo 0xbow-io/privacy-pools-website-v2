@@ -721,11 +721,11 @@ test('the discovery session builder never requests address-keyed keystore status
   await expect(build(10)).rejects.toThrow('different unlock');
   expect(statusReads).toBe(1);
   identityStatus = 'unknown';
-  // A write session asks the chain when the registries have no answer (no wait), and never proceeds on an unanswered identity.
+  // A write session waits for the bulk registry and refuses unknown; it cannot opt into an address-keyed fallback.
   await expect(build(10)).rejects.toBeInstanceOf(RegistrySyncingError);
   expect(statusReads).toBe(2);
-  expect(waits).toEqual([0, 0]);
-  expect(fallbacks).toEqual([true, true]);
+  expect(waits).toEqual([15_000, 15_000]);
+  expect(fallbacks).toEqual([undefined, undefined]);
 });
 
 // One chain's failed identity read is unknown for THAT chain only: it blocks a

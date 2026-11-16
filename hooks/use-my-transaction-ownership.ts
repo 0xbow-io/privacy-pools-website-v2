@@ -10,6 +10,7 @@ import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import { Platform } from 'react-native';
 import { useMultiChainWallet } from '@/hooks/use-multi-chain-wallet';
 import { usePoolSession } from '@/hooks/use-pool-session';
+import { useChainRouter } from '@/hooks/use-chain-router';
 import { useNotes } from '@/hooks/use-notes';
 import { getChainConfig, supportedChainIds } from '@/config/chains';
 import { loadStoredAccountExport } from '@/components/sdk-provider';
@@ -28,18 +29,14 @@ import { isHeldForSpendClassification, isInternalSpendRow, isOwnSwapChangeRow } 
 
 export function useMyTransactionOwnership() {
   const { notes } = useNotes();
-  // Chain-aware connection: wagmi's address is empty when a Sui wallet drives
-  // the session.
   const { address: connectedAddress } = useMultiChainWallet();
-  // The identity whose STORED note export is read. Balances use exactly this
-  // precedence; a key session has no wallet address (Pat, 2026-09-01).
-  const { sessionAddress, identityMode } = usePoolSession();
-  const exportIdentity = sessionAddress ?? connectedAddress;
-  // The identity a DEPOSIT row is matched against when note-matching does not
-  // resolve it. BRANCHED on identityMode, not `wallet ?? session`: a key
-  // session can have a funding wallet connected at a DIFFERENT address, and
-  // that payer must not claim the key account's rows, nor lend its own. The
-  // non-key branch keeps the wallet address, so Sui is untouched.
+  const { isEvm } = useChainRouter();
+  const evmSession = usePoolSession();
+  // A connected EVM session can remain mounted while another chain's wallet is active.
+  const sessionAddress = isEvm ? evmSession.sessionAddress : undefined;
+  const identityMode = isEvm ? evmSession.identityMode : 'wallet';
+  const exportIdentity = isEvm ? sessionAddress ?? connectedAddress : undefined;
+  // In key mode a connected wallet is the payer, not the account being viewed.
   const ownAddress = identityMode === 'key' ? (sessionAddress ?? connectedAddress) : connectedAddress;
 
   // My notes on EVERY chain, not just the live session's: a cross-chain shield

@@ -28,6 +28,7 @@ import { displayTokenSymbol} from '@/services/share-display';
 import { FigureText } from '@/components/ui/share-figure';
 import { LOADING_FIGURE } from '@/services/token-format';
 import { formatUsdBalance } from '@/services/format-fiat';
+import { preparedAmountData } from '@/services/prepared-amount-data';
 
 /**
  * Always-visible action panel for a pool page — the pool-scoped cousin of the
@@ -254,6 +255,10 @@ export function PoolActionPanel({
                 className="min-w-0 flex-1 p-0 font-pp-bold text-[28px] leading-[34px] text-text"
                 // nw-keep(platform-css): web-only focus-ring removal (outlineStyle) — null on native
                 style={WEB_NO_OUTLINE}
+                testID="pool-amount-input"
+                // The exact amount this action prepares (shares for a share
+                // pool), for the browser smoke to check against the rate. Web only.
+                {...preparedAmountData(amount)}
               />
               {/* Token pill — the pool's asset, shown not chosen: a pool page
                   is single-asset, so there is nothing to switch. */}

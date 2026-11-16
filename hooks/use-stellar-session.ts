@@ -64,6 +64,8 @@ const STABLE_ACTIONS = {
   sync: () => stellarAccount.sync(),
   deposit: stellarAccount.deposit.bind(stellarAccount),
   withdraw: stellarAccount.withdraw.bind(stellarAccount),
+  quoteWithdrawal: stellarAccount.quoteWithdrawal.bind(stellarAccount),
+  quoteTransferFee: stellarAccount.quoteTransferFee.bind(stellarAccount),
   transfer: stellarAccount.transfer.bind(stellarAccount),
   ragequit: stellarAccount.ragequit.bind(stellarAccount),
   ensureCanReceive: stellarAccount.ensureCanReceive.bind(stellarAccount),

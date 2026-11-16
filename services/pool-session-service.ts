@@ -197,8 +197,8 @@ export async function createPoolSession(params: CreatePoolSessionParams) {
   // The SDK reads the session account's own nullifyingKeys / viewingKeys
   // entries before every deposit, registration and spend. Those reads are
   // answered from the bulk ASP registries instead of naming the account to
-  // the RPC (services/keystore-registry-reads.ts). Other accounts (recipients)
-  // still go to the chain.
+  // the RPC (services/keystore-registry-reads.ts). Recipient reads use the same
+  // complete bulk sources. Unavailable data refuses without an account request.
   // Scoped the way the grid and the identity check scope the registries.
   routeOwnKeystoreReads(keystoreInteractor, { chainId, keystoreAddress: keystoreScopeAddress(chainId) ?? keystoreAddress, ownerAddress });
 
@@ -449,7 +449,7 @@ export async function createPoolSession(params: CreatePoolSessionParams) {
   };
 
   // Forward the SDK's own warnings/errors to the console (see services/sdk-logger.ts).
-  // Own-account keystore reads ask the registries first, then the chain; never wait
+  // Session-account keystore reads use the registries only; unavailable data throws
   // (services/keystore-registry-reads.ts).
   return createEvmPoolSession(config, { logger: createSdkConsoleLogger() });
 }

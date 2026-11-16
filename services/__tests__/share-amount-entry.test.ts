@@ -28,9 +28,9 @@ describe('exact share entry boundary', () => {
     expect(convert('0.10', rate(18, 1001100000000000000n), '0.09989', '0.10')).toBe('0.09989');
     expect(convert('38.10', rate(6, 1000103n), '38.1', '38.10')).toBe('38.1');
   });
-  test('clamps, rounds down, rejects invalid text and does not promote zero into dust MAX', () => {
+  test('clamps, rounds shares up, rejects invalid text and does not promote zero into dust MAX', () => {
     expect(convert('1000', rate(18, 1000000000000000001n), '0.1', '0.10')).toBe('0.1');
-    expect(convert('0.1', rate(18, 1000000000000000001n), '100', '100')).toBe('0.099999999999999999');
+    expect(convert('0.1', rate(18, 1000000000000000001n), '100', '100')).toBe('0.1');
     expect(convert('0', rate(6, 1000001n), '0.000000000000000001', '0.00')).toBe('0');
     for (const text of ['', '.', '-1', '1e3', 'NaN']) expect(convert(text, rate(18, 1n))).toBe('0');
   });
@@ -91,4 +91,12 @@ describe('USD edits use the same exact share entry boundary', () => {
     }
     expect(shareUsdDisplayExact('1', undefined, '1')).toBeNull();
   });
+});
+
+test('5 USDC at the observed browser rate redeems for at least 5 USDC', () => {
+  const r = rate(6, 1006259n);
+  const shares = parseTokenAmount(convert('5', r, '100', '100.6259'), 18);
+  const wanted = 5_000_000n;
+  expect(shares * r.assetsPerShare / 10n ** 18n).toBe(wanted);
+  expect((shares - 1n) * r.assetsPerShare / 10n ** 18n).toBe(wanted - 1n);
 });

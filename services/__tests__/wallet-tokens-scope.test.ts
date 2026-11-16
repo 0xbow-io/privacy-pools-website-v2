@@ -78,7 +78,7 @@ test('with a key, Alchemy chains and custom-RPC chains are both in scope, dedupe
   expect(scope.WALLET_TOKEN_CHAIN_IDS.slice().sort((a, b) => a - b)).toEqual([1, 10, 56, 137, 8453, 42161, 11155111]);
   // 56 has a custom RPC, so it is read on-chain, not through Alchemy (11155111
   // stays on Alchemy: it has no custom RPC of its own).
-  expect(scope.ALCHEMY_WALLET_CHAIN_IDS.slice().sort((a, b) => a - b)).toEqual([1, 10, 137, 8453, 42161, 11155111]);
+  expect(scope.ALCHEMY_WALLET_CHAIN_IDS).toEqual([]);
   expect(scope.ONCHAIN_WALLET_CHAIN_IDS).toEqual([56]);
   // Mainnets only (11155111 is a testnet) — 1 from Alchemy, 56 from custom
   // RPC, no duplicate entry for 56.
@@ -92,7 +92,7 @@ test('an ordinary build with no custom RPC at all is unchanged', () => {
     testnetIds: [11155111],
     customRpcIds: [],
   });
-  expect(scope.ALCHEMY_WALLET_CHAIN_IDS.slice().sort((a, b) => a - b)).toEqual([1, 10, 56, 137, 8453, 42161, 11155111]);
+  expect(scope.ALCHEMY_WALLET_CHAIN_IDS).toEqual([]);
   expect(scope.ONCHAIN_WALLET_CHAIN_IDS).toEqual([]);
   expect(scope.WALLET_TOKEN_MAINNET_IDS.slice().sort((a, b) => a - b)).toEqual([1, 10, 56, 137, 8453, 42161]);
 });
@@ -146,10 +146,18 @@ test('prod: every new chain is in the Alchemy holdings scope', () => {
     customRpcIds: [],
   });
   for (const id of [10, 8453, 42161, 4663]) {
-    expect(scope.ALCHEMY_WALLET_CHAIN_IDS).toContain(id);
+    expect(scope.ALCHEMY_WALLET_CHAIN_IDS).toEqual([]);
     expect(scope.WALLET_ROW_CHAIN_IDS).toContain(id);
     expect(scope.WALLET_TOKEN_MAINNET_IDS).toContain(id);
   }
   expect(scope.ONCHAIN_WALLET_CHAIN_IDS).toEqual([]);
   expect(scope.WALLET_ROW_CHAIN_IDS).not.toContain(4114);
+});
+
+test('no portfolio request can name the wallet, regardless of key or chain scope', () => {
+  const provider = readFileSync(new URL('../../components/wallet-tokens-provider.tsx', import.meta.url), 'utf8');
+  expect(provider).not.toContain('fetchWalletTokensByChain');
+  expect(provider).not.toMatch(/useQuery\(/);
+  expect(code).not.toContain('/assets/tokens/by-address');
+  expect(code).not.toMatch(/\bfetch\(/);
 });
