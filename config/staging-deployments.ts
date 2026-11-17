@@ -122,7 +122,7 @@ const OPTIMISM_STAGING_RPCS = buildRpcOrder(
   alchemyHostFor(10),
   process.env.EXPO_PUBLIC_STAGING_OPTIMISM_RPC_URL,
   undefined,
-  'https://mainnet.optimism.io',
+  'https://optimism-rpc.publicnode.com',
 );
 const OPTIMISM_STAGING_RPC = OPTIMISM_STAGING_RPCS[0];
 // Base. The public endpoint caps eth_getLogs at 2000 blocks (probed
@@ -290,7 +290,9 @@ const ALL_STAGING_CHAINS: StagingDeployment[] = [
     // ~420k blocks, and at 3000 per request that is ~140 requests for every
     // state-leaf scan. On the public endpoint the answer was 429 (QA
     // 2026-08-20); 50k keeps us an order of magnitude inside what was measured
-    // to work while cutting the request count ~17x.
+    // to work while cutting the request count ~17x. The public fallback is now
+    // publicnode, since mainnet.optimism.io answers 403 to Tor exits; it
+    // answered 3000 and 10k windows (2026-10-31), so 3000 still holds.
     logsMaxBlockRange: OPTIMISM_ON_ALCHEMY ? 50_000n : 3000n,
     relayerBaseUrl: process.env.EXPO_PUBLIC_STAGING_OPTIMISM_RELAYER_URL?.trim() || STAGING_CHAINS_RELAYER_URL,
     relayerSigner:

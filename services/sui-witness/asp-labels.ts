@@ -1,4 +1,5 @@
 import { SUI_ASP_LABELS_URL } from '@/config/sui-deployment';
+import { routedFetch } from '@/services/tor-fetch';
 
 /**
  * Fetch the operator-published ASP **approved set** when a source is configured
@@ -41,7 +42,7 @@ function parseDecimalArray(arr: unknown[], what: string): bigint[] {
 
 export async function fetchSuiApprovedSet(): Promise<SuiAspSet | null> {
   if (!SUI_ASP_LABELS_URL) return null;
-  const res = await fetch(SUI_ASP_LABELS_URL);
+  const res = await routedFetch('asp')(SUI_ASP_LABELS_URL);
   if (!res.ok) {
     throw new Error(
       `ASP set fetch failed: ${res.status} ${res.statusText} (${SUI_ASP_LABELS_URL})`,

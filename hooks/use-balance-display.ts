@@ -22,7 +22,7 @@ export function useBalanceDisplay(activeChainId?: number) {
   return useCallback((exact: string | number, symbol: string, chainId: number | undefined, address?: string) => {
     const tokenAddress = address ?? getTokenMetadataBySymbol(symbol, chainId)?.address;
     return shareBalanceDisplay({
-      sharesExact: typeof exact === 'number' ? exact.toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 100 }) : exact,
+      sharesExact: typeof exact === 'number' ? exact.toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 20 }) : exact,
       shareSymbol: symbol,
       rate: isShareSymbol(symbol) && chainId != null ? rateFor(chainId, tokenAddress) : undefined,
       priceMap: prices,

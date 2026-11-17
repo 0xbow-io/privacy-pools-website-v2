@@ -13,6 +13,7 @@ import { Platform } from 'react-native';
 
 import { envScopedStorageKey } from '@/config/app-environment';
 import { LIFI_API_KEY, NATIVE_ASSET_ADDRESS } from '@/config/intent-swaps';
+import { routedFetch } from '@/services/tor-fetch';
 
 const LIFI_NATIVE = '0x0000000000000000000000000000000000000000';
 
@@ -116,7 +117,7 @@ export async function fetchLifiVerifiedTokens(chainId: number): Promise<Set<stri
     inMemory.set(chainId, stored);
     return stored.verified;
   }
-  const res = await fetch(`https://li.quest/v1/tokens?chains=${chainId}`, {
+  const res = await routedFetch('web')(`https://li.quest/v1/tokens?chains=${chainId}`, {
     headers: LIFI_API_KEY ? { 'x-lifi-api-key': LIFI_API_KEY } : undefined,
     signal: typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(30_000) : undefined,
   });

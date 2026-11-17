@@ -142,7 +142,11 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
   const [status, setStatus] = useState<StellarWalletStatus>('disconnected');
   const [networkPassphrase, setNetworkPassphrase] = useState<string | null>(null);
   const [isAvailable, setIsAvailable] = useState(isDevBurner);
-  const [availabilityChecked, setAvailabilityChecked] = useState(isDevBurner);
+  const [availabilityChecked, setAvailabilityChecked] = useState(
+    // Varial is a browser extension reached through window.postMessage, which React Native
+    // lacks: off the web build there is nothing to probe, so the check is already done.
+    isDevBurner || Platform.OS !== 'web',
+  );
   const lastErrorRef = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [signer, setSigner] = useState<StellarSigner | null>(null);

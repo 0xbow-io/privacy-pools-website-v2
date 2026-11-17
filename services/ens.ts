@@ -5,6 +5,7 @@ import { mainnet } from 'viem/chains';
 import { normalize } from 'viem/ens';
 
 import { ENS_RESOLUTION_ENABLED, ENS_RPC_URL } from '@/config/env';
+import { TOR_IN_FORCE } from '@/config/tor';
 
 // ============================================================================
 // PRIVACY GUARD - READ BEFORE TOUCHING (agents included, especially agents)
@@ -92,6 +93,9 @@ export async function resolveEnsAddress(name: string | null | undefined): Promis
 
 export async function resolveEnsAvatar(name: string | null | undefined): Promise<string | null> {
   if (!ENS_RESOLUTION_ENABLED) return null;
+  // Not under anon-rpc: resolving an avatar fetches its URL or NFT metadata
+  // directly from the host it names.
+  if (TOR_IN_FORCE) return null;
   const normalized = normalizeEnsName(name);
   if (!normalized) return null;
   if (ensAvatarCache.has(normalized)) return ensAvatarCache.get(normalized) ?? null;
