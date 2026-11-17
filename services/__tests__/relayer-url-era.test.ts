@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { resolveSepoliaRelayerBaseUrl } from '@/config/relayer-eras';
 
-const STAGING = 'https://relayer-staging.example';
-const TESTING = 'https://relayer-testing.example';
+const STAGING = 'https://relayer-v2-staging-149184580131.us-east1.run.app';
+const TESTING = 'https://relayer-v2-testing-149184580131.us-east1.run.app';
 const V8_VAULT = '0x4DECEef285a24CA05999870887C895042731D7cB';
 
 describe('resolveSepoliaRelayerBaseUrl (per-pool-era relayer routing)', () => {

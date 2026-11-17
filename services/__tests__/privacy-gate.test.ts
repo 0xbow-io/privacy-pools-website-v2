@@ -47,7 +47,7 @@ describe('host resolution', () => {
     expect(classifyDestination('https://eth-sepolia.g.alchemy.com/v2/k', HOSTS)).toBe('rpc');
     expect(
       classifyDestination(
-        'https://relayer-staging.example/v1/details',
+        'https://relayer-v2-staging-149184580131.us-east1.run.app/v1/details',
         HOSTS,
       ),
     ).toBe('relayer');
