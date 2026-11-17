@@ -74,6 +74,7 @@ import { getRelayerSignerAddress, getTransferProcessorAddress } from '@/config/r
 import type { AspLeafRow } from '@/services/api-client';
 import { noteEventsFromSnapshot, SNAPSHOT_NOTE_OVERLAP_BLOCKS, snapshotCursor } from '@/services/asp-event-snapshot';
 import { loadPoolEventSnapshot, loadPoolLeaves } from '@/services/snapshot-source';
+import { KEYSTORE_HELD_LEAVES_WAIT_MS, settleWithin } from '@/services/held-copy-wait';
 import { createRangeWindow, sweepLogRange, type RangeWindow } from '@/services/rpc-log-chunking';
 import { createLogCoalescer, type LogCoalescer } from '@/services/log-coalescer';
 import { createBlockNumberMemo } from '@/services/block-number-memo';
@@ -1169,7 +1170,11 @@ class ChunkedRPCInteractor implements IRPCInteractor {
       }
       const entrypoint = await resolveConfiguredEntrypoint(this.chainId);
       if (!entrypoint) return null;
-      const held = await loadPoolLeaves(this.chainId, { entrypoint });
+      // An exit proof needs only the keystore tree, which the chain can rebuild
+      // cheaply, so it does not sit behind a hanging ASP refresh (DEV-808).
+      const held = kind === 'keystore-leaves'
+        ? await settleWithin(loadPoolLeaves(this.chainId, { entrypoint }), KEYSTORE_HELD_LEAVES_WAIT_MS)
+        : await loadPoolLeaves(this.chainId, { entrypoint });
       const section = kind === 'leaves' ? held?.leaves : held?.keystoreLeaves;
       if (!Array.isArray(section)) return null;
       // A section watermark covers empty blocks, not just returned leaves.

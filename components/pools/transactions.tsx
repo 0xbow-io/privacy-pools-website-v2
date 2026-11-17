@@ -51,6 +51,7 @@ import { useAccountRecoveryModal } from '@/components/account-recovery-modal-pro
 import { useNotes } from '@/hooks/use-notes';
 import { registerDebugSnapshot } from '@/services/debug-snapshots';
 import { NoteStatus } from '@/services/sdk-types';
+import { exitableNotes } from '@/services/exit-eligibility';
 import { FUNDS_REASON_COPY, FUNDS_STATE_LABEL, STATUS_FILTER_HINTS, STATUS_FILTER_OPTIONS, fundsChipText, isLiveNoteStatus, matchesStatusFilter } from '@/services/funds-state';
 import { fullySpentDepositTxHashesByChain, type SpendableNoteLike } from '@/services/fully-spent';
 import { rowTypeLabel } from '@/services/row-type-label';
@@ -1243,7 +1244,7 @@ export function Transactions({
   // split screen this component renders into ~55% of the viewport. Falls back
   // to the window width outside a panel shell (Classic pools page).
   const width = useLayoutWidth();
-  const { data } = usePools();
+  const { data, activityUnavailable } = usePools();
   // Live USDC-per-ppUSDC: a share row prints the USDC it is worth, share named in a hint.
   const { rateFor } = useShareRates();
   const balanceDisplay = useBalanceDisplay();
@@ -1332,6 +1333,14 @@ export function Transactions({
   const { openOriginProof } = useOriginProof();
   const { notes } = useNotes();
   const { toast } = useToast();
+  // DEV-808: with the activity feeds down there are no rows, so no row menu
+  // carries Exit. Offer it from the local notes instead. Derived from data
+  // already in hand: showing it, or pressing it, sends nothing a row's Exit
+  // would not.
+  const hasExitableNote = useMemo(() => exitableNotes(notes, new Set<string>()).length > 0, [notes]);
+  const openExitWithoutActivity = useCallback(() => {
+    launchFromDrawer(drawerHost, () => openRagequitModal());
+  }, [drawerHost, openRagequitModal]);
 
   // Withdraw, Exit and Export Note act on the note's own chain
   // (services/row-chain-action.ts). A row on another chain switches there
@@ -1948,6 +1957,25 @@ export function Transactions({
             >
               <Text className="font-pp-medium text-[12px] text-button-primary-text">
                 {keyInitFailed ? 'Retry' : 'Sign in'}
+              </Text>
+            </Pressable>
+          </View>
+        )}
+
+        {/* Activity feeds down (DEV-808): exit still works from chain data. */}
+        {scopeTab === 'mine' && activityUnavailable && hasExitableNote && (
+          <View className="flex-row items-center gap-[8px] border-b border-b-border-light px-[8px] py-[10px]">
+            <Text className="flex-1 font-pp-regular text-[12px] text-text-secondary">
+              Activity is unavailable right now. You can still exit your notes to this wallet.
+            </Text>
+            <Pressable
+              className="rounded-control bg-button-primary px-[14px] py-[6px]"
+              accessibilityRole="button"
+              accessibilityLabel="Exit a note"
+              onPress={openExitWithoutActivity}
+            >
+              <Text className="font-pp-medium text-[12px] text-button-primary-text">
+                Exit a note
               </Text>
             </Pressable>
           </View>

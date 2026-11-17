@@ -74,6 +74,7 @@ import { readAnchorTxHashesForChains } from '@/services/anchor-stamps-store';
 import type { AssetsStatsResponse, EntrypointsResponse, GlobalEvent, GlobalStatistics, TokenPrice, TokenPricesResponse, SnapshotDeposit, SnapshotRagequit, SnapshotTransact } from '@/services/api-types';
 import { useAllChainsPriceMap } from '@/hooks/use-all-chains-price-map';
 import { usePublicFeed } from '@/hooks/use-public-feed';
+import { activityFeedsUnavailable } from '@/services/exit-eligibility';
 import { whenActive } from '@/services/activity-signal';
 import { feedData, publicFeeds } from '@/services/public-feed-scheduler';
 import { feedEventSnapshot } from '@/services/snapshot-source';
@@ -396,6 +397,13 @@ type PoolsContextType = {
   statistics: GlobalStatistics | null;
   isLoading: boolean;
   error: string | null;
+  /**
+   * The activity feeds (events and event snapshot) failed and nothing is held,
+   * so the rows that carry the Exit action cannot be built. Derived from the
+   * existing queries' state, it causes no request. The activity list offers
+   * exit from local notes instead (DEV-808).
+   */
+  activityUnavailable?: boolean;
   /** Entrypoint contract address scoping the events feed ('' = all pools). */
 };
 
@@ -1328,6 +1336,13 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
     const e = statsError || eventsError || pricesError || tokenPricesError;
     return e ? (e instanceof Error ? e.message : String(e)) : null;
   }, [statsError, eventsError, pricesError, tokenPricesError]);
+
+  const activityUnavailable = activityFeedsUnavailable({
+    eventsLoaded: eventsResponse !== undefined,
+    eventsFailed: !!eventsError,
+    snapshotLoaded: eventSnapshot !== undefined,
+    snapshotFailed: eventSnapshotFailed,
+  });
 
   const supportedTokenPrices = useMemo(
     // Guard against ASP price rows with a missing tokenSymbol — they'd
@@ -3101,7 +3116,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
   });
 
   return (
-    <PoolsContext.Provider value={{ data, yieldEarned, walletShareBalances, statistics: statistics || null, isLoading, error }}>
+    <PoolsContext.Provider value={{ data, yieldEarned, walletShareBalances, statistics: statistics || null, isLoading, error, activityUnavailable }}>
       {children}
     </PoolsContext.Provider>
   );

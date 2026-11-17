@@ -408,7 +408,7 @@
     "[\"components/sdk-provider.tsx\",\"import/first\",1,\"Import in body of module; reorder to top.\",\"import { passkeyUnlockDefault } from '@/services/passkey-policy';\"]": 1,
     "[\"components/sdk-provider.tsx\",\"import/first\",1,\"Import in body of module; reorder to top.\",\"import { perfPhaseStart, perfPhaseEnd } from '@/services/perf-trace';\"]": 1,
     "[\"components/sdk-provider.tsx\",\"import/first\",1,\"Import in body of module; reorder to top.\",\"import { registerDebugSnapshot } from '@/services/debug-snapshots';\"]": 1,
-    "[\"components/sdk-provider.tsx\",\"import/first\",1,\"Import in body of module; reorder to top.\",\"import { resolveEntrypointChainConfig } from '@/services/entrypoint-resolution';\"]": 1,
+    "[\"components/sdk-provider.tsx\",\"import/first\",1,\"Import in body of module; reorder to top.\",\"import { resolveEntrypointChainConfigFor } from '@/services/entrypoint-resolution';\"]": 1,
     "[\"components/sdk-provider.tsx\",\"import/first\",1,\"Import in body of module; reorder to top.\",\"import { resolveNotePersistTarget } from '@/services/note-source';\"]": 1,
     "[\"components/sdk-provider.tsx\",\"import/first\",1,\"Import in body of module; reorder to top.\",\"import { sessionResuming } from '@/services/session-resume';\"]": 1,
     "[\"components/sdk-provider.tsx\",\"import/first\",1,\"Import in body of module; reorder to top.\",\"import { setErrorReportWallet } from '@/services/error-reports';\"]": 1,
