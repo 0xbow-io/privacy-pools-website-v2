@@ -88,7 +88,7 @@ import { getChainConfig, isSupportedEvmChainId, queryableEvmChainIds, supportedC
 import { clearReceiveSetupForAddress, receiveSetupFromIdentity, setReceiveSetup } from '@/services/receive-setup';
 import { keysBelongTo, pickStatusIdentity, readStatusWithRetry } from '@/services/keystore-status-read';
 import { LEGACY_CONFIG } from '@/config/env';
-import { resolveEntrypointChainConfig } from '@/services/entrypoint-resolution';
+import { resolveEntrypointChainConfigFor } from '@/services/entrypoint-resolution';
 import { NoteStatus } from '@/services/sdk-types';
 import { NATIVE_MOCK_ACTIVE } from '@/constants/native-mock';
 import { getNativeMockSession } from '@/services/native-mock-data';
@@ -2300,11 +2300,13 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
         poolAddress = LEGACY_CONFIG.pool as Address;
         keystoreAddress = LEGACY_CONFIG.keystore as Address;
       } else {
-        const entrypoints = await apiClient.getEntrypoints();
-        const chainConfig = resolveEntrypointChainConfig(
-          entrypoints,
+        // Pinned chains resolve from config and never wait on the ASP feed:
+        // every flow, exit included, starts here, and an unreachable ASP must
+        // not stop a user from reaching notes the chain says are theirs (DEV-808).
+        const chainConfig = await resolveEntrypointChainConfigFor(
           currentChainId,
           localChainConfig?.contracts?.poolAddress,
+          () => apiClient.getEntrypoints(),
         );
         if (!chainConfig) {
           throw new Error(`No entrypoint configuration found for chain ${currentChainId}`);
@@ -2991,8 +2993,8 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     if (targetFromBlock === undefined || !targetPool || !targetKeystore) {
       throw new Error(`Missing pool/keystore config for chain ${targetChainId}`);
     }
-    const entrypoints = await apiClient.getEntrypoints();
-    const targetEntrypointCfg = resolveEntrypointChainConfig(entrypoints, targetChainId, targetPool);
+    const loadEntrypoints = () => apiClient.getEntrypoints();
+    const targetEntrypointCfg = await resolveEntrypointChainConfigFor(targetChainId, targetPool, loadEntrypoints);
     const targetEntrypoint = targetEntrypointCfg?.entrypoint;
     if (typeof targetEntrypoint !== 'string' || !isAddress(targetEntrypoint)) {
       throw new Error(`No entrypoint for chain ${targetChainId}`);
@@ -3089,7 +3091,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
       const destPool = destConfig?.contracts?.poolAddress;
       const destFromBlock = destConfig?.contracts?.fromBlock;
       const destEntrypoint = destPool
-        ? resolveEntrypointChainConfig(entrypoints, destChainId, destPool)?.entrypoint
+        ? (await resolveEntrypointChainConfigFor(destChainId, destPool, loadEntrypoints))?.entrypoint
         : undefined;
       if (!destPool || !destEntrypoint) {
         // Refuse rather than build the half-configured session this function's

@@ -100,7 +100,7 @@ try {
     if (!(await clickButton(page, 'Accept and exit')) && !(await clickButton(page, 'Exit pool'))) {
       throw new Error('no Accept and exit button');
     }
-    const settled = await waitForText(page, /Exit Successful|Ragequit failed|reverted/i, 900_000);
+    const settled = await waitForText(page, /Exit Successful|Exit failed|Ragequit failed|reverted/i, 900_000);
     console.log(`  round ${round}: ${settled ?? 'no terminal state'}`);
     if (!/Exit Successful/i.test((await page.evaluate(() => document.body.innerText)))) {
       throw new Error(`dust exit ${round} did not succeed`);

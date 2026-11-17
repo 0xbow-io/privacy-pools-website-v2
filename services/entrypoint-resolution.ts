@@ -44,3 +44,22 @@ export function resolveEntrypointChainConfig(
   }
   return onChain[0];
 }
+
+/**
+ * Same answer as resolveEntrypointChainConfig, but the feed is only loaded when
+ * the chain has no pin. A pinned chain ignores the feed's rows anyway, so
+ * awaiting the feed first only made the answer depend on the ASP being up: with
+ * the ASP down, session init threw on `/entrypoints` and the exit modal could
+ * not list or exit a single note (DEV-808). This sends no request of its own.
+ */
+export async function resolveEntrypointChainConfigFor(
+  chainId: number,
+  poolVault: string | undefined,
+  loadFeed: () => Promise<EntrypointsResponse>,
+  stagingByChain: Record<number, ChainDeployment> = ACTIVE_DEPLOYMENTS_BY_CHAIN,
+): Promise<PoolEntrypoint | undefined> {
+  if (stagingByChain[chainId]) {
+    return resolveEntrypointChainConfig({ pools: [], cacheTimestamp: '' }, chainId, poolVault, stagingByChain);
+  }
+  return resolveEntrypointChainConfig(await loadFeed(), chainId, poolVault, stagingByChain);
+}

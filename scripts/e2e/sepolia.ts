@@ -795,7 +795,7 @@ async function doRagequit(p: Page): Promise<boolean> {
     return false;
   }
   await registerKeystoreIfPrompted(p);
-  const settled = await waitForText(p, /Exit Successful|Ragequit failed|transaction reverted/i, 900_000);
+  const settled = await waitForText(p, /Exit Successful|Exit failed|Ragequit failed|transaction reverted/i, 900_000);
   await shot('ragequit-after');
   if (!/Exit Successful/i.test(settled ?? '')) {
     record('ragequit', false, settled ? 'flow reported a failed exit' : 'no terminal state within 900s');
