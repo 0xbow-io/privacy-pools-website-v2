@@ -2,6 +2,26 @@
 
 All notable changes to the Privacy Pools v2 web app are documented in this file.
 
+## [1.6.0] - 2026-11-17
+
+### Added
+- Stellar: keystore registration screen, so a Stellar account can register for private sends (#94).
+- Releases are tagged and published from main automatically, with reproducible static bundles, circuits, hashes and IPFS proofs attached (#90, #98).
+
+### Changed
+- The Stellar wallet is now Varial, with an updated connection flow (#91).
+- Stellar relayed operations show the estimated fee before you confirm (#93).
+- Account checks use bulk background registry scans instead of per-account fallback requests (#97).
+
+### Fixed
+- Stellar: switching accounts in the wallet keeps each unlocked session, so switching back needs no new signature (#79).
+- Stellar: one-time link sends go through the relayer (#76), and a failed one-time send is decided by the relayer's answer, so a link is only dropped when the send really failed (#99).
+- Stellar: relayed transfers and payments build their proof once (#81), the one-time receipt box shows the link, deposit steps are labelled accurately (#80), and deposit-for and claimed-link rows show correctly in activity (#69).
+- Swap converts a typed coin amount to shares before preparing it (#87).
+- Entered yield payout amounts are covered and the prepared shares are verified (#92).
+- Paged event snapshots are followed to the last page (#96).
+- End-to-end tests: unlock gate recovery, fixture budget and recipient fields (#95), and the Stellar fee poll no longer trips the privacy gate (#101).
+
 ## [1.2.1] - 2026-10-23
 
 ### Fixed
