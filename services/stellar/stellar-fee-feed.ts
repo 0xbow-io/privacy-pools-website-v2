@@ -64,12 +64,14 @@ function stellarFeeServer(rpc: typeof import('@stellar/stellar-sdk').rpc) {
 
 /** Public asset configuration from a fixed neutral source, never the wallet. */
 export async function fetchStellarDepositVettingFee(): Promise<number> {
-  const { rpc, Account, BASE_FEE, Contract, StrKey, TransactionBuilder, nativeToScVal, scValToNative } = await import('@stellar/stellar-sdk');
+  const { rpc, Account, BASE_FEE, Contract, StrKey, TimeoutInfinite, TransactionBuilder, nativeToScVal, scValToNative } = await import('@stellar/stellar-sdk');
   const transaction = new TransactionBuilder(new Account(StrKey.encodeEd25519PublicKey(Buffer.alloc(32)), '0'), {
     fee: BASE_FEE, networkPassphrase: STELLAR_TESTNET_NETWORK.networkPassphrase,
   }).addOperation(new Contract(STELLAR_TESTNET_CONTRACTS.poolContractId).call(
     'get_asset_config', nativeToScVal(STELLAR_TESTNET_CONTRACTS.nativeAssetContractId, { type: 'address' }),
-  )).setTimeout(30).build();
+  // No time bound: a simulation is never submitted, and a "now + 30 s" bound made every poll's body different,
+  // so the fixed-grid poll could not be told apart from a request the user caused.
+  )).setTimeout(TimeoutInfinite).build();
   const simulation = await stellarFeeServer(rpc).simulateTransaction(transaction);
   if (!rpc.Api.isSimulationSuccess(simulation)) throw new Error('Stellar asset configuration unavailable');
   const config = scValToNative(simulation.result!.retval);

@@ -40,6 +40,12 @@ export interface StellarWalletContextValue {
   /** Cancel an in-flight connection without forgetting the reconnect preference. */
   cancelConnect: () => void;
   disconnect: () => void;
+  /**
+   * True until an account connects and again after Disconnect. Losing the active account
+   * (Varial switched to an account this site is not allowed for) leaves it false, so the
+   * accounts unlocked in this tab stay unlocked.
+   */
+  signedOut: boolean;
   /** Signer for the SDK; null until connected. */
   signer: StellarSigner | null;
 }
@@ -140,6 +146,7 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
   const lastErrorRef = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [signer, setSigner] = useState<StellarSigner | null>(null);
+  const [signedOut, setSignedOut] = useState(true);
   const generationRef = useRef(0);
   const busyRef = useRef(false);
   const connectedAddressRef = useRef<string | null>(null);
@@ -156,6 +163,7 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
     setNetworkPassphrase(next.passphrase);
     setSigner(next.signer);
     setStatus('connected');
+    setSignedOut(false);
     setError(null);
   }, []);
 
@@ -174,7 +182,19 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
     drop();
   }, [drop, stopWatching]);
 
-  // Preserve passive recovery from a locked wallet and account/network changes.
+  // Preserve passive recovery from a locked wallet and account/network changes. A site that is
+  // not allowed drops the active account, and watching continues so an unlock or re-allow
+  // reconnects.
+  //
+  // The wallet scopes site access per account, so selecting an account this site was never
+  // allowed for reads exactly like a revoked site. Neither is a sign-out here: `signedOut` stays
+  // false and the accounts unlocked in this tab keep their sessions (memory only, gone on reload),
+  // so the new account asks for its first signature and switching back needs none. A real
+  // revocation is treated the same way on purpose, because it cannot be told apart. Nothing can
+  // sign meanwhile: the store has no bound account and no signer, and a kept session signs only
+  // while its own account is bound. Disconnect is the one action that forgets every session, and
+  // the header keeps a Sign Out button for it while sessions are kept and no account is connected
+  // (showStellarSignOut in services/stellar/stellar-wallet-binding.ts).
   const watch = useCallback(async (current: VarialAccount, generation: number) => {
     if (isDevBurner) return;
     stopWatching();
@@ -283,6 +303,7 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
   const disconnect = useCallback(() => {
     writeFlag(false);
     reset();
+    setSignedOut(true);
   }, [reset]);
   const cancelConnect = useCallback(() => {
     if (busyRef.current) reset();
@@ -304,8 +325,9 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
     connectDetailed,
     cancelConnect,
     disconnect,
+    signedOut,
     signer,
-  }), [address, status, networkPassphrase, isAvailable, availabilityChecked, isDevBurner, error, connect, connectDetailed, cancelConnect, disconnect, signer]);
+  }), [address, status, networkPassphrase, isAvailable, availabilityChecked, isDevBurner, error, connect, connectDetailed, cancelConnect, disconnect, signedOut, signer]);
 
   return <StellarWalletContext.Provider value={value}>{children}</StellarWalletContext.Provider>;
 }
@@ -324,6 +346,7 @@ const DISCONNECTED: StellarWalletContextValue = {
   connectDetailed: async () => ({ address: null, error: null }),
   cancelConnect: () => {},
   disconnect: () => {},
+  signedOut: true,
   signer: null,
 };
 
