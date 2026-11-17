@@ -10,3 +10,6 @@ GHSA-qr28-fpjm-wq7f
 
 # zod 3.x under @reown/appkit-wallet, @coinbase/cdp-sdk and @expo/cli (our own zod is 4.6.6)
 GHSA-mrhx-c7xc-m3w5
+
+# picomatch 2.3.2 and 4.0.4 under metro, tailwind, eslint, walletconnect storage (build tooling); no patched release exists
+GHSA-fc5q-39xc-vjpf
