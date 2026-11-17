@@ -12,7 +12,7 @@ const cryptoService = new CryptoService();
 const km = KeystoreManager.fromSignature({ signature: sig, signerAddress: acct.address, addressHash, revocableKeyIndex: '0x0' }, { cryptoService });
 const quiet = { level: 'warn', child: () => quiet, debug() {}, info() {}, warn() {}, error() {}, fatal() {} };
 const nm = new NoteManager({}, { logger: quiet });
-const session = await PoolSessionBuilder.fromConfig({ chainId: 11155111, rpcUrl: 'https://ethereum-sepolia-rpc.publicnode.com', ownerAddress: acct.address, deploymentBlock: '0xa6d283', aspUrl: 'https://api-dev.0xbow.io', relayers: [{ url: 'https://relayer-staging.example', name: 's', chainId: 11155111, chainType: 'evm', status: 'active', address: '0x0000000000000000000000000000000000000001', processorAddress: '0x7430cc030d7eb8C83E76cD983996982C8C054204' }], logger: quiet })
+const session = await PoolSessionBuilder.fromConfig({ chainId: 11155111, rpcUrl: 'https://ethereum-sepolia-rpc.publicnode.com', ownerAddress: acct.address, deploymentBlock: '0xa6d283', aspUrl: 'https://api-dev.0xbow.io', relayers: [{ url: 'https://relayer-v2-staging-149184580131.us-east1.run.app', name: 's', chainId: 11155111, chainType: 'evm', status: 'active', address: '0x0000000000000000000000000000000000000001', processorAddress: '0x7430cc030d7eb8C83E76cD983996982C8C054204' }], logger: quiet })
   .withCircuitArtifacts({ getWasm: async () => { throw new Error('x'); }, getZkey: async () => { throw new Error('x'); }, getVkey: async () => { throw new Error('x'); } } as any)
   .withKeystoreManager(km).withNoteManager(nm).create();
 await session.discoverNotes({ fromBlock: '0xa6d103' });

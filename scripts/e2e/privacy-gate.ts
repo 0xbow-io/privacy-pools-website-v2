@@ -79,9 +79,8 @@ export function resolveHosts(config: {
     // Full hostnames, from config/relayer-eras.ts and config/chains.ts.
     relayer: [
       'relayer-v2-prod-149184580131.us-east1.run.app',
-      'relayer-staging.example',
       'relayer-v2-staging-149184580131.us-east1.run.app',
-      'relayer-testing.example',
+      'relayer-v2-testing-149184580131.us-east1.run.app',
       'testnet-relayer.privacypools.com',
     ],
     // Exact origin: a subdomain of our own site is not automatically ours, and

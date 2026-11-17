@@ -32,7 +32,7 @@ export const RELAY_PROCESSOR_BY_VAULT: Record<string, RelayEra> = {
   '0x4deceef285a24ca05999870887c895042731d7cb': {
     relay: '0x87a5BFbAd7cA6B1FF3d9E631877B5930f17C24B0',
     transfersViaSignerEoa: true,
-    relayerBaseUrl: 'https://relayer-testing.example',
+    relayerBaseUrl: 'https://relayer-v2-testing-149184580131.us-east1.run.app',
   },
 };
 
@@ -73,7 +73,7 @@ export const CURRENT_RELAY = '0x7430cc030d7eb8C83E76cD983996982C8C054204';
  * another reason: a quote succeeding proves nothing, the revert only shows up
  * on a real relayed spend.
  */
-export const CURRENT_RELAYER_BASE_URL = 'https://relayer-staging.example';
+export const CURRENT_RELAYER_BASE_URL = 'https://relayer-v2-staging-149184580131.us-east1.run.app';
 
 /**
  * Pure resolver for the Sepolia relayer base URL. Env override wins (ops

@@ -35,7 +35,7 @@
 // regardless of headers (see relayer-eras.ts) — check reachability first if
 // staging-chain quotes fail. Env-overridable per chain below, pending the
 // final same-or-new-instance decision (daffy).
-const STAGING_CHAINS_RELAYER_URL = 'https://relayer-testing.example';
+const STAGING_CHAINS_RELAYER_URL = 'https://relayer-v2-testing-149184580131.us-east1.run.app';
 
 /**
  * One staging pool deployment. The shape is shared with the prod list

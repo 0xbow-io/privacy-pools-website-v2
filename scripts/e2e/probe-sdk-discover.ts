@@ -37,7 +37,7 @@ const session = await PoolSessionBuilder.fromConfig({
   ownerAddress: B.address,
   deploymentBlock: '0xa6d283',
   aspUrl: 'https://api-dev.0xbow.io',
-  relayers: [{ url: 'https://relayer-staging.example', name: 'staging', chainId: 11155111, chainType: 'evm', status: 'active', address: '0x0000000000000000000000000000000000000001', processorAddress: '0x7430cc030d7eb8C83E76cD983996982C8C054204' }],
+  relayers: [{ url: 'https://relayer-v2-staging-149184580131.us-east1.run.app', name: 'staging', chainId: 11155111, chainType: 'evm', status: 'active', address: '0x0000000000000000000000000000000000000001', processorAddress: '0x7430cc030d7eb8C83E76cD983996982C8C054204' }],
   logger,
 })
   .withCircuitArtifacts({ getWasm: async () => { throw new Error('no circuits in probe'); }, getZkey: async () => { throw new Error('no circuits in probe'); }, getVkey: async () => { throw new Error('no circuits in probe'); } } as any)
