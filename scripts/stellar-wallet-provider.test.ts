@@ -13,7 +13,7 @@ function deferred<T>() {
   const promise = new Promise<T>((ok) => { resolve = ok; });
   return { promise, resolve };
 }
-function fixture() {
+function fixture(metaMask: boolean | Promise<boolean> = false) {
   const state: Record<string, unknown> = {};
   const effects: (() => void | (() => void))[] = [];
   let flag = false;
@@ -37,6 +37,11 @@ function fixture() {
     useEffect: (fn: () => void | (() => void)) => effects.push(fn),
     DEV_SECRET: '', isLocalHost: () => false, Platform: { OS: 'web' },
     STELLAR_TESTNET_NETWORK: { networkPassphrase: 'testnet' }, WATCH_INTERVAL_MS: 3000,
+    readStellarWalletKind: () => 'freighter', writeStellarWalletKind: () => {},
+    STELLAR_WALLET_NAMES: { freighter: 'Varial', metamask: 'MetaMask' },
+    isMetaMaskInstalled: () => Promise.resolve(metaMask),
+    getMetaMaskAdapter: async () => ({ ...api, getNetwork: api.getNetworkDetails }),
+    metaMaskNetworkMismatchMessage: () => 'MetaMask mainnet only', metaMaskSigner: () => ({}), watchMetaMask: () => ({ stop() {} }),
     loadVarial: async () => api,
     isVarialInstalled: async () => true,
     readFlag: () => flag, writeFlag: (value: boolean) => { flag = value; },
@@ -44,7 +49,7 @@ function fixture() {
     varialSigner: () => ({}),
   };
   const value = new Function(...Object.keys(context), `${js}; return StellarWalletProvider({children:null});`)(...Object.values(context)) as {
-    connect(): Promise<string | null>; disconnect(): void; cancelConnect(): void;
+    connect(kind?: 'freighter' | 'metamask'): Promise<string | null>; disconnect(): void; cancelConnect(): void;
   };
   return { value, state, effects, replies, requests: () => requests, passiveReads: () => passiveReads,
     flag: () => flag, setFlag: () => { flag = true; }, change: () => watchCallbacks.change({ address: 'G-next', passphrase: 'other-network' }) };
@@ -59,6 +64,11 @@ describe('Stellar provider lifecycle', () => {
     const f = fixture(); f.setFlag(); f.effects.forEach((effect) => effect()); await flush();
     expect(f.requests()).toBe(0); expect(f.passiveReads()).toBe(1);
     expect(f.state.status).toBe('connected');
+  });
+  test('a slow MetaMask probe does not hold up the Varial reconnect', async () => {
+    // Without MetaMask the EIP-6963 probe only answers after a 2 s timeout.
+    const f = fixture(new Promise<boolean>(() => {})); f.setFlag(); f.effects.forEach((effect) => effect()); await flush();
+    expect(f.state.status).toBe('connected'); expect(f.state.availabilityChecked).toBe(true);
   });
   test('disconnect cancels a pending reply and allows a new connection', async () => {
     const f = fixture(); const pending = deferred<{ address: string }>(); f.replies.push(pending.promise);
@@ -109,4 +119,26 @@ test('cancelling a first connection does not enable reconnect', async () => {
   const connection = f.value.connect(); await flush(); f.value.cancelConnect();
   pending.resolve({ address: 'G-late' }); await connection;
   expect(f.flag()).toBe(false); expect(f.state.address).toBeNull();
+});
+
+describe('MetaMask connection lifecycle', () => {
+  test('cancel discards a late access grant without persisting or adopting it', async () => {
+    const f = fixture(true); const pending = deferred<{ address: string }>(); f.replies.push(pending.promise);
+    const first = f.value.connect('metamask'); await flush(); f.value.cancelConnect();
+    pending.resolve({ address: 'G-late' }); expect(await first).toBeNull();
+    expect(f.state.address).toBeNull(); expect(f.flag()).toBe(false);
+  });
+  test('a cancelled MetaMask attempt cannot overwrite a new Varial connection', async () => {
+    const f = fixture(true); const pending = deferred<{ address: string }>(); f.replies.push(pending.promise);
+    const first = f.value.connect('metamask'); await flush(); f.value.cancelConnect();
+    expect(await f.value.connect('freighter')).toBe('G-account');
+    pending.resolve({ address: 'G-old' }); expect(await first).toBeNull();
+    expect(f.state.address).toBe('G-account');
+  });
+  test('unmount ignores a late MetaMask access grant', async () => {
+    const f = fixture(true); const pending = deferred<{ address: string }>(); f.replies.push(pending.promise);
+    const cleanups = f.effects.map((effect) => effect());
+    const first = f.value.connect('metamask'); await flush(); cleanups.forEach((cleanup) => cleanup?.());
+    pending.resolve({ address: 'G-late' }); expect(await first).toBeNull(); expect(f.flag()).toBe(false);
+  });
 });

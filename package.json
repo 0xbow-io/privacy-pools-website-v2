@@ -44,6 +44,7 @@
     "@expo/ui": "56.0.17",
     "@expo/vector-icons": "15.1.1",
     "@floating-ui/react": "0.27.19",
+    "@metamask/connect-stellar": "0.3.0",
     "@mysten/dapp-kit": "1.0.4",
     "@mysten/sui": "2.15.0",
     "@mysten/wallet-standard": "0.20.1",

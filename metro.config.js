@@ -124,6 +124,12 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   ) {
     return { type: 'sourceFile', filePath: emptyShim };
   }
+  // @metamask/connect-stellar's index also re-exports its Stellar Wallets Kit module, which
+  // imports an optional peer (@creit.tech/stellar-wallets-kit) that is not installed. We only
+  // use the adapter; the module's one use of the peer is in a constructor nothing calls.
+  if (moduleName === '@creit.tech/stellar-wallets-kit' && /[\\/]@metamask[\\/]connect-stellar[\\/]/.test(context.originModulePath ?? '')) {
+    return { type: 'sourceFile', filePath: emptyShim };
+  }
   if (moduleName.startsWith('@noble/') && moduleName.endsWith('.js')) {
     const filePath = path.resolve(__dirname, 'node_modules', moduleName);
     return { type: 'sourceFile', filePath };

@@ -7,6 +7,7 @@
  */
 import { StellarRegistrationCancelledError } from './stellar-registration-prompt';
 import type { StellarFlowStage } from '@/services/stellar/stellar-account';
+import { metaMaskNetworkMismatchMessage } from '@/services/stellar/metamask-stellar';
 
 export function describeStellarStage(stage: StellarFlowStage): string {
   switch (stage) {
@@ -35,6 +36,7 @@ const RULES: [RegExp, string][] = [
   // transactions), and a retry builds only the missing step, so the copy is scoped to this one.
   [/\btxTooLate\b/, 'The approval took too long and the network refused it. This transaction was not sent. Try again.'],
   [/\btxBadSeq\b/, 'Another transaction from this wallet went through first. This transaction was not sent. Try again.'],
+  [/MetaMask supports Stellar mainnet only|Unknown network passphrase/i, metaMaskNetworkMismatchMessage()],
   [/network.*mismatch|StellarWalletNetworkMismatch/i, 'Your wallet is on another network. Switch it to Testnet and try again.'],
   [/not installed|StellarWalletNotAvailable/i, 'Your wallet is not available in this browser.'],
   [/locked|not connected/i, 'Unlock your wallet and try again.'],
