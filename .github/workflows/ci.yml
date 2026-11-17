@@ -34,6 +34,8 @@ jobs:
           printf '%s\n' '/// <reference types="expo/types" />' > expo-env.d.ts
           cat expo-env.d.ts
       - run: bun run typecheck
+      - name: Static release input validation
+        run: node --test scripts/release/static-files.test.mjs
       # Two suites, two runners — a bare `bun test` sweeps in tests/sui/**, which
       # is a vitest-only suite: it needs vitest.config.ts's `react-native` alias
       # (bun loads the real package and chokes on its Flow `import typeof`) and

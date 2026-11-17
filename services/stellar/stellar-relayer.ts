@@ -38,7 +38,10 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
       signal: controller.signal,
     });
     const json = (await res.json().catch(() => ({}))) as T & { message?: string | string[]; error?: string };
-    if (!res.ok) throw new Error([json.message ?? json.error ?? `relayer ${res.status}`].flat().join('; '));
+    if (!res.ok) {
+      // The status rides along: only a 4xx is the relayer's verdict on the request (relayRefusedBeforeSending).
+      throw Object.assign(new Error([json.message ?? json.error ?? `relayer ${res.status}`].flat().join('; ')), { httpStatus: res.status });
+    }
     return json;
   } finally {
     clearTimeout(timer);
@@ -152,8 +155,13 @@ export function createStellarRelayer(
         noteData: params.noteData,
         signedFeeCommitment: params.signedFeeCommitment,
       }).catch((error: unknown) => {
-        throw new sdk.RelayerRejected(error instanceof Error ? error.message : String(error));
+        // httpStatus is set only when the relayer answered. Without it (timeout, dropped connection) the
+        // relayer may have sent the transaction, and relayRefusedBeforeSending says so.
+        throw Object.assign(new sdk.RelayerRejected(error instanceof Error ? error.message : String(error)), {
+          httpStatus: (error as { httpStatus?: number } | null)?.httpStatus,
+        });
       });
+      // A success answer without a hash is no verdict either (the SDK's relayTxHash treats it the same).
       if (res.error || !res.txHash) throw new sdk.RelayerRejected(res.error ?? 'The relayer rejected the transfer');
       return res.txHash as Hex;
     },
@@ -185,4 +193,53 @@ export function createStellarRelayer(
       };
     },
   });
+}
+
+/**
+ * True when a relay request failed in a way that proves nothing was sent: the fee commitment had
+ * expired before the POST (FeeCommitmentExpired), or the relayer answered with a 4xx, which it
+ * gives before it signs or sends anything (the SDK's relayPost contract). A timeout, a dropped
+ * connection, a 5xx or a success answer without a hash may follow a sent transaction.
+ */
+export function relayRefusedBeforeSending(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.name === 'FeeCommitmentExpired') return true;
+  if (error.name !== 'RelayerRejected') return false;
+  const status = (error as { httpStatus?: unknown }).httpStatus;
+  return typeof status === 'number' && status >= 400 && status <= 499;
+}
+
+/** The SDK's own name for a relay the relayer may have sent (RelayOutcomeUnknown). */
+export function isRelayOutcomeUnknown(error: unknown): boolean {
+  return error instanceof Error && error.name === 'RelayOutcomeUnknown';
+}
+
+/**
+ * How far a transfer's relay request got: never made, refused before sending, or possibly sent
+ * (answered with a hash, or failed without a verdict).
+ */
+export type TransferRelaySubmission = 'not-requested' | 'refused' | 'maybe-sent';
+
+/** Wraps a relayer so the caller can tell whether its relayTransfer may have sent anything. No extra request. */
+export function trackTransferRelay<R extends Pick<IRelayerInteractor<StellarAddress>, 'relayTransfer'>>(
+  relayer: R,
+): { relayer: R; submission: () => TransferRelaySubmission } {
+  let submission: TransferRelaySubmission = 'not-requested';
+  const tracked = new Proxy(relayer, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (prop !== 'relayTransfer' || typeof value !== 'function') return value;
+      return async (...args: unknown[]) => {
+        try {
+          const hash = await value.apply(target, args);
+          submission = 'maybe-sent';
+          return hash;
+        } catch (error) {
+          submission = relayRefusedBeforeSending(error) ? 'refused' : 'maybe-sent';
+          throw error;
+        }
+      };
+    },
+  });
+  return { relayer: tracked, submission: () => submission };
 }

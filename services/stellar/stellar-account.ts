@@ -73,7 +73,7 @@ import {
   type IndexedStellarRpcInteractor,
   type StellarRpcInteractor,
 } from '@/services/stellar/stellar-runtime';
-import { createStellarRelayer, relayAwareRpc } from '@/services/stellar/stellar-relayer';
+import { createStellarRelayer, isRelayOutcomeUnknown, relayAwareRpc, trackTransferRelay, type TransferRelaySubmission } from '@/services/stellar/stellar-relayer';
 import {
   decodeStellarBackup,
   decodeStellarRequestBackup,
@@ -99,7 +99,7 @@ import { bumpPaymentRequestRevision } from '@/services/payment-request-revision'
 import { registerDebugSnapshot } from '@/services/debug-snapshots';
 import { blindClaimNote, blindNoteAddressHash, isUnregisteredRecipientError, toImportableNote, type StellarClaimNote } from '@/services/stellar/stellar-claim';
 import { relayTransferOnce, type TransferOnceAction, type TransferOnceRelayer, type TransferOnceSession } from '@/services/stellar/stellar-transfer-once';
-import { findSentClaim, readSentClaims, saveSentClaim, SENT_CLAIMS_BASE_KEY, setSentClaimTx } from '@/services/stellar/stellar-sent-claims';
+import { findSentClaim, readSentClaims, removeSentClaim, saveSentClaim, SENT_CLAIMS_BASE_KEY, setSentClaimTx } from '@/services/stellar/stellar-sent-claims';
 import { CLAIMED_NOTES_BASE_KEY, DEPOSITS_FOR_BASE_KEY, readClaimedNotes, readDepositsFor, recordClaimedNotes, recordDepositFor } from '@/services/stellar/stellar-activity-records';
 import { isStellarAccountAddress, requestStates, type StellarRequestState } from '@/services/stellar/stellar-request';
 import type { StellarSdkPaymentRequest } from '@/services/payment-request-codec';
@@ -922,6 +922,11 @@ class StellarAccount {
    * (stellar-sent-claims.ts) BEFORE the transfer is submitted; if that save
    * fails nothing is sent. Relayed like any send, so Varial only signs
    * the registration, if any.
+   *
+   * A failure after that save comes out as RelayOutcomeUnknown only when the
+   * relayer may have sent the transaction (oneTimeSendFailure). Any other
+   * error means nothing was sent: the saved copy is removed and the error is
+   * thrown as is.
    */
   sendOneTime(params: {
     maxFee: bigint;
@@ -946,54 +951,79 @@ class StellarAccount {
       this.assertStillBound(generation);
       onStage?.('proving');
       let claim: { id: string; notes: StellarClaimNote[] } | null = null;
+      // Tells a relay that may have sent the transaction from one refused before sending.
+      const relay = trackTransferRelay(relayer);
       // Relayed like any transfer: the relayer submits through the relay contract, so this
       // account does not appear on the transaction. One quote, one proof.
-      const result = await this.withTransferRelayer(relayer, () =>
-        this.relayOnce(session, relayer, {
-          maxFee: params.maxFee,
-          amount: params.amount,
-          inputCommitments: params.inputCommitments,
-          recipient: { kind: 'oneTime', address: params.recipient },
-          beforeRelay: (recipientNotes) => {
-            const notes: StellarClaimNote[] = recipientNotes.map((n) => ({
-              commitment: n.commitment,
-              noteAddressHash: `0x${BigInt(n.noteAddressHash).toString(16).padStart(64, '0')}`,
-              noteSecret: n.noteSecret,
-              value: n.value,
-              tokenId: n.tokenId,
-              label: n.label,
-              ownerAddress: params.recipient,
-              txHash: '0x0',
-            }));
-            const id = `${Date.now().toString(36)}-${notes[0].commitment.slice(-8)}`;
-            saveSentClaim(sentClaimsStorage(), SENT_CLAIMS_KEY, {
-              id,
-              sender: address,
-              recipient: params.recipient,
-              amount: params.amount.toString(),
-              notes,
-              txHash: null,
-              createdAt: Date.now(),
-            });
-            claim = { id, notes };
-            params.onClaimReady?.(notes);
-          },
-          guard: () => {
-            if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
-            this.assertStillBound(generation);
-          },
-          onRelaying: () => onStage?.('relaying'),
-        }),
-      );
+      let result: TransferResult<StellarAddress, StellarLog>;
+      try {
+        result = await this.withTransferRelayer(relay.relayer, () =>
+          this.relayOnce(session, relay.relayer, {
+            maxFee: params.maxFee,
+            amount: params.amount,
+            inputCommitments: params.inputCommitments,
+            recipient: { kind: 'oneTime', address: params.recipient },
+            beforeRelay: (recipientNotes) => {
+              const notes: StellarClaimNote[] = recipientNotes.map((n) => ({
+                commitment: n.commitment,
+                noteAddressHash: `0x${BigInt(n.noteAddressHash).toString(16).padStart(64, '0')}`,
+                noteSecret: n.noteSecret,
+                value: n.value,
+                tokenId: n.tokenId,
+                label: n.label,
+                ownerAddress: params.recipient,
+                txHash: '0x0',
+              }));
+              const id = `${Date.now().toString(36)}-${notes[0].commitment.slice(-8)}`;
+              saveSentClaim(sentClaimsStorage(), SENT_CLAIMS_KEY, {
+                id,
+                sender: address,
+                recipient: params.recipient,
+                amount: params.amount.toString(),
+                notes,
+                txHash: null,
+                createdAt: Date.now(),
+              });
+              claim = { id, notes };
+              params.onClaimReady?.(notes);
+            },
+            guard: () => {
+              if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
+              this.assertStillBound(generation);
+            },
+            onRelaying: () => onStage?.('relaying'),
+          }),
+        );
+        if (!result.txReceipt.status) throw new Error('The transfer transaction failed on-chain.');
+      } catch (error) {
+        throw await this.oneTimeSendFailure(error, (claim as { id: string } | null)?.id ?? null, relay.submission());
+      }
       const saved = claim as { id: string; notes: StellarClaimNote[] } | null;
       if (!saved) throw new Error('The transfer could not be prepared for a one-time link.');
-      if (!result.txReceipt.status) throw new Error('The transfer transaction failed on-chain.');
       const txHash = String(result.txReceipt.txHash);
       setSentClaimTx(sentClaimsStorage(), SENT_CLAIMS_KEY, saved.id, txHash);
       onStage?.('syncing');
       await this.refreshLocal(session, address);
       return { txHash, notes: saved.notes.map((n) => ({ ...n, txHash })) };
     });
+  }
+
+  /**
+   * The error a one-time send throws once its link was saved (claimId set). The relay decides,
+   * never the message: a relay that answered with a hash or failed without a verdict may have
+   * sent the transaction, so the link stays as an unknown outcome (RelayOutcomeUnknown). Anything
+   * else (a quote that expired while proving, a relayer 4xx, a proof or note error before the
+   * relay request, Superseded) sent nothing, so the saved copy is removed.
+   */
+  private async oneTimeSendFailure(error: unknown, claimId: string | null, relay: TransferRelaySubmission): Promise<unknown> {
+    if (!claimId) return error;
+    if (relay === 'maybe-sent' || isRelayOutcomeUnknown(error)) {
+      if (isRelayOutcomeUnknown(error)) return error;
+      const sdk = await loadStellarSdk();
+      return new sdk.RelayOutcomeUnknown(messageOf(error), { cause: error });
+    }
+    removeSentClaim(sentClaimsStorage(), SENT_CLAIMS_KEY, claimId);
+    return error;
   }
 
   /**
