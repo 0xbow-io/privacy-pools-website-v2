@@ -280,6 +280,16 @@ describe('Stellar relayer (v2 relayer routes)', () => {
     expect(quote).toEqual({ txCost: '0', gasPrice: '0', feeAmount: '200000', feeCommitment: transferCommitment });
   });
 
+  test('a preliminary transfer quote does not require a signed commitment', async () => {
+    route = () => ({ body: { feeAmount: '2849562', txCost: '2649562', gasPrice: '0' } });
+    const [info] = await relayer.getRelayers();
+    const quote = await relayer.getTransferQuote(info, { asset: ASSET, commit: false });
+    expect(bodies[0]).toEqual({ asset: ASSET, commit: false });
+    expect(quote.feeAmount).toBe('2849562');
+    expect(quote.feeCommitment).toBeUndefined();
+    await expect(relayer.getTransferQuote(info, { asset: ASSET, commit: true })).rejects.toBeInstanceOf(RelayerRequestFailed);
+  });
+
   test('a relayer without the transfer route fails the quote, it does not fall back', async () => {
     // What the relayer deployed 2026-09-30 (fde65488) answers.
     route = () => ({ status: 400, body: { message: 'Stellar private transfer quotes are not supported (see Scope in the Stellar plan)', statusCode: 400 } });

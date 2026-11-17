@@ -1,7 +1,7 @@
 import { getChainConfig } from '@/config/chains';
 import { LEGACY_CONFIG } from '@/config/env';
 import apiClient from '@/services/api-client';
-import { resolveEntrypointChainConfig } from '@/services/entrypoint-resolution';
+import { resolveEntrypointChainConfigFor } from '@/services/entrypoint-resolution';
 
 /**
  * Resolve the entrypoint address of THIS website's configured pool on a chain.
@@ -25,10 +25,11 @@ export async function resolveConfiguredEntrypoint(chainId: number): Promise<stri
   // Legacy spend-out build pins the entrypoint explicitly.
   if (LEGACY_CONFIG) return LEGACY_CONFIG.entrypoint;
 
-  const entrypoints = await apiClient.getEntrypoints();
-  return resolveEntrypointChainConfig(
-    entrypoints,
+  // A pinned chain answers from config without waiting on the feed, so an ASP
+  // that is down does not hold up anything keyed on the pool (DEV-808).
+  return (await resolveEntrypointChainConfigFor(
     chainId,
     getChainConfig(chainId)?.contracts?.poolAddress,
-  )?.entrypoint;
+    () => apiClient.getEntrypoints(),
+  ))?.entrypoint;
 }

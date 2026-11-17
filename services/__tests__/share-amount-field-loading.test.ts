@@ -61,7 +61,7 @@ for (const denomination of ['underlying', 'usd']) {
     expect(h.amount()).toBe('0.02');
     expect(draft.error).toBeNull();
     const resolved = h.cap('1');
-    expect(h.amount()).toBe('0.099890120867046249');
+    expect(h.amount()).toBe('0.09989012086704625');
     expect(denomination === 'usd' ? resolved.usdValue : resolved.value).toBe(text);
     expect(resolved.error).toBeNull();
   });
@@ -129,12 +129,14 @@ test('an editable cap never rounds above the exact value', () => {
   expect(parseTokenAmount(field.value, 18) <= exact).toBe(true);
 });
 
-test('Send manual edit converts once, rounds down and clamps to the exact share balance', () => {
+test('Send manual edit converts once, covers the entered coin and clamps to the exact share balance', () => {
   const h = fieldHarness();
   h.cap('1');
   h.type('0.5');
-  // 0.5 / 1.0011 shares, rounded down in wei.
-  expect(h.amount()).toBe(formatUnits(parseTokenAmount('0.5', 18) * 10n ** 18n / rate.assetsPerShare, 18));
+  // The smallest share amount whose redemption covers 0.5 ETH.
+  const held = parseTokenAmount(h.amount(), 18);
+  expect(held * rate.assetsPerShare / 10n ** 18n).toBeGreaterThanOrEqual(parseTokenAmount('0.5', 18));
+  expect((held - 1n) * rate.assetsPerShare / 10n ** 18n).toBeLessThan(parseTokenAmount('0.5', 18));
   h.type('5');
   expect(h.amount()).toBe('1'); // clamped
 });

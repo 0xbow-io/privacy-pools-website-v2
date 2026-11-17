@@ -12,6 +12,7 @@ import {
   ownershipSettled,
   ownershipVerdictPending,
   viewingKeyVerdicts,
+  depositMineByAddress,
   type DepositOwnershipInputs,
 } from '@/services/deposit-ownership';
 
@@ -446,5 +447,31 @@ describe('ownershipSettled: settle a deposit only once nothing more can come for
 
   test("settled when its chain's snapshot failed: the depositor fallback stands", () => {
     expect(settled({ chainSnapshotLoaded: false })).toBe(true);
+  });
+});
+
+describe('depositMineByAddress: the depositor fallback', () => {
+  const none = { outgoing: new Set<string>(), notMine: new Set<string>(), pending: new Set<string>() };
+  const TX = '0xabc0000000000000000000000000000000000000000000000000000000000001';
+
+  test('my own plain deposit is mine by address', () => {
+    expect(depositMineByAddress({ txHash: TX, fullAddress: ME }, ME, none)).toBe(true);
+  });
+
+  test("a deposit-for row (Stellar, fullAddress = me, the depositor) is the recipient's, never mine", () => {
+    expect(depositMineByAddress({ txHash: TX, fullAddress: ME, depositFor: true }, ME, none)).toBe(false);
+    expect(depositMineByAddress({ txHash: TX, fullAddress: ME.toUpperCase(), depositFor: true }, ME, none)).toBe(false);
+  });
+
+  test('a stamped outgoing, sealed-elsewhere or undecided deposit is not mine by address', () => {
+    for (const key of ['outgoing', 'notMine', 'pending'] as const) {
+      const sets = { ...none, [key]: new Set([TX]) };
+      expect(depositMineByAddress({ txHash: TX.toUpperCase().replace('0X', '0x'), fullAddress: ME }, ME, sets)).toBe(false);
+    }
+  });
+
+  test("someone else's deposit, or no wallet, is not mine", () => {
+    expect(depositMineByAddress({ txHash: TX, fullAddress: SOMEONE }, ME, none)).toBe(false);
+    expect(depositMineByAddress({ txHash: TX, fullAddress: ME }, null, none)).toBe(false);
   });
 });

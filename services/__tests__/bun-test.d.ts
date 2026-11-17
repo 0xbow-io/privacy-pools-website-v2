@@ -37,7 +37,18 @@ declare module 'bun:test' {
   /** A `mock()`-wrapped function, carrying call bookkeeping. */
   export type Mock<T extends (...args: never[]) => unknown> = T & {
     mock: { calls: Parameters<T>[] };
+    mockReturnValue(value: ReturnType<T>): Mock<T>;
+    mockResolvedValue(value: Awaited<ReturnType<T>>): Mock<T>;
   };
+
+  export type Spy<T extends (...args: never[]) => unknown> = Omit<Mock<T>, 'mockResolvedValue'> & T & {
+    mockImplementation(fn: T): Spy<T>;
+    mockResolvedValue(value: Awaited<ReturnType<T>>): Spy<T>;
+    mockRestore(): void;
+  };
+
+  export function spyOn<T, K extends keyof T>(object: T, key: K):
+    T[K] extends (...args: never[]) => unknown ? Spy<T[K]> : never;
 
   /**
    * `mock(fn)` wraps a function with call bookkeeping; `mock.module(...)`
@@ -45,5 +56,6 @@ declare module 'bun:test' {
    */
   export const mock: (<T extends (...args: never[]) => unknown>(fn: T) => Mock<T>) & {
     module(specifier: string, factory: () => unknown): void;
+    restore(): void;
   };
 }

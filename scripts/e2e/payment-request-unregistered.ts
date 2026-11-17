@@ -25,7 +25,7 @@
 // hand (restore storage, register, withdraw). Without the export, closing
 // the context would strand the payment permanently.
 import {
-  accountFromKey, bodyText, clickButton, openApp,
+  accountFromKey, bodyText, clickButton, clickWhenReady, openApp,
   signIn, sleep, tab, unlockIfPrompted, enterAmount,
   waitForText,
   requestPillSymbol,
@@ -89,7 +89,7 @@ try {
   // the signature gate; clear it and press again if the link has not appeared.
   let payUrl: string | null = null;
   for (let attempt = 1; attempt <= 4 && !payUrl; attempt += 1) {
-    await clickButton(payee.page, 'Create request');
+    assert.ok(await clickWhenReady(payee.page, 'Create request'), 'Create request becomes actionable');
     const deadline = Date.now() + 90_000;
     while (Date.now() < deadline && !payUrl) {
       // The signature gate appears SECONDS after the press on a virgin

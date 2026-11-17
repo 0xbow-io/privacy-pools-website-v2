@@ -40,7 +40,7 @@ describe('withStellarLinkParams', () => {
 
 describe('stellarUnlockErrorTitle', () => {
   test('a declined signature reads as cancelled', () => {
-    expect(stellarUnlockErrorTitle(new Error('User declined access'))).toBe('Sign-in cancelled in Freighter.');
+    expect(stellarUnlockErrorTitle(new Error('User declined access'))).toBe('Sign-in cancelled in your wallet.');
   });
   test('anything else goes through the Stellar error copy', () => {
     expect(stellarUnlockErrorTitle(new Error('StellarWalletNetworkMismatch'))).toContain('another network');

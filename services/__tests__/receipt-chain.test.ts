@@ -18,11 +18,11 @@ describe('receipt chain naming (DEV-457)', () => {
     expect(environmentChainIds(ENVIRONMENTS.prod)).not.toContain(11155111);
   });
 
-  test('a Sepolia receipt on Prod names Sepolia and offers plain Staging', () => {
+  test('a Sepolia receipt on Prod names Sepolia and offers plain Testnet', () => {
     expect(resolveReceiptChain(11155111, undefined, 'prod', TABLES)).toEqual({
       name: 'Sepolia',
       supported: true,
-      otherEnvironment: { id: 'staging', label: 'Staging', query: 'staging' },
+      otherEnvironment: { id: 'staging', label: 'Testnet', query: 'staging' },
     });
   });
 

@@ -1,5 +1,5 @@
 /** Browser-side observation only: the node-side test wallet has its own transport. */
-import { createWriteStream } from 'node:fs';
+import { createWriteStream, writeFileSync } from 'node:fs';
 import type { CapturedRequest } from './network-privacy';
 
 // Structural interfaces keep this module checked even with the repository's
@@ -11,6 +11,7 @@ interface RequestSource {
   allHeaders(): Promise<Record<string, string>>;
   postDataBuffer(): Buffer | null;
   resourceType(): string;
+  failure?(): { errorText: string } | null;
 }
 interface SocketSource {
   url(): string;
@@ -33,6 +34,8 @@ interface SessionSource {
 }
 interface ContextSource {
   on(event: 'request', handler: (request: RequestSource) => void): void;
+  on(event: 'requestfinished' | 'requestfailed', handler: (request: RequestSource) => void): void;
+  on(event: 'response', handler: (response: { request(): RequestSource; status(): number }) => void): void;
   on(event: 'page', handler: (page: PageSource) => void): void;
   on(event: 'close', handler: () => void): void;
   newCDPSession(page: PageSource): Promise<SessionSource>;
@@ -78,11 +81,24 @@ function isDevServerSocket(url: string, devServerOrigin: string | undefined): bo
   }
 }
 
-export function startNetworkCapture(context: ContextSource, options: { enabled?: boolean; file?: string; maxBytes?: number; flushTimeoutMs?: number; devServerOrigin?: string } = {}) {
+export function startNetworkCapture(context: ContextSource, options: { enabled?: boolean; file?: string; maxBytes?: number; flushTimeoutMs?: number; diagnosticsFile?: string; devServerOrigin?: string } = {}) {
   const captured: CapturedRequest[] = [];
   /** Retained bytes per destination, so an overflow names what filled it. */
   const bytesBy = new Map<string, number>();
   const pending = new Set<Promise<void>>();
+  const pendingHttp = new Map<RequestSource, { record: CapturedRequest; state: string }>();
+  context.on('response', response => {
+    const entry = pendingHttp.get(response.request());
+    if (entry) entry.state = `response ${response.status()}`;
+  });
+  context.on('requestfinished', request => {
+    const entry = pendingHttp.get(request);
+    if (entry) entry.state = 'finished';
+  });
+  context.on('requestfailed', request => {
+    const entry = pendingHttp.get(request);
+    if (entry) entry.state = `failed: ${request.failure?.()?.errorText ?? 'unknown'}`;
+  });
   const attached = new WeakMap<PageSource, Promise<void>>();
   const sink = options.file ? createWriteStream(options.file, { flags: 'a', mode: 0o600, highWaterMark: 1024 * 1024 }) : undefined;
   const maxBytes = options.maxBytes ?? 64 * 1024 * 1024;
@@ -133,6 +149,7 @@ export function startNetworkCapture(context: ContextSource, options: { enabled?:
       captureError: 'Request headers/body capture pending; await flushCapture()',
     };
     captured.push(record); // Timestamp/order assigned synchronously, before awaits.
+    pendingHttp.set(request, { record, state: 'awaiting response' });
     const bytes = request.postDataBuffer();
     track((async () => {
       record.headers = await request.allHeaders();
@@ -148,6 +165,7 @@ export function startNetworkCapture(context: ContextSource, options: { enabled?:
         delete record.captureError;
       }
       save(record);
+      pendingHttp.delete(request);
     })());
   });
 
@@ -239,7 +257,18 @@ export function startNetworkCapture(context: ContextSource, options: { enabled?:
           // 90s, not 45s: slow Alchemy/Citrea RPC answers outlived 45s and
           // failed the capture (e2e runs 38251768622, 38253851048).
           timer = setTimeout(() => {
-            const incomplete = captured.filter(r => r.captureError).slice(0, 5).map(r => `${r.method} ${new URL(r.url).origin}`);
+            const details = [...pendingHttp.values()].map(({ record, state }) => ({
+              method: record.method, url: record.url, ageMs: Date.now() - record.t, state,
+              captureError: record.captureError,
+            }));
+            if (options.diagnosticsFile) {
+              try { writeFileSync(options.diagnosticsFile, JSON.stringify(details, null, 2), { mode: 0o600 }); }
+              catch { /* Preserve the original fail-closed capture verdict. */ }
+            }
+            const incomplete = details.slice(0, 5).map(r => {
+              const url = new URL(r.url);
+              return `${r.method} ${url.origin}${url.pathname} (${r.state}, ${Math.round(r.ageMs / 1000)}s old)`;
+            });
             fail(`Network capture flush timed out (${incomplete.join(', ') || 'pending setup'})`);
             reject(error);
           }, options.flushTimeoutMs ?? 90_000);

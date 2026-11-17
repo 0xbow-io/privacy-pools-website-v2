@@ -5,7 +5,8 @@ const expoConfig = require('eslint-config-expo/flat');
 module.exports = defineConfig([
   expoConfig,
   {
-    ignores: ['dist/*'],
+    // Generated from the pinned SDK; checked by build-fee-module.mjs --check.
+    ignores: ['dist/*', 'vendor/stellar-fees/index.js'],
   },
   {
     // Hermes 250829098.0.10 builds the wrong object for an object literal

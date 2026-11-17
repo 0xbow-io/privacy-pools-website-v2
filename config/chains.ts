@@ -122,16 +122,9 @@ export const SUI_TESTNET_ID = 102;
 export const SUI_DEVNET_ID = 103;
 // Stellar has no numeric chain id either; same convention, own range (defined in stellar-deployment).
 export { STELLAR_TESTNET_ID };
-/**
- * Stellar testnet is one more network in the selector. It shows with the debug
- * gate (?debug=1) or with its own opt-in, ?stellar=true (remembered in this
- * browser, ?stellar=false forgets it). See services/stellar-opt-in.ts.
- *
- * Only where the environment includes Stellar (staging, or a build with
- * EXPO_PUBLIC_STELLAR_ENABLED). On prod the query param is not even read, so
- * no URL can put a testnet next to the mainnet pools.
- */
-export const STELLAR_OPT_IN: boolean = ACTIVE_ENVIRONMENT.includesStellar && resolveRuntimeStellarOptIn();
+/** Stellar is available by default in staging; other builds retain the explicit opt-in. */
+export const STELLAR_OPT_IN: boolean = ACTIVE_ENVIRONMENT.includesStellar
+  && (ACTIVE_ENVIRONMENT.id === 'staging' || resolveRuntimeStellarOptIn());
 /** This page load came with ?stellar=true: the network selector starts on Stellar. */
 export const STELLAR_SELECTED_BY_URL: boolean = STELLAR_OPT_IN && runtimeStellarRequestedInUrl();
 
@@ -438,7 +431,7 @@ export function getPoolDetailPath(symbol: string, chainId?: number): string {
 /** The chain the app opens on (and falls back to). */
 export const homeChainId = defaultChainId;
 
-/** Whether a chain may appear in the chain pickers: EVM always, Sui with the debug gate, Stellar with the debug gate or ?stellar=true. */
+/** Whether a chain may appear in the chain pickers: EVM always, Sui with the debug gate, Stellar in staging or with an explicit opt-in. */
 export function isChainSelectable(chainId: number, debugEnabled: boolean): boolean {
   const type = chains[chainId]?.chainType;
   if (type === 'evm') return true;

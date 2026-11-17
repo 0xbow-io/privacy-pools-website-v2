@@ -1,5 +1,5 @@
 // Stellar txTooLate: the SDK builds every Soroban call with a 30 s validity
-// window (DEFAULT_TX_TIMEOUT_SECONDS) BEFORE the Freighter popup opens, so the
+// window (DEFAULT_TX_TIMEOUT_SECONDS) BEFORE the Varial popup opens, so the
 // time a person spends reading and approving the popup counts against it, and
 // the second keystore registration transaction (built together with the first)
 // also waits on the first one's confirmation. The window now starts when the

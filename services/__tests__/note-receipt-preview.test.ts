@@ -64,6 +64,34 @@ describe('previewNoteReceiptUrl', () => {
     expect(previewNoteReceiptUrl('')).toBe('…');
   });
 
+  describe('Stellar form (routing params before the fragment)', () => {
+    const SECRET = 'eyJub3RlcyI6W3siY29tbWl0bWVudCI6IjB4MTIzIiwibm90ZVNlY3JldCI6IjB4YWJjIn1dfQ';
+    const stellar = (query: string, fragment = `#${SECRET}`) => `https://testnet.privacypools.com/import-note?${query}${fragment}`;
+
+    test('shows the link up to the fragment and no payload', () => {
+      expect(previewNoteReceiptUrl(stellar('stellar=true&env=prod'))).toBe('https://testnet.privacypools.com/import-note?stellar=true&env=prod#…');
+      expect(previewNoteReceiptUrl(stellar('stellar=true'))).toBe('https://testnet.privacypools.com/import-note?stellar=true#…');
+      expect(previewNoteReceiptUrl(stellar('stellar=true&env=prod'))).not.toContain(SECRET.slice(0, 4));
+    });
+
+    test('the real builder shape (URL.searchParams order) is recognised', () => {
+      const built = new globalThis.URL(`https://testnet.privacypools.com/import-note#${SECRET}`);
+      built.searchParams.set('stellar', 'true');
+      built.searchParams.set('env', 'staging');
+      expect(previewNoteReceiptUrl(built.toString())).toBe('https://testnet.privacypools.com/import-note?stellar=true&env=staging#…');
+    });
+
+    test('an unknown param, a long or odd value, or a missing fragment stays closed', () => {
+      expect(previewNoteReceiptUrl(stellar('stellar=true&note=abc'))).toBe('…');
+      expect(previewNoteReceiptUrl(stellar(`stellar=${'a'.repeat(33)}`))).toBe('…');
+      expect(previewNoteReceiptUrl(stellar('stellar=tr/ue'))).toBe('…');
+      expect(previewNoteReceiptUrl(stellar('stellar'))).toBe('…');
+      expect(previewNoteReceiptUrl(stellar(''))).toBe('…');
+      expect(previewNoteReceiptUrl(stellar('stellar=true&env=prod', ''))).toBe('…');
+      expect(previewNoteReceiptUrl(stellar(`stellar=true&env=${SECRET}`))).toBe('…');
+    });
+  });
+
   test('the preview cannot be decoded back into a receipt', () => {
     // The most direct statement of the point: run the preview through the same
     // extraction the importer uses and there is nothing usable left.

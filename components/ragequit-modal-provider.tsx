@@ -30,6 +30,7 @@ import { unwrapTargetSymbol } from '@/services/loose-share-unwrap';
 import { usePools } from '@/components/pools-provider';
 import { useQueryClient } from '@tanstack/react-query';
 import { NoteStatus, type Note } from '@/services/sdk-types';
+import { exitableNotes } from '@/services/exit-eligibility';
 import { invalidateTransactionCaches } from '@/services/cache';
 import { redactNoteIdentifiers } from '@/services/debug-log-filter';
 import { formatUnits } from 'viem';
@@ -44,7 +45,7 @@ import { useSeedDerivationModal } from '@/components/seed-derivation-modal-provi
 import { useNotes } from '@/hooks/use-notes';
 import { getExplorerTxUrl, getExplorerName, getChainConfig, STELLAR_TESTNET_ID, SUI_TESTNET_ID } from '@/config/chains';
 import { useStellarSession } from '@/hooks/use-stellar-session';
-import { describeStellarStage, stellarErrorMessage } from '@/services/stellar/stellar-copy';
+import { describeStellarStage, stellarActionError } from '@/services/stellar/stellar-copy';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { useSuiSession } from '@/hooks/use-sui-session';
 import type { Transaction } from '@/components/pools-provider';
@@ -265,11 +266,9 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
     // `sdkAllowsUnconfirmedExit` in services/sdk-setup.ts): listing a note
     // `prepareRageQuit` will refuse is a button that throws, which is a worse dead
     // end than the note being absent.
-    () => notes.filter((note) => note.status === NoteStatus.PENDING
-      || note.status === NoteStatus.ACTIVE
-      || note.status === NoteStatus.REJECTED
-      || ((note.status === NoteStatus.EXITED || note.status === NoteStatus.EXIT_PENDING)
-        && unconfirmedExitCommitments.has(note.commitment))),
+    //
+    // No ASP input (DEV-808): see services/exit-eligibility.ts.
+    () => exitableNotes(notes, unconfirmedExitCommitments),
     [notes, unconfirmedExitCommitments],
   );
 
@@ -386,7 +385,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
     // Operation binding (codex P1-5): abort pre-broadcast if the modal moved on.
     const runEpoch = opEpochRef.current;
     const live = () => opEpochRef.current === runEpoch;
-    setLoadingMessage('Generating ragequit proof...');
+    setLoadingMessage('Generating exit proof...');
     log('info', 'Ragequit', 'Starting ragequit flow');
 
     // Pause background polling (balances, ASP queries) while the tx
@@ -406,20 +405,19 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
             onStage: (stage) => { if (live()) setLoadingMessage(describeStellarStage(stage)); },
           });
           log('info', 'Ragequit', 'Stellar ragequit submitted', { txHash: hash });
-          setTxHash(hash);
-          setTxChainId(STELLAR_TESTNET_ID);
+          if (live()) { setTxHash(hash); setTxChainId(STELLAR_TESTNET_ID); }
           refetchNotes();
           if (live()) setStep('success');
         } catch (err) {
           const raw = err instanceof Error ? err.message : String(err);
           if (/Superseded/.test(raw)) return;
-          throw new Error(/reject|denied|cancel|declined/i.test(raw) ? 'Transaction was rejected.' : stellarErrorMessage(raw));
+          throw new Error(stellarActionError(err));
         }
         return;
       }
       // --- Sui path: exit via the native Sui session ---
       if (isSui) {
-        setLoadingMessage('Generating ragequit proof...');
+        setLoadingMessage('Generating exit proof...');
         // Recover the original stored Sui note (with secrets + coinType) by
         // commitment — the UI Note only carries a hex-encoded commitment.
         const target = suiSession.loadNotes().find((n) => {
@@ -427,11 +425,10 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
         });
         if (!target) throw new Error('Note not found in local Sui store.');
         if (!live()) { log('warn', 'Ragequit', 'Stale run aborted before Sui broadcast'); return; }
-        setLoadingMessage('Submitting ragequit transaction...');
+        setLoadingMessage('Submitting exit transaction...');
         const { txDigest } = await suiSession.ragequit({ note: target, coinType: target.coinType, shouldContinue: live });
         log('info', 'Ragequit', 'Sui ragequit submitted', { txDigest });
-        setTxHash(txDigest);
-        setTxChainId(SUI_TESTNET_ID);
+        if (live()) { setTxHash(txDigest); setTxChainId(SUI_TESTNET_ID); }
         refetchNotes();
         await invalidateTransactionCaches(queryClient);
         if (live()) setStep('success');
@@ -444,7 +441,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
         throw new Error('SDK note manager unavailable after initialization.');
       }
       if (identityMode === 'key') {
-        throw new Error('Account-key sessions cannot ragequit directly because the on-chain exit must be sent by the owner wallet. Use Withdraw, or sign out of the account key and connect the owner wallet to exit.');
+        throw new Error('Account-key sessions cannot exit directly because the on-chain exit must be sent by the owner wallet. Use Withdraw, or sign out of the account key and connect the owner wallet to exit.');
       }
 
       // Ragequit's circuit checks the user's keystore Merkle proof, so
@@ -470,7 +467,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
         openKeystoreRegistrationModal({
           title: 'Register before you exit',
           body:
-            "Exiting (ragequit) needs a one-time on-chain record for your wallet. After this transaction confirms we'll continue with your exit automatically.",
+            "Exiting needs a one-time on-chain record for your wallet. After this transaction confirms we'll continue with your exit automatically.",
           primaryLabel: 'Register and continue',
           // No relayer-paid registration here: the exit itself is a
           // wallet-signed transaction, so a wallet with no gas would pay a
@@ -663,7 +660,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
         return;
       }
 
-      setErrorMessage(isUnknownKeystoreRoot(message) ? keystoreRootRefreshingMessage('exit') : `Ragequit failed: ${message}`);
+      setErrorMessage(isUnknownKeystoreRoot(message) ? keystoreRootRefreshingMessage('exit') : `Exit failed: ${message}`);
       setStep('confirm');
     } finally {
       releaseTx();
@@ -821,11 +818,11 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
 
                 {(!isSui && !isInitialized) ? (
                   <Text className="font-pp-regular text-[14px] leading-[20px] text-center text-[#737373]">
-                    {shareText(errorMessage) ?? (isInitializing ? 'Initializing SDK...' : 'Preparing SDK for ragequit...')}
+                    {shareText(errorMessage) ?? (isInitializing ? 'Initializing SDK...' : 'Preparing your notes...')}
                   </Text>
                 ) : ragequittableNotes.length === 0 ? (
                   <Text className="font-pp-regular text-[14px] leading-[20px] text-center text-[#737373]">
-                    No ragequittable notes available.
+                    No notes to exit.
                   </Text>
                 ) : (
                   <ScrollView className="w-full max-h-[240px]" contentContainerClassName="gap-[8px]">
@@ -879,7 +876,7 @@ export function RagequitModalProvider({ children }: { children: React.ReactNode 
                 {/* Info Section */}
                 <View className="w-full items-center gap-[8px] pb-[32px]">
                   <Text className="font-pp-sans-bold text-[24px] text-center text-text">
-                    Ragequit Privacy Pools
+                    Exit Privacy Pools
                   </Text>
                   <Text className="text-[14px] leading-[20px] text-center text-text">
                     <Text className="font-pp-regular">

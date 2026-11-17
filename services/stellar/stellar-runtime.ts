@@ -204,7 +204,7 @@ export function createIndexedRpcInteractor(sdk: StellarSdk, aspUrl: string): Ind
       }
     }
   }
-  return routeSoroban(new IndexedSorobanRPCInteractor({ rpcUrl: STELLAR_TESTNET_RPC_URL, networkPassphrase: STELLAR_TESTNET_NETWORK.networkPassphrase }));
+  return routeSoroban(new IndexedSorobanRPCInteractor({ rpcUrl: STELLAR_TESTNET_RPC_URL, networkPassphrase: STELLAR_TESTNET_NETWORK.networkPassphrase, receiptPollIntervalMs: 1_000 }));
 }
 
 /**

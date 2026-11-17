@@ -26,7 +26,7 @@ import { resolveConfiguredEntrypoint } from '@/services/pool-entrypoint';
 import { createSnapshotStore } from '@/services/snapshot-cache';
 import { recordSnapshotNoteCiphertexts } from '@/services/note-ciphertexts';
 import { snapshotCursor } from '@/services/asp-event-snapshot';
-import { mergeSnapshotDelta, snapshotDeltaSince } from '@/services/snapshot-delta';
+import { followSnapshotPages, mergeSnapshotDelta, snapshotDeltaSince } from '@/services/snapshot-delta';
 import { blockTimeMs } from '@/services/chain-block-time';
 import { getChainConfig } from '@/config/chains';
 import { publicFeeds } from '@/services/public-feed-scheduler';
@@ -65,6 +65,7 @@ type SnapshotPayload = Awaited<ReturnType<typeof apiClient.getEventSnapshotPaylo
 type Section = NonNullable<Parameters<typeof apiClient.getEventSnapshotPayload>[1]>[number];
 
 type GridKey = { key: Promise<string>; lookupFailed: boolean };
+
 
 type Shared = {
   store: ReturnType<typeof createSnapshotStore<SnapshotPayload>>;
@@ -106,14 +107,22 @@ function gridOwnedPayload(opts: {
     const store = createSnapshotStore<SnapshotPayload>({
       fetchFull: async (poolKey) => {
         const [chainId, entrypoint] = splitPoolKey(poolKey);
-        return apiClient.getEventSnapshotPayload(chainId, opts.include, undefined, entrypoint);
+        const first = await apiClient.getEventSnapshotPayload(chainId, opts.include, undefined, entrypoint);
+        return followSnapshotPages(first, opts.include, (since) =>
+          apiClient.getEventSnapshotPayload(chainId, opts.include, since, entrypoint));
       },
       // Within a page the payload is topped up, never downloaded whole again
       // (services/snapshot-delta.ts). Anything that cannot be joined safely
       // falls back to the full download.
       fetchUpdate: async (poolKey, held) => {
         const [chainId, entrypoint] = splitPoolKey(poolKey);
-        const full = () => apiClient.getEventSnapshotPayload(chainId, opts.include, undefined, entrypoint);
+        const nextPage = (since: bigint) => apiClient.getEventSnapshotPayload(chainId, opts.include, since, entrypoint);
+        const full = async () =>
+          followSnapshotPages(
+            await apiClient.getEventSnapshotPayload(chainId, opts.include, undefined, entrypoint),
+            opts.include,
+            nextPage,
+          );
         const coveredTo = snapshotCursor(held, opts.include);
         if (coveredTo === null) return full();
         const deploymentBlock = getChainConfig(chainId)?.contracts?.fromBlock ?? 0n;
@@ -122,7 +131,7 @@ function gridOwnedPayload(opts: {
         const merged = snapshotCursor(delta, opts.include) === null
           ? null
           : mergeSnapshotDelta(held as unknown as Record<string, unknown>, delta as unknown as Record<string, unknown>, since, opts.include);
-        return merged ? (merged as unknown as SnapshotPayload) : full();
+        return merged ? followSnapshotPages(merged as unknown as SnapshotPayload, opts.include, nextPage) : full();
       },
       onDecision: (line) => { try { console.log(`[perf] · ${opts.label} ${line}`); } catch { /* ignore */ } },
     });

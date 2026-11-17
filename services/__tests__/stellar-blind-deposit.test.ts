@@ -129,6 +129,27 @@ describe('Stellar blind deposit row (DEV-499 review)', () => {
     expect(rows[0]).toMatchObject({ type: 'Deposit', direction: 'out', txHash: 'ab'.repeat(32), fullAddress: THEM, rawAmount: '20000000', status: 'completed' });
   });
 
+  for (const eventHash of ['ab'.repeat(32), `0x${'AB'.repeat(32)}`]) {
+    test(`indexed blind deposit keeps claim recovery without duplicating the row (${eventHash})`, async () => {
+      const { deriveStellarActivity } = await import('@/services/stellar-activity');
+      const { depositMineByAddress } = await import('@/services/deposit-ownership');
+      const { rows, depositCount } = deriveStellarActivity([], {
+        ...origins,
+        authored: [{ txHash: eventHash, amount: '20000000', ledger: 123, time: 1_760_000_000 }],
+      }, {
+        ...CTX,
+        depositsFor: [{ txHash: 'ab'.repeat(32) }],
+        sentDeposits: [{ txHash: 'ab'.repeat(32), recipient: THEM, amount: '20000000', tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId, createdAt: 1 }],
+      });
+      expect(rows).toHaveLength(1);
+      // The menu requires outgoing direction to offer Recover claim link.
+      expect(rows[0]).toMatchObject({ type: 'Deposit', direction: 'out', depositFor: true, fullAddress: ME, rawAmount: '20000000', status: 'completed' });
+      expect(depositCount).toBe(0);
+      expect(depositMineByAddress(rows[0], ME, { outgoing: new Set(), notMine: new Set(), pending: new Set() })).toBe(false);
+    });
+
+  }
+
   test('a claim saved before the tab died is matched to its deposit by the output', async () => {
     const { findSentClaim } = await import('@/services/stellar/stellar-sent-claims');
     const recipient = Keypair.random().publicKey();

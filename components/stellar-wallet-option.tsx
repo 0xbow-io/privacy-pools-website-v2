@@ -1,14 +1,6 @@
-/**
- * "Freighter · Stellar Testnet" row for the wallet pickers.
- *
- * The pickers list wagmi connectors, which cannot connect a Stellar wallet,
- * and unlike dapp-kit's autoConnect for Sui nothing else offers Freighter to a
- * first-time visitor. Shown where Stellar is served and selectable (debug mode
- * or ?stellar=true, the same gate as the chain selector); picking it selects the Stellar chain
- * and asks Freighter for access.
- */
-import React, { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+/** Varial inside the existing wallet picker, with local branding. */
+import React, { useEffect, useRef, useState } from 'react';
+import { Image, Linking, Platform, Pressable, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useStellarWallet } from '@/components/stellar-wallet-provider';
@@ -21,51 +13,88 @@ import { useTheme } from '@/components/theme-provider';
 
 export function StellarWalletOption({ className, onConnected }: { className: string; onConnected?: () => void }) {
   const { isDebugEnabled } = useDebug();
+  const enabled = supportedChainIds.includes(STELLAR_TESTNET_ID) && isChainSelectable(STELLAR_TESTNET_ID, isDebugEnabled);
   const wallet = useStellarWallet();
   const { selectChain } = useChainRouter();
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { cancelConnect, isDevBurner } = wallet;
+  const available = isDevBurner ? true : Platform.OS !== 'web' ? false
+    : wallet.availabilityChecked ? wallet.isAvailable : null;
+  const attempt = useRef({ mounted: true, pending: false });
+  useEffect(() => {
+    const current = attempt.current;
+    current.mounted = true;
+    return () => {
+      current.mounted = false;
+      if (current.pending) cancelConnect();
+    };
+  }, [cancelConnect]);
 
-  if (!supportedChainIds.includes(STELLAR_TESTNET_ID) || !isChainSelectable(STELLAR_TESTNET_ID, isDebugEnabled)) return null;
+  if (!enabled) return null;
 
   const onPress = async () => {
-    // Only a finished probe that found nothing means 'not installed'.
-    if (wallet.availabilityChecked && !wallet.isAvailable) {
-      if (typeof window !== 'undefined') window.open('https://www.freighter.app', '_blank', 'noopener');
+    if (attempt.current.pending) return;
+    if (available === false) {
+      if (Platform.OS === 'web' && typeof window !== 'undefined') window.open('https://varialwallet.com', '_blank', 'noopener,noreferrer');
+      else void Linking.openURL('https://varialwallet.com').catch(() => setError('Could not open the Varial website.'));
       return;
     }
+    attempt.current.pending = true;
     setPending(true);
+    setError(null);
     try {
       const outcome = await selectChain(STELLAR_TESTNET_ID);
-      if (outcome !== 'committed') return;
-      const address = await wallet.connect();
-      if (address) onConnected?.();
+      if (outcome !== 'committed' || !attempt.current.mounted) return;
+      const { address, error } = await wallet.connectDetailed();
+      if (attempt.current.mounted) setError(error);
+      attempt.current.pending = false;
+      if (address && attempt.current.mounted) onConnected?.();
+    } catch (error) {
+      if (attempt.current.mounted) setError(error instanceof Error ? error.message : 'Could not connect to Varial. Try again.');
     } finally {
-      setPending(false);
+      attempt.current.pending = false;
+      if (attempt.current.mounted) setPending(false);
     }
   };
 
   return (
     <Pressable
       onPress={() => { void onPress(); }}
-      disabled={pending}
+      disabled={pending || wallet.status === 'connecting'}
       accessibilityRole="button"
-      accessibilityState={{ disabled: pending, busy: pending }}
+      accessibilityState={{ disabled: pending || wallet.status === 'connecting', busy: pending }}
       className={`${className} ${pending ? 'opacity-50' : 'opacity-100'}`}
     >
       <View className="h-[36px] w-[36px] items-center justify-center overflow-hidden rounded-[10px] bg-card-background">
-        <ChainLogo chain="stellar-testnet" size={24} />
+        {!isDevBurner ? (
+          <Image
+            source={colorScheme === 'dark'
+              ? require('@/assets/images/wallets/varial-dark.png')
+              : require('@/assets/images/wallets/varial.png')}
+            // nw-keep(third-party-style-api): React Native Web Image's intrinsic 128px size overrides class dimensions; explicit style prevents clipping.
+            style={{ width: 28, height: 28 }}
+            resizeMode="contain"
+            accessibilityElementsHidden
+          />
+        ) : <ChainLogo chain="stellar-testnet" size={24} />}
       </View>
-      <View className="flex-1">
-        <Text className="font-pp-medium text-[15px] text-text">{wallet.isDevBurner ? 'Stellar test key' : 'Freighter'}</Text>
-        <Text className="font-pp-regular text-[12px] text-text-secondary">
-          {wallet.isAvailable ? 'Stellar Testnet' : 'Get Freighter for Stellar Testnet'}
+      <View className="min-w-0 flex-1 gap-[2px]">
+        <Text className="font-pp-medium text-[14px] text-text" numberOfLines={1}>{wallet.isDevBurner ? 'Stellar test key' : 'Varial'}</Text>
+        <Text className="font-pp-regular text-[12px] text-text-secondary" numberOfLines={1}>
+          {pending ? 'Connecting…' : isDevBurner ? 'Stellar Testnet' : available === false ? 'Get Varial for Stellar Testnet' : 'Browser extension · Stellar Testnet'}
         </Text>
-        {wallet.error ? <Text className="font-pp-regular text-[12px] text-[#E11D48]">{wallet.error}</Text> : null}
+        {error ? <Text className="font-pp-regular text-[12px] text-[#E11D48]">{error}</Text> : null}
       </View>
+      {available === true && !isDevBurner && !pending && wallet.status !== 'connecting' && (
+        <View className="rounded-control bg-background-secondary px-[7px] py-[4px]">
+          <Text className="font-pp-medium text-[10px] text-text-secondary">Installed</Text>
+        </View>
+      )}
       {/* nw-keep(data-color): glyph color is a theme token into the vector-icon sink */}
-      <Ionicons name={wallet.isAvailable ? 'chevron-forward' : 'open-outline'} size={16} color={colors.textSecondary} />
+      <Ionicons name="chevron-forward" size={15} color={colors.textMuted} />
     </Pressable>
   );
 }

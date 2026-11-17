@@ -11,6 +11,7 @@ import {
   createPublicClient, createWalletClient, formatEther, http, parseEther,
   type Address, type PublicClient,
 } from 'viem';
+import { paymentRequestAmount } from './payment-request-amount';
 import { sepolia } from 'viem/chains';
 import { generatePrivateKey, privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
 import { existsSync, readFileSync } from 'node:fs';
@@ -253,8 +254,6 @@ export const FIXTURE_NOTE_ETH = '0.001';
  * up as "Insufficient value", never as a silent pass.
  */
 export const PAYMENT_FEE_RESERVE_ETH = '0.0003';
-/** Headroom over the app's request floor, for the price moving within a run. */
-const REQUEST_FLOOR_MARGIN = 1.25;
 
 const SEPOLIA_NATIVE = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 const ASSETS_ABI = [{
@@ -299,15 +298,11 @@ export async function paymentRequestEth(): Promise<string> {
     if (asset.enabled && asset.vettingFeeBPS > bps) bps = asset.vettingFeeBPS;
   }
 
-  const step = 10n ** 13n; // 0.00001 ETH
-  const floorWei = parseEther((PAYMENT_REQUEST_MIN_USD * REQUEST_FLOOR_MARGIN / price).toFixed(18));
-  const amountWei = ((floorWei + step - 1n) / step) * step;
   const noteWei = parseEther(FIXTURE_NOTE_ETH) * (10_000n - bps) / 10_000n;
-  const neededWei = amountWei + parseEther(PAYMENT_FEE_RESERVE_ETH);
-  const amount = formatEther(amountWei);
-  console.log(`payment request: ${amount} ETH (floor $${PAYMENT_REQUEST_MIN_USD} x ${REQUEST_FLOOR_MARGIN} at ETH $${price}), note ${formatEther(noteWei)} ETH after ${bps} bps vetting, reserve ${PAYMENT_FEE_RESERVE_ETH}`);
-  if (neededWei > noteWei) {
-    throw new Error(`payment request amount: ${amount} ETH (the app's $${PAYMENT_REQUEST_MIN_USD} floor x ${REQUEST_FLOOR_MARGIN} at ETH $${price}) plus the ${PAYMENT_FEE_RESERVE_ETH} ETH fee reserve does not fit a ${FIXTURE_NOTE_ETH} ETH fixture note worth ${formatEther(noteWei)} ETH after ${bps} bps vetting. Raising the cap is a product-owner decision.`);
-  }
+  const amount = paymentRequestAmount({
+    price, minimumUsd: PAYMENT_REQUEST_MIN_USD, noteWei,
+    reserveWei: parseEther(PAYMENT_FEE_RESERVE_ETH),
+  });
+  console.log(`payment request: ${amount} ETH (floor $${PAYMENT_REQUEST_MIN_USD} at ETH $${price}), note ${formatEther(noteWei)} ETH after ${bps} bps vetting, reserve ${PAYMENT_FEE_RESERVE_ETH}`);
   return amount;
 }

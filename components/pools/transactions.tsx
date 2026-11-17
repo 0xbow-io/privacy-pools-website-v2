@@ -30,7 +30,6 @@ import { useRouter } from 'expo-router';
 // Web-only style: position 'fixed' is valid in react-native-web but not in RN types.
 import Svg, { Path, Circle } from 'react-native-svg';
 import { ScrollView } from 'react-native';
-import { useMultiChainWallet } from '@/hooks/use-multi-chain-wallet';
 import { usePoolSession } from '@/hooks/use-pool-session';
 import { useWalletUnlockGate } from '@/hooks/use-wallet-unlock-gate';
 import { useStellarWallet } from '@/components/stellar-wallet-provider';
@@ -46,11 +45,13 @@ import { useDrawerHost, launchFromDrawer } from '@/components/home/drawer-host';
 import { getUiParam, pushUiParamEntry, retireUiParamEntry, rebaseUiParamEntry, subscribeUiUrl } from '@/components/ui-url-events';
 import { usePools, type Transaction } from '@/components/pools-provider';
 import { useRagequitModal } from '@/components/ragequit-modal-provider';
+import { stellarIncomingActions } from '@/services/stellar-activity';
 import { useWithdrawModal } from '@/components/withdraw-modal-provider';
 import { useAccountRecoveryModal } from '@/components/account-recovery-modal-provider';
 import { useNotes } from '@/hooks/use-notes';
 import { registerDebugSnapshot } from '@/services/debug-snapshots';
 import { NoteStatus } from '@/services/sdk-types';
+import { exitableNotes } from '@/services/exit-eligibility';
 import { FUNDS_REASON_COPY, FUNDS_STATE_LABEL, STATUS_FILTER_HINTS, STATUS_FILTER_OPTIONS, fundsChipText, isLiveNoteStatus, matchesStatusFilter } from '@/services/funds-state';
 import { fullySpentDepositTxHashesByChain, type SpendableNoteLike } from '@/services/fully-spent';
 import { rowTypeLabel } from '@/services/row-type-label';
@@ -1243,7 +1244,7 @@ export function Transactions({
   // split screen this component renders into ~55% of the viewport. Falls back
   // to the window width outside a panel shell (Classic pools page).
   const width = useLayoutWidth();
-  const { data } = usePools();
+  const { data, activityUnavailable } = usePools();
   // Live USDC-per-ppUSDC: a share row prints the USDC it is worth, share named in a hint.
   const { rateFor } = useShareRates();
   const balanceDisplay = useBalanceDisplay();
@@ -1332,6 +1333,14 @@ export function Transactions({
   const { openOriginProof } = useOriginProof();
   const { notes } = useNotes();
   const { toast } = useToast();
+  // DEV-808: with the activity feeds down there are no rows, so no row menu
+  // carries Exit. Offer it from the local notes instead. Derived from data
+  // already in hand: showing it, or pressing it, sends nothing a row's Exit
+  // would not.
+  const hasExitableNote = useMemo(() => exitableNotes(notes, new Set<string>()).length > 0, [notes]);
+  const openExitWithoutActivity = useCallback(() => {
+    launchFromDrawer(drawerHost, () => openRagequitModal());
+  }, [drawerHost, openRagequitModal]);
 
   // Withdraw, Exit and Export Note act on the note's own chain
   // (services/row-chain-action.ts). A row on another chain switches there
@@ -1398,36 +1407,13 @@ export function Transactions({
     });
   }, [selectedChainId, sessionChainId, openRowAction, selectChain, tryPendingRowAction, toast]);
 
-  // Chain-aware connection: wagmi's address is empty when a Sui wallet drives
-  // the session, which hid the All | My Transactions tabs on Sui entirely.
-  const { address: connectedAddress } = useMultiChainWallet();
-  // The identity whose STORED note export this table should read. Balances
-  // already use exactly this precedence (pools-provider.tsx:1313), and the
-  // mismatch was visible: the same account showed 30 rows through its wallet
-  // and ZERO through its account key, while the balance read 0.2131 ETH in
-  // both (Pat, 2026-09-01). The live feed alone cannot classify historical
-  // deposits/withdrawals; that needs the export, which was being loaded for a
-  // wallet address a key session does not have.
-  // EVM-only below, so preferring the session address cannot mis-scope Sui.
-  // getCommittedManagers: the row menu's "Recover claim link" reads the
-  // signed-in viewing key at click time to trial-decrypt the sender's own
-  // on-chain backup (services/blind-deposit-recovery.ts). Read on click, never
-  // held in render state.
-  const { sessionAddress, identityMode, getCommittedManagers } = usePoolSession();
-  // The identity a DEPOSIT row is matched against when note-matching does not
-  // resolve it. isDepositMine tries the notes first and then falls back to
-  // `tx.fullAddress === ownAddress`, and that fallback is what actually claims
-  // most historical deposits. With the wallet address alone it was null for a
-  // key session, so 30 rows collapsed to 2 even once the notes were loaded
-  // (Pat, 2026-09-01, measured: liveNotes 30 + storedNotes 31, still 2 rows).
-  // BRANCHED on identityMode, not `wallet ?? session`: a key session can have a
-  // funding wallet connected at a DIFFERENT address (depositing needs one), and
-  // that payer must not claim the key account's rows, nor lend its own. Same
-  // correction as 1310d10 made in pools-provider; this file was missed. The
-  // non-key branch keeps the wallet address, so Sui is untouched: there the
-  // wallet hook carries the Sui address and a Sui deposit row must compare
-  // against that one.
-  const ownAddress = identityMode === 'key' ? (sessionAddress ?? connectedAddress) : connectedAddress;
+  const { getCommittedManagers } = usePoolSession();
+  // Ownership of a row (notes on every chain by tx hash or label, deposits by
+  // the identity's address, deposits made FOR someone else excluded) comes
+  // from the hook every mine-scoped surface shares, so the home preview and
+  // the bell agree with this table (hooks/use-my-transaction-ownership.ts).
+  const { ownAddress, isDepositMine, isDepositAuthoredByMe, isDepositRecoverable, isMine, sentTxHashes, filterMineEvents, notesByChain } = useMyTransactionOwnership();
+
   // Returning tab: the note cache rehydrates (deposit rows and balances
   // render) but the session keystore isn't rebuilt without a fresh
   // signature — nothing re-syncs, and the user's own transfers/withdrawals
@@ -1441,7 +1427,7 @@ export function Transactions({
   const stellarWallet = useStellarWallet();
   const stellarWalletAddress = stellarWallet.isConnected ? stellarWallet.address ?? null : null;
   const { openSeedDerivationModal: openEvmSignIn } = useSeedDerivationModal();
-  // Stellar's locked session: same banner, Freighter unlock as the action.
+  // Stellar's locked session: same banner, Varial unlock as the action.
   const requiresWalletUnlock = evmRequiresUnlock || stellarLocked;
   const openSeedDerivationModal = stellarLocked ? unlockStellar : () => openEvmSignIn();
   const sessionLocked = requiresWalletUnlock || keyInitFailed;
@@ -1500,12 +1486,6 @@ export function Transactions({
     [assetFilterUpper, chainScope, inScope],
   );
   const allTransactions = useMemo(() => scoped(data.transactions), [data.transactions, scoped]);
-
-  // Ownership of a row (notes on every chain by tx hash or label, deposits by
-  // the identity's address, deposits made FOR someone else excluded) comes
-  // from the hook every mine-scoped surface shares, so the home preview and
-  // the bell agree with this table (hooks/use-my-transaction-ownership.ts).
-  const { isDepositMine, isDepositAuthoredByMe, isDepositRecoverable, isMine, sentTxHashes, filterMineEvents, notesByChain } = useMyTransactionOwnership();
 
   // Deposits whose entire lineage has no ACTIVE value left (fully withdrawn
   // or exited). Partial withdrawals leave a non-zero ACTIVE change note
@@ -1982,6 +1962,25 @@ export function Transactions({
           </View>
         )}
 
+        {/* Activity feeds down (DEV-808): exit still works from chain data. */}
+        {scopeTab === 'mine' && activityUnavailable && hasExitableNote && (
+          <View className="flex-row items-center gap-[8px] border-b border-b-border-light px-[8px] py-[10px]">
+            <Text className="flex-1 font-pp-regular text-[12px] text-text-secondary">
+              Activity is unavailable right now. You can still exit your notes to this wallet.
+            </Text>
+            <Pressable
+              className="rounded-control bg-button-primary px-[14px] py-[6px]"
+              accessibilityRole="button"
+              accessibilityLabel="Exit a note"
+              onPress={openExitWithoutActivity}
+            >
+              <Text className="font-pp-medium text-[12px] text-button-primary-text">
+                Exit a note
+              </Text>
+            </Pressable>
+          </View>
+        )}
+
         {/* Honest empty state (no fall-back to the global feed in the personal
             scope). Filter-empty is distinguished from scope-empty: filters
             apply AFTER scoping, so "no transactions for this wallet" would be
@@ -2103,8 +2102,10 @@ export function Transactions({
             && (chainScope === undefined || depositTx.chainId === chainScope);
           // At risk disables Withdraw (the ASP set will not prove it) but keeps
           // Exit: ragequit is the escape hatch for exactly these deposits.
-          const canWithdraw = depositTx.status === 'completed' && depositTx.fundsState !== 'at_risk' && !isFullySpent && isMine;
-          const canExit = (depositTx.status === 'completed' || depositTx.status === 'pending' || depositTx.fundsState === 'at_risk') && !isFullySpent && isMine;
+          const incoming = stellarIncomingActions(tx, notesByChain.get(tx.chainId) ?? [], stellarWalletAddress);
+          const incomingInScope = chainScope === undefined || tx.chainId === chainScope;
+          const canWithdraw = (incomingInScope && incoming.canWithdraw) || depositTx.status === 'completed' && depositTx.fundsState !== 'at_risk' && !isFullySpent && isMine;
+          const canExit = (incomingInScope && incoming.canExit) || (depositTx.status === 'completed' || depositTx.status === 'pending' || depositTx.fundsState === 'at_risk') && !isFullySpent && isMine;
           // The note backup is the EVM account export; a Stellar note is not in it.
           const canExportNote = isMine && depositTx.type === 'Deposit' && depositTx.chainId !== STELLAR_TESTNET_ID;
           // Only pulse for the current user's own pending deposits (a swap's

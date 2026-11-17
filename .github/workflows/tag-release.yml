@@ -1,0 +1,36 @@
+# Tags vX.Y.Z and publishes the GitHub release when a release PR lands on main.
+# The version comes from package.json and the notes from that version's
+# CHANGELOG.md section, both set in the "Release vX.Y.Z" PR (docs/releasing.md).
+# A push whose version is already tagged is a no-op.
+name: tag-release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Two pushes in a row must not both try to create the same tag.
+concurrency:
+  group: tag-release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    # A manual run on another branch must not tag that branch's commit: the
+    # later push to main would find the tag and leave it on the wrong commit.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      # actions/checkout v4.2.2, pinned by commit
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Tag and publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG_RELEASE_REMOTE: https://github.com/${{ github.repository }}.git
+        run: bash scripts/release/tag-release.sh

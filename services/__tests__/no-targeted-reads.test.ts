@@ -324,7 +324,7 @@ describe('privacy: no amount-keyed ASP reads on user-reachable paths', () => {
 
   test('the recipient exemption is per call, not per file', () => {
     const exempt = (rel: string, line: string) => (RECIPIENT_FALLBACK_CALLS[rel] ?? []).some((re) => re.test(line.trim()));
-    expect(exempt('components/deposit-modal-provider.tsx', '{ getViewingKey: (a) => ks.getViewingKey(a) },')).toBe(true);
+    expect(exempt('components/deposit-modal-provider.tsx', '{ getViewingKey: (a) => ks.getViewingKey(a) },')).toBe(false);
     expect(exempt('components/deposit-modal-provider.tsx', 'const v = await ks.getViewingKey(sessionAddress);')).toBe(false);
   });
 });
@@ -336,41 +336,16 @@ describe('privacy: no amount-keyed ASP reads on user-reachable paths', () => {
  * identity check now reads the bulk ASP registries
  * (services/nullifying-key-hash-cache.ts, services/viewing-key-cache.ts).
  *
- * `getNullifyingKeyHash` has no legitimate caller left. `getViewingKey` still
- * has one use: the RPC FALLBACK of a recipient lookup, which runs only when the
- * ASP registry is not deployed or a sync failed (services/viewing-key-cache.ts
- * lookupViewingKey), and the relayed-transfer builder that is handed that
- * lookup. Those files are listed below; the user's own account must never be
- * read this way anywhere.
+ * Account reads resolve locally through a complete bulk registry. No network
+ * fallback is permitted for either the owner or a recipient.
  */
 const KEYSTORE_ACCOUNT_READS = /\b(getNullifyingKeyHash|getViewingKey)\s*\(/;
 // Exactly the recipient-lookup call shapes, per file: a new getViewingKey call
 // in one of these files (say on the session account) is still an offender.
 const RECIPIENT_FALLBACK_CALLS: Record<string, RegExp[]> = {
-  'services/viewing-key-cache.ts': [
-    /^const key = await rpcFallback\.getViewingKey\(account\);$/,
-    // The RpcFallback interface declaration, not a call.
-    /^getViewingKey\(account: Address\): Promise<Hex \| string>;$/,
-  ],
-  'services/relayed-transfer.ts': [
-    /^const publicViewingKey = await deps\.getViewingKey\(spec\.evmAddress\);$/,
-    // The own account is routed to the registry before this runs (loadTransferRecipientDeps ownerAddress).
-    /^getViewingKey: async \(evmAddress\) => \(await keystore\.getViewingKey\(evmAddress\)\) as Hex,$/,
-  ],
-  'components/transfer-modal-provider.tsx': [/^\{ getViewingKey: \(a\) => ks\.getViewingKey\(a\) \},$/],
-  'components/deposit-modal-provider.tsx': [/^\{ getViewingKey: \(a\) => ks\.getViewingKey\(a\) \},$/],
+  'services/relayed-transfer.ts': [/^const publicViewingKey = await deps\.getViewingKey\(spec\.evmAddress\);$/],
 };
-
-// The own-account CHAIN FALLBACK, for this release (until the registry feed is
-// proven): the registry is asked first and these run only when it has no
-// current data. Exactly these call shapes, per file, for either method.
-const OWN_ACCOUNT_CHAIN_FALLBACK_CALLS: Record<string, RegExp[]> = {
-  'services/keystore-scope.ts': [/^return \(await ks\.getViewingKey\(account as never\)\) as string \| null \| undefined;$/],
-  'components/sdk-provider.tsx': [
-    /^readNullifyingKeyHash: async \(\) => \(await ks\.getNullifyingKeyHash\(addr\)\) as string \| null,$/,
-    /^readViewingKey: async \(\) => \(await ks\.getViewingKey\(addr\)\) as string \| null,$/,
-  ],
-};
+const OWN_ACCOUNT_CHAIN_FALLBACK_CALLS: Record<string, RegExp[]> = {};
 
 describe('privacy: no per-account keystore reads for the session account', () => {
   test('getNullifyingKeyHash is never called, getViewingKey only as a recipient fallback', () => {

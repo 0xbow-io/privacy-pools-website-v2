@@ -3,7 +3,7 @@
  * to sign it, not when the SDK built it.
  *
  * The Stellar SDK builds every Soroban call with a 30 s window
- * (DEFAULT_TX_TIMEOUT_SECONDS) before the Freighter popup opens. The time a
+ * (DEFAULT_TX_TIMEOUT_SECONDS) before the Varial popup opens. The time a
  * person spends reading and approving the popup counts against it, and the
  * second keystore registration transaction (built together with the first)
  * also waits for the first one to confirm. Past the window the network refuses

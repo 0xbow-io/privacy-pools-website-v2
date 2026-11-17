@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mergeSnapshotDelta, snapshotDeltaSince } from '@/services/snapshot-delta';
+import { followSnapshotPages, MAX_SNAPSHOT_PAGES, mergeSnapshotDelta, snapshotDeltaSince } from '@/services/snapshot-delta';
 import { LOG_SCAN_ALIGNMENT_BLOCKS } from '@/services/log-scan-alignment';
 
 const SECTIONS = ['deposits', 'notes'] as const;
@@ -78,5 +78,53 @@ describe('mergeSnapshotDelta', () => {
     expect(mergeSnapshotDelta(base, { ...base, chainId: '56' }, 100n, SECTIONS)).toBeNull();
     expect(mergeSnapshotDelta(base, { ...base, notes: undefined as unknown as [] }, 100n, SECTIONS)).toBeNull();
     expect(mergeSnapshotDelta({ ...base, deposits: [row('0xa', 1, 'garbage')] }, base, 100n, SECTIONS)).toBeNull();
+  });
+});
+
+describe('followSnapshotPages', () => {
+  const row = (block: number) => ({ txHash: `0x${block.toString(16)}`, logIndex: 0, blockNumber: String(block) });
+  const page = (blocks: number[], watermark: number, hasMore: boolean, chainId = '1') => ({
+    chainId,
+    snapshotBlockNumber: String(watermark),
+    hasMore,
+    deposits: blocks.map(row),
+  });
+
+  test('joins every page and asks for each from the previous watermark', async () => {
+    const asked: bigint[] = [];
+    const pages: Record<string, ReturnType<typeof page>> = {
+      '20': page([21, 25], 25, true),
+      '25': page([30], 40, false),
+    };
+    const out = await followSnapshotPages(page([10, 20], 20, true), ['deposits'], async (since) => {
+      asked.push(since);
+      return pages[String(since)];
+    });
+    expect(asked).toEqual([20n, 25n]);
+    expect(out.deposits.map((r) => r.blockNumber)).toEqual(['10', '20', '21', '25', '30']);
+    expect(out.snapshotBlockNumber).toBe('40');
+    expect(out.hasMore).toBe(false);
+  });
+
+  test('asks for nothing when the first page is complete', async () => {
+    let calls = 0;
+    const first = page([10], 10, false);
+    expect(await followSnapshotPages(first, ['deposits'], async () => (calls++, first))).toBe(first);
+    expect(calls).toBe(0);
+  });
+
+  test('keeps what it holds when a page does not move forward or cannot be joined', async () => {
+    const first = page([10], 20, true);
+    expect(await followSnapshotPages(first, ['deposits'], async () => page([], 20, true))).toBe(first);
+    expect(await followSnapshotPages(first, ['deposits'], async () => page([30], 40, false, '2'))).toBe(first);
+  });
+
+  test('stops after MAX_SNAPSHOT_PAGES pages', async () => {
+    let calls = 0;
+    await followSnapshotPages(page([1], 1, true), ['deposits'], async (since) => {
+      calls++;
+      return page([Number(since) + 1], Number(since) + 1, true);
+    });
+    expect(calls).toBe(MAX_SNAPSHOT_PAGES - 1);
   });
 });

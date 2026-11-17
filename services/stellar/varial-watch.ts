@@ -1,19 +1,19 @@
 /**
- * Follows the connected Freighter account and network.
+ * Follows the connected Varial account and network.
  *
- * Not freighter-api's WatchWalletChanges: Freighter answers getAddress with "" both when it is
- * locked and when it does not reply within 2 s (freighter-api resolves that timeout as an empty
+ * Not varial-sdk's WatchWalletChanges: Varial answers getAddress with "" both when it is
+ * locked and when it does not reply within 2 s (varial-sdk resolves that timeout as an empty
  * key with no error, e.g. while a proof keeps the page busy), and WatchWalletChanges also reports
  * every failed read as a switch to "". Taken as a disconnect, one slow read signed the user out.
  * Here an empty, failed or slow read changes nothing. A different account or network is reported,
- * and a site Freighter no longer allows is reported as revoked. Watching goes on until stop(), so
+ * and a site Varial no longer allows is reported as revoked. Watching goes on until stop(), so
  * an unlock or a re-allow is picked up again.
  *
  * Pure module (no react-native) so it is bun-testable.
  */
-type FreighterReads = Pick<typeof import('@stellar/freighter-api'), 'getAddress' | 'getNetworkDetails' | 'isAllowed'>;
+type VarialReads = Pick<typeof import('@stellar/varial-sdk'), 'getAddress' | 'getNetworkDetails' | 'isAllowed'>;
 
-export interface FreighterAccount {
+export interface VarialAccount {
   address: string | null;
   passphrase: string | null;
 }
@@ -30,9 +30,9 @@ function within<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   ]).finally(() => clearTimeout(timer));
 }
 
-export function watchFreighter(
-  api: FreighterReads,
-  current: FreighterAccount,
+export function watchVarial(
+  api: VarialReads,
+  current: VarialAccount,
   on: { change: (account: { address: string; passphrase: string | null }) => void; revoked: () => void },
   intervalMs: number,
   readTimeoutMs: number = READ_TIMEOUT_MS,

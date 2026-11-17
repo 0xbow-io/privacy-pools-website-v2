@@ -45,7 +45,7 @@ describe('the incident string reaches the refreshing message on every path', () 
     expect(src).toContain('if (!timedOutHash) throw relayErr;');
   });
 
-  test('exit: the check runs before the generic "Ragequit failed" message and after only the wallet-rejection arm', () => {
+  test('exit: the check runs before the generic "Exit failed" message and after only the wallet-rejection arm', () => {
     const src = code('components/ragequit-modal-provider.tsx');
     const at = src.indexOf("keystoreRootRefreshingMessage('exit')");
     expect(at).toBeGreaterThan(-1);

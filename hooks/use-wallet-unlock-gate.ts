@@ -24,9 +24,9 @@ import { useStellarSession } from '@/hooks/use-stellar-session';
  * errored: the fix is a DIRECT retry (`retryKeyInit`), never the wallet
  * signature prompt.
  *
- * `stellarLocked` is the Stellar counterpart: Freighter connected, keys not
+ * `stellarLocked` is the Stellar counterpart: Varial connected, keys not
  * derived yet, so the figures are the tab's cached notes and nothing syncs.
- * Its action is `unlockStellar` (one Freighter signature), never the EVM
+ * Its action is `unlockStellar` (one Varial signature), never the EVM
  * seed-derivation modal.
  */
 export function useWalletUnlockGate(): {
@@ -60,7 +60,7 @@ export function useWalletUnlockGate(): {
   const stellarUnlock = stellar.unlock;
   const { toast } = useToast();
   // The session stores the error, but no sign-in surface renders it, so a
-  // failed unlock (Freighter on mainnet, a rejected signature) looked like a
+  // failed unlock (Varial on mainnet, a rejected signature) looked like a
   // dead button.
   const unlockStellar = useCallback(() => {
     stellarUnlock().catch((caught: unknown) => {

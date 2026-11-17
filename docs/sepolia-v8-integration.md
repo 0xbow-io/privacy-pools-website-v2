@@ -23,7 +23,7 @@ code-reading pass (Codex). File:line refs are included so the client can confirm
    flow** (the deposit encrypts a ciphertext to it). Root, leaves, and entrypoints
    come from the same ASP.
 3. **Relayer — yes, there's a URL, but only for spends.** Sepolia relayer is
-   `https://relayer-staging.example`. Deposits don't use it
+   `https://relayer-v2-staging-149184580131.us-east1.run.app`. Deposits don't use it
    (submitted directly); withdrawals/transfers do. Deposit-only PoCs can skip it.
    (The `-testing-` instance is NOT interchangeable: it posts Sepolia from the V8
    relay, so relayed spends bound to the V9 relay revert with
@@ -115,7 +115,7 @@ can be configured statically, but fetching `/public-key` is the source of truth.
 ## Q3 — Relayer: URL exists; only needed for spends
 
 - Sepolia relayer base URL — `WEB/config/chains.ts:40-46`:
-  `https://relayer-staging.example` (a Cloud Run staging service)
+  `https://relayer-v2-staging-149184580131.us-east1.run.app` (a Cloud Run staging service)
 
 **Deposits don't use the relayer**; withdrawals/transfers do (the relayer submits the
 tx so `msg.sender` isn't the user — the privacy point):

@@ -82,8 +82,8 @@ export function resolveHosts(config: {
       'v2-tor.fastrelay.xyz',
       // The former default, still reachable through EXPO_PUBLIC_PROD_RELAYER_URL.
       'relayer-v2-prod-149184580131.us-east1.run.app',
-      'relayer-staging.example',
-      'relayer-testing.example',
+      'relayer-v2-staging-149184580131.us-east1.run.app',
+      'relayer-v2-testing-149184580131.us-east1.run.app',
       'testnet-relayer.privacypools.com',
     ],
     // Exact origin: a subdomain of our own site is not automatically ours, and

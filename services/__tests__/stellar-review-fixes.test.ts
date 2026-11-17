@@ -14,7 +14,6 @@ import {
   readSessionAccount,
   writeSessionAccount,
 } from '@/services/stellar/stellar-account-storage';
-import { estimateStellarRelayFee, maxStellarWithdrawForInputs, STELLAR_MAX_RELAY_FEE } from '@/config/stellar-deployment';
 import { stellarErrorMessage } from '@/services/stellar/stellar-copy';
 import { stellarBalanceFromAccount } from '@/hooks/use-stellar-balance';
 
@@ -70,24 +69,6 @@ describe('Stellar account storage', () => {
   });
 });
 
-describe('Stellar withdraw cap', () => {
-  test('amount + fee always fits the inputs, and is close to the best', () => {
-    for (const inputs of [0n, 1n, 10_000_000n, 123_456_789n, 999_999_999n, 50_000_000_000n, 1_000_000_000_000n]) {
-      const max = maxStellarWithdrawForInputs(inputs);
-      // Inputs at or under the fee's fixed cost term cannot fund any withdrawal.
-      if (max > 0n) expect(max + estimateStellarRelayFee(max)).toBeLessThanOrEqual(inputs);
-      if (inputs > 0n) {
-        const next = max + 2n;
-        expect(next + estimateStellarRelayFee(next)).toBeGreaterThan(inputs);
-      }
-    }
-  });
-
-  test('uses the fee cap once it binds', () => {
-    const inputs = 1_000_000_000_000n; // 100k XLM: 0.5% is far above the cap
-    expect(maxStellarWithdrawForInputs(inputs)).toBe(inputs - STELLAR_MAX_RELAY_FEE);
-  });
-});
 
 describe('Stellar spendable balance', () => {
   test('subtracts reserve, fee headroom and selling liabilities', () => {
@@ -113,6 +94,14 @@ describe('Stellar error copy', () => {
     expect(stellarErrorMessage('Transact failed: note 0xabc is not ACTIVE')).toMatch(/Sync and try again/);
     expect(stellarErrorMessage(`Recipient ${G} has no on-chain viewing key — pass allowOutOfBandFallback`)).toMatch(/recipient has not set up/i);
     expect(stellarErrorMessage('tx failed: insufficient balance')).toMatch(/Not enough XLM/);
+  });
+
+  test('shared EVM balance messages are not rewritten as wallet-funding errors', () => {
+    for (const message of [
+      "Your balance isn't high enough.",
+      "Your XLM notes don't have enough active balance to cover the relayer fee.",
+      "Your XLM notes don't have enough active balance to cover this withdrawal + the relayer fee.",
+    ]) expect(stellarErrorMessage(message)).toBe(message);
   });
 
   test('an indexer outage names the indexer, not the ASP', () => {

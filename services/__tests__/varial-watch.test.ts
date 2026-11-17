@@ -1,10 +1,10 @@
-// The Freighter watcher: an empty, failed or slow read must never sign the user out
-// (freighter-api resolves a 2 s timeout as an empty key); only a revoked site does, and an
+// The Varial watcher: an empty, failed or slow read must never sign the user out
+// (varial-sdk resolves a 2 s timeout as an empty key); only a revoked site does, and an
 // account that reads again is picked back up.
 
 import { describe, expect, test } from 'bun:test';
 
-import { watchFreighter } from '@/services/stellar/freighter-watch';
+import { watchVarial } from '@/services/stellar/varial-watch';
 
 const A = `G${'A'.repeat(55)}`;
 const B = `G${'B'.repeat(55)}`;
@@ -13,7 +13,7 @@ const PUBNET = 'Public Global Stellar Network ; September 2015';
 
 type Read = { address: string; error?: { message: string } } | 'hang';
 
-function fakeFreighter(reads: Read[], opts: { allowed?: boolean[]; passphrases?: string[] } = {}) {
+function fakeVarial(reads: Read[], opts: { allowed?: boolean[]; passphrases?: string[] } = {}) {
   let i = 0;
   let a = 0;
   let p = 0;
@@ -35,10 +35,10 @@ function fakeFreighter(reads: Read[], opts: { allowed?: boolean[]; passphrases?:
   return { api: api as never, reads: () => i };
 }
 
-function run(reads: Read[], start: { address: string | null; passphrase: string | null }, opts?: Parameters<typeof fakeFreighter>[1]) {
-  const fake = fakeFreighter(reads, opts);
+function run(reads: Read[], start: { address: string | null; passphrase: string | null }, opts?: Parameters<typeof fakeVarial>[1]) {
+  const fake = fakeVarial(reads, opts);
   const events: string[] = [];
-  const watcher = watchFreighter(fake.api, start, {
+  const watcher = watchVarial(fake.api, start, {
     change: ({ address, passphrase }) => events.push(`change:${address.slice(0, 2)}:${passphrase === PUBNET ? 'pub' : 'test'}`),
     revoked: () => events.push('revoked'),
   }, 2, 15);
@@ -47,7 +47,7 @@ function run(reads: Read[], start: { address: string | null; passphrase: string 
 
 const settle = (ms = 80) => new Promise((resolve) => setTimeout(resolve, ms));
 
-describe('watchFreighter', () => {
+describe('watchVarial', () => {
   test('an empty read (locked, or the 2 s timeout) while the site is allowed changes nothing', async () => {
     const { events, watcher, fake } = run([{ address: '' }], { address: A, passphrase: TESTNET });
     await settle();
@@ -78,7 +78,7 @@ describe('watchFreighter', () => {
     expect(events).toEqual(['change:GB:test', 'change:GB:pub']);
   });
 
-  test('a site Freighter no longer allows is revoked once, and picked up again when it reads', async () => {
+  test('a site Varial no longer allows is revoked once, and picked up again when it reads', async () => {
     const { events, watcher } = run([{ address: '' }, { address: '' }, { address: A }], { address: A, passphrase: TESTNET }, { allowed: [false] });
     await settle();
     watcher.stop();

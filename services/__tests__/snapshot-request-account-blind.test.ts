@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { createSnapshotStore } from '@/services/snapshot-cache';
 import { snapshotCursor } from '@/services/asp-event-snapshot';
-import { mergeSnapshotDelta, snapshotDeltaSince } from '@/services/snapshot-delta';
+import { followSnapshotPages, mergeSnapshotDelta, snapshotDeltaSince } from '@/services/snapshot-delta';
 
 // The held event snapshot is what note discovery now reads on every chain, so
 // its request must be the SAME bytes for every account: the whole pool's rows,
@@ -24,7 +24,7 @@ const js = ts.transpileModule(`${code}\nreturn { gridOwnedPayload, INCLUDE };`, 
 
 const ACCOUNTS = ['0x1111111111111111111111111111111111111111', '0x2222222222222222222222222222222222222222'];
 
-async function requestsFor(account: string): Promise<unknown[]> {
+async function requestsFor(account: string, firstPageCut = false): Promise<unknown[]> {
   const sent: unknown[] = [];
   let head = 26_000_000;
   const apiClient = {
@@ -32,7 +32,9 @@ async function requestsFor(account: string): Promise<unknown[]> {
       sent.push({ chainId, include: [...include], since: since === undefined ? null : String(since), entrypoint });
       head += 10;
       const rows = { deposits: [], transacts: [], ragequits: [], notes: [] };
-      return { chainId: String(chainId), snapshotBlockNumber: String(head), ...rows };
+      // A large pool: the ASP cuts the page-load download and the client asks for the rest.
+      const hasMore = firstPageCut && sent.length === 1;
+      return { chainId: String(chainId), snapshotBlockNumber: String(head), hasMore, ...rows };
     },
   };
   // What a session would hold for this account; the request path must never read it.
@@ -44,13 +46,14 @@ async function requestsFor(account: string): Promise<unknown[]> {
     snapshotCursor,
     mergeSnapshotDelta,
     snapshotDeltaSince,
+    followSnapshotPages,
     getChainConfig: () => ({ contracts: { fromBlock: 25_884_228n } }),
     blockTimeMs: () => 12_000,
     publicFeeds: { isRunning: () => true, registered: () => ['event-snapshot:1'] },
   };
   const { gridOwnedPayload, INCLUDE } = new Function(...Object.keys(env), js)(...Object.values(env));
   const feed = gridOwnedPayload({
-    flag: `__testSnapshot_${account}`,
+    flag: `__testSnapshot_${account}_${firstPageCut}`,
     label: 'event snapshot',
     include: INCLUDE,
     feedKey: (c: number) => `event-snapshot:${c}`,
@@ -72,4 +75,14 @@ test('two accounts send byte-identical snapshot requests that name nothing of th
   for (const account of ACCOUNTS) expect(JSON.stringify(a).toLowerCase()).not.toContain(account.slice(2));
   // Whole pool, every section discovery reads.
   expect((a[0] as { include: string[] }).include).toEqual(['deposits', 'transacts', 'ragequits', 'notes']);
+});
+
+test('the pages after a cut page-load download are byte-identical across accounts too', async () => {
+  const a = await requestsFor(ACCOUNTS[0], true);
+  const b = await requestsFor(ACCOUNTS[1], true);
+  // The download, its second page from the ASP's own watermark, then the grid instant's delta.
+  expect(a.length).toBe(3);
+  expect((a[1] as { since: string }).since).toBe('26000010');
+  expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+  for (const account of ACCOUNTS) expect(JSON.stringify(a).toLowerCase()).not.toContain(account.slice(2));
 });

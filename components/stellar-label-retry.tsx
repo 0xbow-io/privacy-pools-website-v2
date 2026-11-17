@@ -1,6 +1,6 @@
 /**
  * Shown on a Stellar deposit's success state when the deposit landed but its
- * ASP registration (`register_label`, the second Freighter approval) did not.
+ * ASP registration (`register_label`, the second Varial approval) did not.
  * Until that is re-sent the ASP never sees the deposit, so it would sit in
  * "pending" forever with nothing telling the user why.
  */
@@ -23,7 +23,7 @@ export function StellarLabelRetryNotice({ retry }: { retry: () => Promise<boolea
           void retry().finally(() => setBusy(false));
         }}
       >
-        <Text className="text-[14px] text-text font-pp-medium">{busy ? 'Approve in Freighter...' : 'Send for approval'}</Text>
+        <Text className="text-[14px] text-text font-pp-medium">{busy ? 'Approve in your wallet...' : 'Send for approval'}</Text>
       </Pressable>
     </View>
   );

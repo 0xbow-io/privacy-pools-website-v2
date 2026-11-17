@@ -13,7 +13,8 @@
  */
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useCurrentAccount } from '@mysten/dapp-kit';
-import { useAccount, useChainId, useSwitchChain } from 'wagmi';
+import { useAccount, useChainId, useConfig, useSwitchChain } from 'wagmi';
+import { getConnection } from 'wagmi/actions';
 import { defaultChainId, getChainConfig, getPresetRpcUrls, homeChainId, isSupportedEvmChainId, STELLAR_OPT_IN, STELLAR_SELECTED_BY_URL, supportedChainIds, STELLAR_TESTNET_ID, SUI_TESTNET_ID } from '@/config/chains';
 import { useStellarWallet } from '@/components/stellar-wallet-provider';
 import { isDebugModeActive } from '@/components/debug-provider';
@@ -63,6 +64,7 @@ export function ChainProvider({ children }: { children: React.ReactNode }) {
   // rejected prompt can never leave the app describing chain B while the
   // wallet (and therefore proofs) stay on chain A.
   const wagmiChainId = useChainId();
+  const wagmiConfig = useConfig();
   const excursionHome = useWalletChainExcursionHome();
   const { switchChainAsync } = useSwitchChain();
   // Live connection mirror for selectChain's disconnected fast-path.
@@ -98,7 +100,7 @@ export function ChainProvider({ children }: { children: React.ReactNode }) {
       }
       return 'declined';
     }
-    // Stellar testnet: debug gate or its own ?stellar=true opt-in.
+    // Stellar is available in staging; other builds retain the opt-in.
     if (getChainConfig(chainId)?.chainType === 'stellar' && !STELLAR_OPT_IN && !isDebugModeActive()) {
       if (typeof console !== 'undefined') {
         console.warn('[ChainProvider] Stellar selection requires ?stellar=true or debug mode');
@@ -120,7 +122,9 @@ export function ChainProvider({ children }: { children: React.ReactNode }) {
       cancelWalletChainExcursion();
       setSelectedChainId(chainId);
     };
-    if (getChainConfig(chainId)?.chainType === 'evm' && chainId !== wagmiChainId) {
+    // A just-connected wallet can already be on the requested chain before
+    // useChainId has rendered the new value. Do not ask it to switch again.
+    if (getChainConfig(chainId)?.chainType === 'evm' && chainId !== wagmiChainId && getConnection(wagmiConfig).chainId !== chainId) {
       // Describe the chain so a wallet that has never heard of it can ADD it
       // instead of failing the switch with 4902. This is what the staging
       // chains need: a fresh MetaMask ships with none of Citrea, BNB or
@@ -153,7 +157,7 @@ export function ChainProvider({ children }: { children: React.ReactNode }) {
     // Synchronous path: still current by construction (no await since the bump).
     commit();
     return 'committed';
-  }, [wagmiChainId, switchChainAsync]);
+  }, [wagmiChainId, wagmiConfig, switchChainAsync]);
 
   // Reconcile the selection FROM wagmi: a wallet that auto-connects on (or is
   // manually switched to) another SUPPORTED EVM chain must drag the app
@@ -201,7 +205,7 @@ export function ChainProvider({ children }: { children: React.ReactNode }) {
     }
   }, [suiAccount?.address, selectedChainId]);
 
-  // Same transition rule for the Stellar wallet (Freighter).
+  // Connecting Varial selects Stellar; disconnecting keeps the chosen network.
   const prevStellarAddressRef = useRef<string | null>(null);
   const stellarAddress = stellarWallet.isConnected ? stellarWallet.address : null;
   useEffect(() => {
@@ -217,9 +221,6 @@ export function ChainProvider({ children }: { children: React.ReactNode }) {
       // cannot resolve late and overwrite this selection.
       ++switchReqRef.current;
       setSelectedChainId(STELLAR_TESTNET_ID);
-    } else if (prev && !curr && activeIsStellar) {
-      ++switchReqRef.current;
-      setSelectedChainId(defaultChainId);
     }
   }, [stellarAddress, selectedChainId]);
 

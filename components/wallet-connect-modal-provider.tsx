@@ -4,7 +4,7 @@ import { isWalletTileDisabled, primaryMobileWalletIds, walletListMaxHeight, WALL
 import { WEB_FIXED_POSITION, WEB_BLUR_BACKDROP } from '@/components/ui/web-style-shims';
 import { View, Text, Image, Pressable, Platform, Linking, ActivityIndicator, ScrollView, useWindowDimensions } from 'react-native';
 import type { ViewStyle } from 'react-native';
-import { useAccount, useConnect, useConnectionEffect } from 'wagmi';
+import { useAccount, useChainId, useConnect, useConnectionEffect } from 'wagmi';
 import type { Connector } from 'wagmi';
 import QRCode from 'react-native-qrcode-svg';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -12,7 +12,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import { StellarWalletOption } from '@/components/stellar-wallet-option';
-import { useConnectFreighter, useStellarWallet } from '@/components/stellar-wallet-provider';
+import { isSupportedEvmChainId } from '@/config/chains';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { AccountKeySignIn } from '@/components/account-key-sign-in';
 import { useMobileAccountKeys } from '@/components/mobile-account-keys-context';
@@ -574,32 +574,9 @@ export function WalletConnectModalProvider({ children }: { children: ReactNode }
   const { options, shownOptions, moreCount, moreLabel, expandMore, preparingLinks, error, wcUri, wcView, showQr, reset, isMobile, prepare, select, isOptionPending, isOptionDisabled, notOpened } = useWalletPicker(onConnected);
   const { height: windowHeight } = useWindowDimensions();
 
-  // On the Stellar chain there is nothing for the EVM picker to connect:
-  // every "Connect Wallet" goes straight to Freighter (or to get it).
-  // Read through refs so `open` keeps one identity: callers open the picker
-  // from effects keyed on it (the /modal route), and a Stellar wallet state
-  // change must not re-fire them.
-  const { isStellar: activeIsStellar } = useChainRouter();
-  const connectFreighter = useConnectFreighter();
-  const stellarWallet = useStellarWallet();
-  const stellarRef = useRef({ activeIsStellar, connectFreighter, stellarWallet });
-  stellarRef.current = { activeIsStellar, connectFreighter, stellarWallet };
+  const { selectChain } = useChainRouter();
+  const evmChainId = useChainId();
   const open = useCallback(async () => {
-    const { activeIsStellar: onStellar, connectFreighter: connectStellar, stellarWallet: freighter } = stellarRef.current;
-    if (onStellar) {
-      if (freighter.isConnected) return;
-      // A detected Freighter connects in one step. Otherwise show the picker
-      // with the Freighter row: going straight to window.open(freighter.app)
-      // is blocked as a popup when nothing was clicked (a ?modal=connect
-      // link), and the user saw nothing at all.
-      if (freighter.availabilityChecked && freighter.isAvailable) {
-        await connectStellar();
-        return;
-      }
-      setShowAccountKey(false);
-      setIsOpen(true);
-      return;
-    }
     reset();
     setShowAccountKey(false);
     setIsOpen(true);
@@ -617,12 +594,15 @@ export function WalletConnectModalProvider({ children }: { children: ReactNode }
 
   // Mobile: create the WalletConnect pairing as the picker opens.
   useEffect(() => {
-    if (isOpen && !activeIsStellar) prepare();
-  }, [isOpen, activeIsStellar, prepare]);
+    if (isOpen) prepare();
+  }, [isOpen, prepare]);
 
   // An abandoned wallet approval can still connect outside the picker. Its
   // stale callback is ignored, but the actual connection closes any open modal.
-  useConnectionEffect({ onConnect: close });
+  useConnectionEffect({ onConnect: ({ chainId, isReconnected }) => {
+    if (isOpen && !isReconnected && chainId !== undefined) void selectChain(isSupportedEvmChainId(chainId) ? chainId : evmChainId);
+    close();
+  } });
 
   // Web: Escape dismisses the picker (same guard as the × button).
   useEffect(() => {
@@ -636,6 +616,28 @@ export function WalletConnectModalProvider({ children }: { children: ReactNode }
   useBackHandler(isOpen, close);
 
   const value = useMemo(() => ({ open, close, isOpen }), [open, close, isOpen]);
+  const stellarWalletOption = <StellarWalletOption key="stellar" className="min-h-[68px] flex-row items-center gap-[12px] rounded-[8px] border border-border-light bg-background px-[16px] py-[14px] active:opacity-[0.85]" onConnected={onConnected} />;
+  const walletRows = shownOptions.map((option) => {
+    const isPending = isOptionPending(option);
+    const disabled = isOptionDisabled(option);
+    return (
+      <Pressable
+        key={option.uid}
+        onPress={() => select(option)}
+        disabled={disabled}
+        accessibilityRole="button"
+        accessibilityState={{ disabled, busy: isPending }}
+        // Fill/border are class-authored and the pressed dim is active:; a style
+        // FUNCTION on a className'd Pressable is arrayed by css-interop's web runtime
+        // and never invoked, which would drop the fill + pressed state.
+        className={`min-h-[68px] flex-row items-center gap-[12px] rounded-[8px] border border-border-light bg-background px-[16px] py-[14px] active:opacity-[0.85] ${disabled ? 'opacity-50' : 'opacity-100'}`}
+      >
+        <WalletOptionContent option={option} isPending={isPending} />
+      </Pressable>
+    );
+  });
+  const walletConnectIndex = shownOptions.findIndex((option) => option.connector.type === 'walletConnect');
+  walletRows.splice(walletConnectIndex < 0 ? walletRows.length : walletConnectIndex, 0, stellarWalletOption);
 
   return (
     <WalletConnectModalContext.Provider value={value}>
@@ -670,12 +672,6 @@ export function WalletConnectModalProvider({ children }: { children: ReactNode }
                   <Text className="py-[6px] text-center font-pp-medium text-[12px] text-text-secondary underline">← Back to wallets</Text>
                 </Pressable>
               </>
-            ) : activeIsStellar ? (
-              // Stellar connects through Freighter only; the EVM wallets and
-              // the account key do not apply here.
-              <View className="gap-[8px]">
-                <StellarWalletOption className="min-h-[68px] flex-row items-center gap-[12px] rounded-[8px] border border-border-light bg-background px-[16px] py-[14px] active:opacity-[0.85]" onConnected={() => setIsOpen(false)} />
-              </View>
             ) : wcUri ? (
               wcView === 'wallets'
                 ? <WalletDeepLinkList uri={wcUri} onShowQr={showQr} onBack={reset} />
@@ -703,14 +699,6 @@ export function WalletConnectModalProvider({ children }: { children: ReactNode }
                     </Pressable>
                   ))}
                 </View>
-                <StellarWalletOption className="min-h-[68px] flex-row items-center gap-[12px] rounded-[8px] border border-border-light bg-background px-[16px] py-[14px] active:opacity-[0.85]" onConnected={() => setIsOpen(false)} />
-                <Pressable
-                  onPress={() => setShowAccountKey(true)}
-                  accessibilityRole="button"
-                  className="min-h-[44px] items-center justify-center rounded-control hover:opacity-80 active:opacity-70"
-                >
-                  <Text className="font-pp-medium text-[13px] text-text-secondary underline">Sign in with an account key</Text>
-                </Pressable>
               </View>
             ) : (
               <View className="gap-[8px]">
@@ -718,36 +706,22 @@ export function WalletConnectModalProvider({ children }: { children: ReactNode }
                 {/* Bounded: the expanded list scrolls inside the sheet. */}
                 {/* nw-keep(measured-or-inset): maxHeight is measured from the window height; the gap goes to the content-container sink */}
                 <ScrollView style={{ maxHeight: walletListMaxHeight(windowHeight), flexGrow: 0 }} contentContainerStyle={{ gap: 8 }} keyboardShouldPersistTaps="handled">
-                {shownOptions.map((option) => {
-                  const isPending = isOptionPending(option);
-                  const disabled = isOptionDisabled(option);
-                  return (
-                    <Pressable
-                      key={option.uid}
-                      onPress={() => select(option)}
-                      disabled={disabled}
-                      accessibilityRole="button"
-                      accessibilityState={{ disabled, busy: isPending }}
-                      // Fill/border are class-authored and the pressed dim is active:; a style
-                      // FUNCTION on a className'd Pressable is arrayed by css-interop's web runtime
-                      // and never invoked, which would drop the fill + pressed state.
-                      className={`min-h-[68px] flex-row items-center gap-[12px] rounded-[8px] border border-border-light bg-background px-[16px] py-[14px] active:opacity-[0.85] ${disabled ? 'opacity-50' : 'opacity-100'}`}
-                    >
-                      <WalletOptionContent option={option} isPending={isPending} />
-                    </Pressable>
-                  );
-                })}
+                {walletRows}
                 </ScrollView>
                 {moreCount > 0 && <MoreWalletsButton label={moreLabel} onPress={expandMore} />}
                 {notOpened && <WalletNotOpened {...notOpened} />}
-                <StellarWalletOption className="min-h-[68px] flex-row items-center gap-[12px] rounded-[8px] border border-border-light bg-background px-[16px] py-[14px] active:opacity-[0.85]" onConnected={() => setIsOpen(false)} />
-                {/* Wallet-less path: sign in with an exported account key. */}
-                <Pressable onPress={() => setShowAccountKey(true)} hitSlop={8}>
-                  <Text className="py-[6px] text-center font-pp-medium text-[12px] text-text-secondary underline">
-                    Or sign in with an account key (no wallet)
-                  </Text>
-                </Pressable>
               </View>
+            )}
+
+            {!showAccountKey && !wcUri && options.length === 0 && stellarWalletOption}
+
+            {/* Wallet-less path: sign in with an exported account key. */}
+            {!showAccountKey && !wcUri && (
+              <Pressable onPress={() => setShowAccountKey(true)} hitSlop={8}>
+                <Text className="py-[6px] text-center font-pp-medium text-[12px] text-text-secondary underline">
+                  Or sign in with an account key (no wallet)
+                </Text>
+              </Pressable>
             )}
 
             {/* Native app: bring an account key over from the web by QR. */}

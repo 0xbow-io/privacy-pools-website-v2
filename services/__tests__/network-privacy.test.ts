@@ -50,6 +50,16 @@ describe('encodingsOf', () => {
     expect(encodingsOf('11155111')).toEqual([]);
   });
 
+  test('never reads a decimal as hex bytes', () => {
+    // "1000000000000000" (0.001 ETH) read as hex bytes is 10 00 00 .. 00, whose base64 "EAAAAAAAAAA" matched the
+    // zero-filled Stellar simulate body of the background fee poll. The real hex forms still get their byte encodings.
+    const forms = encodingsOf('1000000000000000');
+    expect(forms).not.toContain('EAAAAAAAAAA');
+    expect(forms).not.toContain('EAAAAAAAAAA=');
+    expect(forms).toContain(Buffer.from('038d7ea4c68000', 'hex').toString('base64'));
+    expect(forms).toContain('0x38d7ea4c68000');
+  });
+
   test('returns nothing for empty input rather than matching everything', () => {
     expect(encodingsOf('')).toEqual([]);
     expect(encodingsOf('   ')).toEqual([]);

@@ -62,24 +62,35 @@ export function encodingsOf(value: string, kind?: keyof JourneySecrets): string[
   if (!address && (number === undefined ? raw.length : number.toString().length) < MIN_SIGNIFICANT_DIGITS) return [];
 
   const out = new Set<string>([raw]);
+  // Only forms that really are hex get decoded to bytes. A decimal like "1000000000000000" is also a run of hex
+  // digits, and reading it as bytes produced a short base64 ("EAAAAAAAAAA") that matched any zero-heavy body.
+  const hexForms = new Set<string>();
+  const decimalRaw = /^\d+$/.test(raw);
+  if (!decimalRaw) hexForms.add(raw);
   if (number !== undefined) {
     const hex = number.toString(16);
     // Addresses are byte strings. Never hunt for their short numeric suffix.
     if (!address) {
       out.add(number.toString());
-      out.add(`0x${hex}`);
-      out.add(`0x${hex.toUpperCase()}`);
-      out.add(hex.padStart(Math.ceil(hex.length / 2) * 2, '0'));
+      for (const form of [`0x${hex}`, `0x${hex.toUpperCase()}`, hex.padStart(Math.ceil(hex.length / 2) * 2, '0')]) {
+        out.add(form);
+        hexForms.add(form);
+      }
     }
-    out.add(`0x${hex.padStart(64, '0')}`);
-    out.add(hex.padStart(64, '0'));
-    if (address) out.add(raw.slice(2));
+    for (const form of [`0x${hex.padStart(64, '0')}`, hex.padStart(64, '0')]) {
+      out.add(form);
+      hexForms.add(form);
+    }
+    if (address) {
+      out.add(raw.slice(2));
+      hexForms.add(raw.slice(2));
+    }
   }
   for (const form of [...out]) {
     out.add(encodeURIComponent(form));
     out.add(Buffer.from(form).toString('base64'));
     out.add(Buffer.from(form).toString('base64url'));
-    if (/^(?:0x)?[\da-f]+$/i.test(form) && form.replace(/^0x/i, '').length % 2 === 0) {
+    if (hexForms.has(form) && /^(?:0x)?[\da-f]+$/i.test(form) && form.replace(/^0x/i, '').length % 2 === 0) {
       const bytes = Buffer.from(form.replace(/^0x/i, ''), 'hex');
       out.add(bytes.toString('base64'));
       out.add(bytes.toString('base64url'));

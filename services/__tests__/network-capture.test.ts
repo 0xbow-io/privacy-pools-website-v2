@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import { startNetworkCapture } from '../../scripts/e2e/network-capture';
 import { findLeaks } from '../../scripts/e2e/network-privacy';
@@ -187,4 +190,29 @@ test('bounded windows retain pending requests and observe frames on pre-existing
   capture.clearCapture();
   expect(capture.captured).toHaveLength(0);
   context.emit('close');
+});
+
+test('header timeout names route and lifecycle, preserves full URL only in private diagnostics', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'capture-lifecycle-'));
+  try {
+    for (const state of ['pending', 'response', 'finished', 'failed']) {
+      const context = new Context();
+      const path = join(dir, `${state}.json`);
+      const capture = startNetworkCapture(context, { flushTimeoutMs: 10, diagnosticsFile: path });
+      const req = request({ url: () => `https://api.0xbow.io/public/events?test=${LABEL}`, allHeaders: () => new Promise(() => {}), failure: () => ({ errorText: 'net::ERR_ABORTED' }) });
+      context.emit('request', req);
+      if (state === 'response') context.emit('response', { request: () => req, status: () => 200 });
+      if (state === 'finished') context.emit('requestfinished', req);
+      if (state === 'failed') context.emit('requestfailed', req);
+      let message = '';
+      try { await capture.flushCapture(); } catch (error) { message = String(error); }
+      expect(message).toContain('https://api.0xbow.io/public/events');
+      expect(message).not.toContain(LABEL);
+      const details = JSON.parse(readFileSync(path, 'utf8'));
+      expect(details[0].url).toBe(req.url());
+      expect(details[0].state).toBe(state === 'pending' ? 'awaiting response' : state === 'response' ? 'response 200' : state === 'failed' ? 'failed: net::ERR_ABORTED' : 'finished');
+      expect(() => findLeaks(capture.captured, {}, HOSTS)).toThrow('Incomplete');
+      context.emit('close');
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

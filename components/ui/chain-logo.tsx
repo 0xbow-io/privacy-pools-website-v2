@@ -1,5 +1,6 @@
-import { View, Text, Image } from 'react-native';
+import { View, Image } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
+import { TestnetLabel } from './testnet-label';
 import { EthereumIcon } from './ethereum-icon';
 import { isTestnetChain, STELLAR_TESTNET_ID, SUI_TESTNET_ID } from '@/config/chains';
 import { SuiIcon } from './sui-icon';
@@ -44,33 +45,27 @@ type ChainLogoProps = {
 };
 
 /**
- * The yellow "testnet" watermark every test-network visual carries, exported
+ * The compact testnet marker every test-network visual carries, exported
  * so token/asset icons (TokenNetworkIcon's ChainBadge, the tx table's
  * AssetChainMark) render the SAME label as the network selector — a Sepolia
  * row must never read as plain Ethereum.
  */
 export function TestnetPill({ size }: { size: number }) {
-  const badgeFont = Math.max(6, Math.round(size * 0.34));
   return (
-    <Text
-      numberOfLines={1}
-      className="absolute -bottom-[4px] -right-[8px] overflow-hidden rounded-[3px] bg-[#F4B740] px-[2px] font-pp-medium text-[#1a1a1a]"
-      // nw-keep(svg-or-canvas): badge type scales with the size prop (fontSize/lineHeight derived at runtime)
-      style={{
-        fontSize: badgeFont,
-        lineHeight: badgeFont + 2,
-      }}
-    >
-      testnet
-    </Text>
+    <View pointerEvents="none" className="absolute -bottom-[2px] -right-[5px]">
+      <TestnetLabel compact size={size} />
+    </View>
   );
 }
 
 /**
  * Chain logo chip: Ethereum / Sui mark in a brand-colored circle, with a
- * "testnet" watermark bottom-right for test networks (Sepolia, Sui Testnet).
+ * "TEST" marker bottom-right for test networks (Sepolia, Sui Testnet).
  */
 export function ChainLogo({ chain, size = 18, testnetLabel = true }: ChainLogoProps) {
+  // Inset symbols share one longest dimension; preserve each SVG's aspect
+  // ratio instead of fitting tall marks into an undersized square viewport.
+  const markSize = size * 0.72;
   const isSui = chain === 'sui-testnet';
   const isStellar = chain === 'stellar-testnet';
   const isOptimism = chain === 'optimism';
@@ -85,7 +80,7 @@ export function ChainLogo({ chain, size = 18, testnetLabel = true }: ChainLogoPr
   return (
     <View
       // nw-keep(svg-or-canvas): prop-driven geometry — the size prop scales the chip around the SVG chain mark
-      style={{ width: size, height: size }}
+      style={{ width: size, height: size, flexShrink: 0 }}
     >
       <View
         className={
@@ -117,7 +112,7 @@ export function ChainLogo({ chain, size = 18, testnetLabel = true }: ChainLogoPr
         }}
       >
         {isSui ? (
-          <SuiIcon width={size * 0.5} height={size * 0.62} color="#FFFFFF" />
+          <SuiIcon width={markSize * (300 / 383.5)} height={markSize} color="#FFFFFF" />
         ) : isOptimism ? (
           // Official OP Mainnet mark: https://optimism.io/brand (not the OP token).
           <Svg width={size} height={size} viewBox="0 0 1024 1024">
@@ -127,9 +122,9 @@ export function ChainLogo({ chain, size = 18, testnetLabel = true }: ChainLogoPr
         ) : isCitrea ? (
           <CitreaIcon width={size * 0.94} height={size * 0.94} />
         ) : isBnb ? (
-          <BnbIcon width={size * 0.72} height={size * 0.72} />
+          <BnbIcon width={markSize} height={markSize} />
         ) : isStellar ? (
-          <StellarIcon width={size * 0.6} height={size * 0.51} color="#FFFFFF" />
+          <StellarIcon width={markSize} height={markSize * (200 / 236.36)} color="#FFFFFF" />
         ) : isArbitrum ? (
           // Official Arbitrum full-color icon.
           <ArbitrumIcon width={size} height={size} />
@@ -148,7 +143,7 @@ export function ChainLogo({ chain, size = 18, testnetLabel = true }: ChainLogoPr
             <Path d="M0,101.12c0-34.64,0-51.95,6.53-65.28,6.25-12.76,16.56-23.07,29.32-29.32C49.17,0,66.48,0,101.12,0h1077.76c34.63,0,51.96,0,65.28,6.53,12.75,6.25,23.06,16.56,29.32,29.32,6.52,13.32,6.52,30.64,6.52,65.28v1077.76c0,34.63,0,51.96-6.52,65.28-6.26,12.75-16.57,23.06-29.32,29.32-13.32,6.52-30.65,6.52-65.28,6.52H101.12c-34.64,0-51.95,0-65.28-6.52-12.76-6.26-23.07-16.57-29.32-29.32-6.53-13.32-6.53-30.65-6.53-65.28V101.12Z" fill="#0000FF" />
           </Svg>
         ) : (
-          <EthereumIcon width={size * 0.56} height={size * 0.56} />
+          <EthereumIcon width={markSize * (784.37 / 1277.39)} height={markSize} />
         )}
       </View>
       {isTestnet && testnetLabel && <TestnetPill size={size} />}

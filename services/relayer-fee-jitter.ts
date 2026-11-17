@@ -57,3 +57,8 @@ export function relayerFeeJitterAllowance(reviewedFeeWei: bigint): bigint {
 export function feeWithinReviewed(feeWei: bigint, reviewedFeeWei: bigint): boolean {
   return feeWei <= reviewedFeeWei + relayerFeeJitterAllowance(reviewedFeeWei);
 }
+
+/** Transfer input selection reserves 25% over the fresh quote; unused funds return as change. */
+export function transferFeeBudget(quotedFee: bigint): bigint {
+  return quotedFee + quotedFee / 4n;
+}

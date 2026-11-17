@@ -23,9 +23,14 @@ import {
 import apiClient from '@/services/api-client';
 import { useTheme } from '@/components/theme-provider';
 import { Logo } from './logo';
+import { TestnetLabel } from './testnet-label';
+import { STAGING_MAINNET_OPT_IN } from '@/config/staging-mainnet';
 import { VersionSwitch } from './version-switch';
 import { ChainLogo, chainLogoChainFor, type ChainLogoChain } from './chain-logo';
-import { useConnectFreighter, useStellarWallet } from '@/components/stellar-wallet-provider';
+import { useWalletConnectModal } from '@/components/wallet-connect-modal-provider';
+import { useStellarWallet } from '@/components/stellar-wallet-provider';
+import { useStellarKeptSessions } from '@/hooks/use-stellar-session';
+import { showStellarSignOut } from '@/services/stellar/stellar-wallet-binding';
 import { useSupportedWalletConnection } from '@/hooks/use-supported-wallet-connection';
 import { usePoolSession } from '@/hooks/use-pool-session';
 import { useChainRouter } from '@/hooks/use-chain-router';
@@ -150,7 +155,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
   // affordance below (ENS, finish-setup, account-key rows) keys off this.
   const connectedIsNonEvm = connectedIsSuiWallet || connectedIsStellar;
   const stellarWallet = useStellarWallet();
-  const connectFreighter = useConnectFreighter();
+  const { open: openStellarWalletPicker } = useWalletConnectModal();
   const { isConnected: evmConnected } = useAccount();
   const suiAccount = useCurrentAccount();
   const { disconnect } = useDisconnect();
@@ -189,6 +194,15 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
   const menuActive = isConnected || keySession;
   // Keep a way back to an existing session when the selected chain has no wallet.
   const showSessionControls = evmConnected || !!suiAccount || stellarWallet.isConnected || keySession;
+  // The wallet lost its active account but other accounts are still unlocked in this tab: the
+  // account menu is gone with the connection, so Sign Out gets its own button.
+  const stellarKeptSessions = useStellarKeptSessions();
+  const showStandaloneStellarSignOut = showStellarSignOut({
+    activeIsStellar,
+    walletConnected: stellarWallet.isConnected,
+    signedOut: stellarWallet.signedOut,
+    keptSessions: stellarKeptSessions,
+  });
 
   // Shared breakpoints decide which destinations fit in the top bar.
   //
@@ -409,8 +423,8 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
 
   const handleConnectWallet = () => {
     if (activeIsStellar) {
-      // Stellar: Freighter. Not installed -> send the user to get it.
-      void connectFreighter();
+      // Use the picker directly; an unrelated EVM connection must not switch chains.
+      void openStellarWalletPicker();
     } else if (activeIsSui) {
       // Sui: connect via the Wallet Standard (Slush et al). Prefer Slush when
       // several wallets are installed; if none, send the user to get Slush.
@@ -516,22 +530,11 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
         >
           <Pressable className="h-[41px] w-[41px] shrink-0 flex-row items-center justify-center rounded-[8px]" onPress={() => navigateTo('/')}>
             <Logo width={35} height={35} variant={colorScheme === 'dark' ? 'white' : 'black'} />
-            {/* Which world you are in, on the mark itself: a staging session looks
-                identical to prod otherwise, and a tester parked on staging has no
-                other cue in the bar (Pat, 2026-09-08). Prod stays unmarked. The
-                warning color pair holds its contrast in both themes; pointer
-                events off so the whole 41px
-                square still navigates home. */}
-            {ACTIVE_APP_ENVIRONMENT === 'staging' ? (
-              <View
-                pointerEvents="none"
-                className="absolute bottom-[-4px] left-[-7px] right-[-7px] items-center rounded-[4px] border border-warning bg-warning-bg py-[1px]"
-              >
-                <Text className="font-pp-bold text-[9px] uppercase leading-[11px] tracking-[0.3px] text-warning">
-                  staging
-                </Text>
+            {ACTIVE_APP_ENVIRONMENT === 'staging' && (
+              <View pointerEvents="none" className="absolute bottom-[-7px] left-[-5px] right-[-5px] items-center">
+                <TestnetLabel label={STAGING_MAINNET_OPT_IN ? 'STAGING' : 'TESTNET'} />
               </View>
-            ) : null}
+            )}
           </Pressable>
           {Platform.OS === 'web' && <VersionSwitch />}
         </View>
@@ -586,6 +589,19 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
           {/* Debug mode only: record everything the debug console logs. Next
               to the Actions menu, never inside it (Pat, 2026-09-24). */}
           <DebugRecordButton />
+          {showStandaloneStellarSignOut && (
+            <Pressable
+              className="h-[32px] flex-row items-center justify-center gap-[6px] rounded-pill bg-background-secondary px-[12px]"
+              onPress={() => { setActionsDropdownOpen(false); stellarWallet.disconnect(); }}
+              testID="header-stellar-sign-out"
+              accessibilityRole="button"
+              accessibilityLabel="Sign Out"
+            >
+              {/* nw-keep(data-color): glyph color is a theme token into the vector-icon sink */}
+              <Ionicons name="log-out-outline" size={16} color={colors.text} />
+              {width >= 400 && <Text className="font-pp-sans-medium text-[14px] text-text">Sign Out</Text>}
+            </Pressable>
+          )}
           <View className="relative z-[99999]">
             <Pressable
               className="h-[32px] flex-row items-center justify-center gap-[10px] rounded-pill bg-button-primary px-[14px] py-[4px]"
@@ -710,7 +726,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                               color={isActive ? colors.primary : colors.textMuted}
                             />
                             <Text className={`text-[14px] ${isActive ? 'font-pp-sans-semi-bold text-primary' : 'font-pp-sans text-text'}`}>
-                              {appEnvironmentLabel(env)}
+                              {appEnvironmentLabel(env, STAGING_MAINNET_OPT_IN)}
                             </Text>
                           </Pressable>
                         );
@@ -799,7 +815,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                         </Pressable>
                       )}
                       {/* A passkey session has no wallet signature to export as an account key,
-                          and neither has a Freighter session (the EVM account key
+                          and neither has a Varial session (the EVM account key
                           it would export does not exist). */}
                       {!passkeyActive && !(connectedIsStellar && !keySession) && (
                       <Pressable
@@ -813,7 +829,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                       </Pressable>
                       )}
                       {/* Only a connected EVM wallet can sign the ASP's SIWE message: a key,
-                          passkey, Sui or Freighter session has no such wallet to check. */}
+                          passkey, Sui or Varial session has no such wallet to check. */}
                       {evmConnected && !keySession && !passkeyActive && !connectedIsNonEvm && (
                       <Pressable
                         className="flex-row items-center gap-[10px] rounded-pill px-[12px] py-[10px] hover:bg-background-secondary"
@@ -829,7 +845,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                       )}
                       {/* Web only: the phone makes the code, this shows the QR.
                           exportAccountKey needs an EVM wallet or an imported key,
-                          so a Sui or Freighter wallet session gets no row. */}
+                          so a Sui or Varial wallet session gets no row. */}
                       {Platform.OS === 'web' && !passkeyActive && !(connectedIsNonEvm && !keySession) && (
                       <Pressable
                         className="flex-row items-center gap-[10px] rounded-pill px-[12px] py-[10px] hover:bg-background-secondary"
@@ -868,7 +884,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                           EVM wallet sessions bind to the wagmi address, so a
                           key-only or Sui session would export/import against
                           the wrong identity. Stellar has its own sealed backup
-                          for the Freighter account. */}
+                          for the Varial account. */}
                       {((connectedIsStellar && stellarWallet.isConnected) || (isConnected && !connectedIsNonEvm && !keySession)) && (<>
                       <Pressable
                         className="flex-row items-center gap-[10px] rounded-pill px-[12px] py-[10px] hover:bg-background-secondary"
@@ -1027,7 +1043,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                       color={colors.text}
                     />
                     <Text className="flex-1 font-pp-sans text-[14px] text-text">
-                      {`Environment: ${appEnvironmentLabel(ACTIVE_APP_ENVIRONMENT)}`}
+                      {`Environment: ${appEnvironmentLabel(ACTIVE_APP_ENVIRONMENT, STAGING_MAINNET_OPT_IN)}`}
                     </Text>
                     <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
                   </Pressable>

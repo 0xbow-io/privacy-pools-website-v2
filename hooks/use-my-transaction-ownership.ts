@@ -10,11 +10,12 @@ import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import { Platform } from 'react-native';
 import { useMultiChainWallet } from '@/hooks/use-multi-chain-wallet';
 import { usePoolSession } from '@/hooks/use-pool-session';
+import { useChainRouter } from '@/hooks/use-chain-router';
 import { useNotes } from '@/hooks/use-notes';
 import { getChainConfig, supportedChainIds } from '@/config/chains';
 import { loadStoredAccountExport } from '@/components/sdk-provider';
 import { usePools, type PoolsData, type Transaction } from '@/components/pools-provider';
-import { noteIdentitySets, depositMatchesMyNotes, normalizeCommitment } from '@/services/deposit-ownership';
+import { noteIdentitySets, depositMatchesMyNotes, depositMineByAddress, normalizeCommitment } from '@/services/deposit-ownership';
 import { mergeNotesByCommitment } from '@/services/note-sets';
 import { useLiveNotesChainId } from '@/hooks/use-live-notes-chain-id';
 import {
@@ -28,18 +29,14 @@ import { isHeldForSpendClassification, isInternalSpendRow, isOwnSwapChangeRow } 
 
 export function useMyTransactionOwnership() {
   const { notes } = useNotes();
-  // Chain-aware connection: wagmi's address is empty when a Sui wallet drives
-  // the session.
   const { address: connectedAddress } = useMultiChainWallet();
-  // The identity whose STORED note export is read. Balances use exactly this
-  // precedence; a key session has no wallet address (Pat, 2026-09-01).
-  const { sessionAddress, identityMode } = usePoolSession();
-  const exportIdentity = sessionAddress ?? connectedAddress;
-  // The identity a DEPOSIT row is matched against when note-matching does not
-  // resolve it. BRANCHED on identityMode, not `wallet ?? session`: a key
-  // session can have a funding wallet connected at a DIFFERENT address, and
-  // that payer must not claim the key account's rows, nor lend its own. The
-  // non-key branch keeps the wallet address, so Sui is untouched.
+  const { isEvm } = useChainRouter();
+  const evmSession = usePoolSession();
+  // A connected EVM session can remain mounted while another chain's wallet is active.
+  const sessionAddress = isEvm ? evmSession.sessionAddress : undefined;
+  const identityMode = isEvm ? evmSession.identityMode : 'wallet';
+  const exportIdentity = isEvm ? sessionAddress ?? connectedAddress : undefined;
+  // In key mode a connected wallet is the payer, not the account being viewed.
   const ownAddress = identityMode === 'key' ? (sessionAddress ?? connectedAddress) : connectedAddress;
 
   // My notes on EVERY chain, not just the live session's: a cross-chain shield
@@ -130,12 +127,13 @@ export function useMyTransactionOwnership() {
       // Claimed by one of my notes (tx hash OR label, any chain): this is
       // what makes a LiFi-executed cross-chain shield mine.
       if (depositMatchesMyNotes({ txHash: tx.txHash ?? null, label: tx.label ?? null, commitment: tx.ownCommitment, tokenAddress: tx.tokenAddress }, ownedIdentity)) return true;
-      const hash = tx.txHash?.toLowerCase();
-      if (hash && outgoingDepositTxHashes.has(hash)) return false;
-      if (hash && (depositOwnership.notMine.has(hash) || depositOwnership.pending.has(hash))) return false;
-      return !!ownAddress
-        && !!tx.fullAddress
-        && tx.fullAddress.toLowerCase() === ownAddress.toLowerCase();
+      // A deposit made for someone else (depositFor, or stamped outgoing) is the
+      // recipient's money: never mine by the depositor address.
+      return depositMineByAddress(tx, ownAddress, {
+        outgoing: outgoingDepositTxHashes,
+        notMine: depositOwnership.notMine,
+        pending: depositOwnership.pending,
+      });
     },
     [ownAddress, ownedIdentity, outgoingDepositTxHashes, depositOwnership],
   );
@@ -167,7 +165,8 @@ export function useMyTransactionOwnership() {
     (tx: Transaction) =>
       tx.type === 'Deposit'
       && !!tx.txHash
-      && (outgoingDepositTxHashes.has(tx.txHash.toLowerCase()) || depositOwnership.notMine.has(tx.txHash.toLowerCase())),
+      // A Stellar deposit-for row is built from this device's own record.
+      && (!!tx.depositFor || outgoingDepositTxHashes.has(tx.txHash.toLowerCase()) || depositOwnership.notMine.has(tx.txHash.toLowerCase())),
     [outgoingDepositTxHashes, depositOwnership],
   );
   /**
