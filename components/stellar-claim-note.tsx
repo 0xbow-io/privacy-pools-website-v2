@@ -24,7 +24,7 @@ import { useStellarSession } from '@/hooks/use-stellar-session';
 import { useStellarTransferFeeEstimate } from '@/hooks/use-stellar-fee-estimate';
 import { useTabCloseGuard } from '@/hooks/use-tab-close-guard';
 import { decodeStellarClaim, stellarClaimTotal } from '@/services/stellar/stellar-claim';
-import { describeStellarStage, stellarErrorMessage, stellarActionError } from '@/services/stellar/stellar-copy';
+import { describeStellarStage, stellarActionError } from '@/services/stellar/stellar-copy';
 
 function short(value: string): string {
   return value.length <= 12 ? value : `${value.slice(0, 6)}…${value.slice(-6)}`;

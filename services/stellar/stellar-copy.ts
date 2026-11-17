@@ -7,18 +7,7 @@
  */
 import { StellarRegistrationCancelledError } from './stellar-registration-prompt';
 import type { StellarFlowStage } from '@/services/stellar/stellar-account';
-import { STELLAR_WALLET_NAMES, type StellarWalletKind } from '@/services/stellar/stellar-wallet-choice';
 import { metaMaskNetworkMismatchMessage } from '@/services/stellar/metamask-stellar';
-
-// The wallet the copy names, set by the wallet provider on connect. Freighter until told otherwise.
-let walletName: string = STELLAR_WALLET_NAMES.freighter;
-export function setStellarCopyWallet(kind: StellarWalletKind): void {
-  walletName = STELLAR_WALLET_NAMES[kind];
-}
-/** The connected wallet's name, for copy that is built outside this module. */
-export function stellarWalletName(): string {
-  return walletName;
-}
 
 export function describeStellarStage(stage: StellarFlowStage): string {
   switch (stage) {
@@ -76,7 +65,7 @@ export function stellarErrorMessage(raw: string): string {
     return `The network rejected this transaction (error #${contract[1]}). Nothing was sent. Sync and try again.`;
   }
   for (const [pattern, message] of RULES) {
-    if (pattern.test(raw)) return message.replace('{wallet}', walletName);
+    if (pattern.test(raw)) return message;
   }
   // Soroban errors can carry a whole XDR blob; keep the head only.
   return raw.length > 240 ? `${raw.slice(0, 240)}…` : raw;

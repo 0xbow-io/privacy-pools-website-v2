@@ -7,9 +7,9 @@
  * ppv2_stellar_wallet), and follows the wallet's
  * own account and network switches (services/stellar/varial-watch.ts, metamask-stellar.ts). It exposes the account as a
  * `StellarWalletProvider`, the bare-value signer contract the Stellar SDK's
- * `FreighterWalletInteractor` signs through (network check included).
+ * wallet interactor signs through (network check included).
  *
- * Local development only: `EXPO_PUBLIC_STELLAR_DEV_SECRET` swaps Freighter for
+ * Local development only: `EXPO_PUBLIC_STELLAR_DEV_SECRET` swaps Varial for
  * a testnet burner keypair, so flows can be driven in a browser without the
  * extension. It is refused on any non-local host and must never hold a key
  * with real value (a public env var is inlined into the bundle).
@@ -27,7 +27,6 @@ import {
   writeStellarWalletKind,
   type StellarWalletKind,
 } from '@/services/stellar/stellar-wallet-choice';
-import { setStellarCopyWallet } from '@/services/stellar/stellar-copy';
 
 type VarialApi = typeof import('@stellar/varial-sdk');
 
@@ -300,7 +299,6 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
     const passphrase = net.error ? null : net.networkPassphrase;
     setWalletKind('metamask');
     connectedKindRef.current = 'metamask';
-    setStellarCopyWallet('metamask');
     adopt({ address: connectedAddress, passphrase, signer: metaMaskSigner(adapter) });
     if (passphrase !== null && passphrase !== STELLAR_TESTNET_NETWORK.networkPassphrase) {
       noticeRef.current = metaMaskNetworkMismatchMessage();
@@ -362,7 +360,6 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
       if (!active()) return null;
       setWalletKind('freighter');
       connectedKindRef.current = 'freighter';
-      setStellarCopyWallet('freighter');
       adopt({ address: access.address, passphrase, signer: varialSigner(api) });
       writeFlag(true);
       writeStellarWalletKind('freighter');
@@ -389,11 +386,14 @@ export function StellarWalletProvider({ children }: { children: React.ReactNode 
       const remembered = isDevBurner ? 'freighter' : readStellarWalletKind();
       if (!isDevBurner) {
         // Local extension probe, so the picker can offer a MetaMask row. Never prompts.
-        const metaMask = await isMetaMaskInstalled();
-        if (!cancelled) setMetaMaskAvailable(metaMask);
+        // Not awaited: without MetaMask it only answers after a 2 s EIP-6963 timeout,
+        // and Varial's probe and reconnect must not wait for that.
+        const metaMaskProbe = isMetaMaskInstalled();
+        void metaMaskProbe.then((metaMask) => { if (!cancelled) setMetaMaskAvailable(metaMask); });
         if (remembered === 'metamask') {
+          const metaMask = await metaMaskProbe;
           if (!cancelled && generation === generationRef.current && metaMask && readFlag()) await connectWith(false, 'metamask');
-          // Freighter is still offered in the picker: probe it, but never connect it.
+          // Varial is still offered in the picker: probe it, but never connect it.
           try {
             const installed = await isVarialInstalled(await loadVarial());
             if (!cancelled) setFreighterAvailable(installed);

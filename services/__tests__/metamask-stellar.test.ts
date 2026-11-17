@@ -15,7 +15,7 @@ import {
   STELLAR_WALLET_KIND_KEY,
   writeStellarWalletKind,
 } from '@/services/stellar/stellar-wallet-choice';
-import { setStellarCopyWallet, stellarErrorMessage, describeStellarStage, stellarUnlockErrorTitle } from '@/services/stellar/stellar-copy';
+import { stellarErrorMessage, describeStellarStage, stellarUnlockErrorTitle } from '@/services/stellar/stellar-copy';
 
 const A = `G${'A'.repeat(55)}`;
 const B = `G${'B'.repeat(55)}`;
@@ -165,17 +165,12 @@ describe('wallet-neutral flow copy and MetaMask-specific network guidance', () =
     expect(stellarErrorMessage('Freighter network mismatch')).toBe('Your wallet is on another network. Switch it to Testnet and try again.');
   });
 
-  test('MetaMask retains neutral flow copy and explains the mainnet-only limitation', () => {
-    setStellarCopyWallet('metamask');
-    try {
-      expect(describeStellarStage('signing')).toBe('Submitting (approve in your wallet)...');
-      expect(stellarUnlockErrorTitle(new Error('User rejected'))).toBe('Sign-in cancelled in your wallet.');
-      expect(stellarErrorMessage('Unknown network passphrase: Test SDF Network ; September 2015')).toBe(
-        'MetaMask supports Stellar mainnet only, this app is on Stellar Testnet.',
-      );
-      expect(stellarErrorMessage(metaMaskNetworkMismatchMessage())).toBe(metaMaskNetworkMismatchMessage());
-    } finally {
-      setStellarCopyWallet('freighter');
-    }
+  test('MetaMask errors keep neutral flow copy and explain the mainnet-only limitation', () => {
+    expect(describeStellarStage('signing')).toBe('Submitting (approve in your wallet)...');
+    expect(stellarUnlockErrorTitle(new Error('User rejected'))).toBe('Sign-in cancelled in your wallet.');
+    expect(stellarErrorMessage('Unknown network passphrase: Test SDF Network ; September 2015')).toBe(
+      'MetaMask supports Stellar mainnet only, this app is on Stellar Testnet.',
+    );
+    expect(stellarErrorMessage(metaMaskNetworkMismatchMessage())).toBe(metaMaskNetworkMismatchMessage());
   });
 });

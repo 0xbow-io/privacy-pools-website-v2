@@ -13,7 +13,7 @@ function deferred<T>() {
   const promise = new Promise<T>((ok) => { resolve = ok; });
   return { promise, resolve };
 }
-function fixture(metaMask = false) {
+function fixture(metaMask: boolean | Promise<boolean> = false) {
   const state: Record<string, unknown> = {};
   const effects: (() => void | (() => void))[] = [];
   let flag = false;
@@ -38,8 +38,8 @@ function fixture(metaMask = false) {
     DEV_SECRET: '', isLocalHost: () => false, Platform: { OS: 'web' },
     STELLAR_TESTNET_NETWORK: { networkPassphrase: 'testnet' }, WATCH_INTERVAL_MS: 3000,
     readStellarWalletKind: () => 'freighter', writeStellarWalletKind: () => {},
-    STELLAR_WALLET_NAMES: { freighter: 'Varial', metamask: 'MetaMask' }, setStellarCopyWallet: () => {},
-    isMetaMaskInstalled: async () => metaMask,
+    STELLAR_WALLET_NAMES: { freighter: 'Varial', metamask: 'MetaMask' },
+    isMetaMaskInstalled: () => Promise.resolve(metaMask),
     getMetaMaskAdapter: async () => ({ ...api, getNetwork: api.getNetworkDetails }),
     metaMaskNetworkMismatchMessage: () => 'MetaMask mainnet only', metaMaskSigner: () => ({}), watchMetaMask: () => ({ stop() {} }),
     loadVarial: async () => api,
@@ -64,6 +64,11 @@ describe('Stellar provider lifecycle', () => {
     const f = fixture(); f.setFlag(); f.effects.forEach((effect) => effect()); await flush();
     expect(f.requests()).toBe(0); expect(f.passiveReads()).toBe(1);
     expect(f.state.status).toBe('connected');
+  });
+  test('a slow MetaMask probe does not hold up the Varial reconnect', async () => {
+    // Without MetaMask the EIP-6963 probe only answers after a 2 s timeout.
+    const f = fixture(new Promise<boolean>(() => {})); f.setFlag(); f.effects.forEach((effect) => effect()); await flush();
+    expect(f.state.status).toBe('connected'); expect(f.state.availabilityChecked).toBe(true);
   });
   test('disconnect cancels a pending reply and allows a new connection', async () => {
     const f = fixture(); const pending = deferred<{ address: string }>(); f.replies.push(pending.promise);
