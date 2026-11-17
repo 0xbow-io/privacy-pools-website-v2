@@ -17,6 +17,7 @@ All notable changes to the Privacy Pools v2 web app are documented in this file.
 - Stellar testnet (staging only): switching accounts in the wallet keeps each unlocked session, so switching back needs no new signature (#79).
 - Stellar testnet (staging only): one-time link sends go through the relayer (#76), and a failed one-time send is decided by the relayer's answer, so a link is only dropped when the send really failed (#99).
 - Stellar testnet (staging only): relayed transfers and payments build their proof once (#81), the one-time receipt box shows the link, deposit steps are labelled accurately (#80), and deposit-for and claimed-link rows show correctly in activity (#69).
+- Exit works when the ASP is down: every prod chain is pinned, so it no longer waits on the ASP for the entrypoint (#100).
 - Swap converts a typed coin amount to shares before preparing it (#87).
 - Entered yield payout amounts are covered and the prepared shares are verified (#92).
 - Paged event snapshots are followed to the last page (#96).
