@@ -17,7 +17,7 @@ type Props = {
   assetStats?: AssetStatistics | null;
   tvlUsd: string;
   tvlToken: string;
-  fundsAccepted: string;
+  totalDeposited: string;
   depositCount: number;
   avgDepositUsd: number;
   withdrawalCount: number;
@@ -39,7 +39,7 @@ export function PoolPageStatsCard({
   statistics,
   tvlUsd,
   tvlToken,
-  fundsAccepted,
+  totalDeposited,
   depositCount,
   avgDepositUsd,
   withdrawalCount,
@@ -55,7 +55,7 @@ export function PoolPageStatsCard({
 
   const items: StatItem[] = [
     { label: 'Pool TVL', value: tvlUsd, sub: tvlToken },
-    { label: 'Total funds accepted', value: fundsAccepted },
+    { label: 'Total deposited', value: totalDeposited },
     {
       label: 'Deposits',
       value: (scoped?.totalDepositsCount ?? (statistics ? statistics.allTime.totalDepositsCount : depositCount)).toLocaleString('en-US'),
