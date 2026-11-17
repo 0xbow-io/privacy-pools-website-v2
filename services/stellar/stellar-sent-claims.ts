@@ -93,6 +93,23 @@ export function setSentClaimTx(storage: StorageLike | null, key: string, id: str
 }
 
 /**
+ * Drops a claim whose transfer is known not to have been sent (refused before the relayer sent it).
+ * A claim with a tx hash is never removed. Best effort: a copy left behind matches no transfer, since
+ * its notes were never created.
+ */
+export function removeSentClaim(storage: StorageLike | null, key: string, id: string): void {
+  if (!storage) return;
+  try {
+    const all = readSentClaimsStrict(storage, key);
+    if (all === null) return;
+    const next = all.filter((c) => c.id !== id || c.txHash);
+    if (next.length !== all.length) storage.setItem(key, JSON.stringify(next));
+  } catch {
+    // Left in place: findSentClaim never matches it to a transfer.
+  }
+}
+
+/**
  * The claim a sent transfer made: by tx hash, or (for one whose confirmation
  * was never recorded) by a recipient note among the transfer's outputs.
  */
