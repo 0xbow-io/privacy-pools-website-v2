@@ -1424,7 +1424,8 @@ class StellarAccount {
    * from the connected Freighter wallet into the request's first note slot,
    * tagged and encrypted for the request (services/stellar/stellar-request-deposit.ts).
    * The requester finds it on their next sync, as with a private payment. No
-   * note is left here and nothing is registered for the payer.
+   * note is left here. The payer's device records the deposit (DEV-501) so it
+ * shows in their activity, and nothing else is registered for the payer.
    */
   depositForPaymentRequest(params: {
     request: StellarSdkPaymentRequestPayload;
@@ -1460,6 +1461,14 @@ class StellarAccount {
       assertStellarRequestLive(params.request);
       onStage?.('signing');
       const { txHash, labelRegistered, pendingLabel } = await submitDeposit(session, prepared);
+      // The requester's note never reaches this account, so this device's own
+      // record is what lets the payer see the payment, as for any deposit for
+      // someone else (DEV-501, same as `deposit()` with a recipient).
+      recordDepositFor(sentClaimsStorage(), DEPOSITS_FOR_KEY, {
+        depositor: address,
+        txHash,
+        createdAt: Date.now(),
+      });
       return { txHash, labelRegistered, pendingLabel };
     });
   }
