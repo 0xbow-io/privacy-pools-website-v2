@@ -98,7 +98,7 @@ import { isLegacyPlainToken } from '@/config/pool-paths';
 import { getKnownTokenMetadata, getTokenMetadata } from '@/config/tokens';
 import { visibleSwapSources } from '@/services/pool-slug';
 import { displayTokenSymbol, isShareSymbol, swapRateText } from '@/services/share-display';
-import { costFigureText } from '@/services/token-format';
+import { costView } from '@/services/token-format';
 import { reshieldHeldBack } from '@/services/reshield-held-back';
 import { handoffRefused, resolveHandoffToken } from '@/services/swap-token-handoff';
 import { friendlySwapError, relaySwapRefusalText } from '@/services/swap-error-copy';
@@ -188,14 +188,6 @@ import type { ShareRate } from '@/services/share-rates';
 // on any other chain. Derived per-chain instead, from the same registry the
 // output list uses.
 /** The refusal for an asset that holds notes but has no swap route on this chain. */
-// A cost shown as a stablecoin figure rounds UP so it never reads low and adds back
-// to the gross with the net (DEV-822); any other asset keeps its own figure.
-function costView<V extends { amount: number; symbol: string; text: string; loading: boolean }>(view: V): V {
-  if (view.loading) return view;
-  const text = costFigureText(view.amount, view.symbol);
-  return text ? { ...view, text } : view;
-}
-
 function swapUnavailableForToken(symbol: string): string {
   return `Swapping ${displayTokenSymbol(symbol)} is not available on this network. Withdraw or send it instead.`;
 }
@@ -3428,14 +3420,14 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                         it on the DEPOSIT, so it is in the deposited token. */}
                     <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                       <Text className="text-[13px] text-text-muted font-pp-medium">Pool vetting fee on the new note</Text>
-                      <BalanceAmount view={costView(balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.vettingFee), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).decimals), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).symbol, reshieldSnapshot.destinationChainId))} className="text-[13px] text-text font-pp-regular" />
+                      <BalanceAmount view={balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.vettingFee), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).decimals), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />
                     </View>
                     {/* The gap between the swap's minimum output and the new note,
                         as its own line so the figures above add up (DEV-822). */}
                     {reshieldSnapshot.destinationChainId === chainId && reshieldHeldBackWei !== null && reshieldHeldBackWei > 0n && (
                       <View className="flex-row flex-wrap items-center justify-between gap-[8px]" testID="reshield-dust-row">
                         <Text className="text-[13px] text-text-muted font-pp-medium">Dust (goes to the relayer)</Text>
-                        <BalanceAmount view={costView(balanceDisplay(formatUnits(reshieldHeldBackWei, (reshieldSwapUnits ?? reshieldSnapshot.outputToken).decimals), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).symbol, reshieldSnapshot.destinationChainId))} className="text-[13px] text-text font-pp-regular" />
+                        <BalanceAmount view={balanceDisplay(formatUnits(reshieldHeldBackWei, (reshieldSwapUnits ?? reshieldSnapshot.outputToken).decimals), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />
                       </View>
                     )}
                     <View className="flex-row flex-wrap items-center justify-between gap-[8px]">

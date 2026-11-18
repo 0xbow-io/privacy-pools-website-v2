@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { costFigureText, formatTokenBalanceDown } from '@/services/token-format';
+import { costFigureText, costView, formatTokenBalanceDown } from '@/services/token-format';
 
 // DEV-822: Review showed a 1000.00 USDT swap with a "0.48" relayer fee and a
 // "999.51" net. The real fee was 0.485: both figures were cut DOWN, so the
@@ -27,5 +27,20 @@ describe('costFigureText', () => {
       const netCents = Math.round(Number(formatTokenBalanceDown(net, 'USDT').split(' ')[0]) * 100);
       expect(feeCents + netCents).toBe(grossCents);
     }
+  });
+});
+
+describe('costView', () => {
+  const view = { amount: 0.485, symbol: 'USDC', text: '0.48 USDC', loading: false, hint: 'Worth 0.48 USDC today. The value grows as yield accrues.' };
+  test('rounds the figure up and keeps the hint naming the same figure', () => {
+    const out = costView(view);
+    expect(out.text).toBe('0.49 USDC');
+    expect(out.hint).toBe('Worth 0.49 USDC today. The value grows as yield accrues.');
+  });
+  test('leaves a loading view, a missing hint and other assets alone', () => {
+    expect(costView({ ...view, loading: true })).toEqual({ ...view, loading: true });
+    expect(costView({ ...view, hint: null }).hint).toBeNull();
+    const eth = { amount: 0.000123, symbol: 'ETH', text: '0.000123 ETH', loading: false, hint: null };
+    expect(costView(eth)).toBe(eth);
   });
 });
