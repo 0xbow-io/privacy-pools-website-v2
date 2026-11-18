@@ -249,11 +249,18 @@ export const FIXTURE_NOTE_ETH = '0.001';
  * Fee room a payer's note keeps beyond the payment. Measured, not assumed: the
  * relayed spends of 2026-10-08 paid 0.00000125 ETH (withdrawal, runs
  * 37725929454, 37767164114, 37776352381) and 0.00000085 ETH (transfer, run
- * 37725929454). 0.0003 is over 200 times that. The 0.0006 fee of 2026-08-21
- * (sepolia.ts SPEND_ETH) was Sepolia gas at the time; a spike back to it shows
- * up as "Insufficient value", never as a silent pass.
+ * 37725929454). 0.0002 is still 160 times the larger of those. The 0.0006 fee
+ * of 2026-08-21 (sepolia.ts SPEND_ETH) was Sepolia gas at the time; a spike
+ * back to it shows up as "Insufficient value", never as a silent pass.
+ *
+ * Cut from 0.0003 on 2026-11-18: the request floor ($1.15 with 10% price
+ * headroom) must fit in the 0.001 ETH cap minus this reserve, which at 0.0003
+ * only held while ETH stayed above about $1807. ETH fell under it and every
+ * payment group refused to seed ("fixture cap cannot cover the request
+ * floor"), failing the other groups at the barrier behind it. At 0.0002 the
+ * limit is about $1581. The cap itself is MAX_ETH and stays at 0.001.
  */
-export const PAYMENT_FEE_RESERVE_ETH = '0.0003';
+export const PAYMENT_FEE_RESERVE_ETH = '0.0002';
 
 const SEPOLIA_NATIVE = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 const ASSETS_ABI = [{
