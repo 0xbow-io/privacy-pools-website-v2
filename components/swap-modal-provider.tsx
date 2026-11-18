@@ -694,7 +694,12 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
   const reshieldSwapUnits = useMemo(() => {
     if (!reshieldSnapshot) return null;
     const { outputToken, destinationChainId } = reshieldSnapshot;
-    return conversionFundingUnits(getConfiguredYieldDeploymentForAsset(destinationChainId, outputToken.address), outputToken);
+    const units = conversionFundingUnits(getConfiguredYieldDeploymentForAsset(destinationChainId, outputToken.address), outputToken);
+    // A native-mode share (ppETH) is funded in the coin but the units keep the
+    // SHARE's symbol, and balanceDisplay would price the figure through the
+    // share rate a second time. These rows are never shares, so name the coin
+    // (ppETH -> ETH); a plain symbol passes through unchanged.
+    return { decimals: units.decimals, symbol: displayTokenSymbol(units.symbol) };
   }, [reshieldSnapshot]);
   // What the deposit leaves behind between the swap's minimum and the note
   // (about 1% by the SDK's sizing), so Review adds up. Null when a share note
