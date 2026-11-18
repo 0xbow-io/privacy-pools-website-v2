@@ -3421,7 +3421,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                     </View>
                     {/* The gap between the swap's minimum output and the new note,
                         as its own line so the figures above add up (DEV-822). */}
-                    {reshieldHeldBackWei !== null && reshieldHeldBackWei > 0n && (
+                    {reshieldSnapshot.destinationChainId === chainId && reshieldHeldBackWei !== null && reshieldHeldBackWei > 0n && (
                       <View className="flex-row flex-wrap items-center justify-between gap-[8px]" testID="reshield-dust-row">
                         <Text className="text-[13px] text-text-muted font-pp-medium">Dust (goes to the relayer)</Text>
                         <BalanceAmount view={balanceDisplay(formatUnits(reshieldHeldBackWei, (reshieldSwapUnits ?? reshieldSnapshot.outputToken).decimals), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />
@@ -3432,10 +3432,14 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                       <Text className="text-[13px] text-text font-pp-regular">{slippageLabel(reshieldSnapshot.slippage)}</Text>
                     </View>
                     {/* Guide §10 asks for dust to be surfaced even same-chain: the
-                        deposit is sized below the swap's minimum output, and the
-                        remainder is swept to the relayer rather than returned. */}
+                        deposit is sized below the swap's minimum output. Same
+                        chain, the remainder is swept to the relayer rather than
+                        returned. Cross-chain, it is paid to the fallback address
+                        the user set for the far side (a public transfer). */}
                     <Text className="text-[12px] leading-[17px] text-text-muted font-pp-regular">
-                      Dust, the part of the swap output the new note does not hold, goes to the relayer.
+                      {reshieldSnapshot.destinationChainId === chainId
+                        ? 'Dust, the part of the swap output the new note does not hold, goes to the relayer.'
+                        : `Dust, the part of the swap output the new note does not hold, is paid to ${reshieldSnapshot.fallbackAddress ? `${reshieldSnapshot.fallbackAddress.slice(0, 6)}…${reshieldSnapshot.fallbackAddress.slice(-4)}` : 'your fallback address'} as a public transfer.`}
                     </Text>
                   </View>
                 )}
