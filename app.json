@@ -53,7 +53,8 @@
           "recordAudioAndroid": false
         }
       ],
-      "@0xbow/anon-rpc-rs-react-native"
+      "@0xbow/anon-rpc-rs-react-native",
+      "./plugins/with-pod-deployment-target"
     ],
     "experiments": {
       "typedRoutes": true,

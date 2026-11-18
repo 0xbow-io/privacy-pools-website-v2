@@ -7,6 +7,7 @@ import * as backoffModule from '@/services/asp-backoff';
 import * as egressFetch from '@/services/egress-fetch';
 import * as policy from '@/services/egress-policy';
 import * as entrypointsNormalize from '@/services/entrypoints-normalize';
+import * as torFetch from '@/services/tor-fetch';
 
 import {
   ASP_BACKOFF_BASE_MS,
@@ -26,9 +27,20 @@ import { LABEL_DECISIONS_INTERVAL_MS, LABEL_DECISIONS_MAX_AGE_MS } from '@/servi
 
 const ASP = 'https://asp.example';
 
+/** React Native's abort-controller 3.0.0 signal: no throwIfAborted() and no reason. */
+function nativeSignal() {
+  const target = new EventTarget();
+  const signal = Object.assign(target, { aborted: false }) as unknown as AbortSignal;
+  const abort = () => {
+    (signal as { aborted: boolean }).aborted = true;
+    target.dispatchEvent(new Event('abort'));
+  };
+  return { signal, abort };
+}
+
 // The real APIClient, with only its native config module replaced (same
 // approach as egress-policy-coverage.test.ts; config/env cannot load in bun).
-function loadApi() {
+function loadApi(tor: Pick<typeof torFetch, 'rpcTimeoutMs'> = torFetch) {
   const exports: Record<string, unknown> = {};
   const source = readFileSync(join(new URL('.', import.meta.url).pathname, '..', 'api-client.ts'), 'utf8');
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -38,6 +50,7 @@ function loadApi() {
     '@/services/egress-fetch': egressFetch,
     '@/services/asp-backoff': backoffModule,
     '@/services/entrypoints-normalize': entrypointsNormalize,
+    '@/services/tor-fetch': tor,
   };
   const require = (name: string) => {
     if (!(name in modules)) throw new Error(`Unexpected APIClient dependency: ${name}`);
@@ -188,6 +201,19 @@ describe('policedFetch: no ASP request leaves during the window', () => {
         expect(err).toBeInstanceOf(AspBackoffError);
         expect(isRateLimitError(err)).toBe(true);
       }
+      expect(sent).toBe(1);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  test('a request carrying React Native\'s AbortSignal (no throwIfAborted, no reason) is sent', async () => {
+    let sent = 0;
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => { sent += 1; return Response.json({}); }) as typeof fetch;
+    try {
+      const { signal } = nativeSignal();
+      expect((await policedFetch('asp', ASP, `${ASP}/public-key`, { signal })).status).toBe(200);
       expect(sent).toBe(1);
     } finally {
       globalThis.fetch = original;
@@ -358,6 +384,20 @@ describe('production ASP pacing and fixed-grid recovery', () => {
     await pacer.wait();
   });
 
+  test('with React Native\'s AbortSignal, an abort still rejects as an AbortError, queued or before queueing', async () => {
+    const clock = fakeClock();
+    const pacer = createAspPacer(clock);
+    await pacer.wait();
+    const queued = nativeSignal();
+    const waiting = pacer.wait(queued.signal).catch(e => e);
+    queued.abort();
+    expect((await waiting).name).toBe('AbortError');
+    const early = nativeSignal();
+    early.abort();
+    expect((await pacer.wait(early.signal).catch(e => e)).name).toBe('AbortError');
+    expect(clock.pending()).toBe(0);
+  });
+
   test('only one probe is in flight; a slow current probe succeeds and an old-window probe cannot close a new window', async () => {
     const clock = fakeClock();
     const b = createAspBackoff(clock);
@@ -462,5 +502,37 @@ describe('production ASP pacing and fixed-grid recovery', () => {
     } finally {
       transport.stopAspRequests(); b.reset(); globalThis.fetch = original;
     }
+  });
+});
+
+describe('the ASP request deadline over Tor', () => {
+  // The deadline starts when the request is made, and the page's first
+  // requests wait for the Tor client to start: over Tor it is an RPC call's.
+  async function deadlines(tor: Pick<typeof torFetch, 'rpcTimeoutMs'>): Promise<number[]> {
+    const delays: number[] = [];
+    const realSetTimeout = globalThis.setTimeout;
+    const realFetch = globalThis.fetch;
+    // Only a request deadline is recorded and held back; the pacer's own
+    // short timers run as usual.
+    globalThis.setTimeout = ((handler: () => void, ms?: number) => {
+      if ((ms ?? 0) < 45_000) return realSetTimeout(handler, ms);
+      delays.push(ms ?? 0);
+      return realSetTimeout(() => {}, 0);
+    }) as typeof setTimeout;
+    globalThis.fetch = (async () => Response.json({})) as typeof fetch;
+    try {
+      await new (loadApi(tor).APIClient)().getGlobalStatistics().catch(() => undefined);
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+      globalThis.fetch = realFetch;
+    }
+    return delays;
+  }
+
+  test('is 45 s direct and the raised RPC deadline while Tor is in force', async () => {
+    expect(await deadlines(torFetch)).toContain(45_000);
+    const raised = await deadlines({ rpcTimeoutMs: (ms) => Math.max(ms ?? 0, torFetch.TOR_RPC_TIMEOUT_MS) });
+    expect(raised).toContain(torFetch.TOR_RPC_TIMEOUT_MS);
+    expect(raised).not.toContain(45_000);
   });
 });

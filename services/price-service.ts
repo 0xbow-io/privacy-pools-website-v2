@@ -7,6 +7,7 @@ import { getTokenMetadata, getTokenMetadataBySymbol, resolveTokenMetadata } from
 import type { TokenPricesResponse } from '@/services/api-types';
 import { ALCHEMY_KEY } from '@/config/env';
 import { ScopedTtlCache } from '@/services/scoped-ttl-cache';
+import { routedFetch } from '@/services/tor-fetch';
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -80,7 +81,7 @@ async function fetchAlchemyPrices(): Promise<Record<string, number>> {
   if (!ALCHEMY_KEY) return {};
   try {
     const params = FALLBACK_SYMBOLS.map((s) => `symbols=${s}`).join('&');
-    const res = await fetch(
+    const res = await routedFetch('web')(
       `https://api.g.alchemy.com/prices/v1/${ALCHEMY_KEY}/tokens/by-symbol?${params}`,
     );
     if (!res.ok) return {};

@@ -163,6 +163,7 @@ import { recordRecipientUseForActiveOwner } from '@/services/address-book-store'
 import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
 import { useShareAmountField } from '@/hooks/use-share-amount-field';
 import { preparedAmountData } from '@/services/prepared-amount-data';
+import { useTorOperation } from '@/hooks/use-tor-operation';
 import type { ShareRate } from '@/services/share-rates';
 
 // Intent swap (withdraw-and-swap): a private note leaves the pool, swaps
@@ -461,6 +462,7 @@ async function assertReshieldCap(noteValueWei: bigint, token: { symbol: string; 
 
 export function SwapModalProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
+  useTorOperation(isOpen);
   const { colorScheme } = useTheme();
   const colors = Colors[colorScheme];
   const { width } = useWindowDimensions();

@@ -14,7 +14,7 @@ import {
   NATIVE_ASSET_ADDRESS,
 } from '@/config/environments';
 import { STAGING_CHAINS, STAGING_ENABLED } from '@/config/staging-deployments';
-import { PROD_CHAINS, PROD_RELAYER_URL } from '@/config/prod-deployments';
+import { PROD_CHAINS, PROD_RELAYER_URL, prodRelayerUrl } from '@/config/prod-deployments';
 import { VIEM_CHAIN_BY_ID } from '@/config/wagmi-chain-map';
 import { resolveEntrypointChainConfig } from '@/services/entrypoint-resolution';
 import { supportsColdStartClaim } from '@/config/cold-start';
@@ -119,6 +119,25 @@ describe('prod', () => {
       expect(d.relayerSigner?.toLowerCase()).not.toBe(d.relay.toLowerCase());
       expect(VIEM_CHAIN_BY_ID[d.chainId]).toBeDefined();
     }
+  });
+
+  test('reaches the relayer through its Tor front end while anon-rpc is in force', () => {
+    const host = (override: string | undefined, fallback: string) => new URL(override || fallback).host;
+    expect(new URL(prodRelayerUrl(false)).host).toBe(host(process.env.EXPO_PUBLIC_PROD_RELAYER_URL, 'https://v2.fastrelay.xyz'));
+    expect(new URL(prodRelayerUrl(true)).host).toBe(host(process.env.EXPO_PUBLIC_PROD_TOR_RELAYER_URL, 'https://v2-tor.fastrelay.xyz'));
+    // The suite runs with anon-rpc off; a fresh process with Nym saved has it on.
+    expect(PROD_RELAYER_URL).toBe(prodRelayerUrl(false));
+    const ROOT = join(new URL('.', import.meta.url).pathname, '..', '..');
+    const saved = JSON.stringify({ enabled: true, gatewayUrl: '', provider: 'nym' });
+    const run = spawnSync(process.execPath, ['-e', `
+      globalThis.window = { localStorage: { getItem: (key) => key === 'ppv2_tor_v1' ? ${JSON.stringify(saved)} : null } };
+      const { TOR_IN_FORCE } = await import('./config/tor.ts');
+      const { PROD_CHAINS, PROD_RELAYER_URL } = await import('./config/prod-deployments.ts');
+      console.log(JSON.stringify({ TOR_IN_FORCE, PROD_RELAYER_URL, chains: [...new Set(PROD_CHAINS.map((d) => d.relayerBaseUrl))] }));
+    `], { cwd: ROOT, encoding: 'utf8' });
+    if (run.status !== 0) throw new Error(run.stderr);
+    const underTor = JSON.parse(run.stdout.trim().split('\n').pop()!);
+    expect(underTor).toEqual({ TOR_IN_FORCE: true, PROD_RELAYER_URL: prodRelayerUrl(true), chains: [prodRelayerUrl(true)] });
   });
 
   test('RelaySwaps only where one is deployed (1 and 56), never Citrea', () => {

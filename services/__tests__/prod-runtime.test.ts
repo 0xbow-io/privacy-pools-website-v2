@@ -45,7 +45,7 @@ describeProd('prod runtime graph (child bun test, EXPO_PUBLIC_APP_ENV=prod)', ()
     expect(chains.getChainConfig(11155111)).toBeUndefined();
     expect(chains.getChainConfig(102)).toBeUndefined();
     expect(chains.getChainConfig(1)?.contracts?.poolAddress.toLowerCase()).toBe(PROD_POOL);
-    expect(chains.getChainConfig(56)?.relayerBaseUrl).toMatch(/relayer-v2-prod/);
+    expect(chains.getChainConfig(56)?.relayerBaseUrl).toMatch(/fastrelay\.xyz/);
     expect(chains.getExplorerName(56)).toBe('BscScan');
     expect(chains.mainnetChainIds.sort((a, b) => a - b)).toEqual([1, 10, 56, 4114, 4663, 8453, 42161]);
   });

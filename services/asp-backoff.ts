@@ -22,6 +22,7 @@
  * Pure module: the clock is injected. services/egress-fetch.ts owns the app's
  * single instance, since every ASP request in the app goes through it.
  */
+import { abortReason } from '@/services/abort-signal';
 import { isRateLimitError } from '@/services/rpc-log-chunking';
 import { LABEL_DECISIONS_INTERVAL_MS, LABEL_DECISIONS_MAX_AGE_MS } from '@/services/label-decision-feed';
 
@@ -112,7 +113,7 @@ export function createAspPacer(opts: {
     }
   };
   function run<T>(send: () => T | Promise<T>, signal?: AbortSignal | null): Promise<T> {
-    if (signal?.aborted) return Promise.reject(signal.reason);
+    if (signal?.aborted) return Promise.reject(abortReason(signal));
     if (queue.length >= (opts.maxPending ?? ASP_MAX_PENDING)) {
       return Promise.reject(new Error('ASP request queue is full; waiting for the next feed tick'));
     }
@@ -122,7 +123,7 @@ export function createAspPacer(opts: {
         if (index < 0) return;
         queue.splice(index, 1);
         waiter.cleanup();
-        reject(signal?.reason);
+        reject(abortReason(signal!));
         if (!queue.length) cancelTimer();
       };
       const waiter: Waiter = {
