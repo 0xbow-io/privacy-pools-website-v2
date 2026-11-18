@@ -17,6 +17,7 @@ export function usePoolSession() {
     ensureInitialized: ctx.ensureInitialized,
     getCommittedManagers: ctx.getCommittedManagers,
     getBatchWithdrawSession: ctx.getBatchWithdrawSession,
+    getCommunityWithdrawSession: ctx.getCommunityWithdrawSession,
     getSelfSubmitTransferSession: ctx.getSelfSubmitTransferSession,
     createCrossChainShieldSession: ctx.createCrossChainShieldSession,
     createReshieldCrosschainSessions: ctx.createReshieldCrosschainSessions,

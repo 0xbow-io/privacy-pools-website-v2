@@ -113,6 +113,9 @@ import { usePoolSession } from '@/hooks/use-pool-session';
 import { useSeedDerivationModal } from '@/components/seed-derivation-modal-provider';
 import { useRequireConnection } from '@/hooks/use-require-connection';
 import { useRelayerQuote, type WithdrawalQuote } from '@/hooks/use-relayer';
+import { communityRelayersFor, type CommunityRelayer } from '@/config/community-relayers';
+import { communityRelayerOffered, type RelayerRoute } from '@/services/community-relayer';
+import { torFetchIfActive } from '@/services/tor-fetch';
 import type { Transaction } from '@/components/pools-provider';
 import { resolveConfiguredEntrypoint } from '@/services/pool-entrypoint';
 import { invalidateTransactionCaches } from '@/services/cache';
@@ -385,7 +388,7 @@ const formatQuickAmount = (v: string) => {
 // DEV-233: relayer options for the withdrawal. Only one relayer exists today;
 // the disabled placeholder signals more are coming. Hardcoded for now —
 // swap for an ASP endpoint when it returns the relayer set.
-type WithdrawRelayer = { id: string; name: string; available: boolean };
+type WithdrawRelayer = { id: string; name: string; available: boolean; community?: CommunityRelayer };
 const WITHDRAW_RELAYERS: WithdrawRelayer[] = [
   { id: '0xbow', name: 'Fast Relay', available: true },
   { id: 'coming-soon', name: 'More relayers coming soon', available: false },
@@ -641,7 +644,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // ~376 KB / 4.7k leaves per withdraw-modal mount for nothing.
 
   const { notes, refetch: refetchNotes, isLoading: isLoadingNotes } = useNotes();
-  const { poolSession, noteManager, keystoreManager, isInitialized: sdkReady, isInitializing, exportAccount, ensureInitialized, getBatchWithdrawSession, isSyncing, retryAssociationSetLeaves } = usePoolSession();
+  const { poolSession, noteManager, keystoreManager, isInitialized: sdkReady, isInitializing, exportAccount, ensureInitialized, getBatchWithdrawSession, getCommunityWithdrawSession, isSyncing, retryAssociationSetLeaves } = usePoolSession();
   const { address: walletAddress } = useAccount();
   // Relayed flow: an account-key session is enough — no wallet tx is posted.
   const ensureConnected = useRequireConnection({ allowAccountKey: true });
@@ -711,7 +714,6 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // DEV-233: relayer selection (UI only for now — one relayer available).
   const [relayerSelectorOpen, setRelayerSelectorOpen] = useState(false);
   const [selectedRelayerId, setSelectedRelayerId] = useState(WITHDRAW_RELAYERS[0].id);
-  const selectedRelayer = WITHDRAW_RELAYERS.find((r) => r.id === selectedRelayerId) ?? WITHDRAW_RELAYERS[0];
   const [dollarValue, setDollarValue] = useState('$0.00');
   const [selectedTab, setSelectedTab] = useState<string | null>(null);
   // Explicit full-balance intent: set ONLY by the 100% tab (never inferred
@@ -955,6 +957,29 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     && (crossChainReceive
       ? !!receiveAsset
       : isSwapExitSelection(receiveAsset?.address, selectedTokenAddress));
+  // DEV-828: relayer rows. Fast Relay is always first and the default. A
+  // community relayer is listed only on its chain, only for the plain
+  // withdrawal and yield redemption, and never in Tor mode.
+  const relayerRoute: RelayerRoute = batchPlan ? 'batch' : (isSwapExit || swapSnapshot) ? 'swap' : 'withdraw';
+  const torActiveForRelayers = torFetchIfActive() !== null;
+  const withdrawRelayers = useMemo<WithdrawRelayer[]>(() => {
+    const community = communityRelayersFor(chainId)
+      .filter((r) => communityRelayerOffered({ relayer: r, chainId, route: relayerRoute, torActive: torActiveForRelayers }))
+      .map((r) => ({ id: r.id, name: r.name, available: true, community: r }));
+    return [WITHDRAW_RELAYERS[0], ...community, WITHDRAW_RELAYERS[1]];
+  }, [chainId, relayerRoute, torActiveForRelayers]);
+  const selectedRelayer = withdrawRelayers.find((r) => r.id === selectedRelayerId) ?? withdrawRelayers[0];
+  // Undefined = Fast Relay. A pick that is no longer offered falls back to it.
+  const communityRelayer = selectedRelayer.community;
+  const pickRelayer = useCallback((id: string) => {
+    if (id === selectedRelayerId) return;
+    setSelectedRelayerId(id);
+    // The quote on screen came from the previous relayer: back to the form,
+    // where Review asks the chosen one.
+    resetQuote();
+    setActiveFeeCommitment(null);
+    setStep((s) => (s === 'review' ? 'withdraw' : s));
+  }, [selectedRelayerId, resetQuote]);
   // Picker rows: the pool asset first (= plain withdrawal), then the chain's
   // swap output tokens. Synthesizes the pool-asset row if the output list
   // doesn't carry it, so "back to plain" is always offered.
@@ -2771,6 +2796,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         selectedTokenAddress as `0x${string}`,
         resolvedRecipient as `0x${string}`,
         gasTokenChecked || undefined,
+        communityRelayer,
       );
       // Shared-guard stale check: discard the result if any quote-defining
       // input (recipient / amount / token / receive-asset / chain / session)
@@ -2863,7 +2889,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     } finally {
       if (isCurrent()) setIsQuoteLoading(false);
     }
-  }, [altAccount, altChainId, altRecipientPattern, balanceDisplay, currentBalance.active, enteredAmountWei, fullWithdrawGroupCount, isStellar, stellarSession, altDecimals, maxSelected, reportWithdrawError, resetQuote, shownError, isSui, suiAmountError, connectedAddress, walletAddress, targetAddress, amount, selectedToken, selectedTokenAddress, chainId, gasTokenChecked, getQuote, identityMode, log, sdkReady, poolSession, ensureInitialized, openKeystoreRegistrationModal, openSeedDerivationModal, resolveColdStartClaim, batchEnabled, fullBalanceRequested, availableWei, effectiveReceiveExact, spendabilityLoading, spendabilityError, spendabilityKey, spendableCommitments, noteManager, isSwapExit, receiveAsset, crossChainReceive, receiveChainId, receiveChainName]);
+  }, [altAccount, altChainId, altRecipientPattern, balanceDisplay, currentBalance.active, enteredAmountWei, fullWithdrawGroupCount, isStellar, stellarSession, altDecimals, maxSelected, reportWithdrawError, resetQuote, shownError, isSui, suiAmountError, connectedAddress, walletAddress, targetAddress, amount, selectedToken, selectedTokenAddress, chainId, gasTokenChecked, getQuote, communityRelayer, identityMode, log, sdkReady, poolSession, ensureInitialized, openKeystoreRegistrationModal, openSeedDerivationModal, resolveColdStartClaim, batchEnabled, fullBalanceRequested, availableWei, effectiveReceiveExact, spendabilityLoading, spendabilityError, spendabilityKey, spendableCommitments, noteManager, isSwapExit, receiveAsset, crossChainReceive, receiveChainId, receiveChainName]);
 
   const handleConfirmUnlocked = useCallback(async () => {
     log('info', 'Withdraw', 'step 3/6 confirm pressed', {
@@ -3387,9 +3413,15 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       if (method && WITHDRAW_RELAY_METHOD.test(method) && isSameOperation()) { withdrawPhaseRef.current = 'confirm'; settleWatch.hear(hash); }
     });
     try {
-      const session = sdkReady && poolSession
+      // DEV-828: a picked community relayer needs a session that talks to it.
+      // No silent fallback to Fast Relay: the review showed this relayer's fee.
+      const communitySession = communityRelayer ? await getCommunityWithdrawSession(communityRelayer) : null;
+      if (communityRelayer && !communitySession) {
+        throw new Error(`${communityRelayer.name} could not be set up. Nothing was sent. Switch to Fast Relay or try again.`);
+      }
+      const session = communitySession ?? (sdkReady && poolSession
         ? poolSession
-        : await ensureInitialized();
+        : await ensureInitialized());
 
       if (!session) {
         throw new Error('SDK initialization did not complete.');
@@ -4289,7 +4321,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           withdrawPhaseRef.current = 'quote';
           setLoadingMessage('Quoting the redemption…');
           const { createRelayerInteractor } = await import('@/services/sdk-runtime');
-          const routerRelayer = createRelayerInteractor(chainId, yieldDeployment.ppRouter as `0x${string}`);
+          const routerRelayer = createRelayerInteractor(chainId, yieldDeployment.ppRouter as `0x${string}`, communityRelayer);
           let plan: YieldRedemptionPlan | null = null;
           let relayerInfo: Awaited<ReturnType<typeof routerRelayer.getRelayers>>[number] | undefined;
           try {
@@ -4301,6 +4333,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                 selectedInputTokenId as `0x${string}`,
                 resolvedRecipient as `0x${string}`,
                 gasTokenChecked || undefined,
+                communityRelayer,
               )
               : null;
             plan = shareQuote
@@ -4396,7 +4429,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         // PrivacyPoolRelay contract that wraps the call. Binding the record to
         // that contract makes relayWithdraw prove against the correct
         // processor, so the on-chain `processor == msg.sender` check passes.
-        const quoteRelayer = createRelayerInteractor(chainId, withdrawalProcessorAddress);
+        const quoteRelayer = createRelayerInteractor(chainId, withdrawalProcessorAddress, communityRelayer);
         const prepareRelayerOption = async () => {
           const relayers = await quoteRelayer.getRelayers();
           const relayerInfo = relayers.find((r) => r.status === 'active') ?? relayers[0];
@@ -4744,7 +4777,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       settleWatch.release();
       endTx();
     }
-  }, [altAccount, altChainId, altDecimals, balanceDisplay, isSwapExit, relayerFee, reportWithdrawError, shownError, stellarSession, stellarReviewInputs, stellarQuoteExpiresAt, isStellar, isSui, stellarFeeWei, suiSession, sdkReady, poolSession, noteManager, keystoreManager, notes, amount, effectiveReceiveExact, selectedToken, selectedTokenAddress, targetAddress, connectedAddress, activeFeeCommitment, batchPlan, swapSnapshot, reviewContext, getBatchWithdrawSession, withdrawalProcessorAddress, chainId, log, resetQuote, selectedPA, refetchNotes, exportAccount, preferredTransaction, preferredWithdrawNote, ensureInitialized, spendabilityKey, spendableCommitments, queryClient, beginTx, endTx, coldStartClaim, getQuote, gasTokenChecked, signTypedDataAsync, markRegistered, crossChainReceive, receiveChainId]);
+  }, [altAccount, altChainId, altDecimals, balanceDisplay, isSwapExit, relayerFee, reportWithdrawError, shownError, stellarSession, stellarReviewInputs, stellarQuoteExpiresAt, isStellar, isSui, stellarFeeWei, suiSession, sdkReady, poolSession, noteManager, keystoreManager, notes, amount, effectiveReceiveExact, selectedToken, selectedTokenAddress, targetAddress, connectedAddress, activeFeeCommitment, batchPlan, swapSnapshot, reviewContext, getBatchWithdrawSession, getCommunityWithdrawSession, communityRelayer, withdrawalProcessorAddress, chainId, log, resetQuote, selectedPA, refetchNotes, exportAccount, preferredTransaction, preferredWithdrawNote, ensureInitialized, spendabilityKey, spendableCommitments, queryClient, beginTx, endTx, coldStartClaim, getQuote, gasTokenChecked, signTypedDataAsync, markRegistered, crossChainReceive, receiveChainId]);
 
   // Same-tick double-press guard — see hooks/use-op-lock.ts.
   const handleConfirm = useMemo(() => withOpLock(handleConfirmUnlocked), [withOpLock, handleConfirmUnlocked]);
@@ -5764,7 +5797,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                   )}
                   {relayerSelectorOpen && (
                     <View className="mb-[10px] overflow-hidden rounded-[8px] border border-border-light bg-card-background">
-                      {WITHDRAW_RELAYERS.map((r) => {
+                      {withdrawRelayers.map((r) => {
                         const isSel = r.id === selectedRelayerId;
                         return (
                           <Pressable
@@ -5772,7 +5805,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                             disabled={!r.available}
                             onPress={() => {
                               if (!r.available) return;
-                              setSelectedRelayerId(r.id);
+                              pickRelayer(r.id);
                               setRelayerSelectorOpen(false);
                             }}
                             className={`flex-row items-center gap-[8px] px-[12px] py-[9px] ${r.available ? 'opacity-100' : 'opacity-50'} ${isSel ? 'bg-primary-soft' : 'bg-transparent'}`}
@@ -5787,6 +5820,12 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     </View>
                   )}
                 </View>
+
+                {communityRelayer ? (
+                  <Text className="text-[11px] text-[#737373] font-pp-regular">
+                    {communityRelayer.name} is run by a third party. If it fails, your note stays unspent.
+                  </Text>
+                ) : null}
 
                 {/* Special-case withdrawal disclosures. */}
                 {batchPlan ? (
@@ -5903,6 +5942,12 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                   </View>
                 </View>
 
+                {communityRelayer ? (
+                  <Text className="text-[11px] text-[#737373] font-pp-regular">
+                    {communityRelayer.name} is run by a third party. If it fails, your note stays unspent.
+                  </Text>
+                ) : null}
+
                 {/* Special-case withdrawal disclosures. */}
                 {batchPlan ? (
                   <Text className="text-[11px] text-[#737373] font-pp-regular">
@@ -5950,7 +5995,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                   </View>
                   {relayerSelectorOpen && (
                     <View className="mt-[6px] border border-border-light rounded-[8px] overflow-hidden bg-card-background">
-                      {WITHDRAW_RELAYERS.map((r) => {
+                      {withdrawRelayers.map((r) => {
                         const isSel = r.id === selectedRelayerId;
                         return (
                           <Pressable
@@ -5958,7 +6003,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                             disabled={!r.available}
                             onPress={() => {
                               if (!r.available) return;
-                              setSelectedRelayerId(r.id);
+                              pickRelayer(r.id);
                               setRelayerSelectorOpen(false);
                             }}
                             className={`flex-row items-center gap-[8px] px-[12px] py-[10px] ${r.available ? 'opacity-100' : 'opacity-50'} ${isSel ? 'bg-primary-soft' : 'bg-transparent'}`}

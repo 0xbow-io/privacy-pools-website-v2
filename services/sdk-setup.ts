@@ -691,8 +691,12 @@ export function createRelayerInteractor(
   // Default: the chain's TRANSFER-route processor (per-chain — staging
   // builds run several EVM chains with their own relayers).
   processorAddress: Address = getTransferProcessorAddress(chainId),
+  // DEV-828: a relayer the user picked instead of Fast Relay. The SDK posts to
+  // the URL in the relayer record it is handed, so this is all a quote and a
+  // relay need to reach it.
+  override?: { name: string; url: string; signer: Address },
 ): IRelayerInteractor {
-  const relayerBaseUrl = getChainConfig(chainId)?.relayerBaseUrl;
+  const relayerBaseUrl = override?.url ?? getChainConfig(chainId)?.relayerBaseUrl;
   if (!relayerBaseUrl) {
     throw new Error(`Missing relayerBaseUrl for chain ${chainId}`);
   }
@@ -732,7 +736,7 @@ export function createRelayerInteractor(
   return recordRelayedHashes(new RelayerInteractor({
     relayers: [
       {
-        name: 'Fast Relay',
+        name: override?.name ?? 'Fast Relay',
         url: relayerBaseUrl,
         chainId,
         chainType: 'evm',
@@ -749,7 +753,7 @@ export function createRelayerInteractor(
         // msg.sender the PrivacyPoolRelay contract. So a batch session passes
         // `processorAddress = SEPOLIA_WITHDRAWAL_PROCESSOR_ADDRESS` here; the
         // shared main session keeps the transfer default untouched.
-        address: getRelayerSignerAddress(chainId),
+        address: override?.signer ?? getRelayerSignerAddress(chainId),
         processorAddress,
       },
     ],
