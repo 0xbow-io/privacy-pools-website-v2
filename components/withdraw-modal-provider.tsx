@@ -974,6 +974,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   const pickRelayer = useCallback((id: string) => {
     if (id === selectedRelayerId) return;
     setSelectedRelayerId(id);
+    // A quote still in flight belongs to the previous pick: stop it landing.
+    quoteGuardRef.current.invalidate();
     // The quote on screen came from the previous relayer: back to the form,
     // where Review asks the chosen one.
     resetQuote();
@@ -2704,6 +2706,11 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           reportWithdrawError(plan.message);
           return;
         }
+        if (communityRelayer) {
+          // A full withdrawal that batches goes through Fast Relay only.
+          reportWithdrawError(`${communityRelayer.name} cannot do a full withdrawal in one go. Switch to Fast Relay, or withdraw less.`);
+          return;
+        }
         const relayerInteractor = createRelayerInteractor(chainId);
         const relayers = await relayerInteractor.getRelayers();
         if (!isCurrent()) return;
@@ -4326,6 +4333,10 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           let relayerInfo: Awaited<ReturnType<typeof routerRelayer.getRelayers>>[number] | undefined;
           try {
             relayerInfo = (await routerRelayer.getRelayers())[0];
+            if (communityRelayer && relayerInfo) {
+              const { assertCommunityRelayer } = await import('@/services/community-relayer-verify');
+              await assertCommunityRelayer(chainId, communityRelayer, routerRelayer as never, relayerInfo);
+            }
             const shareQuote = relayerInfo
               ? await getQuote(
                 chainId,
@@ -4434,6 +4445,10 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           const relayers = await quoteRelayer.getRelayers();
           const relayerInfo = relayers.find((r) => r.status === 'active') ?? relayers[0];
           if (!relayerInfo) throw new Error('No relayer is configured for this chain. Nothing was sent.');
+          if (communityRelayer) {
+            const { assertCommunityRelayer } = await import('@/services/community-relayer-verify');
+            await assertCommunityRelayer(chainId, communityRelayer, quoteRelayer as never, relayerInfo);
+          }
           const quote = await quoteRelayer.getWithdrawalQuote(relayerInfo, {
             asset: selectedInputTokenId,
             amount: BigInt(amountHex).toString(),
