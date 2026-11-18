@@ -230,3 +230,16 @@ export function amountInputDisplay(raw: string, focused: boolean): string {
 export function stripAmountSeparators(text: string): string {
   return text.replace(/,/g, '');
 }
+
+/**
+ * A COST shown as a stablecoin figure ("0.49 USDT"), rounded UP to the cent
+ * with no thousands separator, or null for any other asset (those keep their
+ * own formatting). Balances and nets round down; a cost rounds up so it never
+ * reads low, and then cost + net adds back to the gross to the cent: on
+ * Review a 0.485 fee read "0.48" next to a "999.51" net of 1000.00 and the
+ * lines summed to 999.99 (DEV-822).
+ */
+export function costFigureText(amount: number, symbol: string): string | null {
+  if (!isStablecoin(symbol) || !Number.isFinite(amount)) return null;
+  return `${formatCopyAmount(amount, symbol, 'up').replace(/,/g, '')} ${symbol}`;
+}
