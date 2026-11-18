@@ -234,27 +234,47 @@ export function stripAmountSeparators(text: string): string {
 /**
  * A COST shown as a stablecoin figure ("0.49 USDT"), rounded UP to the cent
  * with no thousands separator, or null for any other asset (those keep their
- * own formatting). Balances and nets round down; a cost rounds up so it never
- * reads low, and then cost + net adds back to the gross to the cent: on
- * Review a 0.485 fee read "0.48" next to a "999.51" net of 1000.00 and the
- * lines summed to 999.99 (DEV-822).
+ * own formatting). Standalone costs round up so they never read low. Review
+ * breakdowns can instead reconcile their displayed cents through costView.
  */
 export function costFigureText(amount: number, symbol: string): string | null {
   if (!isStablecoin(symbol) || !Number.isFinite(amount)) return null;
   return `${formatCopyAmount(amount, symbol, 'up').replace(/,/g, '')} ${symbol}`;
 }
 
+type CostBalanceView = { amount: number; symbol: string; text: string; loading: boolean; hint?: string | null };
+
+/** Read the cents already displayed, not a float that might round differently. */
+function displayedCents(view: CostBalanceView): bigint | null {
+  if (view.loading) return null;
+  const digits = view.text.slice(0, -(view.symbol.length + 1));
+  const match = /^(\d+)\.(\d{2})$/.exec(digits);
+  return match ? BigInt(match[1]) * 100n + BigInt(match[2]) : null;
+}
+
 /**
- * A balance view for a COST taken out of a gross (the relayer fee), with its
- * stablecoin figure rounded up by costFigureText. Only the single cost taken
- * out of a gross is rounded this way: with several costs the sum can come out a
- * cent high instead of a cent low. A view that is loading, or any asset that is
- * not a stablecoin, is returned as it is. The "Worth ... today" hint of a
- * converted share is rewritten to name the same figure.
+ * Stablecoin fees normally round up. In a breakdown whose gross equals fee +
+ * net, use the difference of the displayed cents instead, so the rows add up.
+ * This can round a fee down (even to zero); exact amounts and USD stay intact.
+ * Callers must exclude other deductions, such as cross-chain bridge costs.
+ * A conversion discrepancy larger than a cent is not a rounding adjustment.
  */
-export function costView<V extends { amount: number; symbol: string; text: string; loading: boolean; hint?: string | null }>(view: V): V {
+export function costView<V extends CostBalanceView>(view: V, breakdown?: { gross: CostBalanceView; net: CostBalanceView }): V {
   if (view.loading) return view;
-  const text = costFigureText(view.amount, view.symbol);
+  let text = costFigureText(view.amount, view.symbol);
   if (!text) return view;
+  if (breakdown && breakdown.gross.symbol === view.symbol && breakdown.net.symbol === view.symbol) {
+    const gross = displayedCents(breakdown.gross);
+    const net = displayedCents(breakdown.net);
+    const roundedUp = displayedCents({ ...view, text });
+    if (gross !== null && net !== null && roundedUp !== null) {
+      const cents = gross - net;
+      // Share redemption and the live display rate can differ: never disguise
+      // an actual price/conversion difference as a relayer fee.
+      if (cents >= 0n && cents >= roundedUp - 1n && cents <= roundedUp) {
+        text = `${cents / 100n}.${(cents % 100n).toString().padStart(2, '0')} ${view.symbol}`;
+      }
+    }
+  }
   return { ...view, text, hint: view.hint ? view.hint.split(view.text).join(text) : view.hint };
 }
