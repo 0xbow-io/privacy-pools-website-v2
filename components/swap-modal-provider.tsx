@@ -98,6 +98,7 @@ import { isLegacyPlainToken } from '@/config/pool-paths';
 import { getKnownTokenMetadata, getTokenMetadata } from '@/config/tokens';
 import { visibleSwapSources } from '@/services/pool-slug';
 import { displayTokenSymbol, isShareSymbol, swapRateText } from '@/services/share-display';
+import { reshieldHeldBack } from '@/services/reshield-held-back';
 import { handoffRefused, resolveHandoffToken } from '@/services/swap-token-handoff';
 import { friendlySwapError, relaySwapRefusalText } from '@/services/swap-error-copy';
 import { sameSymbol } from '@/services/symbol-match';
@@ -685,6 +686,37 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       gas: readings,
     });
   }, [reshieldSnapshot, chainId, feePricing]);
+  // The SWAP's output units, which for a share target are the underlying's
+  // (USDC, 6 decimals), not the share's (18). estimatedOutput, estimatedMinOutput
+  // and the vetting fee come back in these. Formatting them with the share's
+  // decimals printed "<0.01 USDC" for a ~990 USDC output (DEV-822). The new note
+  // is the one figure in SHARES, and balanceDisplay prices it to the underlying.
+  const reshieldSwapUnits = useMemo(() => {
+    if (!reshieldSnapshot) return null;
+    const { outputToken, destinationChainId } = reshieldSnapshot;
+    const units = conversionFundingUnits(getConfiguredYieldDeploymentForAsset(destinationChainId, outputToken.address), outputToken);
+    // A native-mode share (ppETH) is funded in the coin but the units keep the
+    // SHARE's symbol, and balanceDisplay would price the figure through the
+    // share rate a second time. These rows are never shares, so name the coin
+    // (ppETH -> ETH); a plain symbol passes through unchanged.
+    return { decimals: units.decimals, symbol: displayTokenSymbol(units.symbol) };
+  }, [reshieldSnapshot]);
+  // What the deposit leaves behind between the swap's minimum and the note
+  // (about 1% by the SDK's sizing), so Review adds up. Null when a share note
+  // cannot be priced yet: the row is hidden rather than guessed.
+  const reshieldHeldBackWei = useMemo(() => {
+    if (!reshieldSnapshot) return null;
+    const { estimate, outputToken, destinationChainId, display } = reshieldSnapshot;
+    const isShareTarget = !!getConfiguredYieldDeploymentForAsset(destinationChainId, outputToken.address);
+    const rate = isShareTarget ? rateFor(destinationChainId, outputToken.address) : undefined;
+    if (isShareTarget && !rate) return null;
+    return reshieldHeldBack({
+      minOutputWei: BigInt(estimate.estimatedMinOutput || '0'),
+      noteValueWei: display.newNoteValueWei,
+      vettingFeeWei: BigInt(estimate.vettingFee || '0'),
+      share: rate ? { assetsPerShare: rate.assetsPerShare, shareDecimals: rate.shareDecimals } : undefined,
+    });
+  }, [reshieldSnapshot, rateFor]);
   const [isQuoting, setIsQuoting] = useState(false);
   const [swapError, setSwapError] = useState<string | null>(null);
   const [quotedNet, setQuotedNet] = useState<InlineQuotedNet | null>(null);
@@ -3375,27 +3407,39 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                     </View>
                     <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                       <Text className="text-[13px] text-text-muted font-pp-medium">Swap output (est.)</Text>
-                      <BalanceAmount view={balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.estimatedOutput), reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />
+                      <BalanceAmount view={balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.estimatedOutput), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).decimals), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />
                     </View>
                     <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                       <Text className="text-[13px] text-text-muted font-pp-medium">Swap output (min.)</Text>
-                      <BalanceAmount view={balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.estimatedMinOutput), reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />
+                      <BalanceAmount view={balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.estimatedMinOutput), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).decimals), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />
                     </View>
                     {/* Named for the leg that charges it. The Entrypoint takes
                         it on the DEPOSIT, so it is in the deposited token. */}
                     <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                       <Text className="text-[13px] text-text-muted font-pp-medium">Pool vetting fee on the new note</Text>
-                      <BalanceAmount view={balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.vettingFee), reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />
+                      <BalanceAmount view={balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.vettingFee), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).decimals), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />
                     </View>
+                    {/* The gap between the swap's minimum output and the new note,
+                        as its own line so the figures above add up (DEV-822). */}
+                    {reshieldSnapshot.destinationChainId === chainId && reshieldHeldBackWei !== null && reshieldHeldBackWei > 0n && (
+                      <View className="flex-row flex-wrap items-center justify-between gap-[8px]" testID="reshield-dust-row">
+                        <Text className="text-[13px] text-text-muted font-pp-medium">Dust (goes to the relayer)</Text>
+                        <BalanceAmount view={balanceDisplay(formatUnits(reshieldHeldBackWei, (reshieldSwapUnits ?? reshieldSnapshot.outputToken).decimals), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />
+                      </View>
+                    )}
                     <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                       <Text className="text-[13px] text-text-muted font-pp-medium">Max slippage</Text>
                       <Text className="text-[13px] text-text font-pp-regular">{slippageLabel(reshieldSnapshot.slippage)}</Text>
                     </View>
                     {/* Guide §10 asks for dust to be surfaced even same-chain: the
-                        swap output rarely matches the proven note value exactly, and
-                        the remainder is swept to the relayer rather than returned. */}
+                        deposit is sized below the swap's minimum output. Same
+                        chain, the remainder is swept to the relayer rather than
+                        returned. Cross-chain, it is paid to the fallback address
+                        the user set for the far side (a public transfer). */}
                     <Text className="text-[12px] leading-[17px] text-text-muted font-pp-regular">
-                      Dust, the small remainder between the swap output and the redeposited note, goes to the relayer.
+                      {reshieldSnapshot.destinationChainId === chainId
+                        ? 'Dust, the part of the swap output the new note does not hold, goes to the relayer.'
+                        : `Dust, the part of the swap output the new note does not hold, is paid to ${reshieldSnapshot.fallbackAddress ? `${reshieldSnapshot.fallbackAddress.slice(0, 6)}…${reshieldSnapshot.fallbackAddress.slice(-4)}` : 'your fallback address'} as a public transfer.`}
                     </Text>
                   </View>
                 )}
