@@ -7,7 +7,7 @@ import { tokenUsd } from '@/services/fee-warning';
 // every mainnet pair comes back empty (QA 2026-09-24).
 //
 // Pure (no config imports) so it is unit-testable; the caller resolves the
-// funding tokens (config/intent-targets conversionFundingToken) and the live
+// redeemed input and destination funding tokens, and the live
 // share rate (hooks/use-share-rates).
 
 export type PreviewShareRate = { assetsPerShare: bigint; shareDecimals: number };
@@ -44,4 +44,9 @@ export function previewIsIdentity(
 /** Preview outputs are funding-token units, even when the destination is a share pool. */
 export function previewOutputUsd(amountWei: bigint, underlyingDecimals: number, underlyingUsd: number | null): number | null {
   return tokenUsd(amountWei, underlyingDecimals, underlyingUsd);
+}
+
+/** A yield exit redeems ERC-20 underlying even when its deposit router takes native coin. */
+export function redeemedSwapInputToken(address: string, deployment?: { underlying: string }): string {
+  return deployment?.underlying ?? address;
 }

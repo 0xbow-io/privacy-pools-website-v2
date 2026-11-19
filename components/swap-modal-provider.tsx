@@ -290,6 +290,7 @@ export const SWAP_SEND_CLAIM_WHY = 'They have no account to find it with, so the
 
 /** See `inlineQuotedNet`. `wei` is in the output asset's base units. */
 export type InlineQuotedNet = {
+  sourceChainId: number;
   grossWei: bigint;
   inputToken: string;
   outputToken: string;
@@ -305,8 +306,10 @@ type SwapModalContextType = {
   /** True while the flow draws inside the hub's inline host (no overlay). */
   inlineActive: boolean;
   inlineStep: 'input' | 'review' | 'executing' | 'success';
+  inlineIsQuoting: boolean;
   /** 'wallet' (payout) or 'reshield' (stays in the pool) — the hub hides its recipient row for a reshield. */
   inlineMode: 'wallet' | 'reshield';
+  inlineSlippage: number;
   /**
    * True while the flow is the Send tab's private swap-send (opened inline with a
    * recipient). The hub keeps it on the Send tab instead of the Swap tab.
@@ -315,10 +318,9 @@ type SwapModalContextType = {
   /** Registration of a recipient the hub's Swap tab pushed, for its row's hint (DEV-510). */
   inlineRecipientRegistration: 'idle' | 'checking' | 'registered' | 'unregistered' | 'unknown';
   /**
-   * The net deposit value the last Review press was refused on as below the
-   * pool minimum, for the request it priced. The hub shows it as "You receive
-   * privately" while its form still matches, so the headline and the refusal
-   * name one number. From that press's own quote: nothing is fetched for it.
+   * The sized note from Review, or the net deposit from a below-minimum
+   * refusal, bound to the request that priced it. The widget reuses this
+   * result locally; it never starts another SDK estimate for its headline.
    */
   inlineQuotedNet: InlineQuotedNet | null;
   syncInlineForm: (patch: InlineSwapFormPatch) => void;
@@ -331,7 +333,9 @@ const SwapModalContext = createContext<SwapModalContextType>({
   isOpen: false,
   inlineActive: false,
   inlineStep: 'input',
+  inlineIsQuoting: false,
   inlineMode: 'wallet',
+  inlineSlippage: 0.005,
   inlineSend: false,
   inlineRecipientRegistration: 'idle',
   inlineQuotedNet: null,
@@ -2109,6 +2113,16 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         ...(requestSendTo ? { recipient: requestSendTo } : {}),
         ...(requestSendTo && requestBlind ? { recipientBlind: true } : {}),
       });
+      // Reuse this request's sized note in the widget. No preview RPC or
+      // relayer quote is needed, and existing invalidation clears it on edits.
+      setQuotedNet({
+        sourceChainId: chainId,
+        grossWei,
+        inputToken: requestFromToken.address,
+        outputToken: requestOutputToken.address,
+        destinationChainId: requestDestination,
+        wei: display.newNoteValueWei,
+      });
       setStep('review');
       if (noticeOnSuccess) setSwapError(noticeOnSuccess);
       log('info', 'Swap', 'Reshield estimate prepared', {
@@ -2124,6 +2138,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       const netWei = depositBelowMinimumValue(err);
       if (netWei !== null) {
         setQuotedNet({
+          sourceChainId: chainId,
           grossWei,
           inputToken: requestFromToken.address,
           outputToken: requestOutputToken.address,
@@ -2791,13 +2806,15 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       isOpen,
       inlineActive: isOpen && inlineHubActive,
       inlineStep: step,
+      inlineIsQuoting: isQuoting,
       inlineMode: mode,
+      inlineSlippage: slippage,
       inlineSend: isOpen && inlineSend,
       inlineRecipientRegistration: isOpen ? swapSendRegistration : 'idle',
       inlineQuotedNet: isOpen && inlineHubActive && !inlineSend ? quotedNet : null,
       syncInlineForm,
     }),
-    [openSwapModal, closeSwapModal, isOpen, inlineHubActive, inlineSend, step, mode, swapSendRegistration, syncInlineForm, quotedNet],
+    [openSwapModal, closeSwapModal, isOpen, inlineHubActive, inlineSend, step, isQuoting, mode, slippage, swapSendRegistration, syncInlineForm, quotedNet],
   );
 
   const explorerUrl = txHash ? getExplorerTxUrl(txChainId ?? chainId, txHash) : null;

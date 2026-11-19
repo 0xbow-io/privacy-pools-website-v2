@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { CROSS_CHAIN_DENY_EXCHANGES } from '@/config/intent-swaps';
 import { deliverableAfterNativeFee, fetchLifiContractCallDeliverable, fetchLifiExactInQuote } from '@/services/lifi-quote';
 
 export type SwapPreview =
@@ -8,8 +9,6 @@ export type SwapPreview =
     status: 'ok';
     toAmount: bigint;
     toAmountMin: bigint;
-    /** A bridge fee paid on top of the token amount (USD), already netted out of `toAmount`. */
-    bridgeFeeUsd?: number;
   }
   | { status: 'none' };
 
@@ -31,31 +30,43 @@ const CROSS_CHAIN_SLIPPAGE = 0.03;
  * out their native fee: it showed ~19.50 for a 20 USDT BNB -> Ethereum
  * reshield that could only deposit ~8.5 (Pat, 2026-09-27).
  *
+ * One request per debounced preview; all fee/note adjustments stay local.
+ * Do not add preliminary, gas-purchase or resized-input quotes here: their
+ * related amounts/timing add a fingerprint before Review.
  * Privacy: the request carries amount, tokens, chains and the relay
  * processor (or wallet) address as `fromAddress`; nothing note-derived.
  */
 export function useSwapPreview(params: {
   enabled: boolean;
+  /** Stop requests during Review while retaining the current form's completed estimate. */
+  paused?: boolean;
   chainId: number;
   toChainId?: number;
   fromToken: string | null | undefined;
   toToken: string | null | undefined;
   fromAmountWei: bigint;
+  /** Stable user input identity when the quoted amount depends on public feeds. */
+  formKey?: string;
   fromAddress: string | null | undefined;
   destinationCall?: boolean;
+  slippage?: number;
 }): SwapPreview {
   const { enabled, chainId, toChainId, fromToken, toToken, fromAmountWei, fromAddress } = params;
+  const paused = !!params.paused;
   const destinationCall = !!params.destinationCall && toChainId !== undefined && toChainId !== chainId;
-  const [preview, setPreview] = useState<SwapPreview>({ status: 'idle' });
+  const requestKey = JSON.stringify([chainId, toChainId, fromToken, toToken, params.formKey ?? fromAmountWei.toString(), fromAddress, destinationCall, params.slippage]);
+  const [result, setResult] = useState<{ key: string; value: SwapPreview } | null>(null);
   const seqRef = useRef(0);
-  // bigint is not a stable dep for React's Object.is on every runtime; key on its string.
-  const amountKey = fromAmountWei.toString();
+  const ready = !!fromToken && !!toToken && !!fromAddress && fromAmountWei > 0n;
   useEffect(() => {
     const seq = ++seqRef.current;
-    if (!enabled || !fromToken || !toToken || !fromAddress || fromAmountWei <= 0n) {
-      setPreview({ status: 'idle' });
+    const setPreview = (value: SwapPreview) => setResult({ key: requestKey, value });
+    if (!enabled || paused || !fromToken || !toToken || !fromAddress || fromAmountWei <= 0n) {
       return;
     }
+    // Keep a completed quote through feed refreshes and Review/Back. A form
+    // edit changes requestKey; missing initial public data can still arrive.
+    if (result?.key === requestKey && result.value.status !== 'loading') return;
     setPreview({ status: 'loading' });
     const controller = new AbortController();
     const timer = setTimeout(() => {
@@ -63,22 +74,19 @@ export function useSwapPreview(params: {
         ? fetchLifiContractCallDeliverable({
           chainId,
           toChainId,
+          depositGasLimit: '2000000',
+          denyExchanges: CROSS_CHAIN_DENY_EXCHANGES,
           fromToken,
           toToken,
           fromAmountWei,
           fromAddress,
-          slippage: CROSS_CHAIN_SLIPPAGE,
+          slippage: params.slippage ?? CROSS_CHAIN_SLIPPAGE,
           signal: controller.signal,
         }).then((q) => {
           if (!q) return { status: 'none' };
           const toAmount = deliverableAfterNativeFee(q, fromAmountWei);
           if (toAmount === null || q.toAmount <= 0n) return { status: 'none' };
-          return {
-            status: 'ok',
-            toAmount,
-            toAmountMin: (q.deliverableMin * toAmount) / q.toAmount,
-            ...(q.nativeFeeUsd > 0 ? { bridgeFeeUsd: q.nativeFeeUsd } : {}),
-          };
+          return { status: 'ok', toAmount, toAmountMin: q.deliverableMin * toAmount / q.toAmount };
         })
         : fetchLifiExactInQuote({
           chainId,
@@ -88,6 +96,7 @@ export function useSwapPreview(params: {
           fromAmountWei,
           fromAddress,
           signal: controller.signal,
+          slippage: params.slippage,
         }).then((q) => (q ? { status: 'ok', toAmount: q.toAmount, toAmountMin: q.toAmountMin } : { status: 'none' }));
       request.then((next) => {
         if (seqRef.current === seq) setPreview(next);
@@ -96,7 +105,10 @@ export function useSwapPreview(params: {
       });
     }, 450);
     return () => { clearTimeout(timer); controller.abort(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fromAmountWei is keyed by amountKey
-  }, [enabled, chainId, toChainId, fromToken, toToken, amountKey, fromAddress, destinationCall]);
-  return preview;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- formKey intentionally freezes computed inputs until a form edit; result is the existing quote cache
+  }, [enabled, paused, ready, requestKey]);
+  // Never paint the previous pair/amount while its replacement effect starts.
+  if (!enabled || !fromToken || !toToken || !fromAddress || fromAmountWei <= 0n) return { status: 'idle' };
+  if (paused && (result?.key !== requestKey || result.value.status !== 'ok')) return { status: 'idle' };
+  return result?.key === requestKey ? result.value : { status: 'loading' };
 }

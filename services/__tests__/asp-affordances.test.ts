@@ -1,3 +1,4 @@
+import { feedSwapPreviewConfig, SWAP_PREVIEW_CONFIG_INTERVAL_MS } from '../swap-preview-config';
 import { applySharePriceFallback, sharePriceKeys } from '@/services/share-price-rule';
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -205,6 +206,8 @@ test('public price and gas price feeds register every build-supported EVM chain 
     fetchGasPrice: async (chain: number) => BigInt(chain),
     feedGasPrice: (chain: number) => `gas-price:${chain}`,
     GAS_PRICE_INTERVAL_MS: 60_000,
+    feedSwapPreviewConfig, SWAP_PREVIEW_CONFIG_INTERVAL_MS,
+    fetchSwapPreviewConfigs: (chain: number) => `swap-preview-config-fetch:${chain}`,
     BULK_REGISTRY_INTERVAL_MS: 30_000,
     refreshBulkKeystoreRegistry: async () => 'test',
     publicFeeds: { register: (feed: typeof registrations[number]) => target.push(feed), start() {} },
@@ -297,6 +300,7 @@ test('public price and gas price feeds register every build-supported EVM chain 
     // it is checked against: on the grid for every chain, so preparing a spend
     // reads copies instead of putting requests on the wire at that moment.
     for (const [key, result] of [
+      [feedSwapPreviewConfig(chain), `swap-preview-config-fetch:${chain}`],
       [`pool-leaves:${chain}`, `leaves:${chain}`],
       [`association-set:${chain}`, `root:${chain}`],
       // And the per-asset statistics, which a pool page fetched as it opened.
