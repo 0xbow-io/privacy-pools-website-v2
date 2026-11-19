@@ -1,5 +1,5 @@
 import type { Address, Hex } from '@/services/sdk-types';
-import { ActivePoolSelection } from '@/config/pool-profile';
+import { SEPOLIA_POOL_ADDRESS } from '@/config/env';
 import {
   CURRENT_RELAY,
   RELAY_PROCESSOR_BY_VAULT,
@@ -38,41 +38,16 @@ import { ACTIVE_DEPLOYMENTS_BY_CHAIN } from '@/config/environments';
 export const SEPOLIA_RELAYER_SIGNER_ADDRESS =
   '0x4Ba5fF376865b370790A56276C63e7984DCFf1f7' as Address;
 
-// Sepolia PrivacyPoolRelay contract for the current 0xbow deployment. It is the
-// on-chain msg.sender for the WITHDRAWAL route (relayer → relay(...) → transact),
-// so it is the processor the withdrawal proof's context MUST bind to. PoolVault
-// checks both `_transactParams.processor == msg.sender` (PoolVault.sol:143) and
-// `_proof.context() == keccak256(abi.encode(_transactParams, _noteData))`
-// (PoolVault.sol:146); binding the wrong address reverts the latter with
-// PoolVault_ProofContextMismatch(). Bumped alongside the 2026-05-31 pool
-// redeploy — the previous deploy's relay was
-// 0xb52f2465C165791ebf2A1e3eD6c6Ef8055f996C6.
-// V9 PrivacyPoolRelay (sepolia-deployment-v9.md). The relayer posts the
-// WITHDRAWAL route through relay() on this contract, so withdrawal proofs bind
-// to it. The TRANSFER route is NOT this contract on the current relayer build —
-// it posts directly from the signer EOA (see SEPOLIA_TRANSFER_PROCESSOR_ADDRESS
-// below and issue #217). An earlier draft of this comment claimed both routes
-// went through relay(); the live transfer revert disproved that.
-//
-// Older pools (in-app pool switcher): each era's relay still points at its
-// own pool on-chain, so proofs bind to it — but the hosted relayer service
-// only posts for the current pool, so relayed routes on an older pool may be
-// declined; ragequit is the supported exit there. Era routing is mapped per
-// vault (the ASP feed doesn't carry relayer data); unmapped pools fall back
-// to the current relay.
-// Era data + the pure URL resolver live in config/relayer-eras.ts (no
-// react-native imports → bun-testable). This module applies the active pool
-// selection to them.
-const selectedRelayEra = ActivePoolSelection
-  ? RELAY_PROCESSOR_BY_VAULT[ActivePoolSelection.poolVault.toLowerCase()]
-  : undefined;
+// Resolve from the effective vault, including explicit env overrides, so the
+// relay URL and proof processor always follow the same deployment as the pool.
+const selectedRelayEra = RELAY_PROCESSOR_BY_VAULT[SEPOLIA_POOL_ADDRESS.toLowerCase()];
 
 export const SEPOLIA_RELAY_PROCESSOR_ADDRESS = (selectedRelayEra?.relay ?? CURRENT_RELAY) as Address;
 
 // Static member read — Metro only inlines static process.env.EXPO_PUBLIC_*
 // access in the production web export (see config/sui-deployment.ts).
 export const SEPOLIA_RELAYER_BASE_URL = resolveSepoliaRelayerBaseUrl(
-  ActivePoolSelection?.poolVault,
+  SEPOLIA_POOL_ADDRESS,
   process.env.EXPO_PUBLIC_SEPOLIA_RELAYER_URL,
 );
 
