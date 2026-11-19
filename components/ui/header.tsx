@@ -1129,7 +1129,7 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
               build can't offer a chain it has no deployment for. Sui is
               debug-gated (see selectableChains above); with a single visible
               chain the selector is hidden entirely. */}
-          {showSessionControls && selectableChains.length > 1 && (
+          {(showSessionControls || ACTIVE_APP_ENVIRONMENT === 'staging') && selectableChains.length > 1 && (
           <View className="relative z-[99999]">
             <Pressable
               className="h-[28px] w-[28px] items-center justify-center rounded-pill bg-background-secondary"
