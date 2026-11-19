@@ -109,7 +109,7 @@ try {
     // Connect from deep in the story: the new app must start at the top.
     await page.getByTestId('front-scroll-hint').click();
     // The header entry point must agree with the widget after a disconnect.
-    await page.getByText('Connect Wallet', { exact: true }).first().click();
+    await page.getByTestId('header-account').click();
     await page.getByRole('button', { name: 'Landing Test Wallet Browser' }).click();
     await story.waitFor({ state: 'detached' });
     await hero.waitFor({ state: 'hidden' });
@@ -124,11 +124,11 @@ try {
     await expectSettledMotion();
     // A cancelled wallet approval may still succeed after the modal reopens.
     await page.evaluate(() => { window.holdLandingConnect = true; });
-    await page.getByText('Connect Wallet', { exact: true }).first().click();
+    await page.getByTestId('header-account').click();
     await page.getByRole('button', { name: 'Landing Test Wallet Browser' }).click();
     await page.waitForFunction(() => typeof window.releaseLandingConnect === 'function');
     await page.getByRole('button', { name: 'Close', exact: true }).click();
-    await page.getByText('Connect Wallet', { exact: true }).first().click();
+    await page.getByTestId('header-account').click();
     await page.evaluate(() => { window.holdLandingConnect = false; window.releaseLandingConnect(); });
     await page.getByRole('button', { name: 'Close', exact: true }).waitFor({ state: 'hidden' });
     await story.waitFor({ state: 'detached' });
