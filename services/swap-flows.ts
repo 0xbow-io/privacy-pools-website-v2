@@ -1459,6 +1459,7 @@ export function hexToBigInt(value: Hex | string | bigint): bigint {
 
 /** `estimateReshieldAmount` result — decimal strings, plus the note size. */
 export interface ReshieldEstimateLike {
+  feeCosts?: import('@privacy-pools-v2/sdk').SwapQuoteResult['feeCosts'];
   feeAmount: string;
   netSwapAmount: string;
   estimatedOutput: string;
