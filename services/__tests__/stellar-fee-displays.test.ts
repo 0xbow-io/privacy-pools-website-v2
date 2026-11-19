@@ -113,9 +113,11 @@ test('Review and Confirm retain the approved fee when the live feed changes', ()
 
 test('a missing or excessive cached fee does not block the signed withdrawal quote', () => {
   const env = { useMemo, isSui: true, isStellar: true, altScale: 10000000, altSymbol: 'XLM', WITHDRAW_MAX_INPUTS: 5,
-    stellarSession: { pendingTotal: 0n }, availableWei: 15000000n,
+    stellarSession: { unlocked: true, pendingTotal: 0n }, availableWei: 15000000n,
     suiWithdraw: { want: 10000000n, selection: null, activeTotal: 20000000n, maxSingle: 15000000n } };
   expect(withdraw('suiAmountError', env)).toBeNull();
+  expect(withdraw('suiAmountError', { ...env, stellarSession: { ...env.stellarSession, unlocked: false },
+    suiWithdraw: { ...env.suiWithdraw, activeTotal: 0n } })).toBeNull();
   expect(withdraw('suiAmountError', { ...env, suiWithdraw: { ...env.suiWithdraw, want: 16000000n } })).toContain('5 notes');
   expect(withdraw('suiAmountError', { ...env, suiWithdraw: { ...env.suiWithdraw, want: 21000000n } })).toContain('Insufficient');
 });
