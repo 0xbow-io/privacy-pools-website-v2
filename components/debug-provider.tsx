@@ -20,7 +20,7 @@ import {
   type DebugLogLevel,
 } from '@/services/debug-log-filter';
 import { BoundedDebugLog, buildDebugRecording, debugRecordingFileName, RECORDING_SECRET_WARNING } from '@/services/debug-recording';
-import { DEFAULT_REDACTION_LEVEL, REDACTION_LEVEL_INFO, REDACTION_LEVELS, type RedactionLevel } from '@/services/debug-redaction';
+import { DEBUG_SAFE_LEVEL, resolveDebugSafe, DEFAULT_REDACTION_LEVEL, REDACTION_LEVEL_INFO, REDACTION_LEVELS, type RedactionLevel } from '@/services/debug-redaction';
 import { HoverHint } from '@/components/ui/hover-hint';
 import { Pill } from '@/components/ui/pill';
 import { collectDebugSnapshots } from '@/services/debug-snapshots';
@@ -86,6 +86,7 @@ const MAX_LOGS = 2000;
 const HOTKEY_SEQUENCE = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
 const HOTKEY_TIMEOUT = 3000;
 const DEBUG_STORAGE_KEY = 'ppv2_debug';
+const DEBUG_SAFE_STORAGE_KEY = 'ppv2_debug_safe';
 /** DOM id of the overlay's own search box, so the clickstream can skip it. */
 const DEBUG_SEARCH_INPUT_ID = 'ppv2-debug-search';
 /**
@@ -105,7 +106,7 @@ export function isDebugModeActive(): boolean {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return false;
   try {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('debug') === '1') return true;
+    if (params.get('debug') === '1' || params.get('debugsafe') === '1') return true;
     return localStorage.getItem(DEBUG_STORAGE_KEY) === '1';
   } catch {
     return false;
@@ -114,6 +115,7 @@ export function isDebugModeActive(): boolean {
 
 export function DebugProvider({ children }: { children: ReactNode }) {
   const [isDebugEnabled, setIsDebugEnabled] = useState(false);
+  const [isSafeExport, setIsSafeExport] = useState(false);
   const [isOverlayVisible, setIsOverlayVisible] = useState(false);
   // Debug mode carried in on page load (?debug=1 or the stored flag) opens the
   // panel as a header bar so it does not cover the page; opening it on purpose
@@ -296,9 +298,11 @@ export function DebugProvider({ children }: { children: ReactNode }) {
     if (Platform.OS !== 'web') return;
 
     try {
-      const params = new URLSearchParams(window.location.search);
-      const queryEnabled = params.get('debug') === '1';
       const storedEnabled = localStorage.getItem(DEBUG_STORAGE_KEY) === '1';
+      const { safe, debug: queryEnabled } = resolveDebugSafe(window.location.search, localStorage.getItem(DEBUG_SAFE_STORAGE_KEY) === '1');
+      if (safe) localStorage.setItem(DEBUG_SAFE_STORAGE_KEY, '1');
+      else localStorage.removeItem(DEBUG_SAFE_STORAGE_KEY);
+      setIsSafeExport(safe);
       if (queryEnabled || storedEnabled) {
         // Persist query-param activation so every debug reader (this provider
         // AND the non-hook isDebugModeActive(), which the Sui chain gate uses)
@@ -324,6 +328,8 @@ export function DebugProvider({ children }: { children: ReactNode }) {
         },
         disable: () => {
           localStorage.removeItem(DEBUG_STORAGE_KEY);
+          localStorage.removeItem(DEBUG_SAFE_STORAGE_KEY);
+          setIsSafeExport(false);
           setIsDebugEnabled(false);
           setIsOverlayVisible(false);
         },
@@ -392,7 +398,7 @@ export function DebugProvider({ children }: { children: ReactNode }) {
       {isDebugEnabled && isOverlayVisible && (
         <DebugOverlay collapsed={isOverlayCollapsed} onToggleCollapsed={() => setIsOverlayCollapsed((c) => !c)} />
       )}
-      {isDebugEnabled && exportOpen && <DebugExportDialog preferred={exportOpen} onClose={() => setExportOpen(null)} />}
+      {isDebugEnabled && exportOpen && <DebugExportDialog safe={isSafeExport} preferred={exportOpen} onClose={() => setExportOpen(null)} />}
     </DebugContext.Provider>
   );
 }
@@ -511,9 +517,9 @@ function RedactionChoice({ level, selected, onSelect }: { level: RedactionLevel;
  * removed is the user's pick: all keys and transaction details by default, and
  * the spend-grade warning only when they choose Full.
  */
-function DebugExportDialog({ preferred, onClose }: { preferred: 'session' | 'recording'; onClose: () => void }) {
+function DebugExportDialog({ preferred, onClose, safe }: { preferred: 'session' | 'recording'; onClose: () => void; safe: boolean }) {
   const { getSessionLog, getLastRecording, log, isRecording } = useDebug();
-  const [level, setLevel] = useState<RedactionLevel>(DEFAULT_REDACTION_LEVEL);
+  const [level, setLevel] = useState<RedactionLevel>(safe ? DEBUG_SAFE_LEVEL : DEFAULT_REDACTION_LEVEL);
   const sessionLog = getSessionLog();
   const rec = getLastRecording();
   const meta = () => ({
@@ -543,16 +549,24 @@ function DebugExportDialog({ preferred, onClose }: { preferred: 'session' | 'rec
   return (
     <View className="absolute inset-0 z-[999999] items-center justify-center bg-[rgba(0,0,0,0.5)] px-[16px]" testID="debug-export-dialog">
       <View className="w-full max-w-[380px] gap-[10px] rounded-card border border-border-light bg-card-background p-[16px]">
-        <Text className="font-pp-bold text-[15px] text-text">Export debug log</Text>
-        <Text className="font-pp-sans text-[12px] leading-[17px] text-text-secondary">
-          Optional for support. No tx details removes keys and transaction details. Never send a note backup.
-        </Text>
-        <View className="gap-[4px]" accessibilityRole="radiogroup" testID="debug-redaction-levels">
-          <Text className="font-pp-sans-medium text-[12px] text-text-secondary">What to remove</Text>
-          {REDACTION_LEVELS.map((l) => (
-            <RedactionChoice key={l} level={l} selected={level === l} onSelect={() => setLevel(l)} />
-          ))}
-        </View>
+        <Text className="font-pp-bold text-[15px] text-text">{safe ? 'Debug export for team' : 'Export debug log'}</Text>
+        {safe ? (
+          <Text className="font-pp-sans text-[12px] leading-[17px] text-text-secondary" testID="debug-safe-note">
+            Send this file to the team so we can look into your issue. Nothing in it can be used to move your funds.
+          </Text>
+        ) : (
+          <>
+            <Text className="font-pp-sans text-[12px] leading-[17px] text-text-secondary">
+              Optional for support. No tx details removes keys and transaction details. Never send a note backup.
+            </Text>
+            <View className="gap-[4px]" accessibilityRole="radiogroup" testID="debug-redaction-levels">
+              <Text className="font-pp-sans-medium text-[12px] text-text-secondary">What to remove</Text>
+              {REDACTION_LEVELS.map((l) => (
+                <RedactionChoice key={l} level={l} selected={level === l} onSelect={() => setLevel(l)} />
+              ))}
+            </View>
+          </>
+        )}
         {level === 'full' && (
           <Text className="font-pp-sans text-[11px] leading-[15px] text-[#EF4444]">{RECORDING_SECRET_WARNING}</Text>
         )}
