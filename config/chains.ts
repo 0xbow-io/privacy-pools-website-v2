@@ -31,7 +31,7 @@ import {
 } from '@/config/stellar-deployment';
 // Per-pool-era relayer routing: each hosted relayer instance serves exactly one
 // pool, so the base URL must follow the selected vault (same era mapping as the
-// proof-processor binding). config/relayer.ts imports only pool-profile — no cycle.
+// proof-processor binding). config/relayer.ts reads config/env and the environment pins — no cycle.
 import { SEPOLIA_RELAYER_BASE_URL } from '@/config/relayer';
 // The active environment (Prod or Staging, config/app-environment.ts) decides
 // which EVM pool deployments register here and whether the build's base chain
