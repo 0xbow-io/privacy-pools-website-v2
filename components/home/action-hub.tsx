@@ -3736,7 +3736,7 @@ export function ActionHub({
                       : pageBalanceView.text))} />
               </Text>
             </Pressable>
-            {a !== 'shield' && !poolsLoading && !stellarLocked && !(a === 'withdraw' && withdrawBalanceBlocked) ? <ShareCountHint hint={pageBalanceView.hint} /> : null}
+            {a !== 'shield' && a !== 'swap' && !poolsLoading && !stellarLocked && !(a === 'withdraw' && withdrawBalanceBlocked) ? <ShareCountHint hint={pageBalanceView.hint} /> : null}
             {a === 'shield' ? (
               // The other side of the same row: what is ALREADY shielded, so
               // depositing doesn't require opening My balances to know where
@@ -4374,7 +4374,7 @@ export function ActionHub({
           {depositFlow.swapConsent ? (
             <View className="w-full gap-[10px] rounded-inner border border-border-light bg-card-background p-[14px]">
               <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
-                <Text className="font-pp-sans-medium text-[13px] text-text-secondary">You pay (est.)</Text>
+                <Text className="font-pp-sans-medium text-[13px] text-text-secondary">You pay (estimated)</Text>
                 <Text className="font-pp-sans-bold text-[13px] text-text">
                   {depositFlow.swapConsent.inputAmountText}
                   {depositFlow.swapConsent.inputAmountUSD ? ` · ${depositFlow.swapConsent.inputAmountUSD}` : ''}
@@ -4386,7 +4386,7 @@ export function ActionHub({
               </View>
               {depositFlow.swapConsent.durationText ? (
                 <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
-                  <Text className="font-pp-sans-medium text-[13px] text-text-secondary">Est. time</Text>
+                  <Text className="font-pp-sans-medium text-[13px] text-text-secondary">Estimated time</Text>
                   <Text className="font-pp-sans text-[13px] text-text">{depositFlow.swapConsent.durationText}</Text>
                 </View>
               ) : null}
