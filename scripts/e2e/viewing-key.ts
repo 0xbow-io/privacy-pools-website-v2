@@ -19,7 +19,7 @@ const aKey = envValue('E2E_ACCOUNT_A_PK') ?? envValue('DEV_PK');
 if (!aKey) throw new Error('need E2E_ACCOUNT_A_PK or DEV_PK');
 const A = accountFromKey(aKey.startsWith('0x') ? aKey : `0x${aKey}`);
 const BASE = process.env.PROBE_URL || 'http://localhost:8081';
-const KEYSTORE = (envValue('EXPO_PUBLIC_SEPOLIA_KEYSTORE_ADDRESS') ?? '0x6d264acb9c3a7a3105c29470afe2f5f1ec203c73') as `0x${string}`;
+const KEYSTORE = (envValue('EXPO_PUBLIC_SEPOLIA_KEYSTORE_ADDRESS') ?? '0x5b8883a2f8339560d8ebfeaabf93ce4e7056c4ca') as `0x${string}`;
 
 const results: { name: string; ok: boolean; detail: string }[] = [];
 let failed = false;
