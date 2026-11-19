@@ -101,7 +101,7 @@ import { Colors } from '@/constants/theme';
 import { useSuiClient } from '@mysten/dapp-kit';
 import { useChainRouter } from '@/hooks/use-chain-router';
 import { useStellarSession } from '@/hooks/use-stellar-session';
-import { STELLAR_XLM } from '@/config/stellar-deployment';
+import { STELLAR_TESTNET_CONTRACTS, STELLAR_XLM } from '@/config/stellar-deployment';
 import { encodeStellarBlindRequest, stellarBlindRequestId } from '@/services/stellar/stellar-request';
 import { describeStellarStage, stellarErrorMessage } from '@/services/stellar/stellar-copy';
 import { withStellarLinkParams } from '@/services/stellar/stellar-link';
@@ -256,7 +256,7 @@ type PaymentRequestModalContextType = {
    * created payload does not carry. On Sui `symbol`/`decimals` are the forced
    * SUI/9 pair; `address` stays the (unused) EVM selection.
    */
-  requestToken: { symbol: string; address: Hex; decimals: number; chainId: number };
+  requestToken: { symbol: string; address: string; decimals: number; chainId: number };
   /** The amount a request would be created for; the provider owns it. */
   requestAmount: string;
   /**
@@ -926,9 +926,14 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
   // create path uses, so the pill can never name an asset the payload does not
   // carry.
   const requestToken = useMemo(
-    () => ({ symbol: requestTokenSymbol, address: selectedToken.address, decimals: requestTokenDecimals, chainId: isStellar ? STELLAR_TESTNET_ID : chainId }),
+    () => ({ symbol: requestTokenSymbol, address: isStellar ? STELLAR_TESTNET_CONTRACTS.nativeAssetContractId : selectedToken.address, decimals: requestTokenDecimals, chainId: isStellar ? STELLAR_TESTNET_ID : chainId }),
     [requestTokenSymbol, selectedToken.address, requestTokenDecimals, chainId, isStellar],
   );
+  // Asset picks and header network switches must both respect the new precision.
+  useEffect(() => {
+    setAmountInput((current) => sanitizeAmountInput(current, requestTokenDecimals));
+  }, [requestTokenDecimals]);
+
   // Refs, so the sync callback identity is stable: the hub calls it from
   // render-time handlers and a changing identity would churn its publisher.
   const isOpenRef = useRef(isOpen); isOpenRef.current = isOpen;
