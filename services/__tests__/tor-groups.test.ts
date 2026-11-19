@@ -27,6 +27,15 @@ describe('anon-rpc isolation groups', () => {
     expect(torGroupFor('sentry', 'https://sentry.example/')).toBe('public:sentry');
   });
 
+  test('a body-bearing preview gets a fresh subject route outside Review', () => {
+    const request = 'https://li.quest/v1/quote/contractCalls\n{"fromAmount":"50000000","fromAddress":"0x3333333333333333333333333333333333333333"}';
+    const first = torGroupFor('lifi', request);
+    const second = torGroupFor('lifi', request);
+    expect(first.startsWith('subject:')).toBe(true);
+    expect(second.startsWith('subject:')).toBe(true);
+    expect(first).not.toBe(second);
+  });
+
   test('a request naming an account goes over that account\'s group, in hex case-insensitively', () => {
     setTorAccounts([SESSION, undefined, null, 'not-an-address', STELLAR]);
     const balanceOf = `{"method":"eth_call","params":[{"data":"0x70a08231${padded(SESSION)}"}]}`;
