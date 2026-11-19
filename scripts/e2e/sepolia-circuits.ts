@@ -1,18 +1,9 @@
 // Prove the Sepolia journeys with the keys the Sepolia verifiers actually hold.
 //
-// public/artifacts carries the ceremony keys the production verifiers were
-// deployed with (since 2026-10-20). The Sepolia pool still runs the verifiers
-// from the earlier, pre-ceremony setup, so every proof the app makes from
-// public/artifacts is rejected there (deposit: PoolVault_InvalidDepositProof,
-// 0x08bf478d) and the whole e2e-sepolia suite fails before anything is spent.
-//
-// This script runs in CI before the app starts. For every circuit it reads the
-// verifier the Sepolia pool routes to, compares its bytecode with the checked-out
-// verification key and with the pinned pre-ceremony one
-// (fixtures/sepolia-circuits.json), and swaps the pinned zkey + vkey into
-// public/artifacts only where the chain holds the pinned key. When Sepolia's
-// verifiers are redeployed with the ceremony keys the script finds nothing to
-// swap and the suite runs on the checked-out files unchanged.
+// V8 is the app default and holds the ceremony keys in public/artifacts.
+// CI uses --require-current: check that exact pairing, fail on a mismatch,
+// and never replace artifacts. The optional legacy swap mode remains available
+// for explicit pool overrides that still use the pinned development keys.
 //
 // E2E only. It edits the CI runner's working copy, nothing in the app reads the
 // fixture, and no build or env flag reaches it (sepolia-circuits.test.ts).
@@ -29,7 +20,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createPublicClient, encodeAbiParameters, http, keccak256, type Address, type Hex } from 'viem';
 import { sepolia } from 'viem/chains';
-import { DEPLOYMENTS } from '@privacy-pools-v2/sdk';
+import { SEPOLIA_DEFAULT_POOL } from '../../config/sepolia-deployment';
 import { rpcUrl } from './funding';
 
 const ROOT = new URL('../..', import.meta.url).pathname.replace(/\/$/, '');
@@ -129,10 +120,10 @@ async function cached(fixture: CircuitsFixture, pinned: Pinned, label: string): 
 
 async function main() {
   const checkOnly = process.argv.includes('--check');
+  const requireCurrent = process.argv.includes('--require-current');
   const fixture = JSON.parse(readFileSync(FIXTURE_PATH, 'utf8')) as CircuitsFixture;
-  const pool = DEPLOYMENTS[fixture.chainId]?.poolAddress as Address | undefined;
-  if (!pool) throw new Error(`the SDK has no pool deployment for chain ${fixture.chainId}`);
-  const client = createPublicClient({ chain: sepolia, transport: http(rpcUrl()) });
+  const pool = (process.env.EXPO_PUBLIC_SEPOLIA_POOL_ADDRESS?.trim() || SEPOLIA_DEFAULT_POOL.pool) as Address;
+  const client = createPublicClient({ chain: sepolia, transport: http(process.env.EXPO_PUBLIC_SEPOLIA_RPC_URL?.trim() || rpcUrl()) });
 
   const verifierOf = async (circuit: string): Promise<Address> => {
     if (circuit === 'deposit') return client.readContract({ address: pool, abi: POOL_ABI, functionName: 'depositVerifier' });
@@ -152,6 +143,12 @@ async function main() {
     const code = await client.getCode({ address: verifier });
     if (!code || code === '0x') throw new Error(`${circuit}: no code at verifier ${verifier}`);
     const checkedOut = JSON.parse(readFileSync(join(ARTIFACTS, circuit, 'groth16_vkey.json'), 'utf8')) as Vkey;
+    if (requireCurrent) {
+      const match = bytecodeHolds(checkedOut, code);
+      if (match.found !== match.total) throw new Error(`${circuit}: ${pool} does not verify with the frontend key`);
+      console.log(`${circuit}: frontend key matches ${verifier}`);
+      continue;
+    }
     const pinnedVk = JSON.parse(readFileSync(await cached(fixture, pinned.verificationKey, `${circuit} vkey`), 'utf8')) as Vkey;
     const keySet = classifyVerifier(code, checkedOut, pinnedVk);
     console.log(`${circuit.padEnd(13)} ${verifier} holds the ${keySet} key`);
