@@ -339,6 +339,8 @@ export function DebugProvider({ children }: { children: ReactNode }) {
             localStorage.setItem(DEBUG_STORAGE_KEY, '1');
           } else {
             localStorage.removeItem(DEBUG_STORAGE_KEY);
+            localStorage.removeItem(DEBUG_SAFE_STORAGE_KEY);
+            setIsSafeExport(false);
           }
           setIsDebugEnabled(next);
           setIsOverlayVisible(next);
@@ -375,7 +377,11 @@ export function DebugProvider({ children }: { children: ReactNode }) {
           const next = !prev;
           try {
             if (next) localStorage.setItem(DEBUG_STORAGE_KEY, '1');
-            else localStorage.removeItem(DEBUG_STORAGE_KEY);
+            else {
+              localStorage.removeItem(DEBUG_STORAGE_KEY);
+              localStorage.removeItem(DEBUG_SAFE_STORAGE_KEY);
+              setIsSafeExport(false);
+            }
           } catch {
             // Ignore storage errors.
           }
@@ -552,7 +558,7 @@ function DebugExportDialog({ preferred, onClose, safe }: { preferred: 'session' 
         <Text className="font-pp-bold text-[15px] text-text">{safe ? 'Debug export for team' : 'Export debug log'}</Text>
         {safe ? (
           <Text className="font-pp-sans text-[12px] leading-[17px] text-text-secondary" testID="debug-safe-note">
-            Send this file to the team so we can look into your issue. Nothing in it can be used to move your funds.
+            Send this file to the team so we can look into your issue. It shows your account activity and balances to us. It cannot be used to move your funds.
           </Text>
         ) : (
           <>

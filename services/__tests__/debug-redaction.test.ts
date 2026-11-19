@@ -475,6 +475,7 @@ describe('source guards', () => {
     const end = provider.indexOf(') : (', start);
     const copy = provider.slice(start, end).toLowerCase();
     expect(copy).toContain('send this file to the team');
+    expect(copy).toContain('shows your account activity and balances');
     expect(copy).not.toContain('key');
     expect(copy).not.toContain('—');
     expect(provider).toContain("Debug export for team");
