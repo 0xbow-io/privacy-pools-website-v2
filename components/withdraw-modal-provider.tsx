@@ -1783,6 +1783,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // "Unshielding" and "left after" figures include it.
   const stellarFeeWei = stellarFeeFor(suiWithdraw.inputCount || 1, suiWithdraw.want);
   const suiAmountError = useMemo(() => {
+    // A locked Stellar session has not decrypted its balance yet.
+    if (isStellar && !stellarSession.unlocked) return null;
     if (!isSui || suiWithdraw.want <= 0n || suiWithdraw.selection) return null;
     if (suiWithdraw.want > suiWithdraw.activeTotal) {
       // Funds that exist but are not approved yet are not "insufficient".
@@ -1795,7 +1797,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     return isStellar
       ? `One withdrawal can spend up to ${WITHDRAW_MAX_INPUTS} notes (${(Number(availableWei) / altScale).toFixed(4)} ${altSymbol}). Withdraw that first, then the rest.`
       : SUI_SINGLE_NOTE_ERROR;
-  }, [isSui, isStellar, altScale, altSymbol, suiWithdraw, stellarSession.pendingTotal, availableWei]);
+  }, [isSui, isStellar, altScale, altSymbol, suiWithdraw, stellarSession.unlocked, stellarSession.pendingTotal, availableWei]);
   // Remaining means the WHOLE approved shielded balance, not just the selected
   // inputs' change. With mixed labels (or notes beyond the five-input cap),
   // subtracting from `availableWei` hid untouched notes on Review.
@@ -2210,11 +2212,21 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
 
   const handleReviewWithdrawal = useCallback(async () => {
     withdrawPhaseRef.current = 'validate';
+    // Quote selection needs decrypted notes, so Stellar must unlock before
+    // review too. Leave the populated form in place for the next press.
+    if (isStellar && !stellarSession.unlocked) {
+      const epoch = modalEpochRef.current;
+      try { await stellarSession.unlock(); }
+      catch (error) {
+        if (modalEpochRef.current === epoch) reportWithdrawError(stellarActionError(error));
+      }
+      return;
+    }
     // Locked wallet session: the press IS the request to sign in. Prompt for the
     // one-time signature and stop here; the balance and the form's validation
     // only mean anything once the notes can be decrypted, so there is nothing to
     // review yet and nothing to continue into.
-    // EVM session only: Sui/Stellar unlock inside their own confirm paths.
+    // EVM's keys are managed separately from the Stellar session above.
     if (!isSui && !keysReadyRef.current && identityMode !== 'key') {
       log('debug', 'Withdraw', 'locked session: prompting for the keystore signature');
       openSeedDerivationModal();
