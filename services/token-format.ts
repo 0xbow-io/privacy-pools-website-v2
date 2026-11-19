@@ -230,3 +230,31 @@ export function amountInputDisplay(raw: string, focused: boolean): string {
 export function stripAmountSeparators(text: string): string {
   return text.replace(/,/g, '');
 }
+
+/**
+ * A COST shown as a stablecoin figure ("0.49 USDT"), rounded UP to the cent
+ * with no thousands separator, or null for any other asset (those keep their
+ * own formatting). Balances and nets round down; a cost rounds up so it never
+ * reads low, and then cost + net adds back to the gross to the cent: on
+ * Review a 0.485 fee read "0.48" next to a "999.51" net of 1000.00 and the
+ * lines summed to 999.99 (DEV-822).
+ */
+export function costFigureText(amount: number, symbol: string): string | null {
+  if (!isStablecoin(symbol) || !Number.isFinite(amount)) return null;
+  return `${formatCopyAmount(amount, symbol, 'up').replace(/,/g, '')} ${symbol}`;
+}
+
+/**
+ * A balance view for a COST taken out of a gross (the relayer fee), with its
+ * stablecoin figure rounded up by costFigureText. Only the single cost taken
+ * out of a gross is rounded this way: with several costs the sum can come out a
+ * cent high instead of a cent low. A view that is loading, or any asset that is
+ * not a stablecoin, is returned as it is. The "Worth ... today" hint of a
+ * converted share is rewritten to name the same figure.
+ */
+export function costView<V extends { amount: number; symbol: string; text: string; loading: boolean; hint?: string | null }>(view: V): V {
+  if (view.loading) return view;
+  const text = costFigureText(view.amount, view.symbol);
+  if (!text) return view;
+  return { ...view, text, hint: view.hint ? view.hint.split(view.text).join(text) : view.hint };
+}

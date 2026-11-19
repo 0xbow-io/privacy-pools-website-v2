@@ -107,3 +107,11 @@ describe('P2 Swap amount is the coin it names', () => {
     expect(hook).toContain('const waitingRate = !rate && underlyingEntry && isShareSymbol(symbol);');
   });
 });
+
+test('note previews use normal ETH precision rather than the four-decimal error formatter', () => {
+  const rate: ShareRate = { ...RATE, underlyingSymbol: 'WETH', underlyingDecimals: 18, assetsPerShare: parseUnits('1', 18) };
+  expect(quotedNetFigure(parseUnits('0.004589', 18), { symbol: 'ppETH', decimals: 18 }, rate))
+    .toEqual({ status: 'ready', text: '~0.00458' });
+  expect(quotedNetFigure(parseUnits('0.004589', 18), { symbol: 'ETH', decimals: 18 }, undefined))
+    .toEqual({ status: 'ready', text: '~0.00458' });
+});

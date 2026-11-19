@@ -1,3 +1,6 @@
+import { usePublicFeed } from '@/hooks/use-public-feed';
+import { feedSwapPreviewConfig, readSwapPreviewConfigs, swapPreviewConfigKey, type SwapPreviewConfigs } from '@/services/swap-preview-config';
+import { estimateReshieldFee, estimateSwapNote } from '@/services/swap-note-preview';
 import { estimatedUsdLabel } from '@/services/estimated-usd';
 import { useAssetStatistics } from '@/hooks/use-asset-statistics';
 import { DEPOSIT_FAQ_URL } from '@/config/support';
@@ -86,7 +89,7 @@ import { getUiParam, pushUiParamEntry, retireUiParamEntry, rebaseUiParamEntry, s
 import { useShareYield } from '@/hooks/use-share-yield';
 import { useYieldVaultProbeVersion } from '@/hooks/use-yield-vault-probe';
 import { displayTokenSymbol, isShareSymbol, presetChipLabel } from '@/services/share-display';
-import { amountInputDisplay, compactAmountLabel, formatCopyAmount, formatTokenBalance, groupThousands, isStablecoin, LOADING_FIGURE, stripAmountSeparators } from '@/services/token-format';
+import { amountInputDisplay, compactAmountLabel, formatCopyAmount, formatTokenBalance, groupThousands, isStablecoin, stripAmountSeparators } from '@/services/token-format';
 import { conversionFundingToken, targetAcceptsConversion } from '@/config/intent-targets';
 import { getYieldShareToken } from '@/services/share-yield';
 import { compactPhoneLayout } from '@/services/header-nav';
@@ -102,8 +105,7 @@ import { listShieldPools, defaultPoolFor, type ShieldPool } from '@/services/shi
 import { fetchLifiContractCallDeliverable } from '@/services/lifi-quote';
 import { useSwapPreview } from '@/hooks/use-swap-preview';
 import { useShareRates, useShareNameText } from '@/hooks/use-share-rates';
-import { previewInputAmount, previewIsIdentity, previewOutputUsd } from '@/services/swap-preview-input';
-import { formatSwapExitEstimate } from '@/services/swap-exit-estimate';
+import { previewInputAmount, previewIsIdentity, previewOutputUsd, redeemedSwapInputToken } from '@/services/swap-preview-input';
 import { sizeConvertingDeposit } from '@/services/cross-pay-sizing';
 import { useTxActivity } from '@/components/tx-activity-provider';
 import { INLINE_OP_HOST_ID } from '@/components/inline-op-portal';
@@ -250,7 +252,7 @@ export function ActionHub({
   const outCard = tight ? 'gap-[6px] px-[16px] py-[12px]' : 'gap-[12px] px-[16px] py-[20px]';
   const { openWithdrawModal, closeWithdrawModal, inlineActive: withdrawInline, isOpen: withdrawIsOpen, inlineStep: withdrawStep, syncInlineAmount: syncWithdrawAmount, inlineAmount: withdrawAmount, inlineToken: withdrawToken, syncInlineToken: syncWithdrawToken, spendabilityLoading: withdrawSpendabilityLoading, spendabilityError: withdrawSpendabilityError, retrySpendability, getSpendableBalanceWei: getWithdrawSpendableBalanceWei, getWithdrawMaxWei } = useWithdrawModal();
   const { openTransferModal, closeTransferModal, inlineActive: transferInline, isOpen: transferIsOpen, syncInlineAmount: syncTransferAmount, getTransferMaxWei, inlineStep: transferStep, inlineAmount: transferAmount, inlineToken: transferToken, syncInlineToken: syncTransferToken } = useTransferModal();
-  const { openSwapModal, closeSwapModal, isOpen: swapIsOpen, inlineActive: swapInline, inlineStep: swapStep, inlineSend: swapInlineSend, inlineRecipientRegistration: swapRecipientRegistration, syncInlineForm: syncSwapForm, inlineQuotedNet: swapQuotedNetRaw } = useSwapModal();
+  const { openSwapModal, closeSwapModal, isOpen: swapIsOpen, inlineActive: swapInline, inlineStep: swapStep, inlineIsQuoting: swapIsQuoting, inlineSend: swapInlineSend, inlineRecipientRegistration: swapRecipientRegistration, syncInlineForm: syncSwapForm, inlineQuotedNet: swapQuotedNetRaw, inlineSlippage: swapSlippage } = useSwapModal();
   const {
     openRequestPaymentModal, closePaymentRequestModal,
     inlineActive: requestInline, isOpen: requestIsOpen,
@@ -1035,19 +1037,32 @@ export function ActionHub({
     if (swapStep !== 'success' || swapIsOpen) return;
     setAmountFor('swap', '');
   }, [swapStep, swapIsOpen, setAmountFor]);
-  // "~ what you receive" on the Swap tab before Review: the pair's LiFi
-  // exact-in estimate on the typed amount. The binding quote (relayer fee,
-  // slippage floor) still comes at Review; the card says so.
+  // Estimate the note locally from public cached fee/config/rate inputs and
+  // the existing routed market quote. Review replaces it with SDK sizing.
+  const feePricing = useFeePricing(chainId);
   const swapAmountWei = (() => { try { return parseTokenAmount(amount || '0', tokenMeta.decimals); } catch { return 0n; } })();
   // A share has no market of its own: the swap redeems it to its underlying
   // and deposits the output back as a share. Price the preview the same way,
   // underlying to underlying, or every mainnet pair (all shares) stays "—"
   // (QA 2026-09-24).
-  const { rateFor: shareRateFor } = useShareRates();
+  const { rateFor: shareRateFor, loading: swapRatesLoading } = useShareRates();
   const swapFromAddress = getTokenMetadataBySymbol(tokenMeta.symbol, chainId)?.address ?? '';
-  const swapFromFunding = swapFromAddress ? conversionFundingToken(swapFromAddress, chainId) : '';
+  const swapFromFunding = redeemedSwapInputToken(swapFromAddress, getConfiguredYieldDeploymentForAsset(chainId, swapFromAddress));
   const swapFromIsShare = !!swapFromAddress && swapFromFunding.toLowerCase() !== swapFromAddress.toLowerCase();
-  const swapPreviewInWei = previewInputAmount(swapAmountWei, swapFromIsShare, shareRateFor(chainId, swapFromAddress));
+  const swapConfigState = usePublicFeed<SwapPreviewConfigs>(feedSwapPreviewConfig(chainId));
+  const swapConfigs = readSwapPreviewConfigs(swapConfigState);
+  const swapDestConfigState = usePublicFeed<SwapPreviewConfigs>(feedSwapPreviewConfig(swapDestChainId));
+  const swapDestConfigs = readSwapPreviewConfigs(swapDestConfigState);
+  const swapFee = estimateReshieldFee({
+    gross: swapAmountWei, gasPrice: feePricing.gasPriceOf(chainId),
+    nativeUsd: feePricing.nativeUsdOf(chainId),
+    tokenUsd: feePricing.tokenUsdOf(chainId, swapFromAddress, tokenMeta.symbol),
+    decimals: tokenMeta.decimals, shareInput: swapFromIsShare, crossChain: swapCrossChain,
+    config: swapConfigs?.[swapPreviewConfigKey(chainId, swapFromAddress)],
+  });
+  const swapNetInput = swapFee === null ? null : swapAmountWei - swapFee;
+  const swapPreviewInWei = swapNetInput === null ? null
+    : previewInputAmount(swapNetInput, swapFromIsShare, shareRateFor(chainId, swapFromAddress));
   const swapToFunding = swapOutToken ? conversionFundingToken(swapOutToken.address, swapDestChainId) : '';
   const swapOutUnits = swapOutToken
     ? swapInputUnits(swapDestChainId, swapOutToken.address, { symbol: swapOutToken.symbol, decimals: swapOutToken.decimals })
@@ -1058,15 +1073,18 @@ export function ActionHub({
     enabled: action === 'swap' && !isSui && !!swapOutToken && swapAmountWei > 0n
       && swapPreviewInWei !== null && swapPreviewInWei > 0n && !swapPreviewIdentity
       && intentSwapInputSupported(chainId, swapFromAddress),
+    paused: swapStep !== 'input' || swapIsQuoting,
     chainId,
     toChainId: swapDestChainId,
     fromToken: swapFromFunding || null,
     toToken: swapToFunding || null,
     fromAmountWei: swapPreviewInWei ?? 0n,
-    fromAddress: getSwapProcessorAddress(chainId) ?? unifiedAddress ?? null,
+    formKey: JSON.stringify([swapFromAddress, swapOutToken?.address, swapAmountWei.toString()]),
+    fromAddress: getSwapProcessorAddress(chainId) ?? null,
     // A cross-chain swap deposits on arrival: price the route that can run
     // that call, net of its bridge fee, not the cheapest plain bridge.
     destinationCall: swapCrossChain,
+    slippage: swapSlippage,
   });
   // A Review press refused below the pool minimum carries the net deposit it
   // was priced at (relayer and swap fees out). While the form still asks for
@@ -1075,33 +1093,31 @@ export function ActionHub({
   // "about 9.6391 USDT, below the pool's minimum"). From the press's own
   // quote: nothing is fetched for it.
   const swapQuotedNet = swapQuotedNetRaw && swapOutToken
+    && swapQuotedNetRaw.sourceChainId === chainId
     && swapQuotedNetRaw.grossWei === swapAmountWei
     && swapQuotedNetRaw.inputToken.toLowerCase() === swapFromAddress.toLowerCase()
     && swapQuotedNetRaw.outputToken.toLowerCase() === swapOutToken.address.toLowerCase()
     && swapQuotedNetRaw.destinationChainId === swapDestChainId
     ? swapQuotedNetRaw.wei
     : null;
-  // A share output is a share count: converted at the scheduled rate, shimmer until it lands.
-  const swapQuotedFigure = swapQuotedNet !== null && swapOutToken
-    ? quotedNetFigure(swapQuotedNet, swapOutToken, shareRateFor(swapDestChainId, swapOutToken.address))
+  const swapOutputIsShare = !!swapOutToken && swapToFunding.toLowerCase() !== swapOutToken.address.toLowerCase();
+  const swapOutputRate = swapOutToken ? shareRateFor(swapDestChainId, swapOutToken.address) : undefined;
+  const swapMinimumOutput = swapPreviewIdentity ? swapPreviewInWei : swapPreview.status === 'ok' ? swapPreview.toAmountMin : null;
+  const swapLocalNote = swapAmountWei <= 0n || !swapOutToken || swapMinimumOutput === null || (swapOutputIsShare && !swapOutputRate)
+    ? null : estimateSwapNote({
+      minimumOutput: swapMinimumOutput, crossChain: swapCrossChain, destinationChainId: swapDestChainId,
+      config: swapDestConfigs?.[swapPreviewConfigKey(swapDestChainId, swapOutToken.address)],
+      share: swapOutputIsShare ? swapOutputRate : undefined,
+    });
+  const swapNoteWei = swapQuotedNet ?? swapLocalNote;
+  const swapQuotedFigure = swapNoteWei !== null && swapOutToken
+    ? quotedNetFigure(swapNoteWei, swapOutToken, swapOutputRate)
     : null;
-  const swapQuotedLoading = swapQuotedFigure?.status === 'loading';
-  const swapPreviewText = !swapOutUnits
-    ? null
-    : swapQuotedFigure
-      ? (swapQuotedFigure.status === 'loading' ? LOADING_FIGURE : swapQuotedFigure.text)
-    : swapPreviewIdentity && swapPreviewInWei !== null && swapPreviewInWei > 0n
-      ? `~${formatSwapExitEstimate(swapPreviewInWei, swapOutUnits.decimals, swapOutUnits.symbol)}`
-      : swapPreview.status === 'ok'
-        ? `~${formatSwapExitEstimate(swapPreview.toAmount, swapOutUnits.decimals, swapOutUnits.symbol)}`
-        : null;
-  // A bridge fee charged on top of the tokens (Stargate's LayerZero fee into
-  // Ethereum runs ~$8 to $9). It is netted out of the estimate above, and named
-  // so a small swap that lands under the pool minimum is not a surprise at review.
-  const swapBridgeFeeText = swapPreview.status === 'ok' && swapPreview.bridgeFeeUsd && swapPreview.bridgeFeeUsd >= 0.5
-    ? swapPreview.bridgeFeeUsd.toFixed(2)
-    : null;
-
+  const swapQuotedLoading = swapQuotedFigure?.status === 'loading'
+    || (swapAmountWei > 0n && swapNoteWei === null
+      && (swapConfigState.status === 'empty' || swapDestConfigState.status === 'empty' || swapPreview.status === 'loading' || swapRatesLoading));
+  const swapPreviewText = !swapOutUnits ? null
+    : swapQuotedFigure?.status === 'ready' ? swapQuotedFigure.text : null;
   // A swap-send to YOUR OWN account is a private reshield: the Swap tab,
   // prefilled with the pair and the destination. The auto-open below mounts the
   // flow pinned to reshield.
@@ -2381,7 +2397,6 @@ export function ActionHub({
 
   // What shielding costs beyond the amount: the wallet's gas, and for a
   // conversion what the swap and bridge keep, priced off the feeds.
-  const feePricing = useFeePricing(chainId);
   const shieldAmountUsd = useMemo(() => {
     if (action !== 'shield' || isSui) return null;
     const amt = parseFloat(amount) || 0;
@@ -3736,7 +3751,7 @@ export function ActionHub({
                       : pageBalanceView.text))} />
               </Text>
             </Pressable>
-            {a !== 'shield' && !poolsLoading && !stellarLocked && !(a === 'withdraw' && withdrawBalanceBlocked) ? <ShareCountHint hint={pageBalanceView.hint} /> : null}
+            {a !== 'shield' && a !== 'swap' && !poolsLoading && !stellarLocked && !(a === 'withdraw' && withdrawBalanceBlocked) ? <ShareCountHint hint={pageBalanceView.hint} /> : null}
             {a === 'shield' ? (
               // The other side of the same row: what is ALREADY shielded, so
               // depositing doesn't require opening My balances to know where
@@ -4186,7 +4201,7 @@ export function ActionHub({
                   <Skeleton width={120} height={tight ? 26 : 32} radius={8} />
                 </View>
               ) : (
-                <Text className={`min-w-0 flex-1 py-[2px] font-pp-sans-bold ${outText} tracking-[-1px] text-text-muted`} numberOfLines={1} adjustsFontSizeToFit>
+                <Text testID="hub-swap-output-note" className={`min-w-0 flex-1 py-[2px] font-pp-sans-bold ${outText} tracking-[-1px] text-text-muted`} numberOfLines={1} adjustsFontSizeToFit>
                   {swapPreviewText ?? '—'}
                 </Text>
               )}
@@ -4238,31 +4253,20 @@ export function ActionHub({
             </View>
 
             {swapOutToken && swapOutUnits && swapPreviewText && (() => {
-              const output = swapQuotedNet !== null ? null : swapPreviewIdentity ? swapPreviewInWei : swapPreview.status === 'ok' ? swapPreview.toAmount : null;
+              const output = swapNoteWei === null ? null : previewInputAmount(swapNoteWei, swapOutputIsShare, swapOutputRate);
               const label = output == null ? null : estimatedUsdLabel(previewOutputUsd(output, swapOutUnits.decimals, feePricing.tokenUsdOf(swapDestChainId, swapToFunding, swapOutUnits.symbol)) ?? 0);
               return label ? <Text className="font-pp-sans text-[12px] text-text-secondary" testID="hub-swap-output-usd">{label}</Text> : null;
             })()}
             <View className="flex-row flex-wrap items-center gap-[6px]">
               {(() => {
-                // The relayer fee is only known from the relayer's quote at
-                // review (a request the press makes), so the figure above is
-                // BEFORE it, and the pool minimum is checked on what is left.
-                // Pat's QA: "~10.04 USDT" here, then "about 9.61 USDT, below
-                // the pool's minimum of 10" at review.
                 const note = swapQuotedNet !== null
                   ? 'After relayer and swap fees, from the review quote. The pool minimum applies to this amount.'
-                  : swapPreviewText
-                  ? swapBridgeFeeText
-                    ? `Estimate after a ~$${swapBridgeFeeText} bridge fee, before relayer fees. Review shows the exact amount, and the pool minimum applies to what is left.`
-                    : 'Estimate before relayer fees. Review shows the exact amount, and the pool minimum applies to what is left.'
-                  : 'Quoted at review, once the route is priced. Relayer and swap fees come out of the amount you swap, and the pool minimum applies to what is left.';
+                  : 'After estimated fees. Review refreshes the amount.';
                 // Phone web: the long note folds into a hint behind a short label.
                 return tight ? (
                   <HoverHint hint={note} wrap testID="hub-swap-quote-hint">
                     <View className="flex-row items-center gap-[4px]">
-                      <Text className="font-pp-sans text-[12.5px] text-text-secondary">{swapPreviewText
-                        ? swapQuotedNet !== null ? 'After fees, from the review quote' : 'Estimate, before relayer fees'
-                        : 'Quoted at review, after fees'}</Text>
+                      <Text className="font-pp-sans text-[12.5px] text-text-secondary">{swapQuotedNet !== null ? 'After fees, from the review quote' : 'Estimated shielded note'}</Text>
                       {/* nw-keep(data-color): glyph colour is a runtime theme token (vector-icon sink) */}
                       <Ionicons name="information-circle-outline" size={12} color={colors.textMuted} />
                     </View>
@@ -4374,7 +4378,7 @@ export function ActionHub({
           {depositFlow.swapConsent ? (
             <View className="w-full gap-[10px] rounded-inner border border-border-light bg-card-background p-[14px]">
               <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
-                <Text className="font-pp-sans-medium text-[13px] text-text-secondary">You pay (est.)</Text>
+                <Text className="font-pp-sans-medium text-[13px] text-text-secondary">You pay (estimated)</Text>
                 <Text className="font-pp-sans-bold text-[13px] text-text">
                   {depositFlow.swapConsent.inputAmountText}
                   {depositFlow.swapConsent.inputAmountUSD ? ` · ${depositFlow.swapConsent.inputAmountUSD}` : ''}
@@ -4386,7 +4390,7 @@ export function ActionHub({
               </View>
               {depositFlow.swapConsent.durationText ? (
                 <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
-                  <Text className="font-pp-sans-medium text-[13px] text-text-secondary">Est. time</Text>
+                  <Text className="font-pp-sans-medium text-[13px] text-text-secondary">Estimated time</Text>
                   <Text className="font-pp-sans text-[13px] text-text">{depositFlow.swapConsent.durationText}</Text>
                 </View>
               ) : null}

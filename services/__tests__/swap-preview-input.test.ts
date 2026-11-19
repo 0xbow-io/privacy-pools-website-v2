@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { projectOwnOutputs } from '../swap-rows';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { previewInputAmount, previewIsIdentity, previewOutputUsd } from '../swap-preview-input';
+import { previewInputAmount, previewIsIdentity, previewOutputUsd, redeemedSwapInputToken } from '../swap-preview-input';
 import { swapOutputReviewStatus } from '../funds-state';
 
 const ROOT = join(new URL('.', import.meta.url).pathname, '..', '..');
@@ -81,4 +81,12 @@ test('the hub prices preview outputs with the funding token and its units', () =
   expect(block).toContain('previewOutputUsd(output, swapOutUnits.decimals');
   expect(block).toContain('feePricing.tokenUsdOf(swapDestChainId, swapToFunding, swapOutUnits.symbol)');
   expect(block).not.toContain('balanceDisplay(');
+});
+
+test('native-mode yield input routes WETH after redemption while plain native stays native', () => {
+  const native = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+  const weth = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
+  expect(redeemedSwapInputToken('ppETH', { underlying: weth })).toBe(weth);
+  expect(redeemedSwapInputToken(native)).toBe(native);
+  expect(previewIsIdentity(redeemedSwapInputToken('ppETH', { underlying: weth }), native, 1, 1)).toBe(false);
 });
