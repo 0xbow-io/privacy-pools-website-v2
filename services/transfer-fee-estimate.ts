@@ -21,12 +21,13 @@ import type { FeedState } from '@/services/public-feed-scheduler';
 
 /**
  * `RELAY_GAS_BUDGET.shieldedTransfer` in the relayer's relay_gas_budget.ts
- * (calibrated 2026-09-25, the p90 of 185 relays). It covers ONE input and the
- * transfer's two base outputs. The relayer recalibrates it after contract or
- * circuit changes; this copy has to follow. v2-monorepo#539 raises it to 950k:
- * move this with that relayer's deploy, the prod-fee test pins the live one.
+ * (v2-monorepo#539, live 2026-11-20: mainnet one-input p90 896k). It covers ONE
+ * input and the transfer's two base outputs. The relayer recalibrates it after
+ * contract or circuit changes; this copy has to follow. At 850k a five-input
+ * consolidation was estimated at 1.29M against the live 1.39M, past the 1%
+ * allowance, so Confirm refused it (Matthew, #116 review).
  */
-export const SHIELDED_TRANSFER_GAS = 850_000n;
+export const SHIELDED_TRANSFER_GAS = 950_000n;
 
 /** `RELAY_GAS_BUDGET.extraInput` / `.extraOutput`: per note beyond the base shape. */
 export const EXTRA_INPUT_GAS = 110_000n;

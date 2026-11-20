@@ -17,22 +17,23 @@ const note = (value: bigint, label: string): ConsolidatableNote => ({
   commitment: `0x${(++seq).toString(16).padStart(64, '0')}`, label, tokenId: BNB, value: value.toString(), status: 'ACTIVE',
 });
 
-test('reproduces the relayer fee charged for a prod BNB transfer', () => {
-  // BSC at 0.05 gwei: 0.05 gwei × 850k gas + 21000 wei. The relayed transfer on
-  // prod cost 0.0000425 BNB, and Send displayed "~0.000043 BNB".
+test('prices a one-input transfer at the relayer budget', () => {
+  // BSC at 0.05 gwei: 0.05 gwei × 950k gas + 21000 wei. 950k is the
+  // shieldedTransfer budget since the v2-monorepo#539 relayer went live on
+  // 2026-11-20 (before it, 850k: prod charged 0.0000425 BNB for the same).
   const fee = estimateTransferFee(50_000_000n, native, nativeAsset);
-  expect(fee).toBe(42_500_000_021_000n);
+  expect(fee).toBe(47_500_000_021_000n);
 });
 
 test('converts the gas cost into a non-native asset at the price ratio, rounding up', () => {
-  // 1 gwei × 850k = 0.00085 ETH; at $2000/ETH that is $1.70 of 6-decimal USDC.
+  // 1 gwei × 950k = 0.00095 ETH; at $2000/ETH that is $1.90 of 6-decimal USDC.
   expect(estimateTransferFee(1_000_000_000n, { decimals: 18, usd: 2000 }, { decimals: 6, isNative: false, usd: 1 }))
-    .toBe(1_721_000n);
+    .toBe(1_921_000n);
   // An 18-decimal share worth $1.02: never below the exact figure.
   const share = estimateTransferFee(1_000_000_000n, { decimals: 18, usd: 2000 }, { decimals: 18, isNative: false, usd: 1.02 })!;
-  // $1.70 / $1.02 plus 21000 base units, with <1000 wei conversion rounding.
-  expect(share).toBeGreaterThanOrEqual(1_666_666_666_666_687_667n);
-  expect(share).toBeLessThan(1_666_666_666_666_688_667n);
+  // $1.90 / $1.02 plus 21000 base units, with <1000 wei conversion rounding.
+  expect(share).toBeGreaterThanOrEqual(1_862_745_098_039_236_687n);
+  expect(share).toBeLessThan(1_862_745_098_039_237_687n);
 });
 
 test('an unpriceable fee is unknown rather than zero', () => {
