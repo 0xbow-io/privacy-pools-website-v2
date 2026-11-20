@@ -2202,7 +2202,9 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           ? (resolveForcedInputs(forcedInputs, spendabilityReport.spendableNotes) ?? [])
           : selectGreedyTransferInputs(
             spendabilityReport.spendableNotes,
-            enteredAmountWei + (relayFeeEstimate ?? 0n),
+            // Send-exact's final pick targets net + reserve = the typed debit;
+            // target the same here so both picks land on the same notes.
+            sendExactActive ? enteredAmountWei : enteredAmountWei + (relayFeeEstimate ?? 0n),
             TRANSFER_MAX_INPUTS,
             TRANSFER_MAX_LABELS,
             { sweepSelectedLabels: true },
@@ -2602,6 +2604,15 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           amountHex = `0x${sendAmountWei.toString(16)}` as Hex;
           if (bgRun) bgRun.amountHex = amountHex;
           if (live()) setSentAmountWei(sendAmountWei);
+        }
+        // Send-exact promises the typed amount is the whole debit. The fee is
+        // now priced per note (v2-monorepo#539), and the notes picked here can
+        // differ from the pre-check's provisional pick (another deposit, its
+        // small notes swept in), so the binding fee can exceed the reserve the
+        // net was cut by. Refuse before proving rather than debit more than
+        // was typed (Matthew, #116 review).
+        if (sendExactActive && sendAmountWei + quotedRelayFee > enteredAmountWei) {
+          throw new Error('The relayer fee for the notes this send uses is higher than the estimate. Nothing was sent. Try again to get an updated amount.');
         }
         relayerFeeWei = quotedRelayFee;
         if (bgRun) bgRun.feeWei = quotedRelayFee;
