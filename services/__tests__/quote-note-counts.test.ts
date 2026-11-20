@@ -40,3 +40,22 @@ test('sameQuoteCounts compares both counts', () => {
   expect(sameQuoteCounts({ inputs: 2, outputs: 3 }, { inputs: 3, outputs: 3 })).toBe(false);
   expect(sameQuoteCounts({ inputs: 2, outputs: 3 }, { inputs: 2, outputs: 2 })).toBe(false);
 });
+
+describe('transferGasUnits (relay_gas_budget.ts, v2-monorepo#539)', () => {
+  // Imported lazily so this file still reads as the counts' own test.
+  test('one input and the two base outputs is the one-input budget', async () => {
+    const { transferGasUnits, SHIELDED_TRANSFER_GAS } = await import('@/services/transfer-fee-estimate');
+    expect(transferGasUnits()).toBe(SHIELDED_TRANSFER_GAS);
+    expect(transferGasUnits({ inputs: 1, outputs: 2 })).toBe(SHIELDED_TRANSFER_GAS);
+  });
+
+  test('each extra input and each output past two adds its budget', async () => {
+    const { transferGasUnits, SHIELDED_TRANSFER_GAS, EXTRA_INPUT_GAS, EXTRA_OUTPUT_GAS } = await import('@/services/transfer-fee-estimate');
+    expect(transferGasUnits({ inputs: 4, outputs: 2 })).toBe(SHIELDED_TRANSFER_GAS + 3n * EXTRA_INPUT_GAS);
+    expect(transferGasUnits({ inputs: 3, outputs: 4 })).toBe(SHIELDED_TRANSFER_GAS + 2n * EXTRA_INPUT_GAS + 2n * EXTRA_OUTPUT_GAS);
+  });
+
+  test('a consolidation (amount 0) has no recipient outputs', () => {
+    expect(transferQuoteCounts([note('1', 5n), note('1', 5n), note('2', 5n), note('2', 5n)], 0n)).toEqual({ inputs: 4, outputs: 2 });
+  });
+});

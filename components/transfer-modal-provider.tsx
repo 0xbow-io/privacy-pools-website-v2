@@ -1422,9 +1422,17 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     gasPriceWei: feePricing.gasPriceOf(chainId),
     nativeUsd: feePricing.nativeUsdOf(chainId),
   });
+  // A consolidation spends every forced note and sends nothing, so its fee is
+  // priced on those notes' counts (v2-monorepo#539), not on one input: the
+  // binding quote at Confirm is, and a one-input review fee made
+  // feeWithinReviewed refuse the first press every time.
+  const consolidationNotes = forcedInputs ? resolveForcedInputs(forcedInputs, activeNotes) : null;
+  const consolidationEstimate = !isSui && hideAddress && consolidationNotes && consolidationNotes.length > 0
+    ? transferFeeFor(selectedTokenId, transferQuoteCounts(consolidationNotes, 0n))
+    : relayFeeEstimate;
   // A binding quote that changed is visible on review and reserved on retry.
-  const consolidationFee = consolidationQuotedFee !== null && (relayFeeEstimate === null || consolidationQuotedFee > relayFeeEstimate)
-    ? consolidationQuotedFee : relayFeeEstimate;
+  const consolidationFee = consolidationQuotedFee !== null && (consolidationEstimate === null || consolidationQuotedFee > consolidationEstimate)
+    ? consolidationQuotedFee : consolidationEstimate;
   // 6 dp display granularity: fee ceiled (never understated), max floored
   // (the suggestion always clears the pre-relay guard).
   const feeDisplayGrain = selectedDecimals > 6 ? 10n ** BigInt(selectedDecimals - 6) : 1n;
@@ -2185,9 +2193,27 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
       let feeQuoteWei = 0n;
       let feeQuote: bigint | null = null;
       if (hideAddress) {
-        feeQuote = await fetchTransferFeeQuote(chainId, selectedTokenId);
-        feeBudget = feeQuote != null ? (forcedInputs ? feeQuote : transferFeeBudget(feeQuote)) : (relayFeeEstimate ?? 0n);
-        feeQuoteWei = feeQuote ?? relayFeeEstimate ?? 0n;
+        // The relayer prices per input and output note (v2-monorepo#539), so
+        // this pre-check is quoted on the notes the selection below will pick:
+        // the forced ones for a consolidation (which sends nothing), otherwise
+        // a provisional pick for the amount plus the estimated fee. A one-input
+        // quote under-reserved every multi-note send.
+        const precheckNotes = forcedInputs
+          ? (resolveForcedInputs(forcedInputs, spendabilityReport.spendableNotes) ?? [])
+          : selectGreedyTransferInputs(
+            spendabilityReport.spendableNotes,
+            enteredAmountWei + (relayFeeEstimate ?? 0n),
+            TRANSFER_MAX_INPUTS,
+            TRANSFER_MAX_LABELS,
+            { sweepSelectedLabels: true },
+          ).selectedNotes;
+        const precheckCounts = precheckNotes.length > 0
+          ? transferQuoteCounts(precheckNotes, forcedInputs ? 0n : enteredAmountWei)
+          : undefined;
+        const precheckEstimate = precheckCounts ? transferFeeFor(selectedTokenId, precheckCounts) : relayFeeEstimate;
+        feeQuote = await fetchTransferFeeQuote(chainId, selectedTokenId, undefined, precheckCounts);
+        feeBudget = feeQuote != null ? (forcedInputs ? feeQuote : transferFeeBudget(feeQuote)) : (precheckEstimate ?? 0n);
+        feeQuoteWei = feeQuote ?? precheckEstimate ?? 0n;
         console.log('[Transfer] fee budget for input selection:', feeBudget.toString());
       }
       // Consolidation: the forced notes ARE the inputs. They must all still be
@@ -2549,7 +2575,9 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           transferQuotes,
           inputTokenId,
           undefined,
-          transferQuoteCounts(selection.selectedNotes, sendAmountWei),
+          // A consolidation is proven with amount 0: one change note per
+          // label, no recipient notes (sendAmountWei is display state there).
+          transferQuoteCounts(selection.selectedNotes, forcedNow ? 0n : sendAmountWei),
         );
         if (!selectedQuote) {
           throw new Error('No relayer quote available for this transfer.');

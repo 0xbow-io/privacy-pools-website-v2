@@ -21,10 +21,29 @@ import type { FeedState } from '@/services/public-feed-scheduler';
 
 /**
  * `RELAY_GAS_BUDGET.shieldedTransfer` in the relayer's relay_gas_budget.ts
- * (calibrated 2026-09-25, the p90 of 185 relays). The relayer recalibrates it
- * after contract or circuit changes; this copy has to follow.
+ * (calibrated 2026-09-25, the p90 of 185 relays). It covers ONE input and the
+ * transfer's two base outputs. The relayer recalibrates it after contract or
+ * circuit changes; this copy has to follow. v2-monorepo#539 raises it to 950k:
+ * move this with that relayer's deploy, the prod-fee test pins the live one.
  */
 export const SHIELDED_TRANSFER_GAS = 850_000n;
+
+/** `RELAY_GAS_BUDGET.extraInput` / `.extraOutput`: per note beyond the base shape. */
+export const EXTRA_INPUT_GAS = 110_000n;
+export const EXTRA_OUTPUT_GAS = 135_000n;
+/** `RELAY_BASE_OUTPUTS.transfer`: one change and one recipient note. */
+export const TRANSFER_BASE_OUTPUTS = 2;
+
+/**
+ * The gas the relayer prices a shielded transfer at for these note counts,
+ * the way #539's quote does. No counts is its one-input default.
+ */
+export function transferGasUnits(counts?: { inputs: number; outputs: number }): bigint {
+  if (!counts) return SHIELDED_TRANSFER_GAS;
+  const extraInputs = BigInt(Math.max(0, counts.inputs - 1));
+  const extraOutputs = BigInt(Math.max(0, counts.outputs - TRANSFER_BASE_OUTPUTS));
+  return SHIELDED_TRANSFER_GAS + extraInputs * EXTRA_INPUT_GAS + extraOutputs * EXTRA_OUTPUT_GAS;
+}
 
 /**
  * The relayer's `flat_fee_amount` default, published per chain as
@@ -59,9 +78,10 @@ export function estimateTransferFee(
   gasPriceWei: bigint | null,
   native: { decimals: number; usd: number | null },
   asset: FeeAsset,
+  gasUnits: bigint = SHIELDED_TRANSFER_GAS,
 ): bigint | null {
   if (gasPriceWei === null || gasPriceWei < 0n) return null;
-  const gasCostWei = gasPriceWei * SHIELDED_TRANSFER_GAS;
+  const gasCostWei = gasPriceWei * gasUnits;
   if (asset.isNative) return gasCostWei + RELAYER_FLAT_FEE;
   if (!priced(native.usd) || !priced(asset.usd)) return null;
   // Asset units per native unit, rounded up so the estimate never understates.

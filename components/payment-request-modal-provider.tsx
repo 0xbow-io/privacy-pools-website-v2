@@ -2854,9 +2854,9 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           error: feeErr instanceof Error ? feeErr.message : String(feeErr),
         });
       }
-      const feeBudget = feeQuoteWei != null ? transferFeeBudget(feeQuoteWei) : 0n;
-      const paddedTarget = requestAmountWei + feeBudget;
-      const trueTarget = requestAmountWei + (feeQuoteWei ?? 0n);
+      let feeBudget = feeQuoteWei != null ? transferFeeBudget(feeQuoteWei) : 0n;
+      let paddedTarget = requestAmountWei + feeBudget;
+      let trueTarget = requestAmountWei + (feeQuoteWei ?? 0n);
       const spendabilityReport = await verifyTransferSpendability({
         notes: activeNotes,
         chainId: request.chainId,
@@ -2893,6 +2893,31 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           maxLabels,
           { sweepSelectedLabels: true },
         );
+      }
+      // The fee above was quoted for one input, and the relayer prices per
+      // input and output note (v2-monorepo#539). When the pick spends more,
+      // re-quote for its counts and select once more, so a multi-note payment
+      // reserves the fee the binding quote at Confirm will charge.
+      const pickedCounts = selection.selectedNotes.length > 0
+        ? transferQuoteCounts(selection.selectedNotes, requestAmountWei)
+        : undefined;
+      if (pickedCounts && feeQuoteWei != null && (pickedCounts.inputs > 1 || pickedCounts.outputs > 2)) {
+        const countedFee = await fetchTransferFeeQuote(request.chainId, request.tokenId, undefined, pickedCounts)
+          .catch(() => null);
+        if (countedFee != null && countedFee > feeQuoteWei) {
+          feeQuoteWei = countedFee;
+          feeBudget = transferFeeBudget(countedFee);
+          paddedTarget = requestAmountWei + feeBudget;
+          trueTarget = requestAmountWei + countedFee;
+          selection = selectGreedyTransferInputs(
+            spendabilityReport.spendableNotes, paddedTarget, TRANSFER_MAX_INPUTS, maxLabels, { sweepSelectedLabels: true },
+          );
+          if (!selection.covered) {
+            selection = selectGreedyTransferInputs(
+              spendabilityReport.spendableNotes, trueTarget, TRANSFER_MAX_INPUTS, maxLabels, { sweepSelectedLabels: true },
+            );
+          }
+        }
       }
       log('info', 'PaymentRequest', 'Preflighted payment-request input spendability', {
         ...toTransferSpendabilityLog(spendabilityReport),
