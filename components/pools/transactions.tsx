@@ -722,8 +722,8 @@ export function TransactionDetailModal({ tx, onClose, onCloseForAction, actions 
   // Per-note state is read from the row's own chain's notes.
   const { isDepositMine: isDepositMineForDetail, isDepositAuthoredByMe, notesByChain, ownAddress } = useMyTransactionOwnership();
   const originDepositor = useMemo(
-    () => originDepositorFor(tx, buildDepositorByLabel(poolsData.transactions), ownAddress),
-    [tx, poolsData.transactions, ownAddress],
+    () => originDepositorFor({ ...tx, direction: direction ?? undefined }, buildDepositorByLabel(poolsData.transactions), ownAddress),
+    [tx, direction, poolsData.transactions, ownAddress],
   );
   // Named as its list row is (services/row-type-label.ts).
   const displayType = rowTypeLabel({ ...tx, direction: direction ?? undefined, authored: isDepositAuthoredByMe(tx) });
