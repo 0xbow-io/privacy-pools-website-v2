@@ -98,6 +98,7 @@ import { isLegacyPlainToken } from '@/config/pool-paths';
 import { getKnownTokenMetadata, getTokenMetadata } from '@/config/tokens';
 import { visibleSwapSources } from '@/services/pool-slug';
 import { displayTokenSymbol, isShareSymbol, swapRateText } from '@/services/share-display';
+import { costView } from '@/services/token-format';
 import { reshieldHeldBack } from '@/services/reshield-held-back';
 import { handoffRefused, resolveHandoffToken } from '@/services/swap-token-handoff';
 import { friendlySwapError, relaySwapRefusalText } from '@/services/swap-error-copy';
@@ -3327,7 +3328,10 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                   </View>
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[13px] text-text-muted font-pp-medium">Relayer fee</Text>
-                    <BalanceAmount view={balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.feeAmount), reshieldSnapshot.fromToken.decimals), reshieldSnapshot.fromToken.symbol, chainId)} className="text-[13px] text-text font-pp-regular" />
+                    <BalanceAmount view={costView(balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.feeAmount), reshieldSnapshot.fromToken.decimals), reshieldSnapshot.fromToken.symbol, chainId), reshieldSnapshot.destinationChainId === chainId ? {
+                      gross: balanceDisplay(formatUnits(reshieldSnapshot.grossWei, reshieldSnapshot.fromToken.decimals), reshieldSnapshot.fromToken.symbol, chainId),
+                      net: balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.netSwapAmount), swapInputUnits(chainId, reshieldSnapshot.fromToken.address, reshieldSnapshot.fromToken).decimals), swapInputUnits(chainId, reshieldSnapshot.fromToken.address, reshieldSnapshot.fromToken).symbol, chainId),
+                    } : undefined)} className="text-[13px] text-text font-pp-regular" />
                   </View>
                   <FeeWarning breakdown={reshieldFeeBreakdown} testID="reshield-fee-warning" />
                 </View>
@@ -3491,7 +3495,10 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                   </View>
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[13px] text-text-muted font-pp-medium">Relayer fee</Text>
-                    <BalanceAmount view={balanceDisplay(snapshot.display.relayerFee, snapshot.fromToken.symbol, chainId)} className="text-[13px] text-text font-pp-regular" />
+                    <BalanceAmount view={costView(balanceDisplay(snapshot.display.relayerFee, snapshot.fromToken.symbol, chainId), {
+                      gross: balanceDisplay(snapshot.amountText, snapshot.fromToken.symbol, chainId),
+                      net: balanceDisplay(snapshot.display.netSwapped, snapshot.fromToken.symbol, chainId),
+                    })} className="text-[13px] text-text font-pp-regular" />
                   </View>
                   <FeeWarning breakdown={walletFeeBreakdown} testID="swap-fee-warning" />
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
