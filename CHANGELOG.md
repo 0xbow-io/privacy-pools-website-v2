@@ -2,6 +2,11 @@
 
 All notable changes to the Privacy Pools v2 web app are documented in this file.
 
+## [1.6.2] - 2026-11-20
+
+### Changed
+- The app uses the released SDK `@0xbow/privacy-pools-v2-sdk@1.1.0` instead of a build of its main branch. The SDK code is byte-identical to what 1.6.1 shipped, so nothing changes for users (#121).
+
 ## [1.6.1] - 2026-11-20
 
 ### Changed
