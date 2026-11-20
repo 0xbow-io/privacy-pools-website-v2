@@ -38,6 +38,7 @@ import type { Hex } from 'viem';
 import { NoteStatus } from '@/services/sdk-types';
 import { ceilFeeToDisplayGrain, netAfterReserve, splitRelayFee } from '@/services/relay-fee-split';
 import type { Note, Hash, Address as SdkAddress } from '@/services/sdk-types';
+import { transferQuoteCounts } from '@/services/quote-note-counts';
 import { plainTransferRelayError, relayerTransferQuotes, relayTransferParams, relayWithReprove, requestTransferQuote, transferRelayExpectation, transferRelayFee, TRANSFER_QUOTE_EXPIRED_MESSAGE } from '@/services/relayed-transfer';
 import { expectTransferRelay } from '@/services/transfer-relay-outputs';
 import { feeWithinReviewed, transferFeeBudget } from '@/services/relayer-fee-jitter';
@@ -1421,9 +1422,17 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
     gasPriceWei: feePricing.gasPriceOf(chainId),
     nativeUsd: feePricing.nativeUsdOf(chainId),
   });
+  // A consolidation spends every forced note and sends nothing, so its fee is
+  // priced on those notes' counts (v2-monorepo#539), not on one input: the
+  // binding quote at Confirm is, and a one-input review fee made
+  // feeWithinReviewed refuse the first press every time.
+  const consolidationNotes = forcedInputs ? resolveForcedInputs(forcedInputs, activeNotes) : null;
+  const consolidationEstimate = !isSui && hideAddress && consolidationNotes && consolidationNotes.length > 0
+    ? transferFeeFor(selectedTokenId, transferQuoteCounts(consolidationNotes, 0n))
+    : relayFeeEstimate;
   // A binding quote that changed is visible on review and reserved on retry.
-  const consolidationFee = consolidationQuotedFee !== null && (relayFeeEstimate === null || consolidationQuotedFee > relayFeeEstimate)
-    ? consolidationQuotedFee : relayFeeEstimate;
+  const consolidationFee = consolidationQuotedFee !== null && (consolidationEstimate === null || consolidationQuotedFee > consolidationEstimate)
+    ? consolidationQuotedFee : consolidationEstimate;
   // 6 dp display granularity: fee ceiled (never understated), max floored
   // (the suggestion always clears the pre-relay guard).
   const feeDisplayGrain = selectedDecimals > 6 ? 10n ** BigInt(selectedDecimals - 6) : 1n;
@@ -2184,9 +2193,29 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
       let feeQuoteWei = 0n;
       let feeQuote: bigint | null = null;
       if (hideAddress) {
-        feeQuote = await fetchTransferFeeQuote(chainId, selectedTokenId);
-        feeBudget = feeQuote != null ? (forcedInputs ? feeQuote : transferFeeBudget(feeQuote)) : (relayFeeEstimate ?? 0n);
-        feeQuoteWei = feeQuote ?? relayFeeEstimate ?? 0n;
+        // The relayer prices per input and output note (v2-monorepo#539), so
+        // this pre-check is quoted on the notes the selection below will pick:
+        // the forced ones for a consolidation (which sends nothing), otherwise
+        // a provisional pick for the amount plus the estimated fee. A one-input
+        // quote under-reserved every multi-note send.
+        const precheckNotes = forcedInputs
+          ? (resolveForcedInputs(forcedInputs, spendabilityReport.spendableNotes) ?? [])
+          : selectGreedyTransferInputs(
+            spendabilityReport.spendableNotes,
+            // Send-exact's final pick targets net + reserve = the typed debit;
+            // target the same here so both picks land on the same notes.
+            sendExactActive ? enteredAmountWei : enteredAmountWei + (relayFeeEstimate ?? 0n),
+            TRANSFER_MAX_INPUTS,
+            TRANSFER_MAX_LABELS,
+            { sweepSelectedLabels: true },
+          ).selectedNotes;
+        const precheckCounts = precheckNotes.length > 0
+          ? transferQuoteCounts(precheckNotes, forcedInputs ? 0n : enteredAmountWei)
+          : undefined;
+        const precheckEstimate = precheckCounts ? transferFeeFor(selectedTokenId, precheckCounts) : relayFeeEstimate;
+        feeQuote = await fetchTransferFeeQuote(chainId, selectedTokenId, undefined, precheckCounts);
+        feeBudget = feeQuote != null ? (forcedInputs ? feeQuote : transferFeeBudget(feeQuote)) : (precheckEstimate ?? 0n);
+        feeQuoteWei = feeQuote ?? precheckEstimate ?? 0n;
         console.log('[Transfer] fee budget for input selection:', feeBudget.toString());
       }
       // Consolidation: the forced notes ARE the inputs. They must all still be
@@ -2541,7 +2570,17 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         const freshRelayerOption = async () => {
         transferPhaseRef.current = 'quote';
         setLoadingMessage('Getting a fresh relayer quote…');
-        const selectedQuote = await requestTransferQuote(transferQuotes, inputTokenId);
+        // Priced on the notes about to be proven: the relayer charges gas per
+        // input and output note and refuses a relay that spends more than the
+        // quote priced (v2-monorepo#539).
+        const selectedQuote = await requestTransferQuote(
+          transferQuotes,
+          inputTokenId,
+          undefined,
+          // A consolidation is proven with amount 0: one change note per
+          // label, no recipient notes (sendAmountWei is display state there).
+          transferQuoteCounts(selection.selectedNotes, forcedNow ? 0n : sendAmountWei),
+        );
         if (!selectedQuote) {
           throw new Error('No relayer quote available for this transfer.');
         }
@@ -2565,6 +2604,15 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           amountHex = `0x${sendAmountWei.toString(16)}` as Hex;
           if (bgRun) bgRun.amountHex = amountHex;
           if (live()) setSentAmountWei(sendAmountWei);
+        }
+        // Send-exact promises the typed amount is the whole debit. The fee is
+        // now priced per note (v2-monorepo#539), and the notes picked here can
+        // differ from the pre-check's provisional pick (another deposit, its
+        // small notes swept in), so the binding fee can exceed the reserve the
+        // net was cut by. Refuse before proving rather than debit more than
+        // was typed (Matthew, #116 review).
+        if (sendExactActive && sendAmountWei + quotedRelayFee > enteredAmountWei) {
+          throw new Error('The relayer fee for the notes this send uses is higher than the estimate. Nothing was sent. Try again to get an updated amount.');
         }
         relayerFeeWei = quotedRelayFee;
         if (bgRun) bgRun.feeWei = quotedRelayFee;

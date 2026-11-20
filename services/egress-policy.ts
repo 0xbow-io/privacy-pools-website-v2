@@ -582,6 +582,15 @@ function checkCalldata(data: string, depth = 0): EgressVerdict {
  * one of those, the fix is upstream, not a wider list here.
  */
 const QUOTE_FIELDS = ['asset', 'amount', 'commit'];
+/**
+ * The note counts the relayer prices a quote on, from the SDK's
+ * `transferQuoteParamsSchema` (v2-monorepo#539): `inputs` is how many notes the
+ * proof spends, `outputs` how many it creates. Plain numbers, and both are
+ * public the moment the relay lands (the nullifier and commitment counts of
+ * the proof), so they may be declared. Swap quotes carry `inputs` only, the
+ * schema omits `outputs` there.
+ */
+const QUOTE_COUNT_FIELDS = ['inputs', 'outputs'];
 const RELAY_FIELDS = ['proof', 'noteData', 'signedFeeCommitment', 'inputNullifierNumber', 'outputCommitmentNumber'];
 /**
  * The yield-withdrawal routing on top of a plain relay, from the SDK's
@@ -616,14 +625,14 @@ export const RELAYER_ROUTES: { method: 'GET' | 'POST'; path: RegExp; bodyKeys?: 
   // not maintained by hand, because an earlier version of this table was
   // written against a different build that happened to be installed at the
   // time and was missing six of the ten relayer routes below.
-  { method: 'POST', path: new RegExp(`^\\/v1\\/quote\\/${RELAYER_CHAIN}\\/transfer$`), bodyKeys: QUOTE_FIELDS },
-  { method: 'POST', path: new RegExp(`^\\/v1\\/quote\\/${RELAYER_CHAIN}\\/receive$`), bodyKeys: [...QUOTE_FIELDS, 'recipient', 'extraGas'] },
+  { method: 'POST', path: new RegExp(`^\\/v1\\/quote\\/${RELAYER_CHAIN}\\/transfer$`), bodyKeys: [...QUOTE_FIELDS, ...QUOTE_COUNT_FIELDS] },
+  { method: 'POST', path: new RegExp(`^\\/v1\\/quote\\/${RELAYER_CHAIN}\\/receive$`), bodyKeys: [...QUOTE_FIELDS, ...QUOTE_COUNT_FIELDS, 'recipient', 'extraGas'] },
   { method: 'POST', path: new RegExp(`^\\/v1\\/quote\\/${RELAYER_CHAIN}\\/batch$`), bodyKeys: ['asset', 'commit', 'recipient', 'extraGas', 'amounts'] },
   {
     method: 'POST',
     path: new RegExp(`^\\/v1\\/quote\\/${RELAYER_CHAIN}\\/swap$`),
     bodyKeys: [
-      ...QUOTE_FIELDS, 'recipient', 'fallbackAddress', 'outputToken', 'minOutputAmount', 'extraGas',
+      ...QUOTE_FIELDS, 'inputs', 'recipient', 'fallbackAddress', 'outputToken', 'minOutputAmount', 'extraGas',
       'swapCalldata', 'swapTarget', 'approvalAddress', 'swapValue', 'gasSwapMaxInput',
       'gasSwapCalldata', 'dustRecipient',
       // SDK swapQuoteParamsSchema (v2-monorepo#439): the dust-rescue opt-in is

@@ -1,14 +1,20 @@
 import { policedFetch } from '@/services/egress-fetch';
 import { getChainConfig } from '@/config/chains';
 import { isAmountRejection } from '@/services/cold-start-claim';
+import type { QuoteNoteCounts } from '@/services/quote-note-counts';
 
-/** Submit-time nonbinding quote; fees are amount-independent, so no amount leaves the client. */
+/**
+ * Submit-time nonbinding quote; fees are amount-independent, so no amount
+ * leaves the client. They do depend on how many notes the proof spends and
+ * creates (v2-monorepo#539), so `counts` prices those; left out, one input.
+ */
 export async function fetchTransferFeeQuote(
   chainId: number,
   asset: string,
   signal?: AbortSignal,
+  counts?: QuoteNoteCounts,
 ): Promise<bigint | null> {
-  const r = await requestTransferFee(chainId, asset, undefined, signal);
+  const r = await requestTransferFee(chainId, asset, undefined, signal, counts);
   return typeof r === 'bigint' ? r : null;
 }
 
@@ -32,6 +38,7 @@ async function requestTransferFee(
   asset: string,
   amountWei: bigint | undefined,
   signal?: AbortSignal,
+  counts?: QuoteNoteCounts,
 ): Promise<bigint | 'rejected' | null> {
   const base = getChainConfig(chainId)?.relayerBaseUrl;
   if (!base || (amountWei !== undefined && amountWei <= 0n)) return null;
@@ -39,7 +46,12 @@ async function requestTransferFee(
     const res = await policedFetch('relayer', base, `${base.replace(/\/$/, '')}/v1/quote/evm/${chainId}/transfer`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ asset, ...(amountWei === undefined ? {} : { amount: amountWei.toString() }), commit: false }),
+      body: JSON.stringify({
+        asset,
+        ...(amountWei === undefined ? {} : { amount: amountWei.toString() }),
+        commit: false,
+        ...(counts ? { inputs: counts.inputs, outputs: counts.outputs } : {}),
+      }),
       // Confirm-time callers pass no signal — cap the wait so a hung relayer
       // can't stall the send at "Checking private funds" (GLM review M1); the
       // relay-time guard still protects the money path when this times out.
