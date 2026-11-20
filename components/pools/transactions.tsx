@@ -56,6 +56,7 @@ import { FUNDS_REASON_COPY, FUNDS_STATE_LABEL, STATUS_FILTER_HINTS, STATUS_FILTE
 import { fullySpentDepositTxHashesByChain, type SpendableNoteLike } from '@/services/fully-spent';
 import { rowTypeLabel } from '@/services/row-type-label';
 import { withPublicSwapRows } from '@/services/swap-route-evidence';
+import { buildDepositorByLabel, originDepositorFor, ORIGIN_DEPOSITOR_LABEL, ORIGIN_DEPOSITOR_NOTE } from '@/services/origin-depositor';
 import { anyLeg, debugSafeRow, fundedBySwap, hexKey, isSwapRow, rowLegs, swapLegTexts, swapOutputDepositView, swapPendingLabel, viaSwapRoute, type RowLeg, type SwapLeg } from '@/services/swap-rows';
 import { lifiScanUrl } from '@/services/lifi-scan';
 import { showMoreLabel } from '@/services/explore-pools';
@@ -720,6 +721,10 @@ export function TransactionDetailModal({ tx, onClose, onCloseForAction, actions 
     && poolsData.ownTransfersPendingChainIds.includes(tx.chainId);
   // Per-note state is read from the row's own chain's notes.
   const { isDepositMine: isDepositMineForDetail, isDepositAuthoredByMe, notesByChain, ownAddress } = useMyTransactionOwnership();
+  const originDepositor = useMemo(
+    () => originDepositorFor(tx, buildDepositorByLabel(poolsData.transactions), ownAddress),
+    [tx, poolsData.transactions, ownAddress],
+  );
   // Named as its list row is (services/row-type-label.ts).
   const displayType = rowTypeLabel({ ...tx, direction: direction ?? undefined, authored: isDepositAuthoredByMe(tx) });
   const feeAmountRow = isFeeAmountRow(tx);
@@ -955,6 +960,13 @@ export function TransactionDetailModal({ tx, onClose, onCloseForAction, actions 
     // has no counterparty row rather than a placeholder.
     if (detailPayee) detailRows.push({ label: 'Recipient', value: detailPayee, mono: true, singleLine: true, copy: true });
     else if (!direction && !transferResolving) detailRows.push({ label: 'Address', value: 'Private' });
+    // A received transfer: who made the deposit these funds started from, with
+    // the plain statement that this is not necessarily the sender. Public feed
+    // data already on the page, so no request.
+    if (originDepositor) {
+      detailRows.push({ label: ORIGIN_DEPOSITOR_LABEL, value: originDepositor, mono: true, singleLine: true, copy: true });
+      detailRows.push({ label: 'Note', value: ORIGIN_DEPOSITOR_NOTE });
+    }
   } else if (tx.fullAddress && !fundedBySwapRow) {
     // A bridged arrival's depositor is the bridge's executor, not a party. My
     // own withdrawal names the recipient this device recorded when it sent
