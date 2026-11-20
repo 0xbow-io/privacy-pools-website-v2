@@ -770,6 +770,8 @@ interface SdkContextValue {
   /** Build/cache a batch-withdrawal session bound to the PrivacyPoolRelay
    *  processor (finding 1). Null until the main session is committed. */
   getBatchWithdrawSession: (onlyInputs?: ReadonlySet<string>) => Promise<PoolSession | null>;
+  /** DEV-828: a one-withdrawal session whose relayer is the user's pick. */
+  getCommunityWithdrawSession: (community: { name: string; url: string; signer: Address }) => Promise<PoolSession | null>;
   /** Build/cache a relayer-less session for the disclosed (self-submit)
    *  transfer, so prepareTransfer skips its unconditional relayer quote
    *  (DEV-370). Null until the main session is committed. */
@@ -3857,6 +3859,37 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     return session;
   }, []);
 
+  // DEV-828: a withdrawal session whose relayer is one the user picked. The
+  // egress client of a session talks to ONE host (services/egress-http-client),
+  // so reaching a community relayer takes a session built for it. Same shape
+  // as getBatchWithdrawSession, never cached: it lives for one withdrawal.
+  const getCommunityWithdrawSession = useCallback(async (
+    community: { name: string; url: string; signer: Address },
+  ): Promise<PoolSession | null> => {
+    const started = siblingWorld();
+    const params = started.params;
+    const managers = started.managers;
+    if (!params || !managers) return null;
+    const { getWithdrawalProcessorAddress } = await import('@/config/relayer');
+    const { createCircuitArtifacts } = await getSdkSetup();
+    const { createPoolSession } = await getPoolSessionService();
+    const session = (await createPoolSession({
+      ownerAddress: params.ownerAddress,
+      chainId: params.chainId,
+      entrypointAddress: params.entrypointAddress,
+      poolAddress: params.poolAddress,
+      keystoreAddress: params.keystoreAddress,
+      keystoreManager: managers.keystoreManager as never,
+      noteManager: managers.noteManager as never,
+      circuitArtifacts: createCircuitArtifacts(CIRCUIT_ARTIFACTS_BASE_URL),
+      deploymentBlock: params.deploymentBlock,
+      relayerProcessorAddress: getWithdrawalProcessorAddress(params.chainId),
+      relayerOverride: { name: community.name, url: community.url, signer: community.signer },
+    })) as unknown as PoolSession;
+    if (!siblingWorldUnchanged(started)) return null;
+    return session;
+  }, []);
+
   // Build (and cache) a session for the DISCLOSED transfer ("Hide my address"
   // off), whose only difference is that it advertises no relayers.
   //
@@ -4342,6 +4375,7 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
     ensureInitialized,
     getCommittedManagers,
     getBatchWithdrawSession,
+    getCommunityWithdrawSession,
     getSelfSubmitTransferSession,
     createCrossChainShieldSession,
     createReshieldCrosschainSessions,

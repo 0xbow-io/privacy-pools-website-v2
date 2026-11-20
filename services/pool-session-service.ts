@@ -75,6 +75,8 @@ export interface CreatePoolSessionParams {
    * per-call instead; batch can't). Omitted → the transfer-route default.
    */
   relayerProcessorAddress?: Address;
+  /** DEV-828: a relayer the user picked instead of Fast Relay (name, base URL, signer). */
+  relayerOverride?: { name: string; url: string; signer: Address };
   /**
    * Build this session with NO relayers, so the SDK's unconditional
    * pre-proof quote fetch inside `prepareTransfer` is skipped entirely.
@@ -142,6 +144,7 @@ export async function createPoolSession(params: CreatePoolSessionParams) {
     circuitArtifacts,
     deploymentBlock,
     relayerProcessorAddress,
+    relayerOverride,
     withoutRelayers,
   } = params;
 
@@ -177,7 +180,7 @@ export async function createPoolSession(params: CreatePoolSessionParams) {
   const aspClient = await createASPClient(chainId, merkleService, aspDataProvider);
   const relayerInteractor = withoutRelayers
     ? createRelayerlessInteractor()
-    : createRelayerInteractor(chainId, relayerProcessorAddress);
+    : createRelayerInteractor(chainId, relayerProcessorAddress, relayerOverride);
   const chainContracts = getChainConfig(chainId)?.contracts;
   const syncFromBlock = chainContracts?.fromBlock;
   // Keystore predates the V6 pool deploy on Sepolia, so it has its own

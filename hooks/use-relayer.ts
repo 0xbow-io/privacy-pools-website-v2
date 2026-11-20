@@ -2,6 +2,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import type { Hex } from 'viem';
 import { nameRelayerTransportFailure } from '@/services/transfer-outcome';
+import type { CommunityRelayer } from '@/config/community-relayers';
 
 export interface WithdrawalQuote {
   feeAmount: string;
@@ -35,11 +36,12 @@ export function useRelayerQuote() {
   const mutation = useMutation<
     WithdrawalQuote,
     Error,
-    { chainId: number; amount: string; asset: Hex; recipient: Hex; extraGas?: boolean }
+    { chainId: number; amount: string; asset: Hex; recipient: Hex; extraGas?: boolean; community?: CommunityRelayer }
   >({
-    mutationFn: async ({ chainId, amount, asset, recipient, extraGas }) => {
+    mutationFn: async ({ chainId, amount, asset, recipient, extraGas, community }) => {
       const { createRelayerInteractor } = await import('@/services/sdk-runtime');
-      const relayerInteractor = createRelayerInteractor(chainId);
+      // DEV-828: a relayer the user picked. Fast Relay stays the default.
+      const relayerInteractor = createRelayerInteractor(chainId, undefined, community);
       // Both calls below go to the relayer. A transport failure here IS the
       // relayer being unreachable, so name it: the withdraw modal's outage
       // copy keys on that, and a bare "Failed to fetch" used to reach the user
@@ -51,6 +53,11 @@ export function useRelayerQuote() {
         relayer = relayers[0];
         if (!relayer) {
           throw new Error('No relayer configured');
+        }
+        if (community) {
+          // Its own /v1/details must name our contracts before we ask it for a quote.
+          const { assertCommunityRelayer } = await import('@/services/community-relayer-verify');
+          await assertCommunityRelayer(chainId, community, relayerInteractor as never, relayer);
         }
         quote = await relayerInteractor.getWithdrawalQuote(relayer, {
           asset,
@@ -83,8 +90,8 @@ export function useRelayerQuote() {
   });
 
   const getQuote = useCallback(
-    (chainId: number, amount: string, asset: Hex, recipient: Hex, extraGas?: boolean) =>
-      mutation.mutateAsync({ chainId, amount, asset, recipient, extraGas }),
+    (chainId: number, amount: string, asset: Hex, recipient: Hex, extraGas?: boolean, community?: CommunityRelayer) =>
+      mutation.mutateAsync({ chainId, amount, asset, recipient, extraGas, community }),
     [mutation.mutateAsync],
   );
 
