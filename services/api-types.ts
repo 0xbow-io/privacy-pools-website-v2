@@ -333,14 +333,7 @@ export interface AssetStats {
   totalDepositsCount?: number;
   totalInAssetValueUsd: string;
   totalInAssetValue?: string;
-  pendingDepositsValueUsd: string;
-  pendingDepositsValue?: string;
-  pendingDepositsCount?: number;
-  acceptedDepositsValueUsd?: string;
-  acceptedDepositsValue?: string;
-  acceptedDepositsCount?: number;
   growth24h: number | null;
-  pendingGrowth24h: number | null;
 }
 
 export interface AssetsStatsResponse {

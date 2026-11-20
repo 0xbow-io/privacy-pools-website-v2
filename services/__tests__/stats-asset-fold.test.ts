@@ -16,14 +16,8 @@ const ethPoolA = {
   totalDepositsValueUsd: '24366.02',
   totalDepositsValue: '12571600000000002000',
   totalDepositsCount: 99,
-  acceptedDepositsValueUsd: '24366.02',
-  acceptedDepositsValue: '12571600000000002000',
-  acceptedDepositsCount: 99,
   totalInAssetValueUsd: '22685.77',
   totalInAssetValue: '11704677826937613902',
-  pendingDepositsValueUsd: '1.94',
-  pendingDepositsValue: '1000000000002000',
-  pendingDepositsCount: 3,
   growth24h: null,
 } as never;
 
@@ -32,14 +26,8 @@ const ethPoolB = {
   totalDepositsValueUsd: '341291.97',
   totalDepositsValue: '176088892000000001000',
   totalDepositsCount: 500,
-  acceptedDepositsValueUsd: '341291.97',
-  acceptedDepositsValue: '176088892000000001000',
-  acceptedDepositsCount: 500,
   totalInAssetValueUsd: '334369.97',
   totalInAssetValue: '172517502909576668553',
-  pendingDepositsValueUsd: '3.88',
-  pendingDepositsValue: '2000000000000000',
-  pendingDepositsCount: 2,
 } as never;
 
 describe('foldRowsPerAsset. Collapses the ASP per-pool rows', () => {
@@ -51,7 +39,6 @@ describe('foldRowsPerAsset. Collapses the ASP per-pool rows', () => {
   test('counts and USD totals are summed across pools', () => {
     const [row] = foldRowsPerAsset([ethPoolA, ethPoolB], 11155111) as never as Record<string, unknown>[];
     expect(row.totalDepositsCount).toBe(599);          // 99 + 500
-    expect(row.pendingDepositsCount).toBe(5);          // 3 + 2
     expect(Number(row.totalDepositsValueUsd)).toBeCloseTo(365657.99, 2);
     expect(Number(row.totalInAssetValueUsd)).toBeCloseTo(357055.74, 2);
   });
@@ -97,7 +84,7 @@ describe('all-chains rows used by the pool provider', () => {
     const row = (chainId: string, value: string) => ({
       asset: 'native', chainId, tokenSymbol: 'ETH', tokenAddress: 'same-native-address',
       totalDepositsValueUsd: value, totalInAssetValueUsd: value,
-      pendingDepositsValueUsd: '0', growth24h: null, pendingGrowth24h: null,
+      growth24h: null,
       totalDepositsCount: Number(value),
     });
     const selected = row('1', '5');
