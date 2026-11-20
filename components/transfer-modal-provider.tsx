@@ -38,6 +38,7 @@ import type { Hex } from 'viem';
 import { NoteStatus } from '@/services/sdk-types';
 import { ceilFeeToDisplayGrain, netAfterReserve, splitRelayFee } from '@/services/relay-fee-split';
 import type { Note, Hash, Address as SdkAddress } from '@/services/sdk-types';
+import { transferQuoteCounts } from '@/services/quote-note-counts';
 import { plainTransferRelayError, relayerTransferQuotes, relayTransferParams, relayWithReprove, requestTransferQuote, transferRelayExpectation, transferRelayFee, TRANSFER_QUOTE_EXPIRED_MESSAGE } from '@/services/relayed-transfer';
 import { expectTransferRelay } from '@/services/transfer-relay-outputs';
 import { feeWithinReviewed, transferFeeBudget } from '@/services/relayer-fee-jitter';
@@ -2541,7 +2542,15 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         const freshRelayerOption = async () => {
         transferPhaseRef.current = 'quote';
         setLoadingMessage('Getting a fresh relayer quote…');
-        const selectedQuote = await requestTransferQuote(transferQuotes, inputTokenId);
+        // Priced on the notes about to be proven: the relayer charges gas per
+        // input and output note and refuses a relay that spends more than the
+        // quote priced (v2-monorepo#539).
+        const selectedQuote = await requestTransferQuote(
+          transferQuotes,
+          inputTokenId,
+          undefined,
+          transferQuoteCounts(selection.selectedNotes, sendAmountWei),
+        );
         if (!selectedQuote) {
           throw new Error('No relayer quote available for this transfer.');
         }

@@ -74,6 +74,7 @@ import {
   type RelayTransferParams,
   type TransferRecipientSpec,
 } from '@/services/relayed-transfer';
+import { transferQuoteCounts } from '@/services/quote-note-counts';
 import { expectTransferRelay } from '@/services/transfer-relay-outputs';
 import { useNotes } from '@/hooks/use-notes';
 import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
@@ -3179,7 +3180,13 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
       // proof has the commitment's whole lifetime.
       const transferQuotes = relayerTransferQuotes(request.chainId);
       const freshRelayOption = async (): Promise<RelayTransferParams> => {
-        const selectedQuote = await requestTransferQuote(transferQuotes, payTokenId);
+        // Priced on the notes about to be proven (v2-monorepo#539).
+        const selectedQuote = await requestTransferQuote(
+          transferQuotes,
+          payTokenId,
+          undefined,
+          transferQuoteCounts(selectedNotes, requestAmountWei),
+        );
         if (!selectedQuote) {
           throw new Error('No relayer quote available for this transfer.');
         }

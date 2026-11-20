@@ -2,6 +2,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import type { Hex } from 'viem';
 import { nameRelayerTransportFailure } from '@/services/transfer-outcome';
+import type { QuoteNoteCounts } from '@/services/quote-note-counts';
 
 export interface WithdrawalQuote {
   feeAmount: string;
@@ -35,9 +36,9 @@ export function useRelayerQuote() {
   const mutation = useMutation<
     WithdrawalQuote,
     Error,
-    { chainId: number; amount: string; asset: Hex; recipient: Hex; extraGas?: boolean }
+    { chainId: number; amount: string; asset: Hex; recipient: Hex; extraGas?: boolean; counts?: QuoteNoteCounts }
   >({
-    mutationFn: async ({ chainId, amount, asset, recipient, extraGas }) => {
+    mutationFn: async ({ chainId, amount, asset, recipient, extraGas, counts }) => {
       const { createRelayerInteractor } = await import('@/services/sdk-runtime');
       const relayerInteractor = createRelayerInteractor(chainId);
       // Both calls below go to the relayer. A transport failure here IS the
@@ -58,6 +59,9 @@ export function useRelayerQuote() {
           recipient,
           extraGas: extraGas ?? false,
           amount,
+          // The relayer prices gas per input and output note (v2-monorepo#539).
+          // Left out it prices one input, and a bigger proof is refused.
+          ...(counts ?? {}),
         });
       } catch (err) {
         throw nameRelayerTransportFailure(err);
@@ -83,8 +87,8 @@ export function useRelayerQuote() {
   });
 
   const getQuote = useCallback(
-    (chainId: number, amount: string, asset: Hex, recipient: Hex, extraGas?: boolean) =>
-      mutation.mutateAsync({ chainId, amount, asset, recipient, extraGas }),
+    (chainId: number, amount: string, asset: Hex, recipient: Hex, extraGas?: boolean, counts?: QuoteNoteCounts) =>
+      mutation.mutateAsync({ chainId, amount, asset, recipient, extraGas, counts }),
     [mutation.mutateAsync],
   );
 
