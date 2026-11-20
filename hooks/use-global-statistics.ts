@@ -14,7 +14,7 @@
  *     so the rows are scoped by `poolTableChains()` before anything is drawn.
  *     The provider filters the same feed to its selected chain, but only
  *     exposes the derived `allPools` shape, which drops the per-asset deposit
- *     COUNT, the PENDING value and the raw `growth24h`.
+ *     COUNT and the raw `growth24h`.
  *
  * Missing-data policy (house rule, mirrors config/yield.ts): a value that
  * cannot be resolved comes back as `null` and the UI OMITS it. Nothing here
@@ -61,10 +61,8 @@ export type StatsAssetRow = {
   /** Pool TVL token-denominated, e.g. "1.2345 ETH" — from the provider's
    *  already-formatted `allPools` entry (raw `totalInAssetValue` ÷ decimals). */
   tvlTokenText: string | null;
-  /** Cumulative APPROVED deposits in USD (`acceptedDepositsValueUsd`). */
-  fundsAcceptedUsd: number | null;
-  /** Deposits awaiting ASP review, USD (`pendingDepositsValueUsd`). */
-  pendingUsd: number | null;
+  /** Cumulative deposits in USD (`totalDepositsValueUsd`). */
+  depositsUsd: number | null;
   /** All-time deposit count for this asset (`totalDepositsCount`). */
   depositsCount: number | null;
   /** All-time withdrawal count (`withdrawalsCount`). */
@@ -149,7 +147,7 @@ function sumOrNull(rows: AssetStats[], pick: (row: AssetStats) => number | null)
  * Why: the ASP has no server-side price feed for stablecoins and returns
  * "0.00" for their USD values while the raw token amount is correct — a pool
  * genuinely holding USDC would render as $0. components/pools-provider.tsx
- * repairs this the same way for TVL and "funds accepted"; this mirrors it for
+ * repairs this the same way for TVL and "total deposited"; this mirrors it for
  * the fields the provider doesn't expose. A stablecoin is valued at $1, other
  * assets at the provider's live price map. When neither the USD figure nor a
  * price is available the result is null and the caller omits the number.
@@ -327,17 +325,9 @@ export function useGlobalStatistics(): GlobalStatisticsView {
         // the token figure is omitted rather than shown in shares (Pat,
         // 2026-09-07, on Nat's Explore screenshot; codex on 28daca7).
         tvlTokenText: shareTvlText(stat.totalInAssetValue, meta.decimals, meta.symbol, isShareSymbol(meta.symbol) ? rateFor(chainId, addressKey) : undefined),
-        fundsAcceptedUsd: resolveUsd(
-          stat.acceptedDepositsValueUsd ?? stat.totalDepositsValueUsd,
-          stat.acceptedDepositsValue ?? stat.totalDepositsValue,
-          meta.decimals,
-          meta.symbol,
-          data.priceMap,
-          addressKey,
-        ),
-        pendingUsd: resolveUsd(
-          stat.pendingDepositsValueUsd,
-          stat.pendingDepositsValue,
+        depositsUsd: resolveUsd(
+          stat.totalDepositsValueUsd,
+          stat.totalDepositsValue,
           meta.decimals,
           meta.symbol,
           data.priceMap,

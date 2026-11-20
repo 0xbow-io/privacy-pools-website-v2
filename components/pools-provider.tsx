@@ -180,8 +180,8 @@ export type PoolEntry = {
   poolValueToken: string;
   /** TVL in the pool token as a number: `poolValueToken` is display-compact ("1.23K ppUSDC"), unparseable. */
   poolValueTokenAmount: number;
-  /** DEV-240/219: cumulative approved deposits ("Total funds accepted"), USD. */
-  fundsAccepted: string;
+  /** Cumulative deposits ("Total deposited"), USD. */
+  totalDeposited: string;
   change24h: string;
   privacyScore: number;
 };
@@ -1578,7 +1578,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
     // that case so the UI stops showing $0.00 pools that actually hold USDC.
     const tvlByAddress = new Map<
       string,
-      { tvlUsd: number; tokenAmount: number; growth24h: number | null; symbol: string; fundsAcceptedUsd: number }
+      { tvlUsd: number; tokenAmount: number; growth24h: number | null; symbol: string; depositsUsd: number }
     >();
     for (const s of assetsStats) {
       const addrKey = String(s.tokenAddress || '').toLowerCase();
@@ -1595,18 +1595,17 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
           if (price > 0) tvlUsd = tokenAmount * price;
         }
       }
-      // DEV-219/240: "Total funds accepted" = cumulative approved deposits
-      // (acceptedDepositsValueUsd), NOT current TVL. Re-derive for stablecoins
-      // the ASP returns as $0, mirroring the TVL fallback above.
-      const acceptedRaw = parseFloat(s.acceptedDepositsValue ?? s.totalDepositsValue ?? '0') || 0;
-      const acceptedTokenAmount = acceptedRaw > 0 ? acceptedRaw / 10 ** meta.decimals : 0;
-      let fundsAcceptedUsd = parseFloat(s.acceptedDepositsValueUsd ?? s.totalDepositsValueUsd ?? '0') || 0;
-      if (fundsAcceptedUsd === 0 && acceptedTokenAmount > 0) {
+      // "Total deposited" = cumulative deposits (totalDepositsValueUsd), NOT current TVL. Re-derive
+      // for stablecoins the ASP returns as $0, mirroring the TVL fallback above.
+      const depositsRaw = parseFloat(s.totalDepositsValue ?? '0') || 0;
+      const depositsTokenAmount = depositsRaw > 0 ? depositsRaw / 10 ** meta.decimals : 0;
+      let depositsUsd = parseFloat(s.totalDepositsValueUsd ?? '0') || 0;
+      if (depositsUsd === 0 && depositsTokenAmount > 0) {
         if (isStablecoin(meta.symbol)) {
-          fundsAcceptedUsd = acceptedTokenAmount;
+          depositsUsd = depositsTokenAmount;
         } else {
           const price = priceMap[addrKey] || priceMap[meta.symbol] || 0;
-          if (price > 0) fundsAcceptedUsd = acceptedTokenAmount * price;
+          if (price > 0) depositsUsd = depositsTokenAmount * price;
         }
       }
       tvlByAddress.set(addrKey, {
@@ -1614,7 +1613,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
         tokenAmount,
         growth24h: s.growth24h,
         symbol: meta.symbol,
-        fundsAcceptedUsd,
+        depositsUsd,
       });
     }
 
@@ -1629,7 +1628,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
         denomination: number;
         netUsd: number;
         // Cumulative deposit USD (deposits only, no withdrawals) — the
-        // event-derived fallback for "Total funds accepted" when the ASP has no
+        // event-derived fallback for "Total deposited" when the ASP has no
         // per-pool stats (e.g. Sui).
         depositsUsd: number;
       }
@@ -1656,12 +1655,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
       const info = tokenInfoMap.get(tokenKey)!;
       if (event.type === 'deposit') {
         info.netUsd += usdValue;
-        // "Funds accepted" counts APPROVED deposits only (a pending/declined
-        // deposit isn't accepted yet). ASP marks Sui deposits 'approved' once
-        // admitted; treat a missing status as approved (EVM stats path unused).
-        if (event.reviewStatus === undefined || event.reviewStatus === 'approved') {
-          info.depositsUsd += usdValue;
-        }
+        info.depositsUsd += usdValue;
       } else {
         info.netUsd -= usdValue;
       }
@@ -1787,10 +1781,10 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
         poolValueToken: tokenAmount > 0
           ? formatTokenAmount(tokenAmount, displaySymbol)
           : `0 ${displaySymbol}`, // raw-data: poolValueToken renders through approxUnderlyingText
-        // "Total funds accepted" prefers the ASP's cumulative-approved-deposits
-        // stat; when the ASP has no per-pool stats (Sui), fall back to the
-        // event-summed deposit total so the column isn't a misleading $0.
-        fundsAccepted: formatUsd(Math.max(0, statsEntry?.fundsAcceptedUsd ?? info.depositsUsd)),
+        // "Total deposited" prefers the ASP's cumulative-deposits stat; when the
+        // ASP has no per-pool stats (Sui), fall back to the event-summed deposit
+        // total so the column isn't a misleading $0.
+        totalDeposited: formatUsd(Math.max(0, statsEntry?.depositsUsd ?? info.depositsUsd)),
         change24h,
         privacyScore: computePrivacyScore(tokenKey),
       };

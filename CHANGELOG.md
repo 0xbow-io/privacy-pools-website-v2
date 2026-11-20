@@ -2,6 +2,18 @@
 
 All notable changes to the Privacy Pools v2 web app are documented in this file.
 
+## [1.6.1] - 2026-11-20
+
+### Changed
+- Explore shows the total deposited in place of accepted, and drops the Pending column (#102).
+- `smithers-orchestrator`, local tooling the app never imports, is a dev dependency, which takes `effect` out of the production dependency audit (#118).
+
+### Fixed
+- Withdrawals and sends that spend more than one note are no longer refused by the relayer: quotes now carry the number of notes the proof spends and creates, which the relayer prices since its 2026-11-20 update. Fee estimates and consolidation follow the same counts, and a send-exact transfer never debits more than the entered amount (#116).
+- Swap Review lines add up: costs round up to the cent, the swap output is shown in its own units, and dust has its own row (#106, #109).
+- Stellar testnet (staging only): a payment request can be paid from the wallet, with a clear message when it times out (#107).
+- End-to-end tests: the payment group's fee reserve fits the funded balance (#108).
+
 ## [1.6.0] - 2026-11-17
 
 ### Added

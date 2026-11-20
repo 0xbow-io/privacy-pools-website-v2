@@ -207,9 +207,27 @@ describe('real request construction reaches the egress allowlist', () => {
         }
         return ts.isIdentifier(inner) ? resolve(inner.text, seen) : [];
       }
+      // The schema a call is chained onto: a named one, or another chained call
+      // (`transferQuoteParamsSchema.omit({...}).extend({...})`).
+      const baseKeys = (base: ts.Expression, tag: string): string[] => {
+        if (ts.isIdentifier(base)) return resolve(base.text, seen);
+        if (ts.isCallExpression(base) && ts.isPropertyAccessExpression(base.expression)) {
+          const synthetic = `__${tag}_${schema}`;
+          declarations.set(synthetic, base);
+          return resolve(synthetic, seen);
+        }
+        return [];
+      };
+      // `swapQuoteParamsSchema = transferQuoteParamsSchema.omit({ outputs: true }).extend(...)`
+      // (v2-monorepo#539): `omit` drops the named keys from the schema it wraps.
+      // Without this the swap route lost every inherited key and the test
+      // compared against a list missing `asset`, `commit` and `inputs`.
+      if (method === 'omit') {
+        const dropped = new Set(own);
+        return baseKeys(init.expression.expression, 'omit').filter((key) => !dropped.has(key));
+      }
       if (method === 'extend') {
-        const base = init.expression.expression;
-        return [...new Set([...(ts.isIdentifier(base) ? resolve(base.text, seen) : []), ...own])];
+        return [...new Set([...baseKeys(init.expression.expression, 'extend'), ...own])];
       }
       // A plain alias, `var TransferRelayParamsSchema = RelayParamsSchema`.
       return own;

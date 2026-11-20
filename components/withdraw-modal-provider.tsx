@@ -1,3 +1,4 @@
+import { sameQuoteCounts, withdrawQuoteCounts } from '@/services/quote-note-counts';
 import { selectGreedyTransferInputs } from '@/services/transfer-note-selection';
 import { selectStellarInputs, maxStellarAmount, stellarFeeReserve, type StellarFeeFor } from '@/services/stellar-fee-selection';
 import { spendableBalanceLabel } from '@/services/spendable-balance-label';
@@ -2765,13 +2766,47 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     setRelayerQuote(null);
     setIsQuoteLoading(true);
     try {
-      const quote = await getQuote(
+      // The relayer prices gas per input and output note, and Confirm will
+      // spend the notes selectWithdrawInputs picks for amount + fee. Quote the
+      // fee for those same notes, so Confirm's fee is not a different one than
+      // the one reviewed (feeWithinReviewed would stop it). The fee is not
+      // known before the first quote, so the notes are picked for the amount
+      // alone first, then again with the fee; if that changes the counts the
+      // quote is requested once more for the new ones.
+      const reviewTokenDecimals = withdrawTokenDecimals(selectedToken, chainId, isSui);
+      const reviewDustWei = parseTokenAmount(
+        String(DUST_THRESHOLD[selectedToken] ?? DEFAULT_DUST_THRESHOLD),
+        reviewTokenDecimals,
+      );
+      const reviewCounts = (feeAllowanceWei: bigint) => {
+        const picked = selectWithdrawInputs(
+          activeNotesForSelectedToken,
+          effectiveReceiveExact ? amountWei + feeAllowanceWei : amountWei,
+          reviewDustWei,
+        ).notes;
+        return picked.length > 0 ? withdrawQuoteCounts(picked) : undefined;
+      };
+      const firstCounts = reviewCounts(0n);
+      let quote = await getQuote(
         chainId,
         amountWei.toString(),
         selectedTokenAddress as `0x${string}`,
         resolvedRecipient as `0x${string}`,
         gasTokenChecked || undefined,
+        firstCounts,
       );
+      const feeWei = BigInt(quote.feeAmount);
+      const withFeeCounts = reviewCounts(feeWei + relayerFeeJitterAllowance(feeWei));
+      if (withFeeCounts && (!firstCounts || !sameQuoteCounts(firstCounts, withFeeCounts))) {
+        quote = await getQuote(
+          chainId,
+          amountWei.toString(),
+          selectedTokenAddress as `0x${string}`,
+          resolvedRecipient as `0x${string}`,
+          gasTokenChecked || undefined,
+          withFeeCounts,
+        );
+      }
       // Shared-guard stale check: discard the result if any quote-defining
       // input (recipient / amount / token / receive-asset / chain / session)
       // changed while the quote was in flight — otherwise a stale quote
@@ -2863,7 +2898,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     } finally {
       if (isCurrent()) setIsQuoteLoading(false);
     }
-  }, [altAccount, altChainId, altRecipientPattern, balanceDisplay, currentBalance.active, enteredAmountWei, fullWithdrawGroupCount, isStellar, stellarSession, altDecimals, maxSelected, reportWithdrawError, resetQuote, shownError, isSui, suiAmountError, connectedAddress, walletAddress, targetAddress, amount, selectedToken, selectedTokenAddress, chainId, gasTokenChecked, getQuote, identityMode, log, sdkReady, poolSession, ensureInitialized, openKeystoreRegistrationModal, openSeedDerivationModal, resolveColdStartClaim, batchEnabled, fullBalanceRequested, availableWei, effectiveReceiveExact, spendabilityLoading, spendabilityError, spendabilityKey, spendableCommitments, noteManager, isSwapExit, receiveAsset, crossChainReceive, receiveChainId, receiveChainName]);
+  }, [altAccount, altChainId, altRecipientPattern, balanceDisplay, currentBalance.active, enteredAmountWei, fullWithdrawGroupCount, isStellar, stellarSession, altDecimals, maxSelected, reportWithdrawError, resetQuote, shownError, isSui, suiAmountError, connectedAddress, walletAddress, targetAddress, amount, selectedToken, selectedTokenAddress, chainId, gasTokenChecked, getQuote, identityMode, log, sdkReady, poolSession, ensureInitialized, openKeystoreRegistrationModal, openSeedDerivationModal, resolveColdStartClaim, batchEnabled, fullBalanceRequested, availableWei, effectiveReceiveExact, spendabilityLoading, spendabilityError, spendabilityKey, spendableCommitments, noteManager, isSwapExit, receiveAsset, crossChainReceive, receiveChainId, receiveChainName, activeNotesForSelectedToken]);
 
   const handleConfirmUnlocked = useCallback(async () => {
     log('info', 'Withdraw', 'step 3/6 confirm pressed', {
@@ -4177,6 +4212,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           selectedTokenAddress as `0x${string}`,
           resolvedRecipient as `0x${string}`,
           gasTokenChecked || undefined,
+          withdrawQuoteCounts(inputNotes),
         );
         const claimFeeWei = BigInt(claimQuote.feeAmount);
         // Same fund-safety rule as the plain path: the withdrawal must never
@@ -4301,6 +4337,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                 selectedInputTokenId as `0x${string}`,
                 resolvedRecipient as `0x${string}`,
                 gasTokenChecked || undefined,
+                withdrawQuoteCounts(inputNotes),
               )
               : null;
             plan = shareQuote
@@ -4410,6 +4447,10 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
             // (QA I-b, 2026-09-02).
             extraGas: gasTokenChecked,
             commit: true,
+            // Priced on the notes about to be proven: the relayer charges gas
+            // per input and output note and refuses a relay that spends more
+            // than the quote priced (v2-monorepo#539).
+            ...withdrawQuoteCounts(inputNotes),
           });
           return rebindProcessor({
             inputCommitments,

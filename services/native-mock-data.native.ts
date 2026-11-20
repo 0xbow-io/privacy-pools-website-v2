@@ -168,7 +168,7 @@ export function getNativeMockPoolsValue(): NativeMockPoolsValue {
       poolValueUsd: usd,
       poolValueToken: tokenText(tvl[sym], sym),
       poolValueTokenAmount: tvl[sym],
-      fundsAccepted: formatUsd(usd * 1.38),
+      totalDeposited: formatUsd(usd * 1.38),
       change24h: ['+2.4%', '+0.8%', '+1.3%', '+3.1%'][i],
       privacyScore: [92, 88, 81, 76][i],
     };

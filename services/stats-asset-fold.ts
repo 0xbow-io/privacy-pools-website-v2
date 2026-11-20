@@ -98,14 +98,8 @@ export function foldRowsPerAsset(rows: RawAssetStat[], fallbackChainId: number):
       totalDepositsCount: sumCounts(bucket.map((r) => r.totalDepositsCount)),
       withdrawalsCount: sumCounts(bucket.map((r) => r.withdrawalsCount)),
       transfersCount: sumCounts(bucket.map((r) => r.transfersCount)),
-      acceptedDepositsValueUsd: sumUsd(bucket.map((r) => r.acceptedDepositsValueUsd)),
-      acceptedDepositsValue: sumBaseUnits(bucket.map((r) => r.acceptedDepositsValue)),
-      acceptedDepositsCount: sumCounts(bucket.map((r) => r.acceptedDepositsCount)),
       totalInAssetValueUsd: sumUsd(bucket.map((r) => r.totalInAssetValueUsd)) ?? bucket[0].totalInAssetValueUsd,
       totalInAssetValue: sumBaseUnits(bucket.map((r) => r.totalInAssetValue)),
-      pendingDepositsValueUsd: sumUsd(bucket.map((r) => r.pendingDepositsValueUsd)) ?? bucket[0].pendingDepositsValueUsd,
-      pendingDepositsValue: sumBaseUnits(bucket.map((r) => r.pendingDepositsValue)),
-      pendingDepositsCount: sumCounts(bucket.map((r) => r.pendingDepositsCount)),
       growth24h: growths.length === 1 ? growths[0] : null,
     } as RawAssetStat);
   }

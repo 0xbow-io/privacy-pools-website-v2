@@ -341,16 +341,16 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
     // The ASP has no chain-scoped statistics endpoint, so the SUI pool would
     // otherwise inherit the global (Sepolia) Deposits/Average/Withdrawals. Use
     // the SUI-specific counts derived from the chain-102 events instead, and
-    // compute Total funds accepted from them (the ASP pool-stats row is $0).
+    // compute Total deposited from them (the ASP pool-stats row is $0).
     const isSui = currentPoolToken === 'SUI' || currentPoolToken === 'XLM';
     // Stellar deposits are not in the ASP events feed this total reads, so any
     // XLM figure here would be a false zero: show a dash until a Stellar
     // index feeds it.
-    const fundsAccepted = currentPoolToken === 'XLM'
+    const totalDeposited = currentPoolToken === 'XLM'
       ? '\u2014'
-      : isSui ? formatUsd(sumDepositUsd) : (poolEntry?.fundsAccepted ?? '$0');
+      : isSui ? formatUsd(sumDepositUsd) : (poolEntry?.totalDeposited ?? '$0');
 
-    return { tvlUsd, tvlToken, fundsAccepted, pendingUsd, pendingToken, depositCount, withdrawalCount, transferCount, avgDepositUsd, isSui };
+    return { tvlUsd, tvlToken, totalDeposited, pendingUsd, pendingToken, depositCount, withdrawalCount, transferCount, avgDepositUsd, isSui };
   }, [currentPoolToken, poolChainId, isPoolTx, data.allPools, data.transactions, rateFor]);
 
   const { notes } = useNotes();
@@ -809,7 +809,7 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
               assetStats={poolSpecificStats.isSui ? null : assetStats}
               tvlUsd={poolSpecificStats.tvlUsd}
               tvlToken={poolSpecificStats.tvlToken}
-              fundsAccepted={poolSpecificStats.fundsAccepted}
+              totalDeposited={poolSpecificStats.totalDeposited}
               depositCount={poolSpecificStats.depositCount}
               avgDepositUsd={poolSpecificStats.avgDepositUsd}
               withdrawalCount={poolSpecificStats.withdrawalCount}

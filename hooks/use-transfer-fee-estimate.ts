@@ -8,18 +8,23 @@ import { useShareRates } from '@/hooks/use-share-rates';
 import { feedPriceMap } from '@/services/public-feeds';
 import { underlyingPriceFor } from '@/services/share-rates';
 import { isStablecoin } from '@/services/token-format';
-import { estimateTransferFee, feedGasPrice, readGasPrice, usdPriceOf } from '@/services/transfer-fee-estimate';
+import type { QuoteNoteCounts } from '@/services/quote-note-counts';
+import { estimateTransferFee, feedGasPrice, readGasPrice, transferGasUnits, usdPriceOf } from '@/services/transfer-fee-estimate';
 
 /**
  * The estimated relayer fee for a relayed transfer of one asset on `chainId`,
  * from the gas-price and price feeds (services/transfer-fee-estimate.ts). Reads
  * caches only: nothing here can cause a request.
  */
-export function useTransferFeeEstimate(chainId: number): (tokenAddress: string) => bigint | null {
+export function useTransferFeeEstimate(
+  chainId: number,
+): (tokenAddress: string, counts?: QuoteNoteCounts) => bigint | null {
   const gas = usePublicFeed<bigint>(feedGasPrice(chainId));
   const prices = usePublicFeed<Record<string, number>>(feedPriceMap(chainId));
   const { rateFor } = useShareRates();
-  return useCallback((tokenAddress: string) => {
+  // `counts`: the notes the transfer will spend and create, priced per note the
+  // way the relayer quotes them (v2-monorepo#539). Left out, one input.
+  return useCallback((tokenAddress: string, counts?: QuoteNoteCounts) => {
     const token = getKnownTokenMetadata(tokenAddress, chainId);
     const native = getKnownTokenMetadata(NATIVE_ASSET_ADDRESS, chainId);
     if (!token || !native) return null;
@@ -37,6 +42,7 @@ export function useTransferFeeEstimate(chainId: number): (tokenAddress: string) 
       readGasPrice(gas),
       { decimals: native.decimals, usd: usdPriceOf(priceMap, native.address, native.symbol, false) },
       { decimals: token.decimals, isNative: token.isNative, usd },
+      transferGasUnits(counts),
     );
   }, [chainId, gas, prices, rateFor]);
 }

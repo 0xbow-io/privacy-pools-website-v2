@@ -11,6 +11,7 @@ import { isStaleAspRootRejection } from '@/services/relayed-withdrawal';
 import { isFreshCommitmentLive } from '@/services/intent-swaps';
 import type { Address, Hash, Hex } from '@/services/sdk-types';
 import { nameRelayerTransportFailure } from '@/services/transfer-outcome';
+import type { QuoteNoteCounts } from '@/services/quote-note-counts';
 import type { TransferRelayExpectation } from '@/services/transfer-relay-outputs';
 
 export type { RelayTransferParams };
@@ -76,11 +77,15 @@ export async function requestTransferQuote(
   source: TransferQuoteSource,
   tokenId: Address,
   now: () => number = Date.now,
+  counts?: QuoteNoteCounts,
 ): Promise<SelectedTransferQuote | null> {
   const relayers = await source.relayers();
   const relayerInfo = relayers.find((r) => r.status === 'active') ?? relayers[0];
   if (!relayerInfo) return null;
-  const quote = await source.quote(relayerInfo, { asset: tokenId, commit: true });
+  // The relayer prices gas per input and output note and refuses a relay whose
+  // proof spends more than this quote priced (v2-monorepo#539), so the counts
+  // are the ones of the notes the caller is about to prove.
+  const quote = await source.quote(relayerInfo, { asset: tokenId, commit: true, ...(counts ?? {}) });
   const commitment = quote.feeCommitment;
   if (!commitment
     || commitment.asset.toLowerCase() !== tokenId.toLowerCase()

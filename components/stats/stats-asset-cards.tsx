@@ -22,8 +22,7 @@ import type { GlobalStatisticsView, StatsAssetRow } from '@/hooks/use-global-sta
  * figures shift sideways from row to row whenever one pool was missing a field.
  */
 const STAT_COLUMNS: { key: string; label: string; get: (row: StatsAssetRow) => string | null }[] = [
-  { key: 'accepted', label: 'Accepted', get: (r) => (r.fundsAcceptedUsd === null ? null : formatUsd(r.fundsAcceptedUsd)) },
-  { key: 'pending', label: 'Pending', get: (r) => (r.pendingUsd === null ? null : formatUsd(r.pendingUsd)) },
+  { key: 'deposited', label: 'Deposited', get: (r) => (r.depositsUsd === null ? null : formatUsd(r.depositsUsd)) },
   { key: 'deposits', label: 'Deposits', get: (r) => (r.depositsCount === null ? null : r.depositsCount.toLocaleString('en-US')) },
   { key: 'withdrawals', label: 'Withdrawals', get: (r) => (r.withdrawalsCount === null ? null : r.withdrawalsCount.toLocaleString('en-US')) },
   { key: 'transfers', label: 'Transfers', get: (r) => (r.transfersCount === null ? null : r.transfersCount.toLocaleString('en-US')) },
@@ -153,8 +152,7 @@ function AssetRow({
  * `apiClient.getAssetsStats('all')` (`AssetsStatsResponse.assets`):
  *   Pool TVL $      ← totalInAssetValueUsd (stablecoin-repaired, see the hook)
  *   Pool TVL token  ← totalInAssetValue ÷ decimals
- *   Funds accepted  ← acceptedDepositsValueUsd (falls back to totalDeposits*)
- *   Pending         ← pendingDepositsValueUsd
+ *   Deposited       ← totalDepositsValueUsd
  *   Deposits        ← totalDepositsCount
  * Nothing here is fabricated, and any field the ASP omits is omitted from the
  * card rather than rendered as a zero.

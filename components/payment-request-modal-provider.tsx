@@ -74,6 +74,7 @@ import {
   type RelayTransferParams,
   type TransferRecipientSpec,
 } from '@/services/relayed-transfer';
+import { transferQuoteCounts } from '@/services/quote-note-counts';
 import { expectTransferRelay } from '@/services/transfer-relay-outputs';
 import { useNotes } from '@/hooks/use-notes';
 import { useShareNameText, useShareRates } from '@/hooks/use-share-rates';
@@ -2853,9 +2854,9 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           error: feeErr instanceof Error ? feeErr.message : String(feeErr),
         });
       }
-      const feeBudget = feeQuoteWei != null ? transferFeeBudget(feeQuoteWei) : 0n;
-      const paddedTarget = requestAmountWei + feeBudget;
-      const trueTarget = requestAmountWei + (feeQuoteWei ?? 0n);
+      let feeBudget = feeQuoteWei != null ? transferFeeBudget(feeQuoteWei) : 0n;
+      let paddedTarget = requestAmountWei + feeBudget;
+      let trueTarget = requestAmountWei + (feeQuoteWei ?? 0n);
       const spendabilityReport = await verifyTransferSpendability({
         notes: activeNotes,
         chainId: request.chainId,
@@ -2892,6 +2893,31 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
           maxLabels,
           { sweepSelectedLabels: true },
         );
+      }
+      // The fee above was quoted for one input, and the relayer prices per
+      // input and output note (v2-monorepo#539). When the pick spends more,
+      // re-quote for its counts and select once more, so a multi-note payment
+      // reserves the fee the binding quote at Confirm will charge.
+      const pickedCounts = selection.selectedNotes.length > 0
+        ? transferQuoteCounts(selection.selectedNotes, requestAmountWei)
+        : undefined;
+      if (pickedCounts && feeQuoteWei != null && (pickedCounts.inputs > 1 || pickedCounts.outputs > 2)) {
+        const countedFee = await fetchTransferFeeQuote(request.chainId, request.tokenId, undefined, pickedCounts)
+          .catch(() => null);
+        if (countedFee != null && countedFee > feeQuoteWei) {
+          feeQuoteWei = countedFee;
+          feeBudget = transferFeeBudget(countedFee);
+          paddedTarget = requestAmountWei + feeBudget;
+          trueTarget = requestAmountWei + countedFee;
+          selection = selectGreedyTransferInputs(
+            spendabilityReport.spendableNotes, paddedTarget, TRANSFER_MAX_INPUTS, maxLabels, { sweepSelectedLabels: true },
+          );
+          if (!selection.covered) {
+            selection = selectGreedyTransferInputs(
+              spendabilityReport.spendableNotes, trueTarget, TRANSFER_MAX_INPUTS, maxLabels, { sweepSelectedLabels: true },
+            );
+          }
+        }
       }
       log('info', 'PaymentRequest', 'Preflighted payment-request input spendability', {
         ...toTransferSpendabilityLog(spendabilityReport),
@@ -3179,7 +3205,13 @@ export function PaymentRequestModalProvider({ children }: { children: React.Reac
       // proof has the commitment's whole lifetime.
       const transferQuotes = relayerTransferQuotes(request.chainId);
       const freshRelayOption = async (): Promise<RelayTransferParams> => {
-        const selectedQuote = await requestTransferQuote(transferQuotes, payTokenId);
+        // Priced on the notes about to be proven (v2-monorepo#539).
+        const selectedQuote = await requestTransferQuote(
+          transferQuotes,
+          payTokenId,
+          undefined,
+          transferQuoteCounts(selectedNotes, requestAmountWei),
+        );
         if (!selectedQuote) {
           throw new Error('No relayer quote available for this transfer.');
         }

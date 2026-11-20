@@ -104,7 +104,9 @@ import { relayTransferOnce, type TransferOnceAction, type TransferOnceRelayer, t
 import { findSentClaim, readSentClaims, removeSentClaim, saveSentClaim, SENT_CLAIMS_BASE_KEY, setSentClaimTx } from '@/services/stellar/stellar-sent-claims';
 import { CLAIMED_NOTES_BASE_KEY, DEPOSITS_FOR_BASE_KEY, readClaimedNotes, readDepositsFor, recordClaimedNotes, recordDepositFor } from '@/services/stellar/stellar-activity-records';
 import { isStellarAccountAddress, requestStates, type StellarRequestState } from '@/services/stellar/stellar-request';
-import type { StellarSdkPaymentRequest } from '@/services/payment-request-codec';
+import type { StellarSdkPaymentRequest, StellarSdkPaymentRequestPayload } from '@/services/payment-request-codec';
+import type { NoteComputationLike } from '@/services/payment-request-deposit';
+import { assertStellarRequestLive, buildStellarRequestDeposit } from '@/services/stellar/stellar-request-deposit';
 import { envScopedStorageKey } from '@/config/app-environment';
 import { buildStellarNoteOrigins, canonicalCommitment, reconstructStellarSpends, type StellarNoteOrigins } from '@/services/stellar-activity';
 import { withSigningWindow } from '@/services/stellar/stellar-signing-window';
@@ -1420,6 +1422,60 @@ class StellarAccount {
   }
 
   /**
+   * "Pay from wallet" for a blind payment request (DEV-500): a public deposit
+   * from the connected Freighter wallet into the request's first note slot,
+   * tagged and encrypted for the request (services/stellar/stellar-request-deposit.ts).
+   * The requester finds it on their next sync, as with a private payment. No
+   * note is left here. The payer's device records the deposit (DEV-501) so it
+ * shows in their activity, and nothing else is registered for the payer.
+   */
+  depositForPaymentRequest(params: {
+    request: StellarSdkPaymentRequestPayload;
+    onStage?: StageListener;
+    shouldContinue?: () => boolean;
+  }) {
+    return this.enqueue(async () => {
+      const { onStage } = params;
+      const { address, generation } = this.requireSigner();
+      const session = await this.ensureSession(onStage);
+      if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
+      this.assertStillBound(generation);
+      const sdk = await loadStellarSdk();
+      onStage?.('proving');
+      const crypto = new sdk.StellarCryptoService();
+      const hashService = await (this.poseidon ??= sdk.PoseidonHashService.create());
+      // Exported at runtime but not in the package's types.
+      const { NoteComputationService } = sdk as unknown as {
+        NoteComputationService: new (config: { hashService: unknown; cryptoService: unknown }) => NoteComputationLike;
+      };
+      const depositParams = buildStellarRequestDeposit({
+        request: params.request,
+        nativeTokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
+        tokenIdField: new sdk.StellarAddressFieldConverter().toTokenIdField(params.request.tokenId as StellarAddress),
+        noteComputation: new NoteComputationService({ hashService, cryptoService: crypto }),
+        depositSecret: crypto.generateSecret() as Hex,
+      });
+      assertStellarRequestLive(params.request);
+      const prepared = await session.prepareDepositFor(depositParams as Parameters<StellarPoolSession['prepareDepositFor']>[0]);
+      if (params.shouldContinue && !params.shouldContinue()) throw new Error('Superseded');
+      this.assertStillBound(generation);
+      // Proving and the chain switch take time: re-checked before signing (cubic on #304).
+      assertStellarRequestLive(params.request);
+      onStage?.('signing');
+      const { txHash, labelRegistered, pendingLabel } = await submitDeposit(session, prepared);
+      // The requester's note never reaches this account, so this device's own
+      // record is what lets the payer see the payment, as for any deposit for
+      // someone else (DEV-501, same as `deposit()` with a recipient).
+      recordDepositFor(sentClaimsStorage(), DEPOSITS_FOR_KEY, {
+        depositor: address,
+        txHash,
+        createdAt: Date.now(),
+      });
+      return { txHash, labelRegistered, pendingLabel };
+    });
+  }
+
+  /**
    * Makes this account able to RECEIVE private transfers: unlocks and
    * publishes both keystore legs if missing. Address-based transfers need
    * the viewing key; blind payment requests do not.
@@ -1433,6 +1489,19 @@ class StellarAccount {
       await this.ensureRegistered(session, generation, params?.onStage, params?.shouldContinue);
     });
   }
+}
+
+/**
+ * One transaction (`deposit_with_label`): the ASP label cannot fail on its
+ * own, so a landed deposit is always registered.
+ */
+async function submitDeposit(
+  session: StellarPoolSession,
+  prepared: Awaited<ReturnType<StellarPoolSession['prepareDeposit']>>,
+): Promise<{ txHash: string; labelRegistered: boolean; pendingLabel: PendingLabel | null }> {
+  const receipt = await session.executeDeposit(prepared);
+  if (!receipt.status) throw new Error('The deposit transaction failed on-chain.');
+  return { txHash: receipt.txHash as string, labelRegistered: true, pendingLabel: null };
 }
 
 async function deriveProtocolKeys(

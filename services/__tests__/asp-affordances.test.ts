@@ -382,8 +382,8 @@ test('public price and gas price feeds register every build-supported EVM chain 
 
 test('asset counts sum across pool generations using ASP field names', () => {
   const rows = [2, 3].map((n) => ({ chainId: '1', tokenAddress: '0xabc', asset: 'USDC', tokenSymbol: 'USDC',
-    growth24h: null, pendingGrowth24h: null, withdrawalsCount: n,
-    transfersCount: n * 2, totalDepositsValueUsd: '0', totalInAssetValueUsd: '0', pendingDepositsValueUsd: '0' }));
+    growth24h: null, withdrawalsCount: n,
+    transfersCount: n * 2, totalDepositsValueUsd: '0', totalInAssetValueUsd: '0' }));
   const [folded] = foldRowsPerAsset(rows, 1);
   expect(folded.withdrawalsCount).toBe(5);
   expect(folded.transfersCount).toBe(10);

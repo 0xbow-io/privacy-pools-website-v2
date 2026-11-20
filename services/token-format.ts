@@ -230,3 +230,51 @@ export function amountInputDisplay(raw: string, focused: boolean): string {
 export function stripAmountSeparators(text: string): string {
   return text.replace(/,/g, '');
 }
+
+/**
+ * A COST shown as a stablecoin figure ("0.49 USDT"), rounded UP to the cent
+ * with no thousands separator, or null for any other asset (those keep their
+ * own formatting). Standalone costs round up so they never read low. Review
+ * breakdowns can instead reconcile their displayed cents through costView.
+ */
+export function costFigureText(amount: number, symbol: string): string | null {
+  if (!isStablecoin(symbol) || !Number.isFinite(amount)) return null;
+  return `${formatCopyAmount(amount, symbol, 'up').replace(/,/g, '')} ${symbol}`;
+}
+
+type CostBalanceView = { amount: number; symbol: string; text: string; loading: boolean; hint?: string | null };
+
+/** Read the cents already displayed, not a float that might round differently. */
+function displayedCents(view: CostBalanceView): bigint | null {
+  if (view.loading) return null;
+  const digits = view.text.slice(0, -(view.symbol.length + 1));
+  const match = /^(\d+)\.(\d{2})$/.exec(digits);
+  return match ? BigInt(match[1]) * 100n + BigInt(match[2]) : null;
+}
+
+/**
+ * Stablecoin fees normally round up. In a breakdown whose gross equals fee +
+ * net, use the difference of the displayed cents instead, so the rows add up.
+ * This can round a fee down (even to zero); exact amounts and USD stay intact.
+ * Callers must exclude other deductions, such as cross-chain bridge costs.
+ * A conversion discrepancy larger than a cent is not a rounding adjustment.
+ */
+export function costView<V extends CostBalanceView>(view: V, breakdown?: { gross: CostBalanceView; net: CostBalanceView }): V {
+  if (view.loading) return view;
+  let text = costFigureText(view.amount, view.symbol);
+  if (!text) return view;
+  if (breakdown && breakdown.gross.symbol === view.symbol && breakdown.net.symbol === view.symbol) {
+    const gross = displayedCents(breakdown.gross);
+    const net = displayedCents(breakdown.net);
+    const roundedUp = displayedCents({ ...view, text });
+    if (gross !== null && net !== null && roundedUp !== null) {
+      const cents = gross - net;
+      // Share redemption and the live display rate can differ: never disguise
+      // an actual price/conversion difference as a relayer fee.
+      if (cents >= 0n && cents >= roundedUp - 1n && cents <= roundedUp) {
+        text = `${cents / 100n}.${(cents % 100n).toString().padStart(2, '0')} ${view.symbol}`;
+      }
+    }
+  }
+  return { ...view, text, hint: view.hint ? view.hint.split(view.text).join(text) : view.hint };
+}
