@@ -349,3 +349,52 @@ describe('the optimistic deposit row', () => {
     expect(feedRowKey(row)).not.toEqual(feedRowKey(other));
   });
 });
+
+// Real rows from api-v2.0xbow.io /global/public/events (2026-11-21): the ASP
+// numbers each event table on its own counter, shared across chains, so a Base
+// deposit and an Ethereum withdrawal both carry eventId 1238. Keying on the id
+// alone dropped the Base deposit (31k USDC) from every Transactions list.
+const ETH_WITHDRAWAL_1238 = {
+  type: 'withdrawal',
+  eventId: 1238,
+  createdAt: '2026-11-19T16:07:56.495Z',
+  amount: '1352741915670992',
+  address: '',
+  txHash: '0x02d197b48d92666c2638bfaf7b69983af588de0edb04ff194dab45bc5bb84a75',
+  timestamp: 1795104467000,
+  asset: { asset: '0x66051920d25af4e3596a8a46309f4d045f9d83b7', chainId: 1, chainName: 'Chain 1', tokenSymbol: '0x66051920d25af4e3596a8a46309f4d045f9d83b7', tokenAddress: '0x66051920d25af4e3596a8a46309f4d045f9d83b7', assetAddress: '0x66051920d25af4e3596a8a46309f4d045f9d83b7', denomination: 18 },
+} as unknown as GlobalEvent;
+const BASE_DEPOSIT_1238 = {
+  type: 'deposit',
+  eventId: 1238,
+  createdAt: '2026-11-21T02:57:13.358Z',
+  amount: '30955811040061380353001',
+  address: '0x63df3a8f68dab299dbd731cc7926ea8fdcfb8e9e',
+  txHash: '0x8513645a0d5576f95a7794ccfa65f85d14b88dab22bc37b7142cd240f9321a46',
+  timestamp: 1795229825000,
+  asset: { asset: '0x4a5b11c3898367664d94b43be1dcea163bb1d094', chainId: 8453, chainName: 'Chain 8453', tokenSymbol: '0x4a5b11c3898367664d94b43be1dcea163bb1d094', tokenAddress: '0x4a5b11c3898367664d94b43be1dcea163bb1d094', assetAddress: '0x4a5b11c3898367664d94b43be1dcea163bb1d094', denomination: 18 },
+  viaRouter: '0xaae55afcf94c1604c5713cd19510c5140e8afa0e',
+} as unknown as GlobalEvent;
+
+describe('feed rows from different chains or tables that share an eventId', () => {
+  test('a Base deposit and an Ethereum withdrawal with the same eventId are two rows', () => {
+    expect(feedRowKey(BASE_DEPOSIT_1238)).not.toEqual(feedRowKey(ETH_WITHDRAWAL_1238));
+    const out = reconcileFeedRows({
+      publicRows: [ETH_WITHDRAWAL_1238, BASE_DEPOSIT_1238],
+      ownRows: [],
+      visibleChainIds: new Set([1, 8453]),
+      pendingOwn: [],
+    });
+    expect(out.publicRows.map((r) => r.txHash)).toEqual([ETH_WITHDRAWAL_1238.txHash, BASE_DEPOSIT_1238.txHash]);
+  });
+
+  test('the same row delivered twice still collapses to one', () => {
+    const out = reconcileFeedRows({
+      publicRows: [BASE_DEPOSIT_1238, { ...BASE_DEPOSIT_1238 }],
+      ownRows: [],
+      visibleChainIds: new Set([8453]),
+      pendingOwn: [],
+    });
+    expect(out.publicRows).toHaveLength(1);
+  });
+});

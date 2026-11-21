@@ -117,8 +117,11 @@ export function operationKey(chainId: unknown, txHash: string | null | undefined
  * distinct only when the ASP gives them distinct ids.
  */
 export function feedRowKey(row: FeedRowLike): string {
-  if (row.eventId !== undefined && row.eventId !== null && row.eventId !== '') return `id:${String(row.eventId)}`;
   const cid = Number(row.asset?.chainId);
+  // The ASP numbers each event table on its own counter, shared across chains:
+  // a Base deposit and an Ethereum withdrawal can both be eventId 1238. The id
+  // names a row only together with its chain and type.
+  if (row.eventId !== undefined && row.eventId !== null && row.eventId !== '') return `id:${Number.isFinite(cid) ? cid : ''}:${row.type}:${String(row.eventId)}`;
   return `op:${Number.isFinite(cid) ? cid : ''}:${String(row.txHash ?? '').toLowerCase()}:${row.type}:${row.timestamp}`;
 }
 
