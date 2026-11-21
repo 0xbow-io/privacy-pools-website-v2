@@ -20,6 +20,8 @@
 
 import { Platform } from 'react-native';
 
+import { sanitizeTransports, type PasskeyAuthenticatorKind } from './passkey-choice';
+
 // The ambient DOM lib already ships the WebAuthn PRF extension types
 // (`AuthenticationExtensionsClientInputs.prf` etc.), so we use those directly.
 // The only friction is TS 5.7's generic `Uint8Array<ArrayBufferLike>` vs the
@@ -64,12 +66,22 @@ export type CreateResult = {
    * registration authenticator data; when false, `flags` is not authoritative —
    * use a getPasskeyPrf() assertion (flags are always present there). */
   flagsKnown: boolean;
+  /** Transports the authenticator reported (usb, nfc, ...), used for allowCredentials later. */
+  transports: AuthenticatorTransport[];
 };
+
+/** A credential to name in allowCredentials / excludeCredentials. */
+export type KnownCredential = { id: string; transports?: AuthenticatorTransport[] };
+
+/** Every ceremony here waits this long for the user. */
+export const WEBAUTHN_TIMEOUT_MS = 120_000;
 
 export class PasskeyUnsupportedError extends Error {}
 export class PasskeyCancelledError extends Error {}
 export class PasskeyUserVerificationError extends Error {}
 export class PrfUnavailableError extends Error {}
+/** excludeCredentials matched: this authenticator already holds one of the named credentials. */
+export class PasskeyAlreadyRegisteredError extends Error {}
 
 // --- Salts -----------------------------------------------------------------
 //
@@ -115,6 +127,41 @@ export async function isPasskeyPrfLikelySupported(): Promise<boolean> {
   }
 }
 
+/**
+ * Does this browser support the PRF extension at all? WebAuthn L3
+ * getClientCapabilities() answers it where implemented. null = the browser
+ * cannot say, so the ceremony itself is the test.
+ */
+export async function browserSupportsPrf(): Promise<boolean | null> {
+  if (!isWebAuthnAvailable()) return false;
+  try {
+    const getCaps = (window.PublicKeyCredential as unknown as { getClientCapabilities?: () => Promise<Record<string, boolean>> })
+      .getClientCapabilities;
+    if (typeof getCaps !== 'function') return null;
+    const caps = await getCaps.call(window.PublicKeyCredential);
+    const v = caps?.['extension:prf'];
+    return typeof v === 'boolean' ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/** WebAuthn L3 hints steer the browser's UI to the right authenticator. Browsers that predate them ignore the field. */
+function applyHints(publicKey: object, kind: PasskeyAuthenticatorKind | undefined): void {
+  if (kind === 'security-key') (publicKey as { hints?: string[] }).hints = ['security-key'];
+}
+
+function descriptors(list: readonly KnownCredential[] | undefined): PublicKeyCredentialDescriptor[] {
+  return (list ?? []).map((c) => {
+    const transports = sanitizeTransports(c.transports);
+    return {
+      type: 'public-key' as const,
+      id: fromBase64Url(c.id) as BufferSource,
+      ...(transports.length ? { transports } : {}),
+    };
+  });
+}
+
 // --- Create ----------------------------------------------------------------
 
 export async function createPasskey(opts: {
@@ -124,6 +171,14 @@ export async function createPasskey(opts: {
   userName: string;
   userDisplayName: string;
   challenge: Uint8Array;
+  /**
+   * 'security-key' asks for a roaming FIDO2 authenticator (YubiKey and the
+   * like: authenticatorAttachment cross-platform). Omitted = any authenticator,
+   * the behaviour every existing caller relies on.
+   */
+  authenticator?: PasskeyAuthenticatorKind;
+  /** Credentials the authenticator must not already hold (it refuses instead of minting a duplicate). */
+  excludeCredentials?: readonly KnownCredential[];
 }): Promise<CreateResult> {
   if (!isWebAuthnAvailable()) throw new PasskeyUnsupportedError('WebAuthn is unavailable here.');
 
@@ -140,8 +195,10 @@ export async function createPasskey(opts: {
       residentKey: 'required', // discoverable. Find it on a fresh page with no stored id
       requireResidentKey: true,
       userVerification: 'required', // biometric / PIN
+      ...(opts.authenticator === 'security-key' ? { authenticatorAttachment: 'cross-platform' as const } : {}),
     },
-    timeout: 120_000,
+    ...(opts.excludeCredentials?.length ? { excludeCredentials: descriptors(opts.excludeCredentials) } : {}),
+    timeout: WEBAUTHN_TIMEOUT_MS,
     extensions: {
       prf: {
         eval: {
@@ -151,12 +208,13 @@ export async function createPasskey(opts: {
       },
     },
   };
+  applyHints(publicKey, opts.authenticator);
 
   let cred: PublicKeyCredential | null;
   try {
     cred = (await navigator.credentials.create({ publicKey })) as PublicKeyCredential | null;
   } catch (e) {
-    throw toPasskeyError(e);
+    throw toPasskeyError(e, { excludedCredentials: !!opts.excludeCredentials?.length });
   }
   if (!cred) throw new PasskeyCancelledError('Passkey creation returned no credential.');
 
@@ -167,12 +225,20 @@ export async function createPasskey(opts: {
   const prf = extractPrf(ext);
   const prfEnabled = ext.prf?.enabled === true || !!prf;
 
+  let transports: AuthenticatorTransport[] = [];
+  try {
+    transports = sanitizeTransports(attestation.getTransports?.());
+  } catch {
+    transports = [];
+  }
+
   return {
     credentialId: toBase64Url(new Uint8Array(cred.rawId)),
     prf,
     flags,
     prfEnabled,
     flagsKnown: authData !== null,
+    transports,
   };
 }
 
@@ -183,18 +249,22 @@ export async function getPasskeyPrf(opts: {
   challenge: Uint8Array;
   /** Optional: restrict to a known credential id (base64url). Omit for discoverable. */
   credentialId?: string;
+  /** Transports recorded for that credential, so the browser goes straight to the right authenticator. */
+  transports?: AuthenticatorTransport[];
+  /** Steers the browser UI (WebAuthn hints). Omitted = the browser's default chooser. */
+  authenticator?: PasskeyAuthenticatorKind;
 }): Promise<PrfResult> {
   if (!isWebAuthnAvailable()) throw new PasskeyUnsupportedError('WebAuthn is unavailable here.');
 
   const allowCredentials: PublicKeyCredentialDescriptor[] | undefined = opts.credentialId
-    ? [{ type: 'public-key', id: fromBase64Url(opts.credentialId) as BufferSource }]
+    ? descriptors([{ id: opts.credentialId, transports: opts.transports }])
     : undefined; // undefined/empty → discoverable
 
   const publicKey: PublicKeyCredentialRequestOptions = {
     rpId: opts.rpId,
     challenge: opts.challenge as BufferSource,
     userVerification: 'required',
-    timeout: 120_000,
+    timeout: WEBAUTHN_TIMEOUT_MS,
     allowCredentials,
     extensions: {
       prf: {
@@ -205,6 +275,7 @@ export async function getPasskeyPrf(opts: {
       },
     },
   };
+  applyHints(publicKey, opts.authenticator);
 
   let cred: PublicKeyCredential | null;
   try {
@@ -324,10 +395,16 @@ function fromBase64Url(value: string): Uint8Array {
   return out;
 }
 
-function toPasskeyError(e: unknown): Error {
+function toPasskeyError(e: unknown, ctx?: { excludedCredentials?: boolean }): Error {
   const name = (e as { name?: string })?.name;
   if (name === 'NotAllowedError' || name === 'AbortError') {
     return new PasskeyCancelledError('Passkey prompt was dismissed or timed out.');
+  }
+  // Only a create() that named excludeCredentials can mean "already holds one
+  // of these". Any other InvalidStateError (a pending request, an
+  // authenticator state error) keeps its own message.
+  if (name === 'InvalidStateError' && ctx?.excludedCredentials) {
+    return new PasskeyAlreadyRegisteredError('This authenticator is already set up for this wallet.');
   }
   return e instanceof Error ? e : new Error(String(e));
 }

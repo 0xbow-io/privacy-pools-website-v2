@@ -17,7 +17,8 @@
 import { Platform } from 'react-native';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { keccak256, concat, stringToBytes, hexToBytes, type Address, type Hex } from 'viem';
-import { createPasskey, getPasskeyPrf, isPasskeyPrfLikelySupported } from '@/services/passkey';
+import { createPasskey, getPasskeyPrf, isPasskeyPrfLikelySupported, PasskeyCancelledError } from '@/services/passkey';
+import type { PasskeyAuthenticatorKind } from '@/services/passkey-choice';
 import { passkeyRpIdFor } from '@/services/passkey-rp-id';
 import {
   clearEmbeddedWallet,
@@ -34,6 +35,7 @@ const SECP256K1_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0
 
 const RP_NAME = 'Privacy Pools';
 const USER_NAME = 'Privacy Pools Wallet';
+const SECURITY_KEY_USER_NAME = 'Privacy Pools Wallet (security key)';
 
 function legacyHostnameRpId(): string {
   if (typeof window !== 'undefined' && window.location?.hostname) return window.location.hostname;
@@ -90,19 +92,28 @@ export async function canUsePasskey(): Promise<boolean> {
  *    its PRF — nothing secret is stored, the passkey reconstructs it.
  *  - native: store a generated EOA in expo-secure-store.
  */
-export async function createWallet(displayName?: string): Promise<UnlockedEmbeddedWallet> {
+export async function createWallet(
+  displayName?: string,
+  opts?: { authenticator?: PasskeyAuthenticatorKind },
+): Promise<UnlockedEmbeddedWallet> {
   const testPk = getTestPk();
   const usePasskey = await canUsePasskey();
+  const securityKey = opts?.authenticator === 'security-key';
 
   if (usePasskey) {
+    // A security key (YubiKey and other FIDO2 keys) is the alternative to the
+    // device passkey: same PRF request, same EOA derivation below.
+    const name = displayName ?? (securityKey ? SECURITY_KEY_USER_NAME : USER_NAME);
     const created = await createPasskey({
       rpId: rpId(),
       rpName: RP_NAME,
       userId: randomBytes(16),
-      userName: displayName ?? USER_NAME,
-      userDisplayName: displayName ?? USER_NAME,
+      userName: name,
+      userDisplayName: name,
       challenge: randomBytes(32),
+      ...(securityKey ? { authenticator: 'security-key' as const } : {}),
     });
+    if (securityKey && !created.prfEnabled) throw new Error('SECURITY_KEY_PRF_UNSUPPORTED');
 
     // e2e injects a fixed key so testnet funds stay recoverable across runs;
     // honor it but mark the wallet 'test' (re-injected each load, not stored).
@@ -117,10 +128,16 @@ export async function createWallet(displayName?: string): Promise<UnlockedEmbedd
       // create() didn't surface prf.first, immediately assert for it.
       let prfFirst = created.prf?.first;
       if (!prfFirst) {
-        const res = await getPasskeyPrf({ rpId: rpId(), challenge: randomBytes(32), credentialId: created.credentialId });
+        const res = await getPasskeyPrf({
+          rpId: rpId(),
+          challenge: randomBytes(32),
+          credentialId: created.credentialId,
+          transports: created.transports,
+          ...(securityKey ? { authenticator: 'security-key' as const } : {}),
+        });
         prfFirst = res.prf?.first;
       }
-      if (!prfFirst) throw new Error('PASSKEY_PRF_UNSUPPORTED');
+      if (!prfFirst) throw new Error(securityKey ? 'SECURITY_KEY_PRF_UNSUPPORTED' : 'PASSKEY_PRF_UNSUPPORTED');
       privateKey = deriveEoaFromPrf(prfFirst);
     }
 
@@ -130,7 +147,13 @@ export async function createWallet(displayName?: string): Promise<UnlockedEmbedd
       version: 1,
       address,
       protection: 'passkey',
-      passkey: { credentialId: created.credentialId, derivation, rpId: rpId() },
+      passkey: {
+        credentialId: created.credentialId,
+        derivation,
+        rpId: rpId(),
+        kind: securityKey ? 'security-key' : 'platform',
+        transports: created.transports,
+      },
       delegatedChains: [],
       createdAt: Date.now(),
     };
@@ -173,7 +196,13 @@ export async function unlockWallet(): Promise<UnlockedEmbeddedWallet> {
     } else {
       // Metadata written before the apex RP ID names no rpId: its credential only
       // answers for the page hostname it was created on (codex on f0419b5).
-      const res = await getPasskeyPrf({ rpId: meta.passkey.rpId ?? legacyHostnameRpId(), challenge: randomBytes(32), credentialId: meta.passkey.credentialId });
+      const res = await getPasskeyPrf({
+        rpId: meta.passkey.rpId ?? legacyHostnameRpId(),
+        challenge: randomBytes(32),
+        credentialId: meta.passkey.credentialId,
+        transports: meta.passkey.transports,
+        ...(meta.passkey.kind === 'security-key' ? { authenticator: 'security-key' as const } : {}),
+      });
       if (!res.prf?.first) throw new Error('PASSKEY_PRF_UNSUPPORTED');
       privateKey = deriveEoaFromPrf(res.prf.first);
     }
@@ -195,12 +224,21 @@ export async function unlockWallet(): Promise<UnlockedEmbeddedWallet> {
  * rebuilds the metadata, restoring the same account after a storage wipe or on a
  * new device where the passkey is synced. Web + passkey only.
  */
-export async function recoverWallet(): Promise<UnlockedEmbeddedWallet> {
+export async function recoverWallet(opts?: { authenticator?: PasskeyAuthenticatorKind }): Promise<UnlockedEmbeddedWallet> {
   if (!(await canUsePasskey())) throw new Error('PASSKEY_UNAVAILABLE');
+  const securityKey = opts?.authenticator === 'security-key';
 
   // Still require a fresh user-verified passkey gesture (and bind to the actual
   // credential), but in dev/e2e the injected fixed key is the source of truth.
-  const res = await getPasskeyPrf({ rpId: rpId(), challenge: randomBytes(32) });
+  // A security key is steered to with the WebAuthn hint; the key's own
+  // account list lets the user pick which credential.
+  let res: Awaited<ReturnType<typeof getPasskeyPrf>>;
+  try {
+    res = await getPasskeyPrf({ rpId: rpId(), challenge: randomBytes(32), ...(securityKey ? { authenticator: 'security-key' as const } : {}) });
+  } catch (e) {
+    if (securityKey && e instanceof PasskeyCancelledError) throw new Error('SECURITY_KEY_PROMPT_CLOSED');
+    throw e;
+  }
   const testPk = getTestPk();
   const derivation: 'prf' | 'test' = testPk ? 'test' : 'prf';
   let privateKey: Hex;
@@ -216,7 +254,12 @@ export async function recoverWallet(): Promise<UnlockedEmbeddedWallet> {
     version: 1,
     address,
     protection: 'passkey',
-    passkey: { credentialId: res.credentialId, derivation, rpId: rpId() },
+    passkey: {
+      credentialId: res.credentialId,
+      derivation,
+      rpId: rpId(),
+      ...(securityKey ? { kind: 'security-key' as const } : {}),
+    },
     delegatedChains: [],
     createdAt: Date.now(),
   };
