@@ -11,10 +11,12 @@ import { buildDebugRecording, debugRecordingFileName, RECORDING_SECRET_WARNING }
 import {
   ACCOUNT_KEY_BASE64_PREFIX,
   classifyFieldName,
+  DEBUG_SAFE_LEVEL,
   DEFAULT_REDACTION_LEVEL,
   REDACTION_LEVEL_INFO,
   REDACTION_LEVELS,
   redactValue,
+  resolveDebugSafe,
   type RedactionLevel,
 } from '../debug-redaction';
 
@@ -461,10 +463,22 @@ describe('source guards', () => {
 
   test('the dialog uses the redacted default and shows the red warning only on Full', () => {
     const provider = read('components/debug-provider.tsx');
-    expect(provider).toContain('useState<RedactionLevel>(DEFAULT_REDACTION_LEVEL)');
+    expect(provider).toContain('useState<RedactionLevel>(safe ? DEBUG_SAFE_LEVEL : DEFAULT_REDACTION_LEVEL)');
     expect(provider).toContain("{level === 'full' && (");
     expect(provider).toContain('debugRecordingFileName(rec.startedAt, level)');
     expect(provider).toContain('stoppedAt: rec.stoppedAt, truncated: rec.truncated, snapshots: { atStart: rec.atStart, atStop: rec.atStop } }, level)');
+  });
+
+  test('the safe dialog copy never says key', () => {
+    const provider = read('components/debug-provider.tsx');
+    const start = provider.indexOf('{safe ? (');
+    const end = provider.indexOf(') : (', start);
+    const copy = provider.slice(start, end).toLowerCase();
+    expect(copy).toContain('send this file to the team');
+    expect(copy).toContain('shows your account activity and balances');
+    expect(copy).not.toContain('key');
+    expect(copy).not.toContain('—');
+    expect(provider).toContain("Debug export for team");
   });
 
   test('the copy has no em dashes and no semicolons', () => {
@@ -504,5 +518,23 @@ describe('standard base64 payloads', () => {
   test('Full keeps it', () => {
     const out = JSON.stringify(redactValue({ message: `pasted ${withSlash} here` }, 'full'));
     expect(out).toContain(withSlash);
+  });
+});
+
+describe('?debugsafe=1', () => {
+  test('the safe query turns debug on and marks the export safe', () => {
+    expect(resolveDebugSafe('?debugsafe=1', false)).toEqual({ safe: true, debug: true });
+  });
+  test('the safe mark survives a reload without the query', () => {
+    expect(resolveDebugSafe('', true)).toEqual({ safe: true, debug: false });
+  });
+  test('an explicit ?debug=1 lifts the restriction', () => {
+    expect(resolveDebugSafe('?debug=1', true)).toEqual({ safe: false, debug: true });
+  });
+  test('nothing set means neither', () => {
+    expect(resolveDebugSafe('', false)).toEqual({ safe: false, debug: false });
+  });
+  test('the safe level is the no-spending-keys one', () => {
+    expect(DEBUG_SAFE_LEVEL).toBe('no-spending-keys');
   });
 });
