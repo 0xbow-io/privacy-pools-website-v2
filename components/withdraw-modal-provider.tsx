@@ -200,7 +200,7 @@ import { isUnknownKeystoreRoot, keystoreRootRefreshingMessage } from '@/services
 import { isRelayerNullifierInFlight, isRelayerOutOfGas, isRelayerRateLimited, isRelayerUnreachable, isRelayWaitTimeout, relayerOutOfGasMessage, relayerRateLimitedMessage, relayInFlightMessage, timedOutRelayTxHash } from '@/services/transfer-outcome';
 import { aspBusyMessage } from '@/services/asp-backoff';
 import { aspBackoff } from '@/services/egress-fetch';
-import { onRelayedTxHash } from '@/services/relayed-receipt';
+import { onRelayCalled, onRelayedTxHash } from '@/services/relayed-receipt';
 import { isPendingRelayBlocked, landedTxHash } from '@/services/pending-relays-core';
 import { createPendingRelaySettleWatch } from '@/services/pending-relays-store';
 import { PendingRelayNotice } from '@/components/pending-relay-notice';
@@ -214,6 +214,15 @@ import { setReceiveSetup } from '@/services/receive-setup';
 import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, netSharesWei, presetChipLabel, previewReceiveFigure, shareReviewHeadline, swapRateText } from '@/services/share-display';
 import { sdkErrorText, type ErrorUnits } from '@/services/sdk-error-amounts';
 import { RelayFeeIncreasedError, relayWithdrawalWithFreshQuote } from '@/services/relayed-withdrawal';
+import { associationSetRootWatch } from '@/services/public-asp-cache';
+import {
+  associationSetMovedPast,
+  isPlainRelayRevert,
+  proofAssociationSetRoot,
+  RelayedRevertError,
+  RELAYED_REVERT_CHECK_STATUS,
+  STALE_ASP_ROOT_RETRY_STATUS,
+} from '@/services/stale-asp-root';
 import { PREVIEW_REDEEM_ABI } from '@/services/deposit-limits';
 import { useBackHandler } from '@/hooks/use-back-handler';
 import { useNativeMockBlock } from '@/hooks/use-native-mock-block';
@@ -4480,13 +4489,29 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           });
           // Our own wait (services/relayed-receipt.ts) names no hash in its
           // timeout, so the hash is the one heard as the relayer returned it.
-          const heard: { hash: string | null } = { hash: null };
+          const heard: { hash: string | null; proofRoot: bigint | null } = { hash: null, proofRoot: null };
           const stopHearing = onRelayedTxHash((hash, method) => {
             if (method && WITHDRAW_RELAY_METHOD.test(method)) { heard.hash = hash; withdrawPhaseRef.current = 'confirm'; }
           });
+          // The association-set root this proof was built against, read from
+          // the relay request in memory, so a revert can be told apart as a
+          // moved root (services/stale-asp-root.ts). Nothing is sent.
+          const stopHearingCall = onRelayCalled((method, params) => {
+            if (WITHDRAW_RELAY_METHOD.test(method)) heard.proofRoot = proofAssociationSetRoot(params);
+          });
           try {
-            return await session.relayWithdraw(option);
+            const receipt = await session.relayWithdraw(option);
+            // Mined and reverted: the SDK returns before persisting anything,
+            // so the notes are untouched. relayWithdrawalWithFreshQuote decides
+            // whether a moved root explains it and proves once more.
+            if (receipt && typeof receipt === 'object' && (receipt as { status?: unknown }).status === false) {
+              const revertedHash = (receipt as { txHash?: unknown }).txHash;
+              log('warn', 'Withdraw', 'Relayed withdrawal reverted on-chain; notes not spent', { txHash: revertedHash });
+              throw new RelayedRevertError(heard.proofRoot, typeof revertedHash === 'string' ? revertedHash : heard.hash);
+            }
+            return receipt;
           } catch (relayErr) {
+            if (relayErr instanceof RelayedRevertError) throw relayErr;
             const relayMessage = relayErr instanceof Error ? relayErr.message : String(relayErr);
             const timedOutHash = timedOutRelayTxHash(relayMessage)
               ?? (isRelayWaitTimeout(relayMessage) && heard.hash ? heard.hash as `0x${string}` : null);
@@ -4496,6 +4521,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
             return { txHash: timedOutHash, status: undefined } as unknown as Awaited<ReturnType<typeof session.relayWithdraw>>;
           } finally {
             stopHearing();
+            stopHearingCall();
           }
         };
         // The fresh quote is fetched and checked first; relayOnce moves to submit.
@@ -4507,8 +4533,18 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           relay: relayOnce,
           onStaleAspRoot: (staleErr) => {
             log('warn', 'Withdraw', 'Association-set root rotated mid-flight; re-proving once', { relayMessage: staleErr.message });
-            setLoadingMessage('The approval set just updated. Re-proving your withdrawal...');
+            setLoadingMessage(STALE_ASP_ROOT_RETRY_STATUS);
           },
+          onRevert: () => {
+            if (isSameOperation()) setLoadingMessage(RELAYED_REVERT_CHECK_STATUS);
+          },
+          // Compared against the root the feed grid holds, and at most a wait
+          // for its next wall-clock refresh: no request is sent for the check.
+          rootMoved: async (proofRoot, wait) => associationSetMovedPast(
+            proofRoot,
+            await associationSetRootWatch(chainId),
+            { wait },
+          ),
         }).catch((feeErr: unknown) => {
           // A fee above the reviewed one (outside the jitter allowance) is
           // refused before proving, so nothing was sent: back to the form for a
@@ -4552,7 +4588,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         ? (relayReceiptResult as { status?: unknown }).status
         : undefined;
       if (sdkStatus === false) {
-        throw new Error('Withdrawal transaction reverted on-chain. Your notes were NOT spent.');
+        throw new RelayedRevertError(null, relayTxHash);
       }
       if (sdkStatus !== true) {
         // PRIVACY: confirm from bulk chain data, NOT by polling this client's
@@ -4772,7 +4808,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           : isUnknownKeystoreRoot(message) ? keystoreRootRefreshingMessage('withdrawal')
           : isPendingRelayBlocked(message) ? message
             : isRelayerNullifierInFlight(message) ? relayInFlightMessage('withdrawal')
-              : message === WITHDRAW_PENDING_MESSAGE ? message
+              : message === WITHDRAW_PENDING_MESSAGE || isPlainRelayRevert(err) ? message
                 : `Withdrawal failed: ${shownError(err)}`,
         err,
         'relay',

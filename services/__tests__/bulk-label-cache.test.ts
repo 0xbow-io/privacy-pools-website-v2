@@ -338,6 +338,62 @@ describe('createBulkLabelCache, owned by a refresher', () => {
     expect(h.rootCalls).toBe(1);
   });
 
+  // Stale-root revert check (services/stale-asp-root.ts): what the grid holds
+  // now, and what its next refresh brings, without a request of its own.
+  test('heldRoot is a pure read of what the owner brought', async () => {
+    const h = owned();
+    expect(h.cache.heldRoot(CHAIN, POOL)).toBeNull();
+    await h.cache.refresh(source(['0xA']), CHAIN, POOL);
+    expect(h.cache.heldRoot(CHAIN, POOL)).toBe('root-a');
+    expect(h.cache.heldRoot(CHAIN, `${CHAIN}:0xelse`)).toBeNull();
+    expect(h.rootCalls).toBe(1);
+  });
+
+  test('nextRefresh resolves with the root of a refresh started after it, and sends nothing', async () => {
+    const h = owned();
+    const owner = source(['0xA']);
+    await h.cache.refresh(owner, CHAIN, POOL);
+    const next = h.cache.nextRefresh(CHAIN, POOL, 1_000);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.rootCalls).toBe(1);
+    h.setRoot('root-b');
+    await h.cache.refresh(source(['0xA', '0xB']), CHAIN, POOL);
+    expect(await next).toBe('root-b');
+  });
+
+  test('nextRefresh ignores a refresh already running when it was asked', async () => {
+    const h = owned();
+    await h.cache.refresh(source(['0xA']), CHAIN, POOL);
+    h.setRoot('root-b');
+    const running = h.cache.refresh(source(['0xA', '0xB']), CHAIN, POOL);
+    const next = h.cache.nextRefresh(CHAIN, POOL, 1_000);
+    await running;
+    let settled: string | null | undefined;
+    void next.then((root) => { settled = root; });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(settled).toBeUndefined();
+    h.setRoot('root-c');
+    await h.cache.refresh(source(['0xC']), CHAIN, POOL);
+    expect(await next).toBe('root-c');
+  });
+
+  test('nextRefresh waits past a failed refresh and gives null at its deadline', async () => {
+    const h = owned();
+    await h.cache.refresh(source(['0xA']), CHAIN, POOL);
+    const next = h.cache.nextRefresh(CHAIN, POOL, 30);
+    // The root moved, so the refresh fetches the leaves, and that fetch fails.
+    h.setRoot('root-b');
+    await expect(h.cache.refresh(source(['0xB'], true), CHAIN, POOL)).rejects.toThrow('leaf fetch failed');
+    expect(await next).toBeNull();
+  });
+
+  test('nextRefresh on a chain nobody owns answers null at once', async () => {
+    const h = harness();
+    expect(await h.cache.nextRefresh(CHAIN, POOL, 10_000)).toBeNull();
+    expect(h.cache.heldRoot(CHAIN, POOL)).toBeNull();
+    expect(h.rootCalls).toBe(0);
+  });
+
   test('a never-started or hung first refresh cannot strand an owned read', async () => {
     let calls = 0;
     const cache = createBulkLabelCache({

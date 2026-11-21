@@ -42,9 +42,13 @@ const relayedListeners = new Set<(hash: string, method: string | null) => void>(
 /** `method` is the relayer interactor method that returned the hash
  *  (relayTransfer, relayWithdrawal, relaySwap…), so a listener can keep to
  *  its own kind of operation. */
-export function markRelayedTxHash(hash: string, now = Date.now(), method: string | null = null): void {
+/** When each relayed hash's relay call was made (unix ms), when known. */
+const relaySentAt = new Map<string, number>();
+
+export function markRelayedTxHash(hash: string, now = Date.now(), method: string | null = null, sentAt: number | null = null): void {
   if (!TX_HASH.test(hash)) return;
   relayed.set(hash.toLowerCase(), now);
+  if (sentAt !== null) relaySentAt.set(hash.toLowerCase(), sentAt);
   for (const listener of relayedListeners) {
     try { listener(hash, method); } catch { /* a listener must not break the relay */ }
   }
@@ -62,7 +66,7 @@ export function onRelayedTxHash(listener: (hash: string, method: string | null) 
   return () => { relayedListeners.delete(listener); };
 }
 
-const relayCallListeners = new Set<(method: string) => void>();
+const relayCallListeners = new Set<(method: string, params: unknown) => void>();
 
 /**
  * Hear the SDK call the relayer interactor's relay* method (DEV-494). The SDK's
@@ -71,28 +75,37 @@ const relayCallListeners = new Set<(method: string) => void>();
  * "waiting on the relayer" and showed "Generating proof" through a relayer that
  * took minutes. This is the CALL, not the HTTP send: the interactor still
  * validates the payload first, so a payload it refuses flips the label for the
- * instant before its error replaces it. Carries only the method name. Returns
- * the unsubscribe.
+ * instant before its error replaces it. Carries the method name and the
+ * request the SDK built (in memory only: a flow reads its proof's public
+ * signals, e.g. the association-set root, from it). Returns the unsubscribe.
  */
-export function onRelayCalled(listener: (method: string) => void): () => void {
+export function onRelayCalled(listener: (method: string, params: unknown) => void): () => void {
   relayCallListeners.add(listener);
   return () => { relayCallListeners.delete(listener); };
 }
 
-function announceRelayCall(method: string): void {
+function announceRelayCall(method: string, params: unknown): void {
   for (const listener of relayCallListeners) {
-    try { listener(method); } catch { /* a listener must not break the relay */ }
+    try { listener(method, params); } catch { /* a listener must not break the relay */ }
   }
 }
 
 export function isRelayedTxHash(hash: string, now = Date.now()): boolean {
-  for (const [h, at] of relayed) if (now - at > RELAYED_HASH_TTL_MS) relayed.delete(h);
+  for (const [h, at] of relayed) {
+    if (now - at > RELAYED_HASH_TTL_MS) { relayed.delete(h); relaySentAt.delete(h); }
+  }
   return relayed.has(hash.toLowerCase());
+}
+
+/** When the relay call that returned `hash` was made (unix ms), or null. */
+export function relayedTxSentAt(hash: string): number | null {
+  return relaySentAt.get(hash.toLowerCase()) ?? null;
 }
 
 /** Test seam. */
 export function forgetRelayedTxHashes(): void {
   relayed.clear();
+  relaySentAt.clear();
 }
 
 function hashOf(result: unknown): string | null {
@@ -143,7 +156,8 @@ export function recordRelayedHashes<T extends object, C = unknown>(inner: T, hoo
             return Promise.reject(err);
           }
         }
-        announceRelayCall(prop);
+        const sentAt = Date.now();
+        announceRelayCall(prop, params);
         const failed = (err: unknown) => {
           try { hooks.onRelayFailed?.(prop, params, err, context); } catch { /* bookkeeping must not break the relay */ }
         };
@@ -152,7 +166,7 @@ export function recordRelayedHashes<T extends object, C = unknown>(inner: T, hoo
           // Nothing to track without a hash: release what beforeRelay set up.
           if (!h) { failed(new Error('Relayer returned no transaction hash')); return; }
           try { hooks.afterRelay?.(prop, params, h, context); } catch { /* bookkeeping must not break the relay */ }
-          markRelayedTxHash(h, Date.now(), prop);
+          markRelayedTxHash(h, Date.now(), prop, sentAt);
         };
         let out: unknown;
         try {
@@ -205,7 +219,7 @@ export type RelayedReceipt = {
  */
 export type RawLogClient = {
   getBlockNumber(): Promise<bigint>;
-  getBlock(args: { blockNumber: bigint }): Promise<{ transactions: readonly (Hash | { hash: Hash })[] }>;
+  getBlock(args: { blockNumber: bigint }): Promise<{ transactions: readonly (Hash | { hash: Hash })[]; timestamp?: bigint }>;
   getLogs(args: { address: readonly Hex[]; fromBlock: bigint; toBlock: bigint }): Promise<readonly RawLog[]>;
 };
 
@@ -257,6 +271,12 @@ export type WaitForRelayedReceiptOptions = {
    *  the transaction mined, a minute or more later; the walk's short lookback
    *  then never met the block and the whole budget ran out on a landed send. */
   logLookbackBlocks?: bigint;
+  /** When the relay call was made (unix ms). With it, the first walk reaches
+   *  back past `lookbackBlocks` to the block mined at that time, so a revert
+   *  that mined before a slow relayer returned the hash is still seen. */
+  sentAtMs?: number | null;
+  /** Cap on the extra blocks that reach-back reads (default 128). */
+  maxReachBackBlocks?: bigint;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 };
@@ -291,11 +311,14 @@ export async function waitForRelayedReceipt(
   // answers it, whatever block it landed in. A failed scan is retried on each
   // tick until one completes; the walk runs meanwhile.
   //
-  // Known limit: a transaction that mined AND reverted more than `lookback`
-  // blocks before the hash arrived has no log to find here and is below the
-  // walk, so the wait times out. That ends as "outcome unknown", never as a
-  // success, and the notes stay unspent. Walking every block of the window to
-  // tell a revert apart would cost one request per block.
+  // A transaction that mined AND reverted more than `lookback` blocks before
+  // the hash arrived has no log to find here and is below the walk. With
+  // `sentAtMs` the walk reaches back to the block mined when the relay call
+  // was made (below), so a slow relayer's revert is still seen: that is the
+  // stale-root revert of 2026-11-21, which otherwise sat "not confirmed". The
+  // reach-back is bounded by the relay's own duration and by
+  // `maxReachBackBlocks`. Beyond it the wait still times out as "outcome
+  // unknown", never as a success, and the notes stay unspent.
   const scanFrom = head > logLookback ? head - logLookback : 0n;
   const scanTo = head;
   let scanned = false;
@@ -311,6 +334,27 @@ export async function waitForRelayedReceipt(
   const early = await scanOnce();
   if (early) return early;
   let next = head > lookback ? head - lookback : 0n;
+  if (opts.sentAtMs != null && next > 0n) {
+    // Step down from the walk's start while blocks were still mined after the
+    // relay call, less 30 s and one block of slack for a device clock running
+    // ahead of the chain. Each block read here is also checked for the hash,
+    // the same bulk read the walk makes.
+    const sentAtSec = BigInt(Math.floor((opts.sentAtMs - 30_000) / 1000));
+    const floor = next > (opts.maxReachBackBlocks ?? 128n) ? next - (opts.maxReachBackBlocks ?? 128n) : 0n;
+    try {
+      for (let b = next - 1n; b >= floor; b -= 1n) {
+        const block = await client.getBlock({ blockNumber: b });
+        if (block.transactions.some((t) => (typeof t === 'string' ? t : t.hash).toLowerCase() === want)) {
+          const logs = await client.getLogs({ address: opts.addresses, fromBlock: b, toBlock: b });
+          return receiptFromLogs(hash, logs) ?? { txHash: hash, status: false, blockNumber: toHex(b), logs: [] };
+        }
+        if (block.timestamp === undefined || block.timestamp < sentAtSec) break;
+        if (b === 0n) break;
+      }
+    } catch {
+      // A failed read ends the reach-back early; the forward walk still runs.
+    }
+  }
   for (;;) {
     if (!scanned) {
       const found = await scanOnce();
