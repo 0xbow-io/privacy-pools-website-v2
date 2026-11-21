@@ -3500,7 +3500,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         reportTransferError(
           isUnknownKeystoreRoot(String((err as Error)?.message ?? err)) ? keystoreRootRefreshingMessage('transfer')
             // The relayer's raw "HTTP 400: {...}" never reaches the screen.
-            : isRawRelayerHttpAnswer(shownError(err)) ? relayerAnswerFallbackMessage('transfer')
+            : (err as { name?: string } | null)?.name === 'RelayerRejected' && isRawRelayerHttpAnswer(shownError(err)) ? relayerAnswerFallbackMessage('transfer')
               : `Transfer failed: ${shownError(err)}`,
           err,
           'relay',

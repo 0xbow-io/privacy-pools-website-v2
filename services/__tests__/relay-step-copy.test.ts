@@ -34,12 +34,15 @@ describe('claimRelayFailureText (DEV-494)', () => {
     }
   });
 
-  test('a 400 that can follow a broadcast keeps its own wording', () => {
+  test('a 400 that can follow a broadcast never shows the raw JSON nor says nothing was spent', () => {
     for (const message of [
       'HTTP 400: {"message":"Relay failed: The contract call \\"relay\\" failed: timed out.","statusCode":400}',
       'HTTP 400: {"message":"Relay failed: nonce too low","statusCode":400}',
     ]) {
-      expect(claimRelayFailureText(rejected(message))).toBeNull();
+      const text = claimRelayFailureText(rejected(message))!;
+      expect(text).toContain('Check your balance');
+      expect(text).not.toMatch(/nothing was (spent|sent)/i);
+      expect(text).not.toContain('HTTP');
     }
     // Not from the relayer interactor at all, or a transport failure.
     expect(claimRelayFailureText(new Error('Failed to fetch'))).toBeNull();

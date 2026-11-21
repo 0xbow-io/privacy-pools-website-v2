@@ -4775,7 +4775,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
             : isRelayerNullifierInFlight(message) ? relayInFlightMessage('withdrawal')
               : message === WITHDRAW_PENDING_MESSAGE ? message
                 // The relayer's raw "HTTP 400: {...}" never reaches the screen.
-                : isRawRelayerHttpAnswer(shownError(err)) ? relayerAnswerFallbackMessage('withdrawal')
+                : (err as { name?: string } | null)?.name === 'RelayerRejected' && isRawRelayerHttpAnswer(shownError(err)) ? relayerAnswerFallbackMessage('withdrawal')
                 : `Withdrawal failed: ${shownError(err)}`,
         err,
         'relay',

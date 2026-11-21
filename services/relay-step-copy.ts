@@ -16,7 +16,7 @@
  *
  * PURE so bun pins the rules.
  */
-import { isRelayerFeeShort, isRelayerGasBudgetShort, isRelayerOutOfGas, isRelayerRateLimited } from '@/services/transfer-outcome';
+import { isRawRelayerHttpAnswer, isRelayerFeeShort, isRelayerGasBudgetShort, isRelayerOutOfGas, isRelayerRateLimited } from '@/services/transfer-outcome';
 
 export const CLAIM_PROVING = 'Generating proof…';
 // No "relay"/"submit" word is needed for the rail: FlowProgress maps
@@ -70,6 +70,11 @@ export function claimRelayFailureText(err: unknown): string | null {
   }
   if (name === 'RelayerRejected' && /^HTTP 4\d\d\b/.test(message) && PRE_BROADCAST_REFUSAL.some((re) => re.test(message))) {
     return `The relayer could not send the claim, so nothing was spent. ${SAVED} Try again.`;
+  }
+  // Any other raw relayer HTTP answer: never show the JSON. A 4xx/5xx can
+  // also follow a broadcast, so it does not claim nothing was spent.
+  if (name === 'RelayerRejected' && isRawRelayerHttpAnswer(message)) {
+    return `The relayer could not complete the claim. ${SAVED} Check your balance before you try again.`;
   }
   return null;
 }
