@@ -149,7 +149,7 @@ describe('the hub wires dollar entry', () => {
   });
 
   test('the destination card names the pool and the chain', () => {
-    expect(src).toContain('shieldDestinationLabel(shieldPool)');
+    expect(src).toContain('shieldDestinationLabel(shieldDisplayPool)');
     expect(src).not.toContain('Into {shieldPool.chainName} pool');
   });
 

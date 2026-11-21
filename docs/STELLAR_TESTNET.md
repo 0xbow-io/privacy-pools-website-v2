@@ -2,7 +2,7 @@
 
 The website runs the Privacy Pools v2 Stellar (Soroban) testnet deployment through
 the same UI as the EVM pools: the home action hub, the pool page, and the deposit,
-withdraw, transfer and exit modals. Stellar is one more network in the selector, available by default in staging. `?stellar=true` optionally selects it on page load. It has no swap or cross-chain routes; payment requests work (XLM only).
+withdraw, transfer and exit modals. Stellar is one more network in the selector, available by default in staging. `?stellar=true` optionally selects it on page load. It has no swap or cross-chain routes; payment requests work (XLM only). The homepage and landing widget offer XLM in Shield, Withdraw, Send and Request. Selecting XLM switches the active network; it never converts or bridges an EVM asset. Staging also shows the header network selector before a wallet is connected.
 
 ## What it talks to
 
