@@ -197,7 +197,7 @@ import { OpShell } from '@/components/op-shell';
 import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 import { useInlineOpsCapable } from '@/hooks/use-inline-ops-capable';
 import { isUnknownKeystoreRoot, keystoreRootRefreshingMessage } from '@/services/keystore-root-error';
-import { isRelayerNullifierInFlight, isRelayerOutOfGas, isRelayerRateLimited, isRelayerUnreachable, isRelayWaitTimeout, relayerOutOfGasMessage, relayerRateLimitedMessage, relayInFlightMessage, timedOutRelayTxHash } from '@/services/transfer-outcome';
+import { isRawRelayerHttpAnswer, isRelayerFeeShort, isRelayerNullifierInFlight, isRelayerOutOfGas, isRelayerRateLimited, isRelayerUnreachable, isRelayWaitTimeout, relayerAnswerFallbackMessage, relayerFeeShortMessage, relayerOutOfGasMessage, relayerRateLimitedMessage, relayInFlightMessage, timedOutRelayTxHash } from '@/services/transfer-outcome';
 import { aspBusyMessage } from '@/services/asp-backoff';
 import { aspBackoff } from '@/services/egress-fetch';
 import { onRelayedTxHash } from '@/services/relayed-receipt';
@@ -4769,10 +4769,13 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       // nothing about whose problem it was or whether funds moved.
       reportWithdrawError(
         isRelayerOutOfGas(message) ? relayerOutOfGasMessage('withdrawal')
+          : isRelayerFeeShort(message) ? relayerFeeShortMessage('withdrawal', message)
           : isUnknownKeystoreRoot(message) ? keystoreRootRefreshingMessage('withdrawal')
           : isPendingRelayBlocked(message) ? message
             : isRelayerNullifierInFlight(message) ? relayInFlightMessage('withdrawal')
               : message === WITHDRAW_PENDING_MESSAGE ? message
+                // The relayer's raw "HTTP 400: {...}" never reaches the screen.
+                : (err as { name?: string } | null)?.name === 'RelayerRejected' && isRawRelayerHttpAnswer(shownError(err)) ? relayerAnswerFallbackMessage('withdrawal')
                 : `Withdrawal failed: ${shownError(err)}`,
         err,
         'relay',
