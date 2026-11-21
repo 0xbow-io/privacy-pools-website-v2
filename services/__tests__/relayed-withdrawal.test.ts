@@ -3,6 +3,7 @@ import { FeeCommitmentExpired, RelayerRejected, type ExecuteWithdrawRelayerParam
 import { RelayFeeIncreasedError, relayWithdrawalWithFreshQuote } from '@/services/relayed-withdrawal';
 import { sdkErrorText } from '@/services/sdk-error-amounts';
 import { FEE_COMMITMENT_EXPIRED_MESSAGE } from '@/services/fee-commitment';
+import { RELAYED_REVERT_MESSAGE, RelayedRevertError, STALE_ASP_ROOT_MESSAGE, StaleAspRootError } from '@/services/stale-asp-root';
 
 const NOW = 1790650900000;
 const ASSET = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
@@ -95,12 +96,101 @@ describe('plain relayed withdrawal quote', () => {
     expect(args.onStaleAspRoot).toHaveBeenCalledTimes(1);
   });
 
-  test('a second stale ASP root propagates', async () => {
+  test('a second stale ASP root ends in the short copy, carrying the refusal', async () => {
     const args = setup();
     const second = staleRoot();
     args.state.errors = [staleRoot(), second];
-    await expect(relayWithdrawalWithFreshQuote(args)).rejects.toBe(second);
+    const refused = await relayWithdrawalWithFreshQuote(args).catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(StaleAspRootError);
+    expect((refused as Error).message).toBe(STALE_ASP_ROOT_MESSAGE);
+    expect((refused as Error).cause).toBe(second);
     expect(args.relay).toHaveBeenCalledTimes(2);
+  });
+
+  describe('a relayed withdrawal that mined reverted', () => {
+    const PROOF_ROOT = 0xabcn;
+    function withRoot(moved: boolean[]) {
+      const args = setup();
+      const calls: { proofRoot: bigint | null; wait: boolean }[] = [];
+      const onRevert = mock((_error: RelayedRevertError) => {});
+      return {
+        args: {
+          ...args,
+          onRevert,
+          rootMoved: mock(async (proofRoot: bigint | null, wait: boolean) => {
+            calls.push({ proofRoot, wait });
+            return moved.shift() ?? false;
+          }),
+        },
+        calls,
+        onRevert,
+      };
+    }
+
+    test('re-proves once when the association set moved past the proof root', async () => {
+      const { args, calls, onRevert } = withRoot([true]);
+      args.state.errors = [new RelayedRevertError(PROOF_ROOT, '0x1234')];
+      const outcome = await relayWithdrawalWithFreshQuote(args);
+      expect(outcome?.result).toEqual({ txHash: '0x1234' });
+      expect(args.prepareOption).toHaveBeenCalledTimes(2);
+      expect(args.relay).toHaveBeenCalledTimes(2);
+      expect(args.onStaleAspRoot).toHaveBeenCalledTimes(1);
+      expect(onRevert).toHaveBeenCalledTimes(1);
+      // The first check may wait for the grid's next refresh.
+      expect(calls).toEqual([{ proofRoot: PROOF_ROOT, wait: true }]);
+    });
+
+    test('a revert the set does not explain is not retried and reads as the plain copy', async () => {
+      const { args, calls } = withRoot([false]);
+      const reverted = new RelayedRevertError(PROOF_ROOT);
+      args.state.errors = [reverted];
+      await expect(relayWithdrawalWithFreshQuote(args)).rejects.toBe(reverted);
+      expect(reverted.message).toBe(RELAYED_REVERT_MESSAGE);
+      expect(args.relay).toHaveBeenCalledTimes(1);
+      expect(args.onStaleAspRoot).toHaveBeenCalledTimes(0);
+      expect(calls).toHaveLength(1);
+    });
+
+    test('a second revert past a moved set ends in the short copy, checked without waiting', async () => {
+      const { args, calls } = withRoot([true, true]);
+      args.state.errors = [new RelayedRevertError(PROOF_ROOT), new RelayedRevertError(0xdefn)];
+      await expect(relayWithdrawalWithFreshQuote(args)).rejects.toThrow(STALE_ASP_ROOT_MESSAGE);
+      expect(args.relay).toHaveBeenCalledTimes(2);
+      expect(calls).toEqual([{ proofRoot: PROOF_ROOT, wait: true }, { proofRoot: 0xdefn, wait: false }]);
+    });
+
+    test('a refusal after a revert retry also ends in the short copy', async () => {
+      const { args } = withRoot([true]);
+      args.state.errors = [new RelayedRevertError(PROOF_ROOT), staleRoot()];
+      await expect(relayWithdrawalWithFreshQuote(args)).rejects.toThrow(STALE_ASP_ROOT_MESSAGE);
+      expect(args.relay).toHaveBeenCalledTimes(2);
+    });
+
+    test('a failing check counts as unexplained, never as a retry', async () => {
+      const args = { ...setup(), rootMoved: async () => { throw new Error('grid unavailable'); } };
+      const reverted = new RelayedRevertError(PROOF_ROOT);
+      args.state.errors = [reverted];
+      await expect(relayWithdrawalWithFreshQuote(args)).rejects.toBe(reverted);
+      expect(args.relay).toHaveBeenCalledTimes(1);
+    });
+
+    test('without a check a revert is never retried', async () => {
+      const args = setup();
+      const reverted = new RelayedRevertError(PROOF_ROOT);
+      args.state.errors = [reverted];
+      await expect(relayWithdrawalWithFreshQuote(args)).rejects.toBe(reverted);
+      expect(args.relay).toHaveBeenCalledTimes(1);
+    });
+
+    test('does not re-prove once the operation changed during the check', async () => {
+      const base = setup();
+      const args = { ...base, rootMoved: async () => { base.state.current = false; return true; } };
+      args.state.errors = [new RelayedRevertError(PROOF_ROOT)];
+      expect(await relayWithdrawalWithFreshQuote(args)).toBeNull();
+      expect(args.prepareOption).toHaveBeenCalledTimes(1);
+      expect(args.relay).toHaveBeenCalledTimes(1);
+      expect(args.onStaleAspRoot).toHaveBeenCalledTimes(0);
+    });
   });
 
   test('the retry quote is held to the reviewed fee', async () => {

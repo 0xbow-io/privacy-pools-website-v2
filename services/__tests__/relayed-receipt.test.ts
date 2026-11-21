@@ -171,6 +171,83 @@ describe('waitForRelayedReceipt', () => {
     expect(wire).not.toContain(H.slice(2, 20));
   });
 
+  // 2026-11-21: a mainnet withdrawal reverted (stale association-set root)
+  // before the relayer returned its hash. A revert has no log for the range
+  // scan, and it sat below the 5-block walk, so the wait timed out and the
+  // flow read "not confirmed". With the relay's send time the walk reaches it.
+  describe('reach-back to the relay call', () => {
+    const SECONDS_PER_BLOCK = 12n;
+    const at = (block: bigint) => 1_790_000_000n + block * SECONDS_PER_BLOCK;
+    function chain(minedAt: bigint | null) {
+      const blockCalls: bigint[] = [];
+      return {
+        blockCalls,
+        client: {
+          getBlockNumber: async () => 1_000n,
+          getBlock: async ({ blockNumber }: { blockNumber: bigint }) => {
+            blockCalls.push(blockNumber);
+            return { transactions: blockNumber === minedAt ? [OTHER, H] : [OTHER], timestamp: at(blockNumber) };
+          },
+          // A revert emits nothing on the pool or keystore.
+          getLogs: async () => [] as RawLog[],
+        },
+      };
+    }
+
+    test('finds a revert mined before the hash arrived, and calls it one', async () => {
+      const c = chain(985n);
+      const sentAtMs = Number(at(980n)) * 1000;
+      const r = await waitForRelayedReceipt(H, c.client, {
+        addresses: [POOL], intervalMs: 1, sleep: async () => {}, lookbackBlocks: 5n, sentAtMs, ...FAST,
+      });
+      expect(r.status).toBe(false);
+      expect(r.blockNumber).toBe('0x3d9');
+      expect(r.logs).toEqual([]);
+      // Down from the walk's start, no further than the block that mined it.
+      expect(c.blockCalls).toEqual([994n, 993n, 992n, 991n, 990n, 989n, 988n, 987n, 986n, 985n]);
+    });
+
+    test('stops at the send time, less the skew allowance', async () => {
+      const c = chain(null);
+      const sentAtMs = Number(at(980n)) * 1000;
+      await expect(waitForRelayedReceipt(H, c.client, {
+        addresses: [POOL], intervalMs: 1, sleep: async () => {}, lookbackBlocks: 5n, sentAtMs,
+        budgetMs: 0, now: () => 0,
+      })).rejects.toBeInstanceOf(RelayedReceiptTimeout);
+      const reachBack = c.blockCalls.filter((b) => b < 995n);
+      // 30 s of skew allowance is under three 12 s blocks: 977 is the first block before it.
+      expect(Math.min(...reachBack.map(Number))).toBe(977);
+    });
+
+    test('is bounded by maxReachBackBlocks', async () => {
+      const c = chain(null);
+      await expect(waitForRelayedReceipt(H, c.client, {
+        addresses: [POOL], intervalMs: 1, sleep: async () => {}, lookbackBlocks: 5n, sentAtMs: 0,
+        maxReachBackBlocks: 20n, budgetMs: 0, now: () => 0,
+      })).rejects.toBeInstanceOf(RelayedReceiptTimeout);
+      expect(Math.min(...c.blockCalls.map(Number))).toBe(975);
+    });
+
+    test('without a send time the walk keeps its short lookback', async () => {
+      const c = chain(985n);
+      await expect(waitForRelayedReceipt(H, c.client, {
+        addresses: [POOL], intervalMs: 1, sleep: async () => {}, lookbackBlocks: 5n, budgetMs: 0, now: () => 0,
+      })).rejects.toBeInstanceOf(RelayedReceiptTimeout);
+      expect(Math.min(...c.blockCalls.map(Number))).toBe(995);
+    });
+
+    test('the relay proxy records when the call was made', async () => {
+      const { relayedTxSentAt } = await import('../relayed-receipt');
+      const before = Date.now();
+      const relayer = recordRelayedHashes({ relayWithdrawal: async () => H });
+      await relayer.relayWithdrawal();
+      const sentAt = relayedTxSentAt(H);
+      expect(sentAt).not.toBeNull();
+      expect(sentAt!).toBeGreaterThanOrEqual(before);
+      expect(sentAt!).toBeLessThanOrEqual(Date.now());
+    });
+  });
+
   test('DEV-412: a failed range scan is retried on the next tick', async () => {
     let scans = 0;
     const client = {

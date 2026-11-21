@@ -157,6 +157,24 @@ export async function refreshPoolAssociationSet(chainId: number): Promise<string
   return root;
 }
 
+/**
+ * The association-set root the grid holds for this chain's pool, and the one
+ * its next refresh brings. Both read what the grid fetches on its own clock,
+ * so neither puts a request on the wire (services/stale-asp-root.ts uses them
+ * to tell a moved root after a reverted relay).
+ */
+export async function associationSetRootWatch(chainId: number): Promise<{
+  held: () => string | null;
+  next: (timeoutMs?: number) => Promise<string | null>;
+}> {
+  const entrypoint = await resolveConfiguredEntrypoint(chainId).catch(() => undefined);
+  const poolKey = `${chainId}:${(entrypoint ?? '').toLowerCase()}`;
+  return {
+    held: () => approvedLabelCache.heldRoot(chainId, poolKey),
+    next: (timeoutMs) => approvedLabelCache.nextRefresh(chainId, poolKey, timeoutMs),
+  };
+}
+
 export async function bulkApprovedLabels(
   provider: { getLeaves: () => Promise<Hash[]> },
   chainId: number,
