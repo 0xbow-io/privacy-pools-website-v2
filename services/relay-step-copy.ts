@@ -16,7 +16,7 @@
  *
  * PURE so bun pins the rules.
  */
-import { isRelayerOutOfGas, isRelayerRateLimited } from '@/services/transfer-outcome';
+import { isRelayerFeeShort, isRelayerGasBudgetShort, isRelayerOutOfGas, isRelayerRateLimited } from '@/services/transfer-outcome';
 
 export const CLAIM_PROVING = 'Generating proof…';
 // No "relay"/"submit" word is needed for the rail: FlowProgress maps
@@ -60,6 +60,13 @@ export function claimRelayFailureText(err: unknown): string | null {
   // nothing about whether the claim went out.
   if (name === 'RelayerRejected' && isRelayerRateLimited(message)) {
     return `The relayer is busy right now, so the claim was not sent and nothing was spent. ${SAVED} Wait a minute and try again.`;
+  }
+  // The relayer re-priced the relay before signing and the quoted fee fell
+  // short. Its gas budget being too low is not fixed by trying again soon.
+  if (name === 'RelayerRejected' && isRelayerFeeShort(message)) {
+    return isRelayerGasBudgetShort(message)
+      ? `The relayer can't send the claim right now, so nothing was spent. ${SAVED} Try again later.`
+      : `The relayer fee went up, so the claim was not sent and nothing was spent. ${SAVED} Try again.`;
   }
   if (name === 'RelayerRejected' && /^HTTP 4\d\d\b/.test(message) && PRE_BROADCAST_REFUSAL.some((re) => re.test(message))) {
     return `The relayer could not send the claim, so nothing was spent. ${SAVED} Try again.`;
