@@ -23,7 +23,15 @@
  * rule.
  */
 import { tokenAmountLabel } from '@/services/share-display';
-import { isRelayerOutOfGas, isRelayerRateLimited, relayerOutOfGasMessage, relayerRateLimitedMessage } from '@/services/transfer-outcome';
+import {
+  isRelayerFeeShort,
+  isRelayerOutOfGas,
+  isRelayerRateLimited,
+  relayerAnswerFallbackMessage,
+  relayerFeeShortMessage,
+  relayerOutOfGasMessage,
+  relayerRateLimitedMessage,
+} from '@/services/transfer-outcome';
 import { formatUnits } from 'viem';
 
 export interface AmountUnits {
@@ -97,8 +105,11 @@ export function isSwapValueOverRelayerCap(err: unknown): boolean {
  * turns a failed or timed-out broadcast into a 400. So "Nothing was sent" is
  * only shown for answers the relayer gives BEFORE it signs: a simulation or
  * estimate revert, its gas-cap refusal, an expired fee commitment, or an
- * unsupported chain. A note already in flight gets its own copy. Anything else,
- * like a transport failure, returns null and keeps its own wording.
+ * unsupported chain. A note already in flight gets its own copy. Any other HTTP
+ * answer gets a short generic line that does not claim nothing was sent, so
+ * the raw JSON never reaches the screen (it stays in the log). Anything that is
+ * not an HTTP answer, like a transport failure, returns null and keeps its own
+ * wording.
  */
 const PRE_BROADCAST_REFUSAL = [
   // The body is JSON, so the quotes around the function name arrive escaped.
@@ -113,7 +124,15 @@ export function relaySwapRefusalText(err: unknown): string | null {
   if (!(err instanceof Error) || err.name !== 'RelayerRejected') return null;
   if (isRelayerOutOfGas(err.message)) return relayerOutOfGasMessage('swap');
   if (isRelayerRateLimited(err.message)) return relayerRateLimitedMessage('swap');
-  if (!/^HTTP 4\d\d\b/.test(err.message)) return null;
-  if (NULLIFIER_IN_FLIGHT.test(err.message)) return 'A swap from this balance is still pending. Wait for it to finish before trying again.';
-  return PRE_BROADCAST_REFUSAL.some((re) => re.test(err.message)) ? 'The swap could not be executed. Nothing was sent.' : null;
+  // Any other HTTP answer is the relayer's raw JSON, never shown as is.
+  if (!/^HTTP \d{3}\b/.test(err.message)) return null;
+  // The relayer re-priced the relay before signing and the quoted fee fell
+  // short: a fresh quote helps for drift, not when its gas budget is too low.
+  if (isRelayerFeeShort(err.message)) return relayerFeeShortMessage('swap', err.message);
+  if (isSwapValueOverRelayerCap(err)) return SWAP_VALUE_CAP_TEXT;
+  if (/^HTTP 4\d\d\b/.test(err.message)) {
+    if (NULLIFIER_IN_FLIGHT.test(err.message)) return 'A swap from this balance is still pending. Wait for it to finish before trying again.';
+    if (PRE_BROADCAST_REFUSAL.some((re) => re.test(err.message))) return 'The swap could not be executed. Nothing was sent.';
+  }
+  return relayerAnswerFallbackMessage('swap');
 }

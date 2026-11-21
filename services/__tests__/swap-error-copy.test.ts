@@ -75,14 +75,16 @@ describe('relaySwapRefusalText (DEV-459)', () => {
     }
   });
 
-  test('a 400 that may follow a broadcast never says nothing was sent', () => {
+  test('a 400 that may follow a broadcast never says nothing was sent, and never shows the raw JSON', () => {
     for (const message of [
       ETH_400,
       'HTTP 400: {"message":"RelaySwaps failed: The contract call \\"executeUnwrapped\\" failed: timed out.","statusCode":400}',
       'HTTP 400: {"message":"RelaySwaps failed: The contract call \\"executeUnwrapped\\" failed: nonce too low.","statusCode":400}',
       'HTTP 400: {"message":"RelaySwaps failed: The contract call \\"executeUnwrapped\\" failed: transaction already known.","statusCode":400}',
     ]) {
-      expect(relaySwapRefusalText(rejected(message))).toBeNull();
+      const text = relaySwapRefusalText(rejected(message));
+      expect(text).toBe('The relayer could not complete this swap. Check your balance before you try again.');
+      expect(text).not.toContain('Nothing was sent');
     }
   });
 
@@ -104,11 +106,65 @@ describe('relaySwapRefusalText (DEV-459)', () => {
     expect(relaySwapRefusalText(rejected('Failed to fetch'))).toBeNull();
     // The SDK's own pre-send validation is more specific than the generic copy.
     expect(relaySwapRefusalText(rejected('Invalid relay swap params: amount: Required'))).toBeNull();
-    // A gateway error from in front of the relayer is not its answer.
-    expect(relaySwapRefusalText(rejected('HTTP 502: Bad Gateway'))).toBeNull();
+    // A gateway error from in front of the relayer is not its answer, and may
+    // follow a broadcast: the generic line, not "nothing was sent", not raw.
+    expect(relaySwapRefusalText(rejected('HTTP 502: Bad Gateway'))).toBe('The relayer could not complete this swap. Check your balance before you try again.');
     // Not from the relayer interactor at all.
     expect(relaySwapRefusalText(new Error(BNB_400))).toBeNull();
     expect(relaySwapRefusalText(BNB_400)).toBeNull();
+  });
+});
+
+// Prod Ethereum, Swap USDC to USDT through RelaySwaps executeUnwrapped,
+// 2026-11-21. The relayer refused before broadcasting and the raw answer was on
+// the Review screen. The body is the relayer's, verbatim; the message is built
+// the way services/egress-http-client.ts builds it (HTTP/2, so no statusText,
+// body cut at 500), and it arrives in the SDK's own RelayerRejected, which
+// RelayerInteractor.relaySwap wraps every HTTP failure in.
+const BUDGET_BODY = '{"message":"RelaySwaps executeUnwrapped rejected: the quoted relay fee no longer covers the transaction cost (fee worth 528948033800012 wei; cost 741277054791952 wei = 3011116 gas × 246180172 wei/gas). This transaction needs 3011116 gas but the relayer prices it at 2300000 gas on this chain, so a new quote will not cover it until the relayer\'s gas budget is raised. Request a new quote and retry later.","error":"Bad Request","statusCode":400}';
+const ON_SCREEN = 'HTTP 400: {"message":"RelaySwaps executeUnwrapped rejected: the quoted relay fee no longer covers the transaction cost (fee worth 528948033800012 wei; cost 741277054791952 wei = 3011116 gas × 246180172 wei/gas). This transaction needs 3011116 gas but the relayer prices it at 2300000 gas on this chain, so a new quote will not cover it until the relayer\'s gas budget is raised. Request a new quote and retry later.","error":"Bad Request","statusCode":400}';
+// The same refusal without the budget sentence: the gas price moved since the
+// quote, so a fresh quote does cover it.
+const DRIFT_BODY = '{"message":"RelaySwaps executeUnwrapped rejected: the quoted relay fee no longer covers the transaction cost (fee worth 528948033800012 wei; cost 741277054791952 wei = 2100000 gas × 352989073 wei/gas). Request a new quote and retry.","error":"Bad Request","statusCode":400}';
+
+async function relayerRejected(body: string): Promise<Error> {
+  const { RelayerRejected } = await import('@privacy-pools-v2/sdk');
+  const statusText = '';
+  const detail = [statusText, body.slice(0, 500)].filter(Boolean).join(': ');
+  return new RelayerRejected(`HTTP 400${detail ? `: ${detail}` : ''}`);
+}
+
+describe('relay fee no longer covers the cost (2026-11-21)', () => {
+  test('the fixture is what the user saw', async () => {
+    const err = await relayerRejected(BUDGET_BODY);
+    expect(err.name).toBe('RelayerRejected');
+    expect(err.message).toBe(ON_SCREEN);
+  });
+
+  test('the gas budget case reads as one short line, no retry-now advice', async () => {
+    const text = relaySwapRefusalText(await relayerRejected(BUDGET_BODY));
+    expect(text).toBe("This swap can't go through the relayer right now. Nothing was sent. Please try again later.");
+    expect(text).not.toMatch(/HTTP|statusCode|\{|wei|gas|quote|—|;/);
+  });
+
+  test('plain fee drift says a fresh quote fixes it', async () => {
+    const text = relaySwapRefusalText(await relayerRejected(DRIFT_BODY));
+    expect(text).toBe('The relayer fee went up since you reviewed this swap. Nothing was sent. Review again for a fresh quote.');
+    expect(text).not.toMatch(/HTTP|statusCode|\{|wei|—|;/);
+  });
+
+  test('withdraw, transfer and claim name the same two cases', async () => {
+    const { isRelayerFeeShort, isRelayerGasBudgetShort, isRelayerRefusal, isIndeterminateOutcome, relayerFeeShortMessage } = await import('@/services/transfer-outcome');
+    const { claimRelayFailureText } = await import('@/services/relay-step-copy');
+    expect(isRelayerFeeShort(ON_SCREEN)).toBe(true);
+    expect(isRelayerGasBudgetShort(ON_SCREEN)).toBe(true);
+    expect(isRelayerGasBudgetShort(`HTTP 400: ${DRIFT_BODY}`)).toBe(false);
+    // A known non-send: a transfer must not latch the unknown-outcome receipt.
+    expect(isRelayerRefusal(ON_SCREEN)).toBe(true);
+    expect(isIndeterminateOutcome(ON_SCREEN, true)).toBe(false);
+    expect(relayerFeeShortMessage('withdrawal', ON_SCREEN)).toBe("This withdrawal can't go through the relayer right now. Nothing was sent. Please try again later.");
+    expect(relayerFeeShortMessage('transfer', `HTTP 400: ${DRIFT_BODY}`)).toContain('Review again for a fresh quote.');
+    expect(claimRelayFailureText(await relayerRejected(BUDGET_BODY))).toContain("The relayer can't send the claim right now");
   });
 });
 
