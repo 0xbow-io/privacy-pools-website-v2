@@ -19,3 +19,21 @@ describe('portfolio Withdraw opens on the row\'s chain', () => {
     expect(src).not.toMatch(/closeMenu\(\); openWithdrawModal\(/);
   });
 });
+
+// Explore -> pool page: the shield card beside a USDC pool opened on ETH because
+// nothing told it which pool it sat on (user report, 2026-11-22).
+describe('pool page shield card starts on the pool asset', () => {
+  const page = readFileSync(fileURLToPath(new URL('../../components/pools/pool-page-content.tsx', import.meta.url)), 'utf8');
+  const hub = readFileSync(fileURLToPath(new URL('../../components/home/action-hub.tsx', import.meta.url)), 'utf8');
+
+  test('the pool page hands its pool to the card', () => {
+    expect(page).toContain('<ActionHub pool={hubPool} />');
+    expect(page).toContain('symbol: currentPoolToken, chainId: poolChainId');
+  });
+
+  test('the card seeds once, on the pool chain, matching symbols case-insensitively', () => {
+    expect(hub).toContain('pool.chainId !== activeChainId');
+    expect(hub).toContain('t.symbol.toUpperCase() === pool.symbol.toUpperCase()');
+    expect(hub).toContain('seededPoolRef.current === key');
+  });
+});

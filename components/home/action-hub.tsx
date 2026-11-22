@@ -217,7 +217,13 @@ export function ActionHub({
   onInputFocus,
   onInputBlur,
   onTargetHeight,
+  pool,
 }: {
+  /**
+   * The pool page this card sits on. The card starts on that pool's asset
+   * instead of the chain's first token (a USDC pool page used to open on ETH).
+   */
+  pool?: { symbol: string; chainId: number };
   /** Simplify visitor controls and captions; entered amounts expand the Shield form. */
   landing?: boolean;
   onEngage?: () => void;
@@ -822,6 +828,21 @@ export function ActionHub({
     setAmount((a) => (spending ? '' : sanitizeAmountInput(a, fallback.decimals)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSui, token, action, tokens, evmTokens, holdings, spendTokenPinned]);
+
+  // Pool page: start on that pool's asset once per pool, and only once this
+  // page owns the pool's chain. A pick handed over from the previous page
+  // (takePoolHubHandoff, applied a tick later) still wins.
+  const seededPoolRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pool || pool.chainId !== activeChainId) return;
+    const key = `${pool.chainId}:${pool.symbol}`;
+    if (seededPoolRef.current === key) return;
+    // Route symbols are upper-case; share symbols are mixed-case (ppUSDC).
+    const match = tokens.find((t) => t.symbol.toUpperCase() === pool.symbol.toUpperCase());
+    if (!match) return;
+    seededPoolRef.current = key;
+    setToken(match.symbol);
+  }, [pool, activeChainId, tokens, setToken]);
 
   const tokenMeta = tokens.find((t) => t.symbol === token) ?? tokens[0];
   // The Sui shape (HubToken) carries no address, and needs none: that chain has
