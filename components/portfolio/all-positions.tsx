@@ -28,6 +28,7 @@ import { PrivacyScore } from '@/components/ui/privacy-score';
 import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import { useWithdrawModal } from '@/components/withdraw-modal-provider';
+import { useChainRouter } from '@/hooks/use-chain-router';
 import { TokenNetworkIcon } from '@/components/ui/token-network-icon';
 import { useSupportedWalletConnection } from '@/hooks/use-supported-wallet-connection';
 import { useYieldFeeds } from '@/hooks/use-yield-feeds';
@@ -292,7 +293,22 @@ export function AllPositions({
     });
   const { connectWallet } = useSupportedWalletConnection();
   const { openWithdrawModal } = useWithdrawModal();
+  const { activeChainId } = useChainRouter();
   const router = useRouter();
+
+  // The withdraw modal works on the ACTIVE chain and only takes a token that
+  // exists there, so a row on another chain opened on the active chain's
+  // default token: every Withdraw looked the same. A row on another chain
+  // goes through its pool page (?action=withdraw), which switches to the
+  // row's chain first and opens the modal once that chain is active.
+  const handleWithdraw = (position: Position) => {
+    const tokenSymbol = position.actionSymbol ?? position.canonicalPoolSymbol ?? position.poolName;
+    if (position.chainId !== undefined && position.chainId !== activeChainId) {
+      router.push(`${getPoolPath(tokenSymbol, position.chainId)}?action=withdraw` as Parameters<typeof router.push>[0]);
+      return;
+    }
+    openWithdrawModal(undefined, { tokenSymbol });
+  };
 
   const handleConnectWallet = () => {
     connectWallet();
@@ -529,7 +545,7 @@ export function AllPositions({
                     <View className={showViewPoolText || showRowWithdraw ? 'relative z-[1] flex-1 flex-row items-center gap-[14px] p-[8px]' : 'relative z-[1] w-[28px] p-[8px]'}>
                       {showRowWithdraw && position.withdrawEnabled !== false && (
                         <Pressable
-                          onPress={() => openWithdrawModal(undefined, { tokenSymbol: position.actionSymbol ?? position.canonicalPoolSymbol ?? position.poolName })}
+                          onPress={() => handleWithdraw(position)}
                           accessibilityRole="button"
                           accessibilityLabel={`Withdraw ${position.poolName}`}
                           testID={`position-withdraw-${position.poolName}`}
@@ -596,7 +612,7 @@ export function AllPositions({
                               actionSymbol keeps the payout named ppUSDC rather
                               than launching the legacy USDC pool. */}
                           {position.withdrawEnabled !== false && (
-                            <Pressable className="flex-row items-center gap-[10px] rounded-pill px-[12px] py-[10px] hover:bg-background-secondary" onPress={() => { closeMenu(); openWithdrawModal(undefined, { tokenSymbol: position.actionSymbol ?? position.canonicalPoolSymbol ?? position.poolName }); }}>
+                            <Pressable className="flex-row items-center gap-[10px] rounded-pill px-[12px] py-[10px] hover:bg-background-secondary" onPress={() => { closeMenu(); handleWithdraw(position); }}>
                               {/* nw-keep(data-color): theme-token color into the vector-icon sink */}
                               <Ionicons name="remove-outline" size={16} color={colors.text} />
                               <Text className="font-pp-regular text-[14px] text-text">
