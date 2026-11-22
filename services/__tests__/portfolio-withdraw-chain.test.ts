@@ -37,3 +37,12 @@ describe('pool page shield card starts on the pool asset', () => {
     expect(hub).toContain('seededPoolRef.current === key');
   });
 });
+
+// The My transactions card cut its own filter dropdowns off at its bottom edge.
+describe('My transactions card lets its filter dropdowns out', () => {
+  const panel = readFileSync(fileURLToPath(new URL('../../components/home/explore-panel.tsx', import.meta.url)), 'utf8');
+  test('no overflow-hidden on the card, overflow visible by style', () => {
+    expect(panel).not.toContain('<Card noPadding className="overflow-hidden">');
+    expect(panel).toContain("style={{ overflow: 'visible' }}");
+  });
+});
