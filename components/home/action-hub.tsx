@@ -835,7 +835,7 @@ export function ActionHub({
   const seededPoolRef = useRef<string | null>(null);
   useEffect(() => {
     if (!pool || pool.chainId !== activeChainId) return;
-    const key = `${pool.chainId}:${pool.symbol}`;
+    const key = `${pool.chainId}:${pool.symbol}`; // not-rendered: seed key
     if (seededPoolRef.current === key) return;
     // Route symbols are upper-case; share symbols are mixed-case (ppUSDC).
     const match = tokens.find((t) => t.symbol.toUpperCase() === pool.symbol.toUpperCase());
