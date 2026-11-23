@@ -263,7 +263,7 @@ describeProd('prod intent landing capabilities', () => {
         depositToken: outputToken, depositAmountWei: 1n, allowSameToken: true, submit: unexpected,
       })).rejects.toThrow(/conversion|deposits/);
       await expect(flows.estimateReshieldForReview(session as Parameters<typeof flows.estimateReshieldForReview>[0], {
-        ...common, input: { symbol: 'ETH', decimals: 18 }, output: { symbol: token.symbol, decimals: token.decimals },
+        ...common, input: { symbol: 'ETH', decimals: 18 }, output: { symbol: token.symbol, decimals: token.decimals }, inputCommitments: [],
       })).rejects.toThrow(/conversion|deposits/);
       await expect(flows.runReshield(session as Parameters<typeof flows.runReshield>[0], {
         ...common, inputCommitments: [],

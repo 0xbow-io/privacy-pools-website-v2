@@ -18,7 +18,7 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { hasErrorAmounts, InfeasibleBatchFee, InvalidYieldAmount } from '@privacy-pools-v2/sdk';
+import { hasErrorAmounts, InfeasibleBatchFee, InvalidYieldAmount, ReshieldQuoteMoved } from '@privacy-pools-v2/sdk';
 
 import { depositBelowMinimumValue, depositValueText, humanizeSdkAmounts, KNOWN_AMOUNT_CODES, sdkErrorText, sentenceKeys } from '@/services/sdk-error-amounts';
 
@@ -112,6 +112,15 @@ describe('every value key a sentence reads is one the SDK actually sends', () =>
 });
 
 describe('structured amounts, from the real producer', () => {
+  test('a moved reshield quote (SDK 1.2.0) reads in what the swap delivers into the deposit', () => {
+    const err = new ReshieldQuoteMoved('short', '1000000', '990000');
+    expect(hasErrorAmounts(err)).toBe(true);
+    // A share target: the swap delivers its underlying, never the share.
+    expect(sdkErrorText(err, { output: PPUSDC, funding: USDC })).toBe(
+      'The price moved: the swap now delivers about 0.99 USDC against a 1 USDC deposit. Nothing was signed or spent. Try again.',
+    );
+  });
+
   test('a batch fee reads in the note being withdrawn', () => {
     const err = new InfeasibleBatchFee('1500000', '1000000');
     expect(hasErrorAmounts(err)).toBe(true);

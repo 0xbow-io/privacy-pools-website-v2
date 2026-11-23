@@ -207,6 +207,13 @@ const CODES: Record<string, { side: Side; text: (f: Fmt, has: (key: string) => b
     side: 'funding',
     text: (f) => `About ${f('budget')} is too little to cover the vault's rate buffer. Try a larger amount.`,
   },
+  // SDK 1.2.0 ReshieldQuoteMoved: both figures are in what the swap delivers
+  // into the deposit, the underlying for a share and the pool token otherwise.
+  // runReshield re-estimates on it; this only reads when that path is cut short.
+  reshieldQuoteMoved: {
+    side: 'funding',
+    text: (f) => `The price moved: the swap now delivers about ${f('quotedOutput')} against a ${f('depositCost')} deposit. Nothing was signed or spent. Try again.`,
+  },
   // LiFi's leg: the redeemed underlying for a share, the note otherwise.
   lifiInputExceedsNet: {
     side: 'swapInput',

@@ -18,6 +18,8 @@ import {
   normalizeUsd,
   ReshieldPreflightError,
   ReshieldRateMovedError,
+  ReshieldQuoteMovedError,
+  isReshieldQuoteMoved,
   assertReshieldNoteWorthIt,
   affordableDepositAmount,
   unaffordableRefit,
@@ -1058,6 +1060,7 @@ describe('estimateReshieldForReview (flow 3 review)', () => {
     outputToken: USDT,
     input: usdc,
     output: usdt,
+    inputCommitments: [COMMITMENT],
   };
 
   test('passes the gross as hex and shapes every Review figure', async () => {
@@ -1066,7 +1069,7 @@ describe('estimateReshieldForReview (flow 3 review)', () => {
       { estimateReshieldAmount: async (p) => { seen = p; return estimate; } },
       { ...args, slippage: 0.01 },
     );
-    expect(seen).toMatchObject({ amount: toHex(1_010_000n), tokenId: USDC, outputToken: USDT, slippage: 0.01 });
+    expect(seen).toMatchObject({ amount: toHex(1_010_000n), tokenId: USDC, outputToken: USDT, slippage: 0.01, inputCommitments: [COMMITMENT] });
     expect(got.noteValue).toBe(estimate.noteValue);
     expect(display.grossText).toBe('1.01 USDC');
     expect(display.netText).toBe('1 USDC');
@@ -1585,6 +1588,20 @@ describe('runReshieldCrosschain (flow 4 re-sizing, v2-monorepo#437)', () => {
     // discarded one.
     expect(result.pendingNote?.commitment).toBe(h2('2'));
     expect((sessions.calls.relay[0]!.depositNote as { commitment: Hash }).commitment).toBe(h2('2'));
+  });
+
+  // SDK 1.2.0 prices every relayer quote of the flow on the number of notes the
+  // proof spends. Every estimate and prepare, the re-sized ones included, gets
+  // the set the relay spends.
+  test('every estimate and prepare carries the relayed note set, re-sized passes included', async () => {
+    const SECOND = h2('2');
+    const sessions = makeSessions([unaffordable(), null]);
+    await run(sessions, { inputCommitments: [COMMITMENT, SECOND] });
+    expect(sessions.calls.estimate.length).toBe(2);
+    for (const call of [...sessions.calls.estimate, ...sessions.calls.quote]) {
+      expect(call.inputCommitments).toEqual([COMMITMENT, SECOND]);
+    }
+    expect(sessions.calls.relay[0]!.inputCommitments).toEqual([COMMITMENT, SECOND]);
   });
 
   test('onBroadcast passes the source hash, the quote and the relayed destination note', async () => {
@@ -3206,6 +3223,91 @@ describe('runReshield retries a relayer fee that outgrew the estimate', () => {
   });
 });
 
+// SDK 1.2.0: prepareReshieldQuote throws ReshieldQuoteMoved when the price moved
+// between the estimate and the prepare. Nothing is committed, and the remedy is
+// a fresh estimate, a fresh deposit proof at the new size, and a fresh prepare,
+// all on the same note set. Bounded: a price that keeps moving ends in a short
+// "price moved" message, never a loop.
+describe('runReshield handles ReshieldQuoteMoved (SDK 1.2.0)', () => {
+  const estimate: ReshieldEstimateLike = {
+    feeAmount: '0x2710', netSwapAmount: '0xf4240', estimatedOutput: '0xf3e58',
+    estimatedMinOutput: '0xf1b30', noteValue: '0xf3e58' as Hex, vettingFee: '0x3e8', totalDepositCost: '0xf4240',
+  };
+  const quote: PreparedReshieldQuoteLike = {
+    selectedQuote: { quote: { feeCommitment: { amountSent: toHex(1_010_000n) }, feeAmount: '0x2710' } },
+    swapCalldata: '0xcafe' as Hex,
+    feeAmount: '0x2710',
+    netAmount: '0xf4240' as Hex,
+    swapTarget: SWAP_TARGET,
+    approvalAddress: APPROVAL_ADDR,
+    dustRecipient: DUST,
+  };
+  const SECOND = h2('2');
+  // The SDK's own class, from the vendored build, not a look-alike.
+  const moved = async (direction: 'short' | 'surplus') => {
+    const { ReshieldQuoteMoved } = await import('@privacy-pools-v2/sdk');
+    return new ReshieldQuoteMoved(direction, '1000000', direction === 'short' ? '990000' : '1100000');
+  };
+
+  const run = (failures: Error[]) => {
+    const calls = { estimate: [] as Record<string, unknown>[], deposit: 0, quote: [] as Record<string, unknown>[], relay: [] as Record<string, unknown>[] };
+    const session: ReshieldSessionLike = {
+      estimateReshieldAmount: async (p) => { calls.estimate.push(p as Record<string, unknown>); return estimate; },
+      prepareDeposit: async () => { calls.deposit += 1; return { pendingNote: { isOwned: true, commitment: h2('a'), value: '0xf3e58' as Hex } }; },
+      prepareReshieldQuote: async (p) => {
+        calls.quote.push(p as Record<string, unknown>);
+        const failure = failures[calls.quote.length - 1];
+        if (failure) throw failure;
+        return quote;
+      },
+      relayReshield: async (p) => { calls.relay.push(p as Record<string, unknown>); return { txHash: '0xabc' as Hex, status: true }; },
+    };
+    const result = runReshield(session, {
+      chainId: 11155111,
+      relayerInfo: {},
+      grossWei: 1_010_000n,
+      inputToken: USDC,
+      outputToken: USDT,
+      inputCommitments: [COMMITMENT, SECOND],
+    });
+    return { result, calls };
+  };
+
+  test('the SDK class is what isReshieldQuoteMoved matches, both directions', async () => {
+    expect(isReshieldQuoteMoved(await moved('short'))).toBe(true);
+    expect(isReshieldQuoteMoved(await moved('surplus'))).toBe(true);
+    expect(isReshieldQuoteMoved(new Error('ReshieldQuoteMoved'))).toBe(false);
+  });
+
+  test('moved once: re-estimates, re-proves, prepares again and relays once', async () => {
+    const { result, calls } = run([await moved('short')]);
+    expect((await result).receipt.txHash).toBe('0xabc');
+    expect(calls.estimate.length).toBe(2);
+    expect(calls.deposit).toBe(2);
+    expect(calls.quote.length).toBe(2);
+    expect(calls.relay.length).toBe(1);
+  });
+
+  test('every estimate and prepare is priced on the note set the relay spends', async () => {
+    const { result, calls } = run([await moved('surplus')]);
+    await result;
+    for (const call of [...calls.estimate, ...calls.quote]) {
+      expect(call.inputCommitments).toEqual([COMMITMENT, SECOND]);
+    }
+    expect(calls.relay[0]!.inputCommitments).toEqual([COMMITMENT, SECOND]);
+  });
+
+  test('a price that keeps moving stops at the cap with a short message, relaying nothing', async () => {
+    const always = await Promise.all(Array.from({ length: 10 }, (_, i) => moved(i % 2 ? 'short' : 'surplus')));
+    const { result, calls } = run(always);
+    await expect(result).rejects.toBeInstanceOf(ReshieldQuoteMovedError);
+    await expect(result).rejects.toBeInstanceOf(ReshieldRateMovedError);
+    await expect(result).rejects.toThrow('The price moved while preparing the swap. Nothing was signed or spent. Try again.');
+    expect(calls.quote.length).toBe(RESHIELD_FEE_DRIFT_MAX_ATTEMPTS);
+    expect(calls.relay.length).toBe(0);
+  });
+});
+
 describe('runReshield never retries past the relay', () => {
   test('a drift error from the relay step is thrown, not retried', async () => {
     const estimate: ReshieldEstimateLike = {
@@ -3441,6 +3543,7 @@ describe('runReshield as a swap-send (reshield-and-transfer)', () => {
       input: { symbol: 'USDC', decimals: 6 },
       output: { symbol: 'USDT', decimals: 6 },
       transfer: true,
+      inputCommitments: [COMMITMENT],
     });
     expect(seen).toEqual(['transfer']);
   });

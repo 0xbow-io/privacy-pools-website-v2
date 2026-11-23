@@ -406,7 +406,33 @@ export interface SwapQuoteSessionLike {
     slippage: number;
     toChainId?: number;
     fallbackAddress?: Address;
+    /**
+     * The notes the relay will spend (SDK 1.2.0). The SDK sends only their
+     * COUNT to the relayer (`inputs`), which prices gas per note; without it a
+     * multi-note relay is priced as one input and refused.
+     */
+    inputCommitments: Hex[];
   }): Promise<unknown>;
+}
+
+/**
+ * Same note set, order and case aside. The relayer prices a swap quote on the
+ * number of notes the proof spends, so the set a quote was requested with must
+ * be the set the relay spends (v2-monorepo docs/FRONTEND_RELAYER_GAS_PRICING.md).
+ */
+export function sameInputNoteSet(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const left = new Set(a.map((c) => c.toLowerCase()));
+  if (left.size !== a.length) return false;
+  return b.every((c) => left.has(c.toLowerCase()));
+}
+
+/** Thrown when the relay would spend a different note set than the quote priced. */
+export class QuotedNoteSetMismatchError extends Error {
+  constructor() {
+    super('The notes this swap would spend changed since it was quoted. Nothing was signed or spent. Review again.');
+    this.name = 'QuotedNoteSetMismatchError';
+  }
 }
 
 /** Thrown when a relayer-prepared quote fails the app-side invariants. */
@@ -444,11 +470,20 @@ export async function prepareValidatedSwapQuote(
     fallbackAddress?: Address;
     /** Exchanges to keep out of the route (see SWAP_DENY_EXCHANGES). */
     denyExchanges?: readonly string[];
+    /**
+     * The notes the relay will spend. Required: the relayer prices the quote
+     * on their count, and the relay must spend exactly this set.
+     */
+    inputCommitments: readonly Hex[];
   },
 ): Promise<{ prepared: PreparedSwapQuoteLike; display: SwapQuoteDisplay }> {
+  if (params.inputCommitments.length === 0) {
+    throw new InvalidSwapQuoteError(['no input notes were selected for this swap']);
+  }
   const crossChain = isCrossChainSwap(params.poolChainId, params.toChainId);
   const prepared = (await session.prepareSwapQuote({
     relayerInfo: params.relayerInfo,
+    inputCommitments: [...params.inputCommitments],
     amount: `0x${params.grossWei.toString(16)}` as Hex,
     tokenId: params.inputToken.address,
     outputToken: params.outputToken.address,
@@ -646,12 +681,17 @@ export function buildRelayWithdrawAndSwapParams(params: {
   poolChainId: number;
   grossWei: bigint;
   inputCommitments: Hex[];
+  /** The set the quote was requested with. The relay must spend exactly it. */
+  quotedInputCommitments: readonly Hex[];
   tokenId: Address;
   outputToken: Address;
   recipientAddress: Address;
   fallbackAddress?: Address;
 }): RelayWithdrawAndSwapParamsShape {
   const { prepared } = params;
+  if (!sameInputNoteSet(params.quotedInputCommitments, params.inputCommitments)) {
+    throw new QuotedNoteSetMismatchError();
+  }
   const problems = validatePreparedSwapQuote(prepared, {
     poolChainId: params.poolChainId,
     grossWei: params.grossWei,

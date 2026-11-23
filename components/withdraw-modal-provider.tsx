@@ -162,6 +162,7 @@ import {
   isSwapExitSelection,
   isSwapUnavailableError,
   prepareValidatedSwapQuote,
+  sameInputNoteSet,
   selectSwapInputNotes,
   type PreparedSwapQuoteLike,
   type SwapQuoteDisplay,
@@ -510,6 +511,13 @@ type WithdrawSwapSnapshot = {
   sessionKey: string;
   /** Modal-operation epoch at quote time (bumped on every open/close). */
   epoch: number;
+  /**
+   * The notes the quote was priced on (SDK 1.2.0 sends their count). Confirm
+   * relays exactly this set, or re-quotes for the set it selects.
+   */
+  inputCommitments: Hex[];
+  /** Set after a failed attempt: the next Confirm re-quotes before proving. */
+  requote?: boolean;
 };
 
 function resolveTokenSymbol(tokenId: string, chainId?: number): string {
@@ -2553,6 +2561,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           );
           return;
         }
+        const quotedInputs = selection.notes.map((n) => n.commitment as Hex);
         const session = sdkReady && poolSession ? poolSession : await ensureInitialized();
         if (!isCurrent()) return;
         if (!session) throw new Error('SDK initialization did not complete.');
@@ -2593,6 +2602,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           ...(crossChainReceive
             ? { toChainId: receiveChainId, fallbackAddress: resolvedRecipient as Address }
             : {}),
+          // The relayer prices per note spent: quote the set Confirm relays.
+          // Only the count leaves the browser.
+          inputCommitments: quotedInputs,
         });
         // Only the newest request (with an unchanged form) may commit state.
         if (!isCurrent()) return;
@@ -2618,6 +2630,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           ...(crossChainReceive ? { fallbackAddress: resolvedRecipient as Address } : {}),
           sessionKey,
           epoch: reviewEpoch,
+          inputCommitments: quotedInputs,
         });
         setCountdown(expiresIn);
         log('info', 'Withdraw', 'Receive-as swap quote prepared', {
@@ -3165,8 +3178,32 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       // order, re-priced — and only refuse if the re-price moved against them
       // beyond REFRESH_DRIFT_BPS (services/intent-swaps.ts). A refresh is one
       // relayer POST carrying no note-derived value.
+      //
+      // The relayer prices the quote per note spent (SDK 1.2.0 sends the
+      // count), so the quote has to be for the set relayed below. Selected
+      // here with the same rule as the relay step; a different set than Review
+      // priced, or a previous attempt that failed, re-quotes first, so a
+      // refused relay is never retried on the same commitment.
+      const selectSwapExitInputs = (): Hex[] | null => {
+        if (spendableCommitments === null) return null;
+        const notes = (noteManager?.getNotes({ status: NoteStatus.ACTIVE }) ?? []).filter(
+          (n) =>
+            String(n.tokenId).toLowerCase() === String(snap.inputToken.address).toLowerCase()
+            && BigInt(n.value) > 0n
+            && spendableCommitments.has(n.commitment),
+        );
+        const picked = selectSwapInputNotes(notes, snap.grossWei);
+        return picked.covered ? picked.notes.map((n) => n.commitment as Hex) : null;
+      };
+      const confirmInputs = selectSwapExitInputs();
       let activePrepared = snap.prepared;
-      if (!hasUsableCommitmentLifetime(getPreparedQuoteExpiration(snap.prepared), Date.now())) {
+      let quotedInputs = snap.inputCommitments;
+      const requoteInputs = confirmInputs !== null
+        && (snap.requote === true || !sameInputNoteSet(quotedInputs, confirmInputs))
+        ? confirmInputs
+        : null;
+      if (requoteInputs || !hasUsableCommitmentLifetime(getPreparedQuoteExpiration(snap.prepared), Date.now())) {
+        const refreshInputs = requoteInputs ?? quotedInputs;
         try {
           withdrawPhaseRef.current = 'quote';
           setLoadingMessage('Refreshing relayer quote...');
@@ -3192,6 +3229,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
             ...(crossChain
               ? { toChainId: snap.destinationChainId, ...(snap.fallbackAddress ? { fallbackAddress: snap.fallbackAddress } : {}) }
               : {}),
+            inputCommitments: refreshInputs,
           });
           if (!isSameOperation()) return;
           const drift = validateRefreshedSwapQuote(snap.prepared, fresh);
@@ -3200,7 +3238,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
             throw new Error('The refreshed relayer quote had already expired when it arrived.');
           }
           activePrepared = fresh;
-          setSwapSnapshot({ ...snap, prepared: fresh, display: freshDisplay });
+          quotedInputs = refreshInputs;
+          setSwapSnapshot({ ...snap, prepared: fresh, display: freshDisplay, inputCommitments: refreshInputs, requote: false });
           log('info', 'Withdraw', 'Refreshed the swap commitment at confirm', {
             fee: fresh.feeAmount, estOut: fresh.estimatedOutput,
           });
@@ -3228,14 +3267,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       try {
         setLoadingMessage('Selecting notes...');
         if (spendableCommitments === null) throw new Error('Note approval state is no longer available. Review again.');
-        const swapActiveNotes = (noteManager?.getNotes({ status: NoteStatus.ACTIVE }) ?? []).filter(
-          (n) =>
-            String(n.tokenId).toLowerCase() === String(snap.inputToken.address).toLowerCase()
-            && BigInt(n.value) > 0n
-            && spendableCommitments.has(n.commitment),
-        );
-        const selection = selectSwapInputNotes(swapActiveNotes, snap.grossWei);
-        if (!selection.covered) throw new Error('The selected notes no longer cover this amount. Review again.');
+        const relayInputs = selectSwapExitInputs();
+        if (!relayInputs) throw new Error('The selected notes no longer cover this amount. Review again.');
         const session = sdkReady && poolSession ? poolSession : await ensureInitialized();
         if (!session) throw new Error('SDK initialization did not complete.');
         // buildRelayWithdrawAndSwapParams re-validates the whole quote (gross
@@ -3250,7 +3283,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           prepared: activePrepared,
           poolChainId: snap.poolChainId,
           grossWei: snap.grossWei,
-          inputCommitments: selection.notes.map((n) => n.commitment as Hex),
+          inputCommitments: relayInputs,
+          // The set the active quote was priced on: the builder refuses any other.
+          quotedInputCommitments: quotedInputs,
           tokenId: snap.inputToken.address,
           outputToken: snap.outputToken.address as Address,
           recipientAddress: snap.recipient,
@@ -3286,6 +3321,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         // without persisting note updates. Only status === true swapped.
         if (!isSuccessfulSwapReceipt(receipt)) {
           log('error', 'Withdraw', 'Withdraw-and-swap transaction reverted', { txHash: hash });
+          setSwapSnapshot((cur) => (cur ? { ...cur, requote: true } : cur));
           if (isSameOperation()) {
             reportWithdrawError(
               'The transaction reverted on-chain. The exit, swap, and payout rolled back together and your notes were NOT spent. You can try again.',
@@ -3327,6 +3363,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         // the /swap route.
         const message = err instanceof Error ? err.message : String(err);
         log('error', 'Withdraw', `Withdraw-and-swap failed: ${message}`);
+        // A refused relay is never retried on the same commitment: the next
+        // Confirm re-quotes for the same note set and proves again.
+        setSwapSnapshot((cur) => (cur ? { ...cur, requote: true } : cur));
         // The receipt wait can run out on a swap the relayer DID broadcast
         // (DEV-458). Without a hash to watch, this used to just sit marked
         // pending forever: if the swap later landed, the pending notice could
