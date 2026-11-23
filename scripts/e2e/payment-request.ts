@@ -17,7 +17,7 @@ import { envValue, paymentRequestEth } from './funding';
 import { parseEther } from 'viem';
 import {
   account, accountFromKey, openApp, signIn, tab, enterAmount, clickButton, clickWhenReady,
-  forceUnlock, registerSepoliaFixture, unlockIfPrompted, sleep,
+  registerSepoliaFixture, unlockIfPrompted, sleep,
   requestPillSymbol,
   payPrivateRequest, ensurePaymentFunding, selectToken, accountNotes,
 } from './lib';
@@ -77,10 +77,8 @@ let payUrl: string | null = null;
 
 try {
   await signIn(payee.page);
-  await forceUnlock(payee.page);
   await registerSepoliaFixture(payee.page);
   await signIn(payer.page);
-  await forceUnlock(payer.page);
   await registerSepoliaFixture(payer.page);
   await ensurePaymentFunding(payer.page, payer.appLogs, payerAccount().address, amount,
     process.argv.includes('--prepare-next-payment') ? 2 : 1, fixtureBarrier);

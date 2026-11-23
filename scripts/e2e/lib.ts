@@ -603,20 +603,52 @@ export async function forceUnlock(page: Page): Promise<boolean> {
 
 /** Seed a fixture that must be able to receive private transfers on Sepolia. */
 export async function registerSepoliaFixture(page: Page): Promise<void> {
+  const primary = page.getByTestId('keystore-register-primary');
+  const autoFinish = primary.filter({ hasText: /^Finish setup$/ });
+  // The partial-account modal can arrive while forceUnlock is opening balances.
+  await page.addLocatorHandler(autoFinish, async () => {
+    await primary.click();
+    await primary.waitFor({ state: 'hidden', timeout: 300_000 });
+  });
+  try {
+    await forceUnlock(page);
+  } finally {
+    await page.removeLocatorHandler(autoFinish);
+  }
+
   const card = page.getByTestId('registration-status-card').filter({ visible: true }).first();
-  const toggle = card.getByTestId('registration-status-toggle');
-  if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
   const row = card.getByTestId(`registration-row-${sepolia.id}`);
   const registered = row.getByText('Registered', { exact: true });
-  const register = row.getByTestId(`registration-register-${sepolia.id}`);
-  const finish = row.getByTestId(`registration-finish-${sepolia.id}`);
+  const action = row.getByTestId(`registration-register-${sepolia.id}`)
+    .or(row.getByTestId(`registration-finish-${sepolia.id}`));
   const error = row.getByText(/Different unlock|Retry/);
-  await registered.or(register).or(finish).or(error).first().waitFor({ timeout: 90_000 });
-  if (await registered.isVisible()) return;
-  if (await error.isVisible()) throw new Error(`Sepolia fixture registration: ${await row.innerText()}`);
-  await register.or(finish).click();
-  await page.getByTestId('keystore-register-primary').click();
-  await registered.waitFor({ timeout: 300_000 });
+  const deadline = Date.now() + 90_000;
+  while (Date.now() < deadline) {
+    if (await primary.isVisible()) {
+      await primary.click();
+      await primary.waitFor({ state: 'hidden', timeout: 300_000 });
+      await registered.waitFor({ timeout: 90_000 });
+      return;
+    }
+    if (await registered.isVisible()) return;
+    if (await error.isVisible()) throw new Error(`Sepolia fixture registration: ${await row.innerText()}`);
+    // A partial account expands the card itself. Re-read the UI if the modal
+    // opens during a click or the card expands while Playwright is waiting.
+    const rowOpen = await row.isVisible();
+    const target = rowOpen ? action : card.getByTestId('registration-status-toggle');
+    if (await target.isVisible()) {
+      try {
+        await target.click({ timeout: 1000 });
+      } catch (cause) {
+        if (!(cause instanceof Error && cause.name === 'TimeoutError')) throw cause;
+        continue;
+      }
+      // After a successful click, wait for its result before acting again.
+      await (rowOpen ? primary : row.or(primary).first()).waitFor({ timeout: 90_000 });
+    }
+    await sleep(200);
+  }
+  throw new Error('Sepolia fixture did not reach a registration action or Registered status');
 }
 
 /**
