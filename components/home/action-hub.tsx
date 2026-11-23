@@ -86,6 +86,7 @@ import { getUiParam, pushUiParamEntry, retireUiParamEntry, rebaseUiParamEntry, s
 import { useShareYield } from '@/hooks/use-share-yield';
 import { useYieldVaultProbeVersion } from '@/hooks/use-yield-vault-probe';
 import { displayTokenSymbol, isShareSymbol, presetChipLabel } from '@/services/share-display';
+import { sameSymbol } from '@/services/symbol-match';
 import { amountInputDisplay, compactAmountLabel, formatCopyAmount, formatTokenBalance, groupThousands, isStablecoin, LOADING_FIGURE, stripAmountSeparators } from '@/services/token-format';
 import { conversionFundingToken, targetAcceptsConversion } from '@/config/intent-targets';
 import { getYieldShareToken } from '@/services/share-yield';
@@ -840,12 +841,11 @@ export function ActionHub({
     // One attempt per pool: a seed left armed would later overwrite whatever
     // another tab (Withdraw, Send) already holds, a handoff included.
     seededPoolRef.current = key;
-    // Route symbols are upper-case; share symbols are mixed-case (ppUSDC). The
-    // Shield list carries no yield shares, so a share pool (ppUSDC) seeds its
-    // underlying (USDC), which is what the user shields into that pool.
-    const wanted = [pool.symbol, displayTokenSymbol(pool.symbol)].map((s) => s.toUpperCase());
-    const match = wanted
-      .map((s) => tokens.find((t) => t.symbol.toUpperCase() === s))
+    // Route symbols are upper-case and share symbols mixed-case, hence
+    // sameSymbol. The Shield list carries no yield shares, so a share pool
+    // seeds its underlying, which is what the user shields into that pool.
+    const match = [pool.symbol, displayTokenSymbol(pool.symbol)]
+      .map((s) => tokens.find((t) => sameSymbol(t.symbol, s)))
       .find((t) => t !== undefined);
     if (match) setToken(match.symbol);
   }, [pool, activeChainId, tokens, setToken]);
