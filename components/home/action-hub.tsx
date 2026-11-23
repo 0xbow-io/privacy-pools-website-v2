@@ -90,7 +90,7 @@ import { useShareYield } from '@/hooks/use-share-yield';
 import { useYieldVaultProbeVersion } from '@/hooks/use-yield-vault-probe';
 import { displayTokenSymbol, isShareSymbol, presetChipLabel } from '@/services/share-display';
 import { sameSymbol } from '@/services/symbol-match';
-import { amountInputDisplay, compactAmountLabel, formatCopyAmount, formatTokenBalance, groupThousands, isStablecoin, LOADING_FIGURE, stripAmountSeparators } from '@/services/token-format';
+import { amountInputDisplay, compactAmountLabel, formatCopyAmount, formatTokenBalance, groupThousands, isStablecoin, stripAmountSeparators } from '@/services/token-format';
 import { conversionFundingToken, targetAcceptsConversion } from '@/config/intent-targets';
 import { getYieldShareToken } from '@/services/share-yield';
 import { compactPhoneLayout } from '@/services/header-nav';

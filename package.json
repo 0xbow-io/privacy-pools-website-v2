@@ -126,7 +126,7 @@
   "patchedDependencies": {
     "react-native-css-interop@0.2.6": "patches/react-native-css-interop@0.2.6.patch",
     "expo-router@56.2.9": "patches/expo-router@56.2.9.patch",
-    "@privacy-pools-v2/sdk@./vendor/privacy-pools-v2-sdk-1.0.3-prerelease.00f84368.tgz": "patches/@privacy-pools-v2%2Fsdk@.%2Fvendor%2Fprivacy-pools-v2-sdk-1.0.3-prerelease.00f84368.tgz.patch"
+    "@privacy-pools-v2/sdk@./vendor/privacy-pools-v2-sdk-1.1.0.tgz": "patches/@privacy-pools-v2%2Fsdk@.%2Fvendor%2Fprivacy-pools-v2-sdk-1.1.0.tgz.patch"
   },
   "overrides": {
     "@walletconnect/jsonrpc-ws-connection": {

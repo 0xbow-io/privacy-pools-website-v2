@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import * as patched from '@privacy-pools-v2/sdk';
 
 const dir = mkdtempSync(join(tmpdir(), 'lifi-fee-baseline-'));
-execFileSync('tar', ['-xzf', resolve('vendor/privacy-pools-v2-sdk-1.0.3-prerelease.00f84368.tgz'), '--strip-components=1', '-C', dir]);
+execFileSync('tar', ['-xzf', resolve('vendor/privacy-pools-v2-sdk-1.1.0.tgz'), '--strip-components=1', '-C', dir]);
 symlinkSync(resolve('node_modules'), join(dir, 'node_modules'));
 const baseline = await import(join(dir, 'dist/index.js'));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
