@@ -277,3 +277,64 @@ default token picker uses configured assets. Wider on-chain holdings discovery
 is limited to explicit custom-RPC builds; it does not silently substitute the
 shared Alchemy service. This removes automatic discovery of arbitrary holdings
 from the default picker rather than trading that privacy property for coverage.
+
+## Swap note previews
+
+The Swap widget estimates the shielded note locally. The
+`swap-preview-config` feed reads every configured EVM chain's catalogued asset
+configuration and the public relayer catalog on the fixed five-minute grid.
+The catalog is fetched once per configured host (`GET /v1/details`), avoiding
+a per-chain burst against the relayer’s shared rate limit.
+It uses the existing policed RPC and relayer transports. Its scope and timing
+never depend on the open tab, entered amount, selected pair, wallet or notes.
+Missing or stale configuration is unknown, not a zero fee.
+
+The routed LI.FI preview uses input net of the locally
+estimated relayer fee and the selected slippage. It still carries only the
+entered amount's public route parameters and processor address. The estimate
+uses scheduled gas/prices, published flat or percentage fee terms, cached share
+rates, and SDK deposit-sizing rules. It does not call the SDK estimator or send
+an amount-specific RPC/relayer request while typing. Review's existing SDK
+request replaces this approximation with its sized note.
+
+Each cross-chain preview issues one POST to `/v1/quote/contractCalls`, as before
+the accuracy refinement. Its placeholder has a fixed one-unit amount and the
+public processor as target. The static gas allowance matches the SDK's
+2,000,000 gas, and the exchange deny list matches Review (including `fly`). Native bridge fees are estimated locally from that same response.
+The hook's existing result is keyed by the user's form (source/output pool,
+amount, chains and slippage), not by a recalculated net amount from public feeds.
+It waits for initial data, captures that request's computed input, and retains
+its completed result through feed updates and Review/Back. Failed previews also
+remain unavailable until a form edit; Review is the existing explicit refresh.
+No quote timer, persistent cache, or retry layer is added.
+
+Preview requests pause when the provider's `isQuoting` flag marks the start of
+Review estimation and remain paused during Review. The completed estimate
+stays visible while the form matches its request. The hook's
+existing cleanup cancels both the debounce and the in-flight request. Public
+feed refreshes cannot start preview quotes alongside transaction quotes. There are no preliminary GET quotes, exact-output gas purchases, resized-input
+quotes, derived deposit budgets or user fallback addresses in preview traffic.
+
+Related quote amounts and response-dependent timing can give LI.FI a
+fingerprint to match to Review or execution. With Tor enabled outside an
+operation, a body-bearing POST gets a fresh `subject:` route. Separate circuits
+cannot hide relationships in request contents from LI.FI, and direct transport
+retains IP-based linkability. A single market quote is not anonymous or unlinkable.
+
+Review displays LI.FI fees from responses already requested by the SDK. The
+selected executor-sizing quote supplies same-chain fees. Cross-chain fees
+follow the selected destination probe and gas-purchase leg when needed. These
+values remain attached to their response in transient Review state and are
+already reflected in the quote amounts. Carrying them into the display does
+not change requests, logging, storage, or execution calculations.
+
+The relayer gas budget and inverse share rate remain approximations. Cross-chain
+route selection, native bridge fees and destination guarantees can differ at
+Review. No preview value is used in proofs, sizing, consent or transaction
+execution. Review dust is expected output less the complete deposit budget;
+share valuation differences are not counted as dust. The cross-chain SDK retains preliminary route outputs even after reserving
+bridge gas and resizing the deposit. It does not expose the final delivery
+remainder, so cross-chain route-output and destination-dust figures stay
+unpriced. The sized shielded note remains available and is shown in Review.
+Yield inputs route their redeemed ERC-20 underlying, including WETH for ppETH;
+the destination funding token can still be native ETH.

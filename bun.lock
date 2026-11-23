@@ -95,6 +95,7 @@
     "unrs-resolver",
   ],
   "patchedDependencies": {
+    "@privacy-pools-v2/sdk@./vendor/privacy-pools-v2-sdk-1.2.0.tgz": "patches/@privacy-pools-v2%2Fsdk@.%2Fvendor%2Fprivacy-pools-v2-sdk-1.2.0.tgz.patch",
     "expo-router@56.2.9": "patches/expo-router@56.2.9.patch",
     "react-native-css-interop@0.2.6": "patches/react-native-css-interop@0.2.6.patch",
   },
@@ -576,7 +577,6 @@
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
     "@kpstreams/core": ["@kpstreams/core@0.2.1", "", {}, "sha512-cx82IpcAG2OoteTrUbHECIm2jc5rJ0+O8qB7cKAXdvkN5oje4aOIiF8nb7nEk+LSMISz8Zz7znrj+gzSXEBKuw=="],
-
 
     "@lifi/types": ["@lifi/types@17.85.0", "", {}, "sha512-EueQyqhyvZbHygkyxj9EPAhUwn69ViRn9zJ56UnZlXsHlOZ/NdNVWxUwrVFVuRt/8qkdZH35R/1vE+SOxFHCNw=="],
 

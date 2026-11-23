@@ -4,6 +4,7 @@
 // prepareSwapAndDeposit at submit time (we hand it `toAmountMin` as the
 // deposit target, so the solved-back input stays at or under what the user
 // typed, within slippage).
+import { isStableExecutorPair } from '@/services/swap-note-preview';
 import { LIFI_API_KEY, NATIVE_ASSET_ADDRESS } from '@/config/intent-swaps';
 import { contractCallDeniedBridges } from '@/services/lifi-native-delivery';
 import { routedFetch } from '@/services/tor-fetch';
@@ -20,6 +21,7 @@ export interface LifiExactInEstimate {
   toAmount: bigint;
   /** Slippage-bounded minimum output (wei) — the safe deposit target. */
   toAmountMin: bigint;
+  stablePair: boolean;
 }
 
 export async function fetchLifiExactInQuote(params: {
@@ -32,6 +34,7 @@ export async function fetchLifiExactInQuote(params: {
   fromAmountWei: bigint;
   fromAddress: string;
   signal?: AbortSignal;
+  slippage?: number;
 }): Promise<LifiExactInEstimate | null> {
   if (params.fromAmountWei <= 0n) return null;
   const qs = new URLSearchParams({
@@ -41,6 +44,7 @@ export async function fetchLifiExactInQuote(params: {
     toToken: toLifiToken(params.toToken),
     fromAmount: params.fromAmountWei.toString(),
     fromAddress: params.fromAddress,
+    ...(params.slippage !== undefined ? { slippage: String(params.slippage), integrator: 'privacy-pools-v2' } : {}),
   });
   try {
     const res = await routedFetch('lifi')(`https://li.quest/v1/quote?${qs.toString()}`, {
@@ -48,11 +52,15 @@ export async function fetchLifiExactInQuote(params: {
       signal: params.signal,
     });
     if (!res.ok) return null;
-    const data = (await res.json()) as { estimate?: { toAmount?: string; toAmountMin?: string } };
+    const data = (await res.json()) as {
+      action?: { fromToken?: { symbol?: string }; toToken?: { symbol?: string } };
+      estimate?: { toAmount?: string; toAmountMin?: string };
+    };
     const toAmount = data.estimate?.toAmount;
     const toAmountMin = data.estimate?.toAmountMin;
     if (!toAmount || !toAmountMin) return null;
-    return { toAmount: BigInt(toAmount), toAmountMin: BigInt(toAmountMin) };
+    const stablePair = isStableExecutorPair(data.action?.fromToken?.symbol, data.action?.toToken?.symbol);
+    return { toAmount: BigInt(toAmount), toAmountMin: BigInt(toAmountMin), stablePair };
   } catch {
     return null;
   }
@@ -100,6 +108,9 @@ export async function fetchLifiContractCallDeliverable(params: {
   fromAddress: string;
   /** Match what the SDK will send: 0.03 cross-chain (its default), 0.01 same-chain (pool-session-service shim). */
   slippage: number;
+  /** The reshield SDK budgets 2M gas; other deposit previews keep their existing probe. */
+  depositGasLimit?: string;
+  denyExchanges?: readonly string[];
   signal?: AbortSignal;
 }): Promise<LifiContractCallDeliverable | null> {
   if (params.fromAmountWei <= 0n) return null;
@@ -123,12 +134,13 @@ export async function fetchLifiContractCallDeliverable(params: {
         // Same deny list the SDK quote gets (services/pool-session-service.ts),
         // so the preview and the execution route the same way.
         ...(deniedBridges ? { denyBridges: deniedBridges } : {}),
+        ...(params.denyExchanges?.length ? { denyExchanges: params.denyExchanges } : {}),
         contractCalls: [{
           fromAmount: '1',
           fromTokenAddress: toToken,
           toContractAddress: params.fromAddress,
           toContractCallData: '0x',
-          toContractGasLimit: '800000',
+          toContractGasLimit: params.depositGasLimit ?? '800000',
         }],
       }),
     });

@@ -26,13 +26,17 @@ const realFetch = globalThis.fetch;
 async function withStub(
   estimate: { toAmount: string; toAmountMin: string } | null,
   body: (calls: string[]) => Promise<void>,
+  symbols?: [string, string],
 ): Promise<void> {
   const calls: string[] = [];
   globalThis.fetch = (async (url: string | URL) => {
     calls.push(String(url));
     return {
       ok: true,
-      json: async () => (estimate ? { estimate } : {}),
+      json: async () => (estimate ? {
+        estimate,
+        action: symbols && { fromToken: { symbol: symbols[0] }, toToken: { symbol: symbols[1] } },
+      } : {}),
     } as Response;
   }) as typeof fetch;
   try {
@@ -59,8 +63,20 @@ describe('fetchLifiExactInQuote', () => {
       const q = paramsOf(calls[0]!);
       expect(q.get('fromChain')).toBe('10');
       expect(q.get('toChain')).toBe('10');
-      expect(out).toEqual({ toAmount: 1000n, toAmountMin: 995n });
+      expect(out).toEqual({ toAmount: 1000n, toAmountMin: 995n, stablePair: false });
     });
+  });
+
+  test('uses the returned route symbols to classify executor pairs', async () => {
+    for (const from of ['usdc.e', 'ETH']) {
+      await withStub({ toAmount: '1000', toAmountMin: '995' }, async () => {
+        const result = await fetchLifiExactInQuote({
+          chainId: 10, fromToken: NATIVE, toToken: USDC_OP, fromAmountWei: 100n,
+          fromAddress: '0x98AdDcc75931795eB66c52cA954541c18535E3c0',
+        });
+        expect(result?.stablePair).toBe(from === 'usdc.e');
+      }, [from, 'USDT']);
+    }
   });
 
   test('toChainId crosses chains without touching the source', async () => {

@@ -1,12 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import { View, LayoutChangeEvent, Text, TouchableOpacity, PanResponder, Platform, useWindowDimensions } from 'react-native';
 
-const WEB_CROSSHAIR_STYLE = Platform.select({ web: { cursor: 'crosshair' }, default: {} }) as Record<string, string>;
 import Svg, { Path, Defs, LinearGradient, Stop, Line, Text as SvgText, Circle, G, Rect } from 'react-native-svg';
 import { Card } from '@/components/ui/card';
 import { Colors, Fonts, FontWeights } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
 import { formatUsdBalance } from '@/services/format-fiat';
+
+const WEB_CROSSHAIR_STYLE = Platform.select({ web: { cursor: 'crosshair' }, default: {} }) as Record<string, string>;
 
 // Define the shape of our data
 export interface DataPoint {

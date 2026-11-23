@@ -1,0 +1,258 @@
+diff --git a/dist/core-sdk.d.cts b/dist/core-sdk.d.cts
+index 3457d1e..111d457 100644
+--- a/dist/core-sdk.d.cts
++++ b/dist/core-sdk.d.cts
+@@ -8652,7 +8652,16 @@ interface SwapQuoteRequest<TAddress = Address> {
+  * Result of a swap quote containing the calldata needed for on-chain execution, generic over the
+  * chain's address type `TAddress`.
+  */
++/** Display-only metadata from an existing aggregator quote; never deducted again. */
++interface QuoteFeeCost {
++    name: string;
++    amount: string;
++    included: boolean;
++    token: { address: string; symbol: string; decimals: number; chainId?: number };
++    feeSplit?: { lifiFee?: string; integratorFee?: string };
++}
+ interface SwapQuoteResult<TAddress = Address> {
++    feeCosts?: QuoteFeeCost[];
+     /** Input amount in token units (wei). */
+     fromAmount: string;
+     /** Expected output amount in token units (wei). */
+@@ -8750,6 +8759,7 @@ interface SwapAndDepositQuoteRequest<TAddress = Address> {
+  * Result of a swap-and-deposit quote, generic over the chain's address type `TAddress`.
+  */
+ interface SwapAndDepositQuoteResult<TAddress = Address> {
++    feeCosts?: QuoteFeeCost[];
+     /** Input amount in token units (wei). */
+     fromAmount: string;
+     /** Deposit amount in token units (wei). */
+@@ -9628,6 +9638,7 @@ interface EstimateReshieldParams<TAddress = Address> {
+ }
+ /** Result of estimateReshieldAmount(). */
+ interface ReshieldEstimate<TAddress = Address> {
++    feeCosts?: QuoteFeeCost[];
+     /** Relayer fee in input token units. */
+     feeAmount: string;
+     /** Net amount after fee, used for LiFi swap. */
+diff --git a/dist/core-sdk.d.ts b/dist/core-sdk.d.ts
+index 0907d37..35a2e2b 100644
+--- a/dist/core-sdk.d.ts
++++ b/dist/core-sdk.d.ts
+@@ -8652,7 +8652,16 @@ interface SwapQuoteRequest<TAddress = Address> {
+  * Result of a swap quote containing the calldata needed for on-chain execution, generic over the
+  * chain's address type `TAddress`.
+  */
++/** Display-only metadata from an existing aggregator quote; never deducted again. */
++interface QuoteFeeCost {
++    name: string;
++    amount: string;
++    included: boolean;
++    token: { address: string; symbol: string; decimals: number; chainId?: number };
++    feeSplit?: { lifiFee?: string; integratorFee?: string };
++}
+ interface SwapQuoteResult<TAddress = Address> {
++    feeCosts?: QuoteFeeCost[];
+     /** Input amount in token units (wei). */
+     fromAmount: string;
+     /** Expected output amount in token units (wei). */
+@@ -8750,6 +8759,7 @@ interface SwapAndDepositQuoteRequest<TAddress = Address> {
+  * Result of a swap-and-deposit quote, generic over the chain's address type `TAddress`.
+  */
+ interface SwapAndDepositQuoteResult<TAddress = Address> {
++    feeCosts?: QuoteFeeCost[];
+     /** Input amount in token units (wei). */
+     fromAmount: string;
+     /** Deposit amount in token units (wei). */
+@@ -9628,6 +9638,7 @@ interface EstimateReshieldParams<TAddress = Address> {
+ }
+ /** Result of estimateReshieldAmount(). */
+ interface ReshieldEstimate<TAddress = Address> {
++    feeCosts?: QuoteFeeCost[];
+     /** Relayer fee in input token units. */
+     feeAmount: string;
+     /** Net amount after fee, used for LiFi swap. */
+diff --git a/dist/index.cjs b/dist/index.cjs
+index 5da4331..d35d5bc 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -9134,6 +9134,7 @@ var PoolSessionReshield = class {
+     return {
+       feeAmount: prelimQuote.feeAmount,
+       netSwapAmount: netSwapAmount.toString(),
++      feeCosts: swapEstimate.feeCosts,
+       estimatedOutput: swapEstimate.toAmount,
+       estimatedMinOutput: swapEstimate.toAmountMin,
+       noteValue: `0x${noteValue.toString(16)}`,
+@@ -10954,6 +10955,7 @@ var PoolSessionReshieldCrosschain = class {
+       denyExchanges
+     });
+     let guaranteed = probe?.budget;
++    let feeCosts = probe?.feeCosts;
+     let reportedFeeAmount = prelimQuote.feeAmount;
+     let reportedNetSwapAmount = netSwapAmount;
+     const isNativeInput = this.addressEqualityComparator.equals(tokenId, this.nativeAssetAddress);
+@@ -10961,6 +10963,7 @@ var PoolSessionReshieldCrosschain = class {
+       let sizedAgainst = probe;
+       let reduced;
+       let mainLegBudget;
++      let gasFeeCosts;
+       for (let attempt = 1; ; attempt++) {
+         const b2 = await this.sizeB2GasSwap({
+           transactionValue: sizedAgainst.transactionValue,
+@@ -10971,6 +10974,7 @@ var PoolSessionReshieldCrosschain = class {
+           slippage,
+           denyExchanges
+         });
++        gasFeeCosts = b2.feeCosts;
+         const b2FeeQuote = await this.relayerInteractor.getSwapQuote(relayerInfo, {
+           asset: tokenId,
+           amount: BigInt(amount).toString(),
+@@ -11017,6 +11021,7 @@ var PoolSessionReshieldCrosschain = class {
+         sizedAgainst = reduced;
+       }
+       guaranteed = reduced?.budget;
++      feeCosts = reduced?.feeCosts && gasFeeCosts ? [...reduced.feeCosts, ...gasFeeCosts] : void 0;
+       if (guaranteed === void 0) {
+         safeMinOutput = safeMinOutput * mainLegBudget / netSwapAmount;
+       }
+@@ -11058,6 +11063,7 @@ var PoolSessionReshieldCrosschain = class {
+         );
+       }
+       guaranteed = reduced?.budget;
++      feeCosts = reduced?.feeCosts;
+       if (guaranteed === void 0) {
+         safeMinOutput = safeMinOutput * reducedFrom / netSwapAmount;
+       }
+@@ -11091,6 +11097,7 @@ var PoolSessionReshieldCrosschain = class {
+       );
+     }
+     return {
++      feeCosts,
+       feeAmount: reportedFeeAmount,
+       netSwapAmount: reportedNetSwapAmount.toString(),
+       estimatedOutput: swapEstimate.toAmount,
+@@ -11131,6 +11138,7 @@ var PoolSessionReshieldCrosschain = class {
+     const budget = this.swapChainAdapter.getDestinationCallAmount(quote.transactionData, ESTIMATE_PROBE_CALLDATA) ?? (quote.destinationCallAmount !== void 0 ? BigInt(quote.destinationCallAmount) : void 0);
+     return {
+       budget,
++      feeCosts: quote.feeCosts,
+       transactionValue: quote.transactionValue,
+       fromAmount: quote.fromAmount,
+       transactionTo: quote.transactionTo,
+@@ -11901,6 +11909,7 @@ var PoolSessionReshieldCrosschain = class {
+       swapValue,
+       gasSwapMaxInput,
+       gasSwapCalldata: gasSwapQuote.transactionData,
++      feeCosts: gasSwapQuote.feeCosts,
+       gasSwapInput,
+       swapTarget: gasSwapQuote.transactionTo,
+       approvalAddress: gasSwapQuote.approvalAddress
+@@ -20681,6 +20690,7 @@ var LiFiSwapQuoteProvider = class {
+       }
+     }
+     const result = {
++      feeCosts: estimate.feeCosts,
+       fromAmount: estimate.fromAmount,
+       toAmount: estimate.toAmount,
+       ...estimate.toAmountMin ? { toAmountMin: estimate.toAmountMin } : {},
+@@ -20762,6 +20772,7 @@ var LiFiSwapQuoteProvider = class {
+       );
+     }
+     const result = {
++      feeCosts: estimate.feeCosts,
+       fromAmount: estimate.fromAmount,
+       toAmount: estimate.toAmount,
+       toAmountMin: estimate.toAmountMin,
+diff --git a/dist/index.js b/dist/index.js
+index 1e9351f..4ca484f 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -9127,6 +9127,7 @@ var PoolSessionReshield = class {
+     return {
+       feeAmount: prelimQuote.feeAmount,
+       netSwapAmount: netSwapAmount.toString(),
++      feeCosts: swapEstimate.feeCosts,
+       estimatedOutput: swapEstimate.toAmount,
+       estimatedMinOutput: swapEstimate.toAmountMin,
+       noteValue: `0x${noteValue.toString(16)}`,
+@@ -10947,6 +10948,7 @@ var PoolSessionReshieldCrosschain = class {
+       denyExchanges
+     });
+     let guaranteed = probe?.budget;
++    let feeCosts = probe?.feeCosts;
+     let reportedFeeAmount = prelimQuote.feeAmount;
+     let reportedNetSwapAmount = netSwapAmount;
+     const isNativeInput = this.addressEqualityComparator.equals(tokenId, this.nativeAssetAddress);
+@@ -10954,6 +10956,7 @@ var PoolSessionReshieldCrosschain = class {
+       let sizedAgainst = probe;
+       let reduced;
+       let mainLegBudget;
++      let gasFeeCosts;
+       for (let attempt = 1; ; attempt++) {
+         const b2 = await this.sizeB2GasSwap({
+           transactionValue: sizedAgainst.transactionValue,
+@@ -10964,6 +10967,7 @@ var PoolSessionReshieldCrosschain = class {
+           slippage,
+           denyExchanges
+         });
++        gasFeeCosts = b2.feeCosts;
+         const b2FeeQuote = await this.relayerInteractor.getSwapQuote(relayerInfo, {
+           asset: tokenId,
+           amount: BigInt(amount).toString(),
+@@ -11010,6 +11014,7 @@ var PoolSessionReshieldCrosschain = class {
+         sizedAgainst = reduced;
+       }
+       guaranteed = reduced?.budget;
++      feeCosts = reduced?.feeCosts && gasFeeCosts ? [...reduced.feeCosts, ...gasFeeCosts] : void 0;
+       if (guaranteed === void 0) {
+         safeMinOutput = safeMinOutput * mainLegBudget / netSwapAmount;
+       }
+@@ -11051,6 +11056,7 @@ var PoolSessionReshieldCrosschain = class {
+         );
+       }
+       guaranteed = reduced?.budget;
++      feeCosts = reduced?.feeCosts;
+       if (guaranteed === void 0) {
+         safeMinOutput = safeMinOutput * reducedFrom / netSwapAmount;
+       }
+@@ -11084,6 +11090,7 @@ var PoolSessionReshieldCrosschain = class {
+       );
+     }
+     return {
++      feeCosts,
+       feeAmount: reportedFeeAmount,
+       netSwapAmount: reportedNetSwapAmount.toString(),
+       estimatedOutput: swapEstimate.toAmount,
+@@ -11124,6 +11131,7 @@ var PoolSessionReshieldCrosschain = class {
+     const budget = this.swapChainAdapter.getDestinationCallAmount(quote.transactionData, ESTIMATE_PROBE_CALLDATA) ?? (quote.destinationCallAmount !== void 0 ? BigInt(quote.destinationCallAmount) : void 0);
+     return {
+       budget,
++      feeCosts: quote.feeCosts,
+       transactionValue: quote.transactionValue,
+       fromAmount: quote.fromAmount,
+       transactionTo: quote.transactionTo,
+@@ -11894,6 +11902,7 @@ var PoolSessionReshieldCrosschain = class {
+       swapValue,
+       gasSwapMaxInput,
+       gasSwapCalldata: gasSwapQuote.transactionData,
++      feeCosts: gasSwapQuote.feeCosts,
+       gasSwapInput,
+       swapTarget: gasSwapQuote.transactionTo,
+       approvalAddress: gasSwapQuote.approvalAddress
+@@ -20674,6 +20683,7 @@ var LiFiSwapQuoteProvider = class {
+       }
+     }
+     const result = {
++      feeCosts: estimate.feeCosts,
+       fromAmount: estimate.fromAmount,
+       toAmount: estimate.toAmount,
+       ...estimate.toAmountMin ? { toAmountMin: estimate.toAmountMin } : {},
+@@ -20755,6 +20765,7 @@ var LiFiSwapQuoteProvider = class {
+       );
+     }
+     const result = {
++      feeCosts: estimate.feeCosts,
+       fromAmount: estimate.fromAmount,
+       toAmount: estimate.toAmount,
+       toAmountMin: estimate.toAmountMin,
