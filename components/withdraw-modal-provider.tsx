@@ -71,6 +71,7 @@ import { useLeafGate } from '@/hooks/use-leaf-gate';
 import { selectSuiNotes, maxSuiLineageTotal, SUI_SINGLE_NOTE_ERROR, type SuiNoteSelection } from '@/services/sui-witness/note-selection';
 import type { StoredSuiNote } from '@/services/sui-witness/note-store';
 import { ChainLogo, chainLogoChainFor } from '@/components/ui/chain-logo';
+import { relaySupportsBatchWithdrawals } from '@/config/relayer-eras';
 import { BATCH_WITHDRAWALS_ENABLED, LEGACY_CONFIG, TEST_MODE } from '@/config/env';
 import {
   batchProgressFraction,
@@ -1728,7 +1729,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // on, Max on a share balance spanning several proofs went straight to
   // prepareBatchWithdraw and paid ppUSDC under a USDC label (codex P1 on
   // d6abfcd). Until batch redemption exists, a share is single-proof only.
-  const batchEnabled = BATCH_WITHDRAWALS_ENABLED && !isSui && !selectedIsShare;
+  const batchEnabled = BATCH_WITHDRAWALS_ENABLED && !isSui && !selectedIsShare
+    && relaySupportsBatchWithdrawals(chainId, getChainConfig(chainId)?.contracts?.poolAddress);
   // A full-balance withdrawal needs batching only when its exact note topology
   // spans more than one proof (one lineage of >5 notes, or several lineages).
   // Derived from note counts, never float amounts.

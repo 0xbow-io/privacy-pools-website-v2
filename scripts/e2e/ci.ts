@@ -8,6 +8,7 @@
 import { formatEther, keccak256, parseEther, stringToBytes } from 'viem';
 import { existsSync, writeFileSync } from 'node:fs';
 import { accountFromKey, client, envValue, fundAccount, mintEphemeral, paymentRequestEth, requireFunds, sweepTo } from './funding';
+import { relaySupportsBatchWithdrawals } from '../../config/relayer-eras';
 import { coreFixtureKey } from './core-fixture';
 
 // 0.004 was not enough: a FIRST deposit from a brand-new key also pays for the
@@ -60,8 +61,9 @@ if (GROUP !== 'all' && !GROUPS.includes(GROUP as never)) {
   throw new Error(`unknown E2E_GROUP "${GROUP}" (one of: all, ${GROUPS.join(', ')})`);
 }
 const runs = (group: typeof GROUPS[number]) => GROUP === 'all' || GROUP === group;
-const BATCH_ENABLED = envValue('EXPO_PUBLIC_BATCH_WITHDRAWALS') === 'true';
-if (!BATCH_ENABLED) console.log('SKIP batch withdrawal: disabled for the V8 relay (no relayBatch support)');
+const BATCH_ENABLED = envValue('EXPO_PUBLIC_BATCH_WITHDRAWALS') === 'true'
+  && relaySupportsBatchWithdrawals(11155111, envValue('EXPO_PUBLIC_SEPOLIA_POOL_ADDRESS'));
+if (!BATCH_ENABLED) console.log('SKIP batch withdrawal: disabled by configuration or unsupported by the Sepolia relay');
 const PHASE_DIR = process.env.E2E_PHASE_DIR;
 const phaseFlag = (name: string) => { if (PHASE_DIR) writeFileSync(`${PHASE_DIR}/${name}`, ''); };
 const phaseGate = async (name: string) => {

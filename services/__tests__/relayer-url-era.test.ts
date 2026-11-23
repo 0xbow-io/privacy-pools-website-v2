@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { CURRENT_RELAY, RELAY_PROCESSOR_BY_VAULT, resolveSepoliaRelayerBaseUrl } from '@/config/relayer-eras';
+import { CURRENT_RELAY, RELAY_PROCESSOR_BY_VAULT, relaySupportsBatchWithdrawals, resolveSepoliaRelayerBaseUrl } from '@/config/relayer-eras';
 import { SEPOLIA_DEFAULT_POOL } from '@/config/sepolia-deployment';
 
 const STAGING = 'https://relayer-v2-staging-149184580131.us-east1.run.app';
@@ -23,6 +23,13 @@ describe('Sepolia pool and relayer routing', () => {
   test('explicit V9 selection retains its own relay and service', () => {
     expect(resolveSepoliaRelayerBaseUrl(V9_VAULT, undefined)).toBe(STAGING);
     expect(RELAY_PROCESSOR_BY_VAULT[V9_VAULT].relay).toBe('0x7430cc030d7eb8C83E76cD983996982C8C054204');
+  });
+
+  test('batch withdrawals require a capable relay on Sepolia', () => {
+    expect(relaySupportsBatchWithdrawals(11155111, V8_VAULT)).toBe(false);
+    expect(relaySupportsBatchWithdrawals(11155111)).toBe(false);
+    expect(relaySupportsBatchWithdrawals(11155111, V9_VAULT.toUpperCase())).toBe(true);
+    expect(relaySupportsBatchWithdrawals(1, V8_VAULT)).toBe(true);
   });
 
   test('unmapped vault falls back to the current relayer', () => {

@@ -15,6 +15,7 @@ export type RelayEra = {
   transfersViaSignerEoa: boolean;
   /** The hosted relayer instance serving this era's pool, if not the current one. */
   relayerBaseUrl?: string;
+  supportsBatchWithdrawals: boolean;
 };
 
 // V8 is the default: its rotated verifiers match the frontend ceremony keys.
@@ -25,11 +26,13 @@ export const CURRENT_RELAYER_BASE_URL = 'https://relayer-v2-testing-149184580131
 export const RELAY_PROCESSOR_BY_VAULT: Record<string, RelayEra> = {
   '0x4deceef285a24ca05999870887c895042731d7cb': {
     relay: CURRENT_RELAY,
+    supportsBatchWithdrawals: false,
     transfersViaSignerEoa: true,
     relayerBaseUrl: CURRENT_RELAYER_BASE_URL,
   },
   // Preserve explicit V9 routing; changing the default does not move its notes.
   '0x09b94d3127019298757a6ceeb7911922085f7c01': {
+    supportsBatchWithdrawals: true,
     relay: '0x7430cc030d7eb8C83E76cD983996982C8C054204',
     transfersViaSignerEoa: true,
     relayerBaseUrl: 'https://relayer-v2-staging-149184580131.us-east1.run.app',
@@ -48,4 +51,9 @@ export function resolveSepoliaRelayerBaseUrl(
   if (trimmed) return trimmed;
   const era = selectedVault ? RELAY_PROCESSOR_BY_VAULT[selectedVault.toLowerCase()] : undefined;
   return era?.relayerBaseUrl ?? CURRENT_RELAYER_BASE_URL;
+}
+
+/** Sepolia relays are per vault. Unknown vaults route to the V8 service. */
+export function relaySupportsBatchWithdrawals(chainId: number, vault?: string): boolean {
+  return chainId !== 11155111 || RELAY_PROCESSOR_BY_VAULT[vault?.toLowerCase() ?? '']?.supportsBatchWithdrawals === true;
 }
