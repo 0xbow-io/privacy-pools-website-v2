@@ -3514,7 +3514,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
   }, [
     isSui, isStellar, suiSession, stellarSession, stellarActiveNotes, altDecimals,
     ensureInitialized, connectedAddress, amount, selectedSymbol, rateFor, selectedRate, noteFigure, recipientAddress,
-    hideAddress, relayFeeEstimate, maxSpendableWei, sendTransactionAsync, walletAddress, sendExactActive,
+    hideAddress, relayFeeEstimate, transferFeeFor, maxSpendableWei, sendTransactionAsync, walletAddress, sendExactActive,
     selectedNoteCommitments, enteredAmountWei, selectedTokenId, chainId, forcedInputs, feeDisplayGrain, selectedDecimals,
     transfer, prepareRelayed, log, noteManager, keystoreManager,
     activeNotes, recipientIsRegistered, recipientRegistrationCheck, stellarOneTime,
