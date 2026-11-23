@@ -837,11 +837,17 @@ export function ActionHub({
     if (!pool || pool.chainId !== activeChainId) return;
     const key = `${pool.chainId}:${pool.symbol}`; // not-rendered: seed key
     if (seededPoolRef.current === key) return;
-    // Route symbols are upper-case; share symbols are mixed-case (ppUSDC).
-    const match = tokens.find((t) => t.symbol.toUpperCase() === pool.symbol.toUpperCase());
-    if (!match) return;
+    // One attempt per pool: a seed left armed would later overwrite whatever
+    // another tab (Withdraw, Send) already holds, a handoff included.
     seededPoolRef.current = key;
-    setToken(match.symbol);
+    // Route symbols are upper-case; share symbols are mixed-case (ppUSDC). The
+    // Shield list carries no yield shares, so a share pool (ppUSDC) seeds its
+    // underlying (USDC), which is what the user shields into that pool.
+    const wanted = [pool.symbol, displayTokenSymbol(pool.symbol)].map((s) => s.toUpperCase());
+    const match = wanted
+      .map((s) => tokens.find((t) => t.symbol.toUpperCase() === s))
+      .find((t) => t !== undefined);
+    if (match) setToken(match.symbol);
   }, [pool, activeChainId, tokens, setToken]);
 
   const tokenMeta = tokens.find((t) => t.symbol === token) ?? tokens[0];

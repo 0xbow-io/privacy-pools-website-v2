@@ -33,8 +33,17 @@ describe('pool page shield card starts on the pool asset', () => {
 
   test('the card seeds once, on the pool chain, matching symbols case-insensitively', () => {
     expect(hub).toContain('pool.chainId !== activeChainId');
-    expect(hub).toContain('t.symbol.toUpperCase() === pool.symbol.toUpperCase()');
     expect(hub).toContain('seededPoolRef.current === key');
+    // Case-insensitive, and a share pool falls back to its underlying (the
+    // Shield list carries no yield shares, so ppUSDC must seed USDC).
+    expect(hub).toContain('[pool.symbol, displayTokenSymbol(pool.symbol)].map((s) => s.toUpperCase())');
+    expect(hub).toContain('t.symbol.toUpperCase() === s');
+  });
+
+  test('the seed is armed once per pool, so a failed match never fires later on another tab', () => {
+    const effect = hub.slice(hub.indexOf('seededPoolRef.current === key'), hub.indexOf('if (match) setToken(match.symbol)'));
+    expect(effect).toContain('seededPoolRef.current = key;');
+    expect(effect.indexOf('seededPoolRef.current = key;')).toBeLessThan(effect.indexOf('const match'));
   });
 });
 
