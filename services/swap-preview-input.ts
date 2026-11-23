@@ -27,6 +27,18 @@ export function previewInputAmount(
   return (amountWei * rate.assetsPerShare) / 10n ** BigInt(rate.shareDecimals);
 }
 
+/** Executor exact-input routes reserve 25% of the estimated fee as headroom.
+ * The SDK also holds back one underlying base unit after share redemption. */
+export function previewReshieldInput(
+  gross: bigint, fee: bigint | null, executor: boolean, isShare: boolean, rate: PreviewShareRate | undefined,
+): bigint | null {
+  if (fee === null) return null;
+  const net = gross - fee - (executor ? fee / 4n : 0n);
+  if (net <= 0n) return null;
+  const redeemed = previewInputAmount(net, isShare, rate);
+  return redeemed !== null && executor && isShare ? redeemed - 1n : redeemed;
+}
+
 /**
  * Whether the preview needs LiFi at all. The same funding token on the same
  * chain on both sides is a straight redeem-and-redeposit, so the estimate is

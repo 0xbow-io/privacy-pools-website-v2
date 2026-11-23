@@ -1,5 +1,6 @@
 import { usePublicFeed } from '@/hooks/use-public-feed';
 import { feedSwapPreviewConfig, readSwapPreviewConfigs, swapPreviewConfigKey, type SwapPreviewConfigs } from '@/services/swap-preview-config';
+import { nativeSwapDepositSupported } from '@/services/native-swap-executor';
 import { estimateReshieldFee, estimateSwapNote } from '@/services/swap-note-preview';
 import { estimatedUsdLabel } from '@/services/estimated-usd';
 import { useAssetStatistics } from '@/hooks/use-asset-statistics';
@@ -107,7 +108,7 @@ import { stellarWidgetPools } from '@/services/stellar-widget-pool';
 import { fetchLifiContractCallDeliverable } from '@/services/lifi-quote';
 import { useSwapPreview } from '@/hooks/use-swap-preview';
 import { useShareRates, useShareNameText } from '@/hooks/use-share-rates';
-import { previewInputAmount, previewIsIdentity, previewOutputUsd, redeemedSwapInputToken } from '@/services/swap-preview-input';
+import { previewReshieldInput, previewInputAmount, previewIsIdentity, previewOutputUsd, redeemedSwapInputToken } from '@/services/swap-preview-input';
 import { sizeConvertingDeposit } from '@/services/cross-pay-sizing';
 import { useTxActivity } from '@/components/tx-activity-provider';
 import { INLINE_OP_HOST_ID } from '@/components/inline-op-portal';
@@ -1088,15 +1089,16 @@ export function ActionHub({
     decimals: tokenMeta.decimals, shareInput: swapFromIsShare, crossChain: swapCrossChain,
     config: swapConfigs?.[swapPreviewConfigKey(chainId, swapFromAddress)],
   });
-  const swapNetInput = swapFee === null ? null : swapAmountWei - swapFee;
-  const swapPreviewInWei = swapNetInput === null ? null
-    : previewInputAmount(swapNetInput, swapFromIsShare, shareRateFor(chainId, swapFromAddress));
   const swapToFunding = swapOutToken ? conversionFundingToken(swapOutToken.address, swapDestChainId) : '';
   const swapOutUnits = swapOutToken
     ? swapInputUnits(swapDestChainId, swapOutToken.address, { symbol: swapOutToken.symbol, decimals: swapOutToken.decimals })
     : null;
   const swapPreviewIdentity = !!swapFromFunding && !!swapToFunding
     && previewIsIdentity(swapFromFunding, swapToFunding, chainId, swapDestChainId);
+  const swapUsesExecutor = !swapCrossChain && !swapPreviewIdentity && nativeSwapDepositSupported(chainId);
+  const swapPreviewInWei = previewReshieldInput(
+    swapAmountWei, swapFee, swapUsesExecutor, swapFromIsShare, shareRateFor(chainId, swapFromAddress),
+  );
   const swapPreview = useSwapPreview({
     enabled: action === 'swap' && !isSui && !!swapOutToken && swapAmountWei > 0n
       && swapPreviewInWei !== null && swapPreviewInWei > 0n && !swapPreviewIdentity
@@ -1133,6 +1135,8 @@ export function ActionHub({
   const swapMinimumOutput = swapPreviewIdentity ? swapPreviewInWei : swapPreview.status === 'ok' ? swapPreview.toAmountMin : null;
   const swapLocalNote = swapAmountWei <= 0n || !swapOutToken || swapMinimumOutput === null || (swapOutputIsShare && !swapOutputRate)
     ? null : estimateSwapNote({
+      executorPair: swapUsesExecutor && swapPreview.status === 'ok'
+        ? (swapPreview.stablePair ? 'stable' : 'volatile') : undefined,
       minimumOutput: swapMinimumOutput, crossChain: swapCrossChain, destinationChainId: swapDestChainId,
       config: swapDestConfigs?.[swapPreviewConfigKey(swapDestChainId, swapOutToken.address)],
       share: swapOutputIsShare ? swapOutputRate : undefined,
@@ -4338,7 +4342,7 @@ export function ActionHub({
               {(() => {
                 const note = swapQuotedNet !== null
                   ? 'After relayer and swap fees, from the review quote. The pool minimum applies to this amount.'
-                  : 'After estimated fees. Review refreshes the amount.';
+                  : 'Fees may be higher when spending multiple notes. Review updates the estimate.';
                 // Phone web: the long note folds into a hint behind a short label.
                 return tight ? (
                   <HoverHint hint={note} wrap testID="hub-swap-quote-hint">

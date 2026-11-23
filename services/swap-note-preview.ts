@@ -1,5 +1,16 @@
 import type { SwapPreviewAssetConfig } from './swap-preview-config';
 
+// The installed SDK keeps its executor symbol table private. The parity test
+// checks the full table at each SDK bump.
+export const EXECUTOR_STABLE_SYMBOLS = new Set([
+  'USDC', 'USDC.E', 'USDBC', 'USDT', 'USDT0', 'USD₮0', 'DAI', 'USDS', 'FDUSD', 'PYUSD',
+]);
+
+export function isStableExecutorPair(from?: string, to?: string): boolean {
+  return typeof from === 'string' && typeof to === 'string'
+    && EXECUTOR_STABLE_SYMBOLS.has(from.toUpperCase()) && EXECUTOR_STABLE_SYMBOLS.has(to.toUpperCase());
+}
+
 /** Public relayer gas budgets; display estimates only, never transaction inputs. */
 const RESHIELD_GAS = 2_020_000n;
 const YIELD_INPUT_GAS = 380_000n;
@@ -32,6 +43,7 @@ export function estimateReshieldFee(input: {
 /** Local approximation of the SDK's note sizing from a public route quote. */
 export function estimateSwapNote(input: {
   minimumOutput: bigint;
+  executorPair?: 'stable' | 'volatile';
   crossChain: boolean;
   destinationChainId: number;
   config: SwapPreviewAssetConfig | undefined;
@@ -40,8 +52,15 @@ export function estimateSwapNote(input: {
   const { config, share } = input;
   if (!config?.enabled || config.vettingFeeBps < 0n || (share && share.assetsPerShare <= 0n)) return null;
   let budget = input.minimumOutput;
-  if (input.crossChain && input.destinationChainId === 1) budget = budget * 97n / 100n;
-  budget = budget * (input.crossChain ? 98n : 99n) / 100n;
+  if (input.crossChain) {
+    if (input.destinationChainId === 1) budget = budget * 97n / 100n;
+    budget = budget * 98n / 100n;
+  } else if (input.executorPair) {
+    const margin = budget * (input.executorPair === 'stable' ? 2n : 10n) / 10_000n;
+    budget -= margin > 1n ? margin : 1n;
+  } else {
+    budget = budget * 99n / 100n;
+  }
   if (budget <= 0n) return 0n;
   if (!share) return budget * 10_000n / (10_000n + config.vettingFeeBps);
   // SDK yield sizing: rate headroom + zap supply rounding buffer, then

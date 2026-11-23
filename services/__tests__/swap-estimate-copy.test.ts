@@ -8,7 +8,7 @@ const hub = readFileSync(new URL('../../components/home/action-hub.tsx', import.
 test('the Swap estimate describes the shielded note after estimated fees', () => {
   expect(hub).not.toContain('before relayer fees');
   expect(hub).toContain('Estimated shielded note');
-  expect(hub).toContain('After estimated fees. Review refreshes the amount.');
+  expect(hub).toContain('Fees may be higher when spending multiple notes. Review updates the estimate.');
 });
 
 test('the widget prefers the matching Review result to local note sizing', () => {

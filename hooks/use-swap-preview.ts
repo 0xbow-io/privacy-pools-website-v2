@@ -9,6 +9,7 @@ export type SwapPreview =
     status: 'ok';
     toAmount: bigint;
     toAmountMin: bigint;
+    stablePair?: boolean;
   }
   | { status: 'none' };
 
@@ -97,7 +98,7 @@ export function useSwapPreview(params: {
           fromAddress,
           signal: controller.signal,
           slippage: params.slippage,
-        }).then((q) => (q ? { status: 'ok', toAmount: q.toAmount, toAmountMin: q.toAmountMin } : { status: 'none' }));
+        }).then((q) => (q ? { status: 'ok', ...q } : { status: 'none' }));
       request.then((next) => {
         if (seqRef.current === seq) setPreview(next);
       }).catch(() => {

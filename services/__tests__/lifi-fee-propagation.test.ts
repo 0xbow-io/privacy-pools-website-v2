@@ -1,13 +1,18 @@
 // @ts-nocheck -- Exercise SDK private sizing methods against the unpatched pinned package.
 import { afterAll, expect, test } from 'bun:test';
-import { mkdtempSync, symlinkSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, symlinkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { previewReshieldInput } from '../swap-preview-input';
+import { estimateSwapNote } from '../swap-note-preview';
 import * as patched from '@privacy-pools-v2/sdk';
 
 const dir = mkdtempSync(join(tmpdir(), 'lifi-fee-baseline-'));
-execFileSync('tar', ['-xzf', resolve('vendor/privacy-pools-v2-sdk-1.2.0.tgz'), '--strip-components=1', '-C', dir]);
+const manifest = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
+const sdkArchive = manifest.dependencies['@privacy-pools-v2/sdk'];
+if (!sdkArchive.startsWith('file:')) throw new Error('Expected a vendored SDK archive for the parity baseline');
+execFileSync('tar', ['-xzf', resolve(sdkArchive.slice('file:'.length)), '--strip-components=1', '-C', dir]);
 symlinkSync(resolve('node_modules'), join(dir, 'node_modules'));
 const baseline = await import(join(dir, 'dist/index.js'));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -40,7 +45,12 @@ test('real provider keeps request, calldata, amounts and logs identical; fees st
   expect(next.results.map(r => r.feeCosts)).toEqual([fee(1000), fee(2000)]);
 });
 
-for (const executor of [false, true]) test(`same-chain selected quote carries fees and preserves input counts (executor=${executor})`, async () => {
+for (const { executor, stable, minimum } of [
+  { executor: false, stable: true, minimum: 1_000_000_123n },
+  { executor: true, stable: true, minimum: 1_000_000_123n },
+  { executor: true, stable: false, minimum: 1_000_000_123n },
+  { executor: true, stable: true, minimum: 100n },
+]) test(`same-chain SDK sizing and selected fees (executor=${executor}, stable=${stable}, minimum=${minimum})`, async () => {
   async function run(sdk) {
     const relayerCalls = [], swapCalls = [];
     const session = Object.create(sdk.PoolSessionReshield.prototype);
@@ -58,8 +68,8 @@ for (const executor of [false, true]) test(`same-chain selected quote carries fe
         swapCalls.push(req);
         return {
           fromTokenAddress: req.fromToken, toTokenAddress: req.toToken,
-          fromChainId: 1, toChainId: 1, fromTokenSymbol: 'ETH', toTokenSymbol: 'USDC',
-          toAmount: '950', toAmountMin: '900', feeCosts: fee(swapCalls.length),
+          fromChainId: 1, toChainId: 1, fromTokenSymbol: stable ? 'USDT' : 'ETH', toTokenSymbol: 'USDC',
+          toAmount: String(minimum + 50n), toAmountMin: String(minimum), feeCosts: fee(swapCalls.length),
         };
       } },
     });
@@ -73,7 +83,14 @@ for (const executor of [false, true]) test(`same-chain selected quote carries fe
   expect(next.relayerCalls).toEqual(old.relayerCalls);
   expect(next.relayerCalls.map(call => call.inputs)).toEqual([2]);
   expect(next.swapCalls).toEqual(old.swapCalls);
-  expect(next.swapCalls).toHaveLength(executor ? 2 : 1);
+  expect(previewReshieldInput(1000n, 5n, executor, false, undefined)).toBe(BigInt(old.swapCalls[0].amount));
+  expect(next.swapCalls).toHaveLength(executor && !stable ? 2 : 1);
+  const preview = estimateSwapNote({
+    minimumOutput: minimum, crossChain: false, destinationChainId: 1,
+    executorPair: executor ? (stable ? 'stable' : 'volatile') : undefined,
+    config: { enabled: true, vettingFeeBps: 0n, maxRelayFee: 100n },
+  });
+  expect(preview).toBe(BigInt(old.result.noteValue));
   expect(withoutFees(next.result)).toEqual(withoutFees(old.result));
   expect(next.result.feeCosts).toEqual(fee(next.swapCalls.length));
 });
