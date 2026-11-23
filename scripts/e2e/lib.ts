@@ -601,6 +601,24 @@ export async function forceUnlock(page: Page): Promise<boolean> {
   return unlockIfPrompted(page);
 }
 
+/** Seed a fixture that must be able to receive private transfers on Sepolia. */
+export async function registerSepoliaFixture(page: Page): Promise<void> {
+  const card = page.getByTestId('registration-status-card').filter({ visible: true }).first();
+  const toggle = card.getByTestId('registration-status-toggle');
+  if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
+  const row = card.getByTestId(`registration-row-${sepolia.id}`);
+  const registered = row.getByText('Registered', { exact: true });
+  const register = row.getByTestId(`registration-register-${sepolia.id}`);
+  const finish = row.getByTestId(`registration-finish-${sepolia.id}`);
+  const error = row.getByText(/Different unlock|Retry/);
+  await registered.or(register).or(finish).or(error).first().waitFor({ timeout: 90_000 });
+  if (await registered.isVisible()) return;
+  if (await error.isVisible()) throw new Error(`Sepolia fixture registration: ${await row.innerText()}`);
+  await register.or(finish).click();
+  await page.getByTestId('keystore-register-primary').click();
+  await registered.waitFor({ timeout: 300_000 });
+}
+
 /**
  * Wait until the card reports a spendable shielded balance.
  *

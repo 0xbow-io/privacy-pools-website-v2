@@ -3,7 +3,7 @@ import { expect } from 'bun:test';
 import { confirmConsolidation } from '../consolidation-confirm';
 import { launchChrome } from '../../lib/chrome.mjs';
 import { installUnlockGateHandler, unlockIfPrompted, waitForUnlockedLink } from '../unlock-gate';
-import { clickWhenReady, fillRecipient, registerKeystoreIfPrompted, waitForShieldedBalance } from '../lib';
+import { clickWhenReady, registerSepoliaFixture, fillRecipient, registerKeystoreIfPrompted, waitForShieldedBalance } from '../lib';
 
 const browser = await launchChrome({ headless: true });
 try {
@@ -88,6 +88,23 @@ try {
   expect(await registration.locator('body').innerText()).toBe('Exit Successful');
   console.log('PASS fresh-wallet exit accepts registration and resumes');
   await registration.close();
+  for (const action of ['register', 'finish', 'registered']) {
+    const page = await browser.newPage();
+    const control = action === 'registered' ? '<span>Registered</span>'
+      : `<button data-testid="registration-${action}-11155111" onclick="confirmButton.hidden=false">${action}</button>`;
+    await page.setContent(`
+      <div data-testid="my-privacy-pools-card">Balances</div>
+      <section data-testid="registration-status-card">
+        <button data-testid="registration-status-toggle" aria-expanded="false" onclick="row.hidden=false">Chain registration</button>
+        <div hidden id="row" data-testid="registration-row-11155111">${control}</div>
+      </section>
+      <button hidden id="confirmButton" data-testid="keystore-register-primary"
+        onclick="row.innerHTML='<span>Registered</span>';this.hidden=true;document.body.dataset.confirmed='yes'">Confirm</button>`);
+    await registerSepoliaFixture(page);
+    expect(await page.locator('body').getAttribute('data-confirmed')).toBe(action === 'registered' ? null : 'yes');
+    await page.close();
+  }
+  console.log('PASS Sepolia fixtures register, finish partial setup, or reuse a registered account');
   for (const pending of ['Check your wallet…', 'Reconnecting…']) {
     const page = await browser.newPage();
     await page.setContent(`<button id="header" onclick="this.dataset.clicked='yes'">Sign in</button><div id="overlay" style="position:fixed;inset:0"><h2>Unlock your account</h2><button disabled>${pending}</button></div>`);
