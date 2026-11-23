@@ -480,7 +480,10 @@ export function ActionHub({
 
   // Each action remembers its asset. Panel picks apply once to the current
   // action; a fallback on another tab must not overwrite a saved Shield pick.
-  const panelSelection = panel?.selection ?? null;
+  // On a pool page the chain-aware seed below already selects the asset for
+  // this tab. Reapplying the panel's raw route symbol would replace Shield's
+  // USDC pay token with PPUSDC and trigger its fallback to ETH.
+  const panelSelection = pool ? null : (panel?.selection ?? null);
   const [assetSelection, setAssetSelection] = useState(() => ({
     byAction: {
       shield: landing ? 'USDC' : 'ETH',
@@ -830,26 +833,6 @@ export function ActionHub({
     setAmount((a) => (spending ? '' : sanitizeAmountInput(a, fallback.decimals)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSui, token, action, tokens, evmTokens, holdings, spendTokenPinned]);
-
-  // Pool page: start on that pool's asset once per pool, and only once this
-  // page owns the pool's chain. A pick handed over from the previous page
-  // (takePoolHubHandoff, applied a tick later) still wins.
-  const seededPoolRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!pool || pool.chainId !== activeChainId) return;
-    const key = `${pool.chainId}:${pool.symbol}`; // not-rendered: seed key
-    if (seededPoolRef.current === key) return;
-    // One attempt per pool: a seed left armed would later overwrite whatever
-    // another tab (Withdraw, Send) already holds, a handoff included.
-    seededPoolRef.current = key;
-    // Route symbols are upper-case and share symbols mixed-case, hence
-    // sameSymbol. The Shield list carries no yield shares, so a share pool
-    // seeds its underlying, which is what the user shields into that pool.
-    const match = [pool.symbol, displayTokenSymbol(pool.symbol)]
-      .map((s) => tokens.find((t) => sameSymbol(t.symbol, s)))
-      .find((t) => t !== undefined);
-    if (match) setToken(match.symbol);
-  }, [pool, activeChainId, tokens, setToken]);
 
   const tokenMeta = tokens.find((t) => t.symbol === token) ?? tokens[0];
   // The Sui shape (HubToken) carries no address, and needs none: that chain has
@@ -1237,6 +1220,26 @@ export function ActionHub({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walletAndPasted, token, tokens, action, isSui, spendTokenPinned]);
+  // Apply the pool pick after both token validity checks. On a chain switch
+  // they can still see the previous chain's token and queue a native fallback.
+  // A handoff from the previous page is applied a tick later and still wins.
+  const seededPoolRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pool || pool.chainId !== activeChainId) return;
+    const key = `${pool.chainId}:${pool.symbol}`; // not-rendered: seed key
+    if (seededPoolRef.current === key) return;
+    // One attempt per pool: a seed left armed would later overwrite whatever
+    // another tab (Withdraw, Send) already holds, a handoff included.
+    seededPoolRef.current = key;
+    // Route symbols are upper-case and share symbols mixed-case, hence
+    // sameSymbol. The Shield list carries no yield shares, so a share pool
+    // seeds its underlying, which is what the user shields into that pool.
+    const match = [pool.symbol, displayTokenSymbol(pool.symbol)]
+      .map((s) => tokens.find((t) => sameSymbol(t.symbol, s)))
+      .find((t) => t !== undefined);
+    if (match) setToken(match.symbol);
+  }, [pool, activeChainId, tokens, setToken]);
+
   /**
    * Address of the pay token the user EXPLICITLY picked from the sheet.
    *
