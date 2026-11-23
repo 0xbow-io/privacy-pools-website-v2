@@ -25,6 +25,8 @@ const RECIPIENT = '0x1111111111111111111111111111111111111111' as const;
 const ETH = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' as const;
 const USDC = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238' as const;
 const GROSS = 10n ** 18n; // 1 ETH gross leaving the pool
+const NOTE_A = `0x${'a'.repeat(64)}` as `0x${string}`;
+const NOTE_B = `0x${'b'.repeat(64)}` as `0x${string}`;
 
 // Coherent same-chain fixture: net 0.99 ETH + fee 0.01 ETH = gross 1 ETH;
 // on-chain min equals LiFi's destination min (1 USDC).
@@ -91,6 +93,7 @@ describe('prepareValidatedSwapQuote (shared quote core: prepare → validate →
     outputToken: { address: USDC, decimals: 6 },
     recipientAddress: RECIPIENT,
     slippage: 0.005,
+    inputCommitments: [NOTE_A, NOTE_B],
   } as const;
 
   test('valid same-chain quote returns the prepared commitment and shaped display', async () => {
@@ -112,6 +115,21 @@ describe('prepareValidatedSwapQuote (shared quote core: prepare → validate →
     expect(sent.slippage).toBe(0.005);
     expect('toChainId' in sent).toBe(false);
     expect('fallbackAddress' in sent).toBe(false);
+  });
+
+  test('quotes on the notes the relay will spend (SDK 1.2.0 prices per note)', async () => {
+    const { session, calls } = makeSession(makePrepared());
+    await prepareValidatedSwapQuote(session, baseParams);
+    const sent = calls[0] as Record<string, unknown>;
+    // Handed to the SDK, which sends the relayer only their count (inputs: 2).
+    expect(sent.inputCommitments).toEqual([NOTE_A, NOTE_B]);
+  });
+
+  test('refuses to quote with no input notes', async () => {
+    const { session, calls } = makeSession(makePrepared());
+    await expect(prepareValidatedSwapQuote(session, { ...baseParams, inputCommitments: [] }))
+      .rejects.toBeInstanceOf(InvalidSwapQuoteError);
+    expect(calls).toHaveLength(0);
   });
 
   test('same-chain destination equal to the pool chain also stays same-chain', async () => {

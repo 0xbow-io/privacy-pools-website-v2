@@ -151,6 +151,7 @@ import {
   isZeroAddress,
   prepareValidatedSwapQuote,
   resolveSwapDelivery,
+  sameInputNoteSet,
   selectSwapInputNotes,
   type PreparedSwapQuoteLike,
   type SwapQuoteDisplay,
@@ -366,6 +367,12 @@ type QuoteSnapshot = {
   destinationName: string;
   slippage: number;
   crossChain: boolean;
+  // The notes the quote was priced on (SDK 1.2.0 sends their count). Confirm
+  // relays exactly this set, or re-quotes for the set it selects.
+  inputCommitments: Hex[];
+  // Set after a failed attempt: the next Confirm re-quotes before proving,
+  // so a refused relay is never retried on the same commitment.
+  requote?: boolean;
 };
 
 /**
@@ -1845,6 +1852,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         setSwapError(picked.error);
         return;
       }
+      const quotedInputs = picked.notes.map((n) => n.commitment as Hex);
 
       const resolved = await resolveSwapSession({
         isCurrent,
@@ -1877,6 +1885,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         slippage: requestSlippage,
         ...(SWAP_DENY_EXCHANGES.length > 0 ? { denyExchanges: SWAP_DENY_EXCHANGES } : {}),
         ...(requestCrossChain ? { toChainId: requestDestination, fallbackAddress: requestRecipient } : {}),
+        // The relayer prices the quote per note spent, so it is quoted on the
+        // exact set Confirm will relay (only the count leaves the browser).
+        inputCommitments: quotedInputs,
       });
 
       // Only the newest request (with an unchanged form) may commit state.
@@ -1895,6 +1906,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         destinationName: getChainConfig(requestDestination)?.displayName ?? `Chain ${requestDestination}`,
         slippage: requestSlippage,
         crossChain: requestCrossChain,
+        inputCommitments: quotedInputs,
       });
       setStep('review');
       log('info', 'Swap', 'Swap quote prepared', {
@@ -2005,6 +2017,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         setSwapError(picked.error);
         return;
       }
+      // Priced on the notes Confirm will spend: the relayer charges per note,
+      // and only their count leaves the browser.
+      const estimateInputs = picked.notes.map((n) => n.commitment as Hex);
 
       const resolved = await resolveSwapSession({
         isCurrent,
@@ -2068,6 +2083,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
             // The same route runReshieldCrosschain will take, so Review shows
             // the number Confirm executes.
             denyExchanges: [...CROSS_CHAIN_DENY_EXCHANGES],
+            inputCommitments: estimateInputs,
           });
         // Refuse a note the far-side gas would reduce to a sliver (Pat's
         // 20 USDC -> mainnet reviewed as "0 ETH" and then failed at relay).
@@ -2101,6 +2117,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
             output: { symbol: requestOutputToken.symbol, decimals: requestOutputToken.decimals },
             slippage: requestSlippage,
             ...(requestSendTo ? { transfer: true } : {}),
+            inputCommitments: estimateInputs,
           },
         );
         estimate = flow3.estimate;
@@ -2272,10 +2289,45 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     // Same refresh-at-confirm as the withdraw flow: the relayer's commitments
     // live ~60s and review dwell eats into that. Re-price the same order and
     // only bounce the user when it moved against them (REFRESH_DRIFT_BPS).
+    //
+    // Notes are selected FIRST: the relayer prices the quote per note spent
+    // (SDK 1.2.0 sends the count), so the quote the relay carries has to be
+    // for the set selected here. A different set than Review priced, or a
+    // previous attempt that failed (a refused relay is never retried on the
+    // same commitment), re-quotes for this set before anything is proved.
+    setStep('executing');
+    setSwapError(null);
+    setExecutingLabel('Selecting notes…');
+    let inputCommitments: Hex[];
+    try {
+      // Yield so React can COMMIT the line above before the scan below.
+      // selectApprovedNotes is synchronous and can run for seconds on a large
+      // note set, and it was starting in the same tick as the state change, so
+      // the browser never painted: pressing Confirm looked frozen, then the
+      // screen jumped straight to a later stage (QA, 2026-09-22).
+      await paintFrame();
+      const picked = selectApprovedNotes(snap.fromToken, snap.grossWei);
+      // Preserve the helper's own diagnosis: an unresolved approval state is a
+      // refresh race, not an insufficient balance, and conflating them sends the
+      // user to look at a balance that is fine.
+      if ('error' in picked) throw new Error(picked.error);
+      await refuseIfSelectionPendingRelay(picked.notes);
+      inputCommitments = picked.notes.map((n) => n.commitment as Hex);
+    } catch (err) {
+      log('error', 'Swap', 'Swap failed', { error: String(err) });
+      if (!live()) return;
+      setSwapError(swapErrorText(err, 'The swap failed.'));
+      setStep('review');
+      return;
+    }
     let activePrepared = snap.prepared;
-    if (!hasUsableCommitmentLifetime(getPreparedQuoteExpiration(snap.prepared), Date.now())) {
+    let quotedInputs = snap.inputCommitments;
+    if (
+      snap.requote
+      || !sameInputNoteSet(quotedInputs, inputCommitments)
+      || !hasUsableCommitmentLifetime(getPreparedQuoteExpiration(snap.prepared), Date.now())
+    ) {
       try {
-        setStep('executing');
         setExecutingLabel('Refreshing relayer quote…');
         const { createRelayerInteractor } = await import('@/services/sdk-runtime');
         // The re-quote binds a fresh commitment to the processor too; the
@@ -2298,6 +2350,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
           ...(snap.crossChain
             ? { toChainId: snap.destinationChainId, ...(snap.fallbackAddress ? { fallbackAddress: snap.fallbackAddress } : {}) }
             : {}),
+          inputCommitments,
         });
         if (!live()) return;
         const drift = validateRefreshedSwapQuote(snap.prepared, fresh);
@@ -2306,7 +2359,8 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
           throw new Error('The refreshed relayer quote had already expired when it arrived.');
         }
         activePrepared = fresh;
-        setSnapshot({ ...snap, prepared: fresh, display: freshDisplay });
+        quotedInputs = inputCommitments;
+        setSnapshot({ ...snap, prepared: fresh, display: freshDisplay, inputCommitments, requote: false });
         log('info', 'Swap', 'Refreshed the swap commitment at confirm', { fee: fresh.feeAmount, estOut: fresh.estimatedOutput });
       } catch (refreshErr) {
         if (!live()) return;
@@ -2324,21 +2378,6 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     setStep('executing');
     setSwapError(null);
     try {
-      setExecutingLabel('Selecting notes…');
-      // Yield so React can COMMIT the line above before the scan below.
-      // selectApprovedNotes is synchronous and can run for seconds on a large
-      // note set, and it was starting in the same tick as the state change, so
-      // the browser never painted: pressing Confirm looked frozen, then the
-      // screen jumped straight to a later stage (QA, 2026-09-22).
-      await paintFrame();
-      const picked = selectApprovedNotes(snap.fromToken, snap.grossWei);
-      // Preserve the helper's own diagnosis: an unresolved approval state is a
-      // refresh race, not an insufficient balance, and conflating them sends the
-      // user to look at a balance that is fine.
-      if ('error' in picked) throw new Error(picked.error);
-      const selection = { notes: picked.notes };
-      await refuseIfSelectionPendingRelay(selection.notes);
-
       const session = (await ensureInitialized()) as PoolSession;
       // buildRelayWithdrawAndSwapParams re-validates the whole quote (gross
       // binding, zero addresses, mode minimums) and THROWS on violation —
@@ -2347,7 +2386,8 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         prepared: activePrepared,
         poolChainId: chainId,
         grossWei: snap.grossWei,
-        inputCommitments: selection.notes.map((n) => n.commitment),
+        inputCommitments,
+        quotedInputCommitments: quotedInputs,
         tokenId: snap.fromToken.address as Address,
         outputToken: snap.outputToken.address as Address,
         recipientAddress: snap.recipient,
@@ -2373,6 +2413,8 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         setSwapError(
           'The swap transaction reverted on-chain. The exit, swap, and payout rolled back together and your notes were NOT spent. You can review and try again.',
         );
+        // That commitment is spent on chain: the retry re-quotes first.
+        setSnapshot((cur) => (cur ? { ...cur, requote: true } : cur));
         setStep('review');
         return;
       }
@@ -2394,6 +2436,10 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       submittedRef.current = false;
       // Stale runs must not repaint a reopened/reset modal (codex).
       if (!live()) return;
+      // A refused relay must not be retried on the same commitment: the next
+      // Confirm re-quotes for the same note set and proves again with the new
+      // fee (relayer gas-pricing checklist).
+      setSnapshot((cur) => (cur ? { ...cur, requote: true } : cur));
       setSwapError(swapErrorText(err, 'The swap failed.'));
       setStep('review');
     }
