@@ -3463,12 +3463,17 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
         // Retain the requested range on either a missing feed or a failed scan.
         const requested = scanPrimary ? { managers: owner, opts } : null;
         if (requested) deferredPrimaryRef.current = requested;
-        const primaryScan = primaryReady && getChainConfig(chainId)?.chainType === 'evm' ? await heldScanFingerprint(chainId) : null;
-        const primary = primaryReady ? await syncFromSnapshot(opts) : null;
-        if (primary && siblingWorldUnchanged(started) && deferredPrimaryRef.current === requested) deferredPrimaryRef.current = null;
-        if (primary && primaryScan && siblingWorldUnchanged(started)) {
-          markSnapshotScanned(owner, chainId, primaryScan, () => (noteManager as unknown as { getSyncCursor?: () => string } | null)?.getSyncCursor?.());
-        }
+        const scanPrimaryNow = async () => {
+          const primaryScan = getChainConfig(chainId)?.chainType === 'evm' ? await heldScanFingerprint(chainId) : null;
+          if (!siblingWorldUnchanged(started)) return null;
+          const result = await syncFromSnapshot(opts);
+          if (result && siblingWorldUnchanged(started) && deferredPrimaryRef.current === requested) deferredPrimaryRef.current = null;
+          if (result && primaryScan && siblingWorldUnchanged(started)) {
+            markSnapshotScanned(owner, chainId, primaryScan, () => (noteManager as unknown as { getSyncCursor?: () => string } | null)?.getSyncCursor?.());
+          }
+          return result;
+        };
+        let primary = primaryReady ? await scanPrimaryNow() : null;
         if (!effectiveAddress || !siblingWorldUnchanged(started)) return null;
         if (scanPrimary) setSyncChainsLeft((n) => Math.max(0, n - 1));
         // Side by side, not one after another: each chain added to the build used
@@ -3476,6 +3481,17 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
         if (await sweepChains(others, (cid) => discoverSiblingChain(cid, started, sweepKeys),
           undefined, () => { if (siblingWorldUnchanged(started)) setSyncChainsLeft((n) => Math.max(0, n - 1)); }) === 'stale') return null;
         if (!siblingWorldUnchanged(started)) return null;
+        // The active chain's snapshot can land while the other chains scan.
+        // The grid's pass skips a chain while this sweep runs, so without this
+        // a fresh account's first scan waited for the NEXT refresh, two
+        // minutes or more (e2e 2026-11-23, a slow ASP). Zero wait: this only
+        // asks whether the copy is held now, it sends nothing.
+        if (scanPrimary && !primaryReady && deferredPrimaryRef.current === requested
+          && await waitForFeed(publicFeeds, feedEventSnapshot(chainId), 0)) {
+          if (!siblingWorldUnchanged(started)) return null;
+          primary = await scanPrimaryNow();
+          if (!siblingWorldUnchanged(started)) return null;
+        }
         if (others.length > 0) refreshNotes();
         return primary;
       } finally {
@@ -3602,13 +3618,30 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
       backgroundSnapshotsRef.current.set(owner, seen);
     }
     const running = new Set<number>();
+    // A refresh that lands while a sweep runs is held over, not dropped: it is
+    // replayed once that sweep settles. Dropping it left a chain the sweep had
+    // deferred unscanned until the grid's next refresh. The replay reads the
+    // copy already held and sends nothing to the ASP.
+    const heldOver = new Set<number>();
+    const holdOverSweep = (cid: number) => {
+      const sweep = allChainsFlightsRef.current.get(owner);
+      if (!sweep || heldOver.has(cid)) return;
+      heldOver.add(cid);
+      void sweep.catch(() => null).then(() => {
+        heldOver.delete(cid);
+        onFeed(cid);
+      });
+    };
     const onFeed = (cid: number) => {
       const state = publicFeeds.read(feedEventSnapshot(cid));
       if (!current() || !feedHasData(state)) return;
       // The session-ready sweep comes first and may be a full-range one; a
       // background pass never overlaps it.
       if (!autoDiscoveredSessionsRef.current.has(session)) return;
-      if (owner && allChainsFlightsRef.current.has(owner)) return;
+      if (owner && allChainsFlightsRef.current.has(owner)) {
+        holdOverSweep(cid);
+        return;
+      }
       if (running.has(cid)) return;
       running.add(cid);
       void (async () => {
@@ -3617,7 +3650,11 @@ export function SdkProvider({ children }: { children: React.ReactNode }) {
           // shared snapshot store. Reading it never refreshes the ASP.
           const { loadPoolEventSnapshot } = await import('@/services/snapshot-source');
           const held = await loadPoolEventSnapshot(cid);
-          if (!current() || allChainsFlightsRef.current.has(owner)) return;
+          if (!current()) return;
+          if (allChainsFlightsRef.current.has(owner)) {
+            holdOverSweep(cid);
+            return;
+          }
           // A pass already running may have read an OLDER snapshot. Joining
           // it must not mark the new fingerprint as scanned. Leave this copy
           // for the next grid tick instead of launching a follow-up off-grid.
