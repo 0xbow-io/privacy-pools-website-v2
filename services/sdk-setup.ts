@@ -56,7 +56,7 @@ import { derivePasskeyKeysFromHex } from './passkey-derivation';
 import { APP_IDENTIFIER } from '@privacy-pools-v2/sdk';
 import { createOnChainNoteIndex, type OnChainNoteIndex } from '@/services/onchain-note-index';
 import { classifyPoolRead, routePoolRead } from '@/services/pool-read-router';
-import { isRelayedTxHash, recordRelayedHashes, waitForRelayedReceipt, type RawLogClient, type RelayHooks } from '@/services/relayed-receipt';
+import { isRelayedTxHash, recordRelayedHashes, relayedTxSentAt, waitForRelayedReceipt, type RawLogClient, type RelayHooks } from '@/services/relayed-receipt';
 import { relayRequestNullifiers } from '@/services/pending-relays-core';
 import { checkTransferRelay } from '@/services/transfer-relay-outputs';
 import {
@@ -1121,6 +1121,9 @@ class ChunkedRPCInteractor implements IRPCInteractor {
       };
       return waitForRelayedReceipt(hash as Hash, client, {
         addresses: [this.poolAddress as Hex, this.keystoreAddress as Hex],
+        // A relayer that answers only after the transaction mined must not hide
+        // a revert below the walk (the 2026-11-21 stale-root revert).
+        sentAtMs: relayedTxSentAt(hash),
       }).then((r) => {
         settlePendingRelayByReceipt(r.txHash, r.status);
         return this.observeReceipt(r);
