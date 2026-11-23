@@ -402,7 +402,7 @@ export function TokenSelectSheet({
   const nativeChainIds = useMemo(
     () => (isSui
       ? []
-      : [...new Set(tokens.filter((t) => t.isNative && !t.unavailableReason).map((t) => t.chainId ?? chainId))].sort((a, b) => a - b)),
+      : [...new Set(tokens.filter((t) => t.isNative && !t.unavailableReason && getChainConfig(t.chainId ?? chainId)?.chainType === 'evm').map((t) => t.chainId ?? chainId))].sort((a, b) => a - b)),
     [isSui, tokens, chainId],
   );
   const nativeQuery = useQuery({
@@ -434,8 +434,8 @@ export function TokenSelectSheet({
 
   // Suspicious rows are left out: they get their own read below.
   const erc20Tokens = useMemo(
-    () => (isSui ? [] : tokens.filter((t) => !t.isNative && !t.suspicious && !t.unavailableReason)),
-    [isSui, tokens],
+    () => (isSui ? [] : tokens.filter((t) => !t.isNative && !t.suspicious && !t.unavailableReason && getChainConfig(t.chainId ?? chainId)?.chainType === 'evm')),
+    [isSui, tokens, chainId],
   );
 
   // A row's chain: its own when the caller lists several chains at once,
@@ -598,7 +598,8 @@ export function TokenSelectSheet({
 
   const rows = useMemo<TokenRow[]>(() => {
     const balanceOf = (token: TokenSelectSheetToken): number | undefined => {
-      if (isSui) {
+      if (getChainConfig(chainOf(token))?.chainType === 'stellar') return token.walletBalance;
+      if (getChainConfig(chainOf(token))?.chainType === 'sui') {
         if (!token.isNative || !suiBalanceData) return undefined;
         return Number(formatUnits(BigInt(suiBalanceData.totalBalance), token.decimals));
       }

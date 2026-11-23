@@ -124,7 +124,7 @@ export function ChainLogo({ chain, size = 18, testnetLabel = true }: ChainLogoPr
         ) : isBnb ? (
           <BnbIcon width={markSize} height={markSize} />
         ) : isStellar ? (
-          <StellarIcon width={markSize} height={markSize * (200 / 236.36)} color="#FFFFFF" />
+          <StellarIcon width={markSize} height={markSize * (161 / 186.54)} color="#FFFFFF" />
         ) : isArbitrum ? (
           // Official Arbitrum full-color icon.
           <ArbitrumIcon width={size} height={size} />
