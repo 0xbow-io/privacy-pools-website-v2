@@ -86,6 +86,7 @@ import { getUiParam, pushUiParamEntry, retireUiParamEntry, rebaseUiParamEntry, s
 import { useShareYield } from '@/hooks/use-share-yield';
 import { useYieldVaultProbeVersion } from '@/hooks/use-yield-vault-probe';
 import { displayTokenSymbol, isShareSymbol, presetChipLabel } from '@/services/share-display';
+import { sameSymbol } from '@/services/symbol-match';
 import { amountInputDisplay, compactAmountLabel, formatCopyAmount, formatTokenBalance, groupThousands, isStablecoin, LOADING_FIGURE, stripAmountSeparators } from '@/services/token-format';
 import { conversionFundingToken, targetAcceptsConversion } from '@/config/intent-targets';
 import { getYieldShareToken } from '@/services/share-yield';
@@ -217,7 +218,13 @@ export function ActionHub({
   onInputFocus,
   onInputBlur,
   onTargetHeight,
+  pool,
 }: {
+  /**
+   * The pool page this card sits on. The card starts on that pool's asset
+   * instead of the chain's first token (a USDC pool page used to open on ETH).
+   */
+  pool?: { symbol: string; chainId: number };
   /** Simplify visitor controls and captions; entered amounts expand the Shield form. */
   landing?: boolean;
   onEngage?: () => void;
@@ -822,6 +829,26 @@ export function ActionHub({
     setAmount((a) => (spending ? '' : sanitizeAmountInput(a, fallback.decimals)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSui, token, action, tokens, evmTokens, holdings, spendTokenPinned]);
+
+  // Pool page: start on that pool's asset once per pool, and only once this
+  // page owns the pool's chain. A pick handed over from the previous page
+  // (takePoolHubHandoff, applied a tick later) still wins.
+  const seededPoolRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pool || pool.chainId !== activeChainId) return;
+    const key = `${pool.chainId}:${pool.symbol}`; // not-rendered: seed key
+    if (seededPoolRef.current === key) return;
+    // One attempt per pool: a seed left armed would later overwrite whatever
+    // another tab (Withdraw, Send) already holds, a handoff included.
+    seededPoolRef.current = key;
+    // Route symbols are upper-case and share symbols mixed-case, hence
+    // sameSymbol. The Shield list carries no yield shares, so a share pool
+    // seeds its underlying, which is what the user shields into that pool.
+    const match = [pool.symbol, displayTokenSymbol(pool.symbol)]
+      .map((s) => tokens.find((t) => sameSymbol(t.symbol, s)))
+      .find((t) => t !== undefined);
+    if (match) setToken(match.symbol);
+  }, [pool, activeChainId, tokens, setToken]);
 
   const tokenMeta = tokens.find((t) => t.symbol === token) ?? tokens[0];
   // The Sui shape (HubToken) carries no address, and needs none: that chain has

@@ -194,6 +194,7 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
   // Single-asset non-EVM pools map straight to their chain.
   const nonEvmPoolChainId = currentPoolToken === 'SUI' ? SUI_TESTNET_ID : currentPoolToken === 'XLM' ? STELLAR_TESTNET_ID : null;
   const poolChainId = nonEvmPoolChainId ?? (routeChain?.id ?? defaultChainId);
+  const hubPool = useMemo(() => ({ symbol: currentPoolToken, chainId: poolChainId }), [currentPoolToken, poolChainId]);
   // Unknown chain segment, or an asset this chain has no token for: a
   // not-found state (rendered below, and the deep link stays inert), never a
   // plausible "DOGE Pool" built from fallback data. /chains/sui (no chain
@@ -666,7 +667,7 @@ export function PoolPageContent({ forcedPoolAsset }: { forcedPoolAsset?: string 
             style={{ width: SPLIT_LEFT_WIDTH }}
           >
             <HubErrorBoundary>
-              <ActionHub />
+              <ActionHub pool={hubPool} />
             </HubErrorBoundary>
           </View>
         )}

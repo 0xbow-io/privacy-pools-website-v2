@@ -601,6 +601,37 @@ test('incremental retries retain a deferred full range and clear it only after s
   expect(h.env.deferredPrimaryRef.current).toBeNull();
 });
 
+// e2e 2026-11-23: a slow ASP held the active chain's snapshot back past the
+// sweep's wait, it landed while the other chains scanned, and the grid's pass
+// skipped it because the sweep was still running. A fresh account then had no
+// first scan for minutes. The sweep now scans it before it ends.
+test('a primary deferred at the wait is scanned when its snapshot lands during the sibling phase', async () => {
+  const h = sessionHarness();
+  let held = false;
+  const waits: number[] = [];
+  h.env.waitForFeed = async (_f: unknown, key: string, timeoutMs?: number) => {
+    if (key === 'event-snapshot:1') waits.push(timeoutMs ?? -1);
+    return key === 'event-snapshot:1' ? held : true;
+  };
+  h.env.buildSessionForChain = async () => ({ discoverNotes: async () => { held = true; h.scans.push(10); return []; } });
+  const { syncAllChains } = h.load();
+  expect(await syncAllChains({ fromBlock: '0x1' })).toEqual({});
+  expect(h.scans).toEqual([10, 1]);
+  expect(h.ranges).toEqual([{ fromBlock: '0x1' }]);
+  expect(h.env.deferredPrimaryRef.current).toBeNull();
+  // The late check only reads what is held: it never waits on the grid again.
+  expect(waits.at(-1)).toBe(0);
+});
+
+test('a primary still without its snapshot at the end of the sweep stays deferred and unscanned', async () => {
+  const h = sessionHarness();
+  h.env.waitForFeed = async (_f: unknown, key: string) => key !== 'event-snapshot:1';
+  const { syncAllChains } = h.load();
+  expect(await syncAllChains({ fromBlock: '0x1' })).toBeNull();
+  expect(h.scans).toEqual([10]);
+  expect(h.env.deferredPrimaryRef.current).toEqual({ managers: h.owner, opts: { fromBlock: '0x1' } });
+});
+
 const backgroundEffect = providerBody.statements.find(s => ts.isExpressionStatement(s)
   && s.getText(providerSource).includes('const onFeed = (cid: number) =>'))!.getText(providerSource)
   .replace("await import('@/services/snapshot-source')", '({ loadPoolEventSnapshot: loadHeldSnapshot })');
@@ -648,6 +679,42 @@ test('deferred discovery resumes on a failed grid refresh carrying the held snap
   await tick();
   expect(h.calls).toEqual([10]);
   expect(h.ranges).toHaveLength(1);
+});
+
+test('a grid refresh that lands during a sweep is replayed when the sweep settles, not dropped', async () => {
+  const h = gridHarness();
+  h.env.deferredPrimaryRef.current = { managers: h.owner, opts: { fromBlock: '0x1' } };
+  let settle!: () => void;
+  h.env.allChainsFlightsRef.current.set(h.owner, new Promise<null>((r) => { settle = () => r(null); }));
+  h.mount();
+  h.emit(1);
+  h.emit(10);
+  h.emit(10);
+  await tick();
+  expect(h.ranges).toEqual([]);
+  expect(h.calls).toEqual([]);
+  h.env.allChainsFlightsRef.current.delete(h.owner);
+  settle();
+  await tick();
+  await tick();
+  expect(h.ranges).toEqual([{ fromBlock: '0x1', quiet: true }]);
+  // Held over once per chain, however many refreshes landed meanwhile.
+  expect(h.calls).toEqual([10]);
+  expect(h.env.deferredPrimaryRef.current).toBeNull();
+});
+
+test('a refresh held over a sweep is not replayed after the effect unmounts', async () => {
+  const h = gridHarness();
+  let settle!: () => void;
+  h.env.allChainsFlightsRef.current.set(h.owner, new Promise<null>((r) => { settle = () => r(null); }));
+  h.mount();
+  h.emit(10);
+  h.cleanup();
+  h.env.allChainsFlightsRef.current.delete(h.owner);
+  settle();
+  await tick();
+  await tick();
+  expect(h.calls).toEqual([]);
 });
 
 test('effect remounts keep successful fingerprints and stale completions cannot mark a new pass seen', async () => {

@@ -30,7 +30,7 @@ export function formatFiat(
 ): string {
   const symbol = FIAT_SYMBOL[currency];
   const v = currency === 'USD' ? value : value * (rate || 1);
-  if (precise) return `${symbol}${v.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+  if (precise) return `${symbol}${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   if (v >= 1_000_000_000) return `${symbol}${(v / 1_000_000_000).toLocaleString('en-US', { maximumFractionDigits: 2 })}B`;
   if (v >= 1_000_000) return `${symbol}${(v / 1_000_000).toLocaleString('en-US', { maximumFractionDigits: 2 })}M`;
   if (v >= 10_000) return `${symbol}${(v / 1_000).toLocaleString('en-US', { maximumFractionDigits: 2 })}k`;
@@ -55,8 +55,9 @@ export function formatFiatFull(
   const symbol = FIAT_SYMBOL[currency];
   const v = currency === 'USD' ? value : value * (rate || 1);
   if (v > 0 && v < 0.005) return `<${symbol}0.01`;
-  const maximumFractionDigits = Math.abs(v) < centsBelow ? 2 : 0;
-  return `${symbol}${v.toLocaleString('en-US', { maximumFractionDigits })}`;
+  // Cents are all or nothing: "$5.10", never "$5.1" (DEV-621).
+  const fractionDigits = Math.abs(v) < centsBelow ? 2 : 0;
+  return `${symbol}${v.toLocaleString('en-US', { minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits })}`;
 }
 
 // The token decimal policy, in one place: stablecoins show 2 decimals,

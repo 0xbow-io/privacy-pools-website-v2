@@ -102,6 +102,7 @@ describe('the dollar keystroke sanitizer and labels', () => {
     expect(usdChipLabel('0.38', 2631)).toBe('$1k');
     expect(usdChipLabel('40', 2630)).toBe('$105.2k');
     expect(usdChipLabel('0.0001', 2630)).toBe('$0.26');
+    expect(usdChipLabel('0.0002', 2500)).toBe('$0.50');
   });
 
   test('an unpriced chip falls back to the token preset', () => {

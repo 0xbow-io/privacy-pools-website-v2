@@ -193,8 +193,9 @@ describe('normalizeUsd', () => {
   });
 
   test('formats a real figure and tolerates $ and commas', () => {
-    expect(normalizeUsd('1234.5')).toBe('$1,234.5');
-    expect(normalizeUsd('$1,234.50')).toBe('$1,234.5');
+    expect(normalizeUsd('1234.5')).toBe('$1,234.50');
+    expect(normalizeUsd('$1,234.50')).toBe('$1,234.50');
+    expect(normalizeUsd('5.1')).toBe('$5.10');
   });
 });
 
@@ -232,7 +233,7 @@ describe('shapeSwapDepositForDisplay (flow 1)', () => {
       { symbol: 'USDT', decimals: 6, amountWei: 1_990_000n },
     );
     expect(display.inputAmountText).toBe('2 USDC');
-    expect(display.inputAmountUSD).toBe('$2');
+    expect(display.inputAmountUSD).toBe('$2.00');
     expect(display.depositAmountText).toBe('1.99 USDT');
     expect(display.durationText).toBe('~45s');
   });

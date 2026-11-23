@@ -5769,7 +5769,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     </View>
                     <View className="items-end gap-[1px]">
                       <Text className="font-pp-mono text-[13px] text-text">{grossNum === null ? 'Estimate unavailable' : groupThousands(balanceDisplay(swapSnapshot ? formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals) : String(grossNum), swapSnapshot ? swapReviewInputSymbol : selectedToken, swapSnapshot?.poolChainId ?? chainId).text)}</Text>
-                      {grossUsd !== null && <Text className="font-pp-sans text-[11.5px] text-text-muted">${grossUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}</Text>}
+                      {grossUsd !== null && <Text className="font-pp-sans text-[11.5px] text-text-muted">{formatUsdBalance(grossUsd)}</Text>}
                     </View>
                   </View>
                   <View className="h-[1px] self-stretch bg-border-light" />
@@ -5794,7 +5794,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     </View>
                     <View className="items-end gap-[1px]">
                       <Text className="font-pp-mono text-[13px] text-text">{groupThousands(netLabel)}</Text>
-                      {netUsd != null ? <Text className="font-pp-sans text-[11.5px] text-text-muted">${netUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}</Text> : null}
+                      {netUsd != null ? <Text className="font-pp-sans text-[11.5px] text-text-muted">{formatUsdBalance(netUsd)}</Text> : null}
                     </View>
                   </View>
                   <View className="h-[1px] self-stretch bg-border-light" />
@@ -5946,7 +5946,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       </Text>
                     </Text>
                     {reviewGross !== null && <Text className="text-[14px] text-text font-pp-regular">
-                      ${(balanceDisplay(swapSnapshot ? formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals) : String(reviewGross), swapSnapshot ? swapReviewInputSymbol : selectedToken, swapSnapshot?.poolChainId ?? chainId).usd).toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                      {formatUsdBalance(balanceDisplay(swapSnapshot ? formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals) : String(reviewGross), swapSnapshot ? swapReviewInputSymbol : selectedToken, swapSnapshot?.poolChainId ?? chainId).usd)}
                     </Text>}
                   </View>
                   {/* Vertical Divider */}
@@ -5976,7 +5976,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                         : reviewNetUsd;
                       return usd != null ? (
                         <Text className="text-[14px] text-text font-pp-regular">
-                          ${usd.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                          {formatUsdBalance(usd)}
                         </Text>
                       ) : null;
                     })()}

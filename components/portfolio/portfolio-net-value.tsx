@@ -6,6 +6,7 @@ import Svg, { Path, Defs, LinearGradient, Stop, Line, Text as SvgText, Circle, G
 import { Card } from '@/components/ui/card';
 import { Colors, Fonts, FontWeights } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
+import { formatUsdBalance } from '@/services/format-fiat';
 
 // Define the shape of our data
 export interface DataPoint {
@@ -424,7 +425,7 @@ export function PortfolioNetValue({ isConnected, hasData, onConnectWallet, title
                     fill={tooltipText}
                     textAnchor="middle"
                   >
-                    ${activePoint.value.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                    {formatUsdBalance(activePoint.value)}
                   </SvgText>
                   <SvgText
                     x="35"

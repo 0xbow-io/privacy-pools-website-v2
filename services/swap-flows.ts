@@ -306,7 +306,7 @@ export function normalizeUsd(value: string | undefined | null): string | null {
   if (!trimmed) return null;
   const numeric = Number(trimmed.replace(/[$,]/g, ''));
   if (!Number.isFinite(numeric) || numeric <= 0) return null;
-  return `$${numeric.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+  return `$${numeric.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 /** Decimal string for a base-unit hex/bigint amount, trailing zeros trimmed. */
