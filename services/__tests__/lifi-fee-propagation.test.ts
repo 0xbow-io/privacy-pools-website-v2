@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import * as patched from '@privacy-pools-v2/sdk';
 
 const dir = mkdtempSync(join(tmpdir(), 'lifi-fee-baseline-'));
-execFileSync('tar', ['-xzf', resolve('vendor/privacy-pools-v2-sdk-1.1.0.tgz'), '--strip-components=1', '-C', dir]);
+execFileSync('tar', ['-xzf', resolve('vendor/privacy-pools-v2-sdk-1.2.0.tgz'), '--strip-components=1', '-C', dir]);
 symlinkSync(resolve('node_modules'), join(dir, 'node_modules'));
 const baseline = await import(join(dir, 'dist/index.js'));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -40,20 +40,42 @@ test('real provider keeps request, calldata, amounts and logs identical; fees st
   expect(next.results.map(r => r.feeCosts)).toEqual([fee(1000), fee(2000)]);
 });
 
-test('executor sizing keeps only the successful round fee without changing sizing calls', async () => {
-  async function run(sdk, patchedResult) {
-    const calls = [], session = Object.create(sdk.PoolSessionReshield.prototype);
-    session.executorRouteInput = async (...args) => {
-      calls.push(args); const inputAmount = calls.length === 1 ? 1100n : 995n;
-      return patchedResult ? { inputAmount, feeCosts: fee(calls.length) } : inputAmount;
-    };
-    const sizeFor = async budget => ({ noteValue: budget, vettingFee: 0n, totalDepositCost: budget });
-    return { calls, result: await session.fitDepositToExecutorRoute({ netSwapAmount: 1000n, initial: await sizeFor(900n), initialBudget: 900n, swapInputToken: address(1), swapOutputToken: address(2), relaySwapsAddress: address(3), sizeFor }) };
+for (const executor of [false, true]) test(`same-chain selected quote carries fees and preserves input counts (executor=${executor})`, async () => {
+  async function run(sdk) {
+    const relayerCalls = [], swapCalls = [];
+    const session = Object.create(sdk.PoolSessionReshield.prototype);
+    Object.assign(session, {
+      chainId: 1, relaySwapsAddress: address(3), emptyAddress: address(0), yieldWrappers: [],
+      swapExecutor: { executor: address(4) },
+      composesExecutorRoute: () => executor, yieldTargetFor: () => undefined,
+      swapChainAdapter: { isSameToken: (a, b) => a === b },
+      entrypointInteractor: { getAssetConfig: async () => ({ enabled: true, vettingFeeBPS: 0n, minAmount: 0n, maxRelayFee: 100n }) },
+      relayerInteractor: { getSwapQuote: async (_, req) => {
+        relayerCalls.push(req);
+        return { feeAmount: '5' };
+      } },
+      swapQuoteProvider: { getSwapQuote: async req => {
+        swapCalls.push(req);
+        return {
+          fromTokenAddress: req.fromToken, toTokenAddress: req.toToken,
+          fromChainId: 1, toChainId: 1, fromTokenSymbol: 'ETH', toTokenSymbol: 'USDC',
+          toAmount: '950', toAmountMin: '900', feeCosts: fee(swapCalls.length),
+        };
+      } },
+    });
+    const result = await session.estimateReshieldAmount({
+      relayerInfo: { chainId: 1, address: address(7) }, amount: '0x3e8',
+      tokenId: address(1), outputToken: address(2), inputCommitments: [1n, 2n],
+    });
+    return { result, relayerCalls, swapCalls };
   }
-  const old = await run(baseline, false), next = await run(patched, true);
-  expect(next.calls).toEqual(old.calls);
+  const old = await run(baseline), next = await run(patched);
+  expect(next.relayerCalls).toEqual(old.relayerCalls);
+  expect(next.relayerCalls.map(call => call.inputs)).toEqual([2]);
+  expect(next.swapCalls).toEqual(old.swapCalls);
+  expect(next.swapCalls).toHaveLength(executor ? 2 : 1);
   expect(withoutFees(next.result)).toEqual(withoutFees(old.result));
-  expect(next.result.feeCosts).toEqual(fee(2));
+  expect(next.result.feeCosts).toEqual(fee(next.swapCalls.length));
 });
 
 for (const mode of ['plain', 'native', 'gas']) test(`cross-chain ${mode}: selected fees do not change calls, budgets or logs`, async () => {
