@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { formatUsd, formatUsdBalance, formatUsdPrecise } from '@/services/format-fiat';
 
 describe('formatUsd (compact)', () => {
@@ -54,5 +57,42 @@ describe('formatUsdPrecise', () => {
   test('rounds to cents', () => {
     expect(formatUsdPrecise(0.005)).toBe('$0.01');
     expect(formatUsdPrecise(10.999)).toBe('$11.00');
+  });
+});
+
+// e2e 2026-11-21: the batch withdraw review painted "$5.1". Each of those sites
+// hand-formatted dollars with `maximumFractionDigits: 2` and no minimum, which
+// strips a trailing zero. Dollars with cents always show two (DEV-621); only
+// the k/M/B abbreviations may drop them.
+describe('no hand-formatted dollar figure drops a trailing zero', () => {
+  const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const DOLLAR = /(?:\$|\{symbol\}|^\s*|>)\$\{([^{}\n]*\.toLocaleString\([^)\n]*\))\}(?![kKMB])/g;
+  const stripsZero = (line: string) => [...line.matchAll(DOLLAR)]
+    .some((m) => /maximumFractionDigits:\s*2\b/.test(m[1]) && !/minimumFractionDigits/.test(m[1]));
+  const sources = (dir: string): string[] => readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((e) => {
+    const rel = join(dir, e.name);
+    if (e.isDirectory()) return e.name === '__tests__' || e.name === 'node_modules' ? [] : sources(rel);
+    return /\.tsx?$/.test(e.name) ? [rel] : [];
+  });
+
+  test('the pattern catches the shapes that shipped "$5.1"', () => {
+    expect(stripsZero("text-muted\">${netUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}</Text>")).toBe(true);
+    expect(stripsZero("  return `$${numeric.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;")).toBe(true);
+    expect(stripsZero("  if (precise) return `${symbol}${v.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;")).toBe(true);
+    expect(stripsZero("    return `$${(value / 1_000).toLocaleString('en-US', { maximumFractionDigits: 2 })}k`;")).toBe(false);
+    expect(stripsZero("  return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;")).toBe(false);
+  });
+
+  test('app sources hold none', () => {
+    const hits = ['components', 'services', 'app', 'hooks'].flatMap(sources).flatMap((file) =>
+      readFileSync(join(ROOT, file), 'utf8').split('\n')
+        .map((line, i) => (stripsZero(line) ? `${file}:${i + 1}` : null))
+        .filter((hit): hit is string => hit !== null));
+    expect(hits).toEqual([]);
+  });
+
+  test('the shared formatters keep the trailing zero', () => {
+    expect(formatUsdBalance(5.1)).toBe('$5.10');
+    expect(formatUsdBalance(1234.5)).toBe('$1,234.50');
   });
 });

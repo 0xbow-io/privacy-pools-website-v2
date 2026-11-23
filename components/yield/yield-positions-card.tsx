@@ -14,6 +14,7 @@ import { EthTokenIcon, TOKEN_ICONS, tokenIconKey } from '@/components/pools/pool
 import { formatApyPercent } from '@/services/share-yield';
 import { YieldPositionHint } from '@/components/yield/yield-position-hint';
 import { displayTokenSymbol } from '@/services/share-display';
+import { formatUsdBalance } from '@/services/format-fiat';
 
 /**
  * Yield card (A5) — the home of the account's Aave yield position. Shows the
@@ -175,7 +176,7 @@ export function YieldPositionsCardView({
                   </Text>
                   {usdValue !== null && (
                     <Text className="font-pp-regular text-[10px] text-text-muted">
-                      ${usdValue.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                      {formatUsdBalance(usdValue)}
                     </Text>
                   )}
                 </>
