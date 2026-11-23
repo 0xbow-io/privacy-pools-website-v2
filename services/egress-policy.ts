@@ -640,6 +640,11 @@ export const RELAYER_ROUTES: { method: 'GET' | 'POST'; path: RegExp; bodyKeys?: 
       // already carries: destination chain id/type, output token, and the
       // account's own stealth identifier. Nothing in it names a note.
       'dustRescue',
+      // SDK swapQuoteParamsSchema (v2-monorepo#536): which deposit a same-chain
+      // reshield ends in, "pool" or "yield", so the relayer prices its gas.
+      // Decided by the output token, which the routing already names. `inputs`
+      // above is the note count, never the commitments themselves.
+      'deposit',
     ],
   },
   // Relays.

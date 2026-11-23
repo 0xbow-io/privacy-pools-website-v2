@@ -431,6 +431,25 @@ describe('review regressions: fail closed without leaking refusals', () => {
     expect(checkRelayerRequest({ method: 'POST', url: '/v1/quote/evm/1/transfer', body: '{"labels":["7"]}' }).allowed).toBe(false);
   });
 
+  test('swap quotes carry the note count and the deposit kind, never the commitments', () => {
+    // SDK 1.2.0 (v2-monorepo#536): every swap and reshield quote declares how
+    // many notes the proof spends, and a same-chain reshield names the deposit
+    // it ends in so the relayer prices that gas.
+    const swapQuote = (fields: Record<string, unknown>) => checkRelayerRequest({
+      method: 'POST',
+      url: '/v1/quote/evm/1/swap',
+      body: JSON.stringify({ asset: ADDRESS, amount: '1000', commit: false, outputToken: ADDRESS, ...fields }),
+    }).allowed;
+    expect(swapQuote({ inputs: 2 })).toBe(true);
+    expect(swapQuote({ inputs: 2, deposit: 'pool' })).toBe(true);
+    expect(swapQuote({ inputs: 3, deposit: 'yield' })).toBe(true);
+    // The SDK reduces the commitments to a count. If they ever reach the wire
+    // the request must be refused, not forwarded.
+    expect(swapQuote({ inputs: 1, inputCommitments: [`0x${'1'.repeat(64)}`] })).toBe(false);
+    // Swap quotes take no output count (the schema omits it).
+    expect(swapQuote({ inputs: 1, outputs: 2 })).toBe(false);
+  });
+
   test('an intent cannot unlock a different route or targeted param', () => {
     expect(checkAspRequest(get(`/global/public/events?address=${ADDRESS}`), 'user-initiated-audit').allowed).toBe(false);
     expect(checkAspRequest(get(`/labels/${LABEL}/status?address=${ADDRESS}`), 'user-initiated-audit').allowed).toBe(false);
