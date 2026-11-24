@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { formatEther, keccak256, parseEther, stringToBytes } from 'viem';
 import { MIN_CONSOLIDATION_INPUTS, consolidationCandidates } from '../../services/consolidate-notes';
 import {
-  accountFromKey, accountNotes, awaitNativeDeposit, clickButton, enterAmount, fillRecipient, forceUnlock, openApp,
+  accountFromKey, accountNotes, awaitNativeDeposit, clickButton, enterAmount, fillRecipient, registerSepoliaFixture, openApp,
   publicClient, registerKeystoreIfPrompted, waitForInitialDiscovery, waitForApprovedDeposit, selectToken, signIn, sleep, submit,
   tab, waitForDepositHash, waitForText,
 } from './lib';
@@ -56,7 +56,7 @@ async function confirmTransfer() {
 }
 try {
   await signIn(page);
-  await forceUnlock(page);
+  await registerSepoliaFixture(page);
   await waitForInitialDiscovery(page, account.address);
   // Finish retained setup before deciding whether another deposit is needed.
   await waitForApproval('Retained consolidation notes', async () => (await notes()).every(n => n.status !== 'PENDING'));

@@ -3,7 +3,7 @@ import { expect } from 'bun:test';
 import { confirmConsolidation } from '../consolidation-confirm';
 import { launchChrome } from '../../lib/chrome.mjs';
 import { installUnlockGateHandler, unlockIfPrompted, waitForUnlockedLink } from '../unlock-gate';
-import { clickWhenReady, fillRecipient, registerKeystoreIfPrompted, waitForShieldedBalance } from '../lib';
+import { clickWhenReady, registerSepoliaFixture, fillRecipient, registerKeystoreIfPrompted, waitForShieldedBalance } from '../lib';
 
 const browser = await launchChrome({ headless: true });
 try {
@@ -88,6 +88,29 @@ try {
   expect(await registration.locator('body').innerText()).toBe('Exit Successful');
   console.log('PASS fresh-wallet exit accepts registration and resumes');
   await registration.close();
+  for (const action of ['register', 'finish', 'registered', 'open-modal', 'expanded', 'late-modal']) {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const expanded = ['open-modal', 'expanded'].includes(action);
+    const control = action === 'registered' ? '<span>Registered</span>'
+      : `<button data-testid="registration-${expanded ? 'finish' : action}-11155111" onclick="overlay.hidden=false">${action}</button>`;
+    await context.route('http://localhost:8081/**', (route) => route.fulfill({ contentType: 'text/html', body: `
+      <div data-testid="my-privacy-pools-card">Balances</div>
+      ${action === 'open-modal' ? '<button>Sync balances</button>' : ''}
+      <section data-testid="registration-status-card">
+        <button data-testid="registration-status-toggle" onclick="row.hidden=!row.hidden;this.dataset.clicked=1">Chain registration</button>
+        <div ${expanded ? '' : 'hidden'} id="row" data-testid="registration-row-11155111">${control}</div>
+      </section>
+      <div id="overlay" ${['open-modal', 'late-modal'].includes(action) ? '' : 'hidden'} style="position:fixed;inset:0;background:white"><button ${action === 'late-modal' ? 'hidden' : ''} data-testid="keystore-register-primary"
+        onclick="row.innerHTML='<span>Registered</span>';overlay.hidden=true;document.body.dataset.confirmed='yes'">Finish setup</button></div>
+      ${action === 'late-modal' ? '<script>setTimeout(() => { row.hidden=false; overlay.querySelector("button").hidden=false; }, 500)</script>' : ''}` }));
+    await page.goto('http://localhost:8081/?panel=balances');
+    await registerSepoliaFixture(page);
+    if (expanded || action === 'late-modal') expect(await page.getByTestId('registration-status-toggle').getAttribute('data-clicked')).toBeNull();
+    expect(await page.locator('body').getAttribute('data-confirmed')).toBe(action === 'registered' ? null : 'yes');
+    await context.close();
+  }
+  console.log('PASS Sepolia fixtures register, finish partial setup, or reuse a registered account');
   for (const pending of ['Check your wallet…', 'Reconnecting…']) {
     const page = await browser.newPage();
     await page.setContent(`<button id="header" onclick="this.dataset.clicked='yes'">Sign in</button><div id="overlay" style="position:fixed;inset:0"><h2>Unlock your account</h2><button disabled>${pending}</button></div>`);

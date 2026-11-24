@@ -97,9 +97,11 @@ describe('isolation from the app', () => {
     expect(offenders).toEqual([]);
   });
 
-  test('only the e2e-sepolia workflow runs the swap', () => {
+  test('only the e2e-sepolia workflow checks circuit keys without swapping', () => {
     const workflows = readdirSync(join(ROOT, '.github/workflows'));
     const callers = workflows.filter((name) => readFileSync(join(ROOT, '.github/workflows', name), 'utf8').includes('scripts/e2e/sepolia-circuits.ts'));
     expect(callers).toEqual(['e2e-sepolia.yml']);
+    expect(readFileSync(join(ROOT, '.github/workflows/e2e-sepolia.yml'), 'utf8'))
+      .toContain('bun scripts/e2e/sepolia-circuits.ts --require-current');
   });
 });

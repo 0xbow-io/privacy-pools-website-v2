@@ -11,6 +11,7 @@
 //
 // Env: DEV_PK (A) or E2E_ACCOUNT_A_PK. A is registered on Sepolia.
 import { createPublicClient, http } from 'viem';
+import { SEPOLIA_DEFAULT_POOL } from '../../config/sepolia-deployment';
 import { sepolia } from 'viem/chains';
 import { accountFromKey, bodyText, clickButton, openApp, signIn, sleep, unlockIfPrompted, waitForText } from './lib';
 import { envValue } from './funding';
@@ -19,7 +20,7 @@ const aKey = envValue('E2E_ACCOUNT_A_PK') ?? envValue('DEV_PK');
 if (!aKey) throw new Error('need E2E_ACCOUNT_A_PK or DEV_PK');
 const A = accountFromKey(aKey.startsWith('0x') ? aKey : `0x${aKey}`);
 const BASE = process.env.PROBE_URL || 'http://localhost:8081';
-const KEYSTORE = (envValue('EXPO_PUBLIC_SEPOLIA_KEYSTORE_ADDRESS') ?? '0x6d264acb9c3a7a3105c29470afe2f5f1ec203c73') as `0x${string}`;
+const KEYSTORE = (envValue('EXPO_PUBLIC_SEPOLIA_KEYSTORE_ADDRESS') ?? SEPOLIA_DEFAULT_POOL.keystore) as `0x${string}`;
 
 const results: { name: string; ok: boolean; detail: string }[] = [];
 let failed = false;
