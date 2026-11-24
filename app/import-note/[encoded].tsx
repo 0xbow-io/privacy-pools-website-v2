@@ -71,6 +71,8 @@ function EvmImportNoteScreen() {
     status,
     statusMessage,
     claimPhase,
+    claimFunding,
+    relayCanRegister,
     errMessage,
     busy,
     done,
@@ -186,12 +188,11 @@ function EvmImportNoteScreen() {
   const transferFeeFor = useTransferFeeEstimate(receiptChainId);
   const walletTokensOn = useWalletTokens();
   // Read from data the page already holds (wallet balances, fee pricing).
-  const walletPays = useMemo(() => {
-    const gasPriceWei = feePricing.gasPriceOf(receiptChainId);
-    const nativeWei = walletTokensOn(receiptChainId).find((t) => t.address.toLowerCase() === NATIVE_ASSET_ADDRESS)?.balance;
-    return nativeWei !== undefined && gasPriceWei !== null
-      && decideRegistrationPath({ supported: true, balanceWei: nativeWei, gasPriceWei }).reason === 'funded';
-  }, [feePricing, receiptChainId, walletTokensOn]);
+  // undefined / null: not loaded yet, or the read failed.
+  const nativeBalanceWei = walletTokensOn(receiptChainId).find((t) => t.address.toLowerCase() === NATIVE_ASSET_ADDRESS)?.balance;
+  const claimGasPriceWei = feePricing.gasPriceOf(receiptChainId);
+  const walletPays = nativeBalanceWei !== undefined && claimGasPriceWei !== null
+    && decideRegistrationPath({ supported: true, balanceWei: nativeBalanceWei, gasPriceWei: claimGasPriceWei }).reason === 'funded';
   const claimFeeBreakdown = useMemo(() => {
     if (!note || !token?.known) return null;
     const perNote = transferFeeFor(note.tokenId);
@@ -212,7 +213,14 @@ function EvmImportNoteScreen() {
   }, [note, receipt, token, transferFeeFor, feePricing, receiptChainId, walletPays]);
   // A wallet that pays its own setup sends it as wallet transactions before
   // the relayed claim; a user took those prompts for the claim. Name both steps.
-  const setupSteps = claimSetupSteps(claimSetupPlan({ setupState, walletPaysGas: walletPays }));
+  // The claim's own funding decision once it has one; until then the same
+  // rule over what the page holds, hedged whenever an input is unknown.
+  const setupSteps = claimSetupSteps(claimSetupPlan({
+    setupState,
+    funding: claimFunding
+      ? { source: 'probed', kind: claimFunding.kind }
+      : { source: 'estimate', balanceWei: nativeBalanceWei, gasPriceWei: claimGasPriceWei, relayCanRegister },
+  }));
   const inSetup = status === 'anchoring' && claimPhase === 'setup';
   const receiptChainInfo = receiptChain(receiptChainId);
   const chainName = receiptChainInfo.name;

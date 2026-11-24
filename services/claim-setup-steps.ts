@@ -1,3 +1,4 @@
+import { decideRegistrationPath } from '@/services/cold-start-claim';
 import type { ReceiveSetupState } from '@/services/receive-setup';
 
 /**
@@ -6,26 +7,55 @@ import type { ReceiveSetupState } from '@/services/receive-setup';
  *
  * A user read "A relayer submits this for you", pressed Claim, got two wallet
  * prompts for on-chain transactions and took them for the claim. They were the
- * one-time registration (auth policy, then viewing key) that a wallet holding
- * gas pays for itself before the relayed claim. The page has to say so before
- * and while those prompts show.
+ * one-time registration (auth policy, then viewing key) that a wallet pays for
+ * itself before the relayed claim. The page has to say so before and while
+ * those prompts show.
  *
- * Only a wallet that pays its own setup sends transactions: an unfunded one is
- * registered by the relayer (a free signature, no transaction). 'maybe' is a
- * funded wallet whose setup state this session has not read yet.
+ * Only the relayer-carried claim sends no wallet transaction. 'none' is
+ * therefore said only when the setup is known done, or the relayer is known to
+ * pay; anything unknown is 'maybe' (the hedged copy), never 'none'.
  */
 export type ClaimSetupPlan =
   | { kind: 'none' }
   | { kind: 'setup'; confirmations: 1 | 2 }
   | { kind: 'maybe' };
 
-export function claimSetupPlan(args: { setupState: ReceiveSetupState; walletPaysGas: boolean }): ClaimSetupPlan {
-  const { setupState, walletPaysGas } = args;
-  if (!walletPaysGas) return { kind: 'none' };
+/**
+ * Who pays, as far as the page knows it.
+ *
+ * `probed`: the claim's own decision (use-note-import's `claimFunding`, the
+ * same `resolveClaimFunding` the claim runs). `estimate`: before that exists,
+ * the inputs the claim's decision uses (decideRegistrationPath), read from data
+ * the page already holds; `undefined`/`null` means not loaded or failed.
+ */
+export type ClaimFundingView =
+  | { source: 'probed'; kind: 'self-funded' | 'relayed' | 'unfunded' }
+  | { source: 'estimate'; balanceWei: bigint | undefined; gasPriceWei: bigint | null | undefined; relayCanRegister: boolean };
+
+function walletPaysPlan(setupState: ReceiveSetupState): ClaimSetupPlan {
+  if (setupState === 'complete') return { kind: 'none' };
   if (setupState === 'unregistered') return { kind: 'setup', confirmations: 2 };
   if (setupState === 'partial') return { kind: 'setup', confirmations: 1 };
-  if (setupState === 'unknown') return { kind: 'maybe' };
-  return { kind: 'none' };
+  return { kind: 'maybe' };
+}
+
+export function claimSetupPlan(args: { setupState: ReceiveSetupState; funding: ClaimFundingView }): ClaimSetupPlan {
+  const { setupState, funding } = args;
+  if (setupState === 'complete') return { kind: 'none' };
+  if (funding.source === 'probed') {
+    // Relayed: the relayer registers (a free signature) or the account is
+    // already registered. Unfunded is still attempted with wallet transactions.
+    return funding.kind === 'relayed' ? { kind: 'none' } : walletPaysPlan(setupState);
+  }
+  // The claim's own rule (decideRegistrationPath): its 'unknown-gas-price'
+  // branch keeps the wallet paying, so an unread gas price is never 'none'.
+  // Only a known zero or short balance, on a chain whose relay can register
+  // the wallet, hands the claim to the relayer.
+  const { balanceWei, gasPriceWei, relayCanRegister } = funding;
+  if (balanceWei === undefined) return { kind: 'maybe' };
+  if (!relayCanRegister) return walletPaysPlan(setupState);
+  const decision = decideRegistrationPath({ supported: true, balanceWei, gasPriceWei: gasPriceWei ?? undefined });
+  return decision.path === 'relayed-claim' ? { kind: 'none' } : walletPaysPlan(setupState);
 }
 
 function confirmationsText(n: number): string {

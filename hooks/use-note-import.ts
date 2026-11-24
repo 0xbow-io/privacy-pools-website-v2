@@ -217,6 +217,10 @@ export function useNoteImport() {
   // msg.sender the proof must bind as its processor and half the cold-start
   // allow-list key — an older relay on the same chain has no registerAndRelay.
   const withdrawalProcessorAddress = getWithdrawalProcessorAddress(chainId);
+  // Whether this chain's relay can register a wallet with no gas (the page
+  // reads it to say, before Claim, whether the wallet sends setup transactions).
+  // Static member read: Metro only inlines static process.env.EXPO_PUBLIC_* access.
+  const relayCanRegister = supportsColdStartClaim(chainId, withdrawalProcessorAddress, process.env.EXPO_PUBLIC_COLD_START_CLAIM_RELAYS);
   const {
     exportAccount,
     importAccount,
@@ -1576,6 +1580,7 @@ export function useNoteImport() {
     approvalBlock,
     claimFunding,
     claimGasTopUpWei,
+    relayCanRegister,
     claimSplit,
     probeClaimFunding,
     registerOffer,
