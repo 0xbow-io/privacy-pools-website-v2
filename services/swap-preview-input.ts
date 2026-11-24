@@ -7,7 +7,7 @@ import { tokenUsd } from '@/services/fee-warning';
 // every mainnet pair comes back empty (QA 2026-09-24).
 //
 // Pure (no config imports) so it is unit-testable; the caller resolves the
-// funding tokens (config/intent-targets conversionFundingToken) and the live
+// redeemed input and destination funding tokens, and the live
 // share rate (hooks/use-share-rates).
 
 export type PreviewShareRate = { assetsPerShare: bigint; shareDecimals: number };
@@ -27,6 +27,18 @@ export function previewInputAmount(
   return (amountWei * rate.assetsPerShare) / 10n ** BigInt(rate.shareDecimals);
 }
 
+/** Executor exact-input routes reserve 25% of the estimated fee as headroom.
+ * The SDK also holds back one underlying base unit after share redemption. */
+export function previewReshieldInput(
+  gross: bigint, fee: bigint | null, executor: boolean, isShare: boolean, rate: PreviewShareRate | undefined,
+): bigint | null {
+  if (fee === null) return null;
+  const net = gross - fee - (executor ? fee / 4n : 0n);
+  if (net <= 0n) return null;
+  const redeemed = previewInputAmount(net, isShare, rate);
+  return redeemed !== null && executor && isShare ? redeemed - 1n : redeemed;
+}
+
 /**
  * Whether the preview needs LiFi at all. The same funding token on the same
  * chain on both sides is a straight redeem-and-redeposit, so the estimate is
@@ -44,4 +56,9 @@ export function previewIsIdentity(
 /** Preview outputs are funding-token units, even when the destination is a share pool. */
 export function previewOutputUsd(amountWei: bigint, underlyingDecimals: number, underlyingUsd: number | null): number | null {
   return tokenUsd(amountWei, underlyingDecimals, underlyingUsd);
+}
+
+/** A yield exit redeems ERC-20 underlying even when its deposit router takes native coin. */
+export function redeemedSwapInputToken(address: string, deployment?: { underlying: string }): string {
+  return deployment?.underlying ?? address;
 }

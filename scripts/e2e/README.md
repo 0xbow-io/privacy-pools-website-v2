@@ -13,13 +13,13 @@ TEST_MODE=true
 EXPO_PUBLIC_ASP_URL=https://api-dev.0xbow.io
 EXPO_PUBLIC_SEPOLIA_RELAYER_URL=https://relayer-v2-staging-149184580131.us-east1.run.app
 EXPO_PUBLIC_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com
-EXPO_PUBLIC_BATCH_WITHDRAWALS=true
+EXPO_PUBLIC_BATCH_WITHDRAWALS=false
 ```
 
 `EXPO_PUBLIC_ALCHEMY_KEY` is also supported. The scripts default to port 8081, but any port works: the hosted relayers and the ASP accept any origin, so several worktrees can run side by side (set `PROBE_URL` to match). If relayer quotes fail with a CORS error on some port, check whether the relayer has gained an allowlist:
 
 ```bash
-curl -s -o /dev/null -D - -X OPTIONS https://relayer-v2-staging-149184580131.us-east1.run.app/v1/quote -H "Origin: http://localhost:8082" -H "Access-Control-Request-Method: POST"
+curl -s -o /dev/null -D - -X OPTIONS https://relayer-v2-testing-149184580131.us-east1.run.app/v1/quote -H "Origin: http://localhost:8082" -H "Access-Control-Request-Method: POST"
 ```
 
 The response must echo the origin in `access-control-allow-origin`.
@@ -40,7 +40,7 @@ bun scripts/e2e/payment-request.ts 0.0006
 
 Ensure Git LFS circuit artifacts are present and install Chromium with `bunx playwright install chromium`.
 
-The Sepolia verifiers still hold the pre-ceremony keys, while `public/artifacts` holds the ceremony keys production uses, so a proof from the checked-out files reverts on Sepolia (`PoolVault_InvalidDepositProof`, `0x08bf478d`). Run `bun scripts/e2e/sepolia-circuits.ts` once before the journeys: it reads each Sepolia verifier and swaps the matching pinned keys (`fixtures/sepolia-circuits.json`, sha256-checked, cached in `~/.cache/e2e-sepolia-circuits`) into `public/artifacts`. `--check` only reports. Restore with `git checkout -- public/artifacts` and never commit the swapped files. CI runs it in `e2e-sepolia.yml`. It swaps nothing once Sepolia verifies with the checked-out keys. Screenshots and unregistered-payee backup downloads are saved under ignored `.e2e-shots/`.
+The default is Sepolia V8, whose verifiers match the ceremony keys in `public/artifacts`. Run `bun scripts/e2e/sepolia-circuits.ts --require-current` to check all 27 verifier keys without replacing artifacts; CI runs the same check. V8's relay does not support batch withdrawals, so leave `EXPO_PUBLIC_BATCH_WITHDRAWALS=false`; the runner explicitly skips that journey. Existing V9 notes remain in V9 and are not migrated by this change. Screenshots and backups are saved under ignored `.e2e-shots/`.
 
 ## CI and funds
 

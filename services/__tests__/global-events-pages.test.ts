@@ -181,3 +181,23 @@ describe('activityHeaderCount', () => {
     expect(activityHeaderCount({ scopeTab: 'all', scoped: false, rowCount: 2, totals, chainFilter: new Set([10]) })).toBe(2);
   });
 });
+
+describe('readAllGlobalEventPages: eventId is per event table', () => {
+  // The ASP numbers deposits and withdrawals on separate counters, so one
+  // chain's feed can hold a deposit and a withdrawal with the same eventId.
+  // prod Base: 11 of 280 rows were dropped by an eventId-only dedupe.
+  const row = (type: GlobalEvent['type'], eventId: number) => ({ type, eventId, txHash: `0x${type}${eventId}` }) as unknown as GlobalEvent;
+
+  test('keeps a deposit and a withdrawal that share an eventId', async () => {
+    const events = [row('deposit', 7), row('withdrawal', 7), row('deposit', 6)];
+    const read = await readAllGlobalEventPages(async () => ({ page: 0, perPage: 100, total: 3, events }));
+    expect(read.events).toHaveLength(3);
+    expect(read.complete).toBe(true);
+  });
+
+  test('still drops a row an offset window repeats', async () => {
+    const events = [row('deposit', 7), row('deposit', 7), row('withdrawal', 7)];
+    const read = await readAllGlobalEventPages(async () => ({ page: 0, perPage: 100, total: 2, events }));
+    expect(read.events).toHaveLength(2);
+  });
+});

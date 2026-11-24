@@ -20,12 +20,22 @@ export const GLOBAL_EVENTS_MAX_PAGES = 50;
 /** `complete`: every page up to the total (or the cap) was read, none failed. */
 export type ChainEventsRead = { events: GlobalEvent[]; total: number; complete: boolean };
 
-const uniqueIds = (events: readonly GlobalEvent[]) => new Set(events.map((e) => e.eventId)).size;
+/**
+ * One chain's row identity. The ASP numbers each event table (deposits,
+ * withdrawals, ...) on its own counter, so a deposit and a withdrawal on the
+ * same chain can share an eventId: the id names a row only with its type.
+ */
+const rowKey = (e: GlobalEvent) => `${e.type}:${e.eventId}`;
 
-/** Newest first, one row per eventId (an offset window can repeat a row). */
+const uniqueIds = (events: readonly GlobalEvent[]) => new Set(events.map(rowKey)).size;
+
+/** Newest first, one row per type + eventId (an offset window can repeat a row). */
 function dedupe(events: readonly GlobalEvent[]): GlobalEvent[] {
-  const seen = new Set<number>();
-  return events.filter((e) => (seen.has(e.eventId) ? false : (seen.add(e.eventId), true)));
+  const seen = new Set<string>();
+  return events.filter((e) => {
+    const key = rowKey(e);
+    return seen.has(key) ? false : (seen.add(key), true);
+  });
 }
 
 /**
@@ -56,8 +66,8 @@ export async function readAllGlobalEventPages(
   // Only a complete earlier read can stand in for the deeper pages; a partial
   // one (a page failed) is read in full again, whatever its row count.
   if (previous?.complete && previous.events.length > 0) {
-    const held = new Set(previous.events.map((e) => e.eventId));
-    if (firstRows.some((e) => held.has(e.eventId)) || firstRows.length === 0) {
+    const held = new Set(previous.events.map(rowKey));
+    if (firstRows.some((e) => held.has(rowKey(e))) || firstRows.length === 0) {
       const events = dedupe([...firstRows, ...previous.events]);
       return { events, total: Math.max(total, uniqueIds(events)), complete: true };
     }

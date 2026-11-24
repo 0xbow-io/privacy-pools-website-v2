@@ -94,7 +94,15 @@ export function MyTransactionsSection() {
   const [count, setCount] = useState(0);
 
   return (
-    <Card noPadding className="overflow-hidden">
+    <Card
+      noPadding
+      className="z-[80]"
+      // nw-keep(forwarded-style-contract): the filter dropdowns open below their
+      // row and must spill past this card's bottom edge; Card's base
+      // overflow-hidden cut them off (user report, 2026-11-22). Same contract as
+      // the card inside <Transactions> (DROPDOWN_ZINDEX_PATTERN.md).
+      style={{ overflow: 'visible' }}
+    >
       <Pressable
         className={`flex-row items-center gap-[8px] p-[16px] ${collapsed ? '' : 'border-b border-b-border-light'}`}
         onPress={toggleCollapsed}

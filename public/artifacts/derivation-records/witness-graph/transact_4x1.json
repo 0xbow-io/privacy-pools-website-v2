@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "privacy-pools-v2-sdk/derived-artifact-derivation-record/v1",
+  "canonicalArtifactSha256": "750789200ed6a56222cf99c80af9ddccaa76081745375a008b0daa7f93345ac1",
+  "derivedArtifactSha256": "3bbfc0683357582ce2cfc124227bc4c0152c9a0b7d364dcc8b453321167e9509",
+  "derivedKind": "witness_graph",
+  "converterTool": "circom-witgen-build-circuit",
+  "converterVersion": "0.4.0-beta.1+c884aae26325e6d3230900004baba6a110b283d9",
+  "converterInputManifestHash": "64bfbe8c97b0e89e6676a14702e93d2651664f29cded5eadc3ec9d888137f611"
+}

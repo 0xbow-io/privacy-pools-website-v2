@@ -1,3 +1,5 @@
+import { lifiFeeText } from '@/services/lifi-fee-display';
+import { displayFractionDigits, costView } from '@/services/token-format';
 import { formatUnits } from 'viem';
 import { ownRegistrationRefusal } from '@/services/keystore-identity-status';
 // RULE (Pat 2026-10-21): underlying is DISPLAY ONLY. All maths, MAX,
@@ -71,7 +73,7 @@ import {
   NATIVE_ASSET_ADDRESS,
   swapInputUnits,
 } from '@/config/intent-swaps';
-import { conversionFundingToken, intentTargetRefusal } from '@/config/intent-targets';
+import { intentTargetRefusal } from '@/config/intent-targets';
 import { getConfiguredYieldDeploymentForAsset } from '@/config/yield';
 import { conversionFundingUnits } from '@/services/shield-conversion-units';
 import { depositBelowMinimumValue, sdkErrorText, shareUnitsRate } from '@/services/sdk-error-amounts';
@@ -98,8 +100,7 @@ import { isLegacyPlainToken } from '@/config/pool-paths';
 import { getKnownTokenMetadata, getTokenMetadata } from '@/config/tokens';
 import { visibleSwapSources } from '@/services/pool-slug';
 import { displayTokenSymbol, isShareSymbol, swapRateText } from '@/services/share-display';
-import { costView } from '@/services/token-format';
-import { reshieldHeldBack } from '@/services/reshield-held-back';
+import { displayedReshieldSurplus } from '@/services/reshield-accounting';
 import { handoffRefused, resolveHandoffToken } from '@/services/swap-token-handoff';
 import { friendlySwapError, relaySwapRefusalText } from '@/services/swap-error-copy';
 import { sameSymbol } from '@/services/symbol-match';
@@ -151,6 +152,7 @@ import {
   isZeroAddress,
   prepareValidatedSwapQuote,
   resolveSwapDelivery,
+  sameInputNoteSet,
   selectSwapInputNotes,
   type PreparedSwapQuoteLike,
   type SwapQuoteDisplay,
@@ -289,6 +291,7 @@ export const SWAP_SEND_CLAIM_WHY = 'They have no account to find it with, so the
 
 /** See `inlineQuotedNet`. `wei` is in the output asset's base units. */
 export type InlineQuotedNet = {
+  sourceChainId: number;
   grossWei: bigint;
   inputToken: string;
   outputToken: string;
@@ -304,8 +307,10 @@ type SwapModalContextType = {
   /** True while the flow draws inside the hub's inline host (no overlay). */
   inlineActive: boolean;
   inlineStep: 'input' | 'review' | 'executing' | 'success';
+  inlineIsQuoting: boolean;
   /** 'wallet' (payout) or 'reshield' (stays in the pool) — the hub hides its recipient row for a reshield. */
   inlineMode: 'wallet' | 'reshield';
+  inlineSlippage: number;
   /**
    * True while the flow is the Send tab's private swap-send (opened inline with a
    * recipient). The hub keeps it on the Send tab instead of the Swap tab.
@@ -314,10 +319,9 @@ type SwapModalContextType = {
   /** Registration of a recipient the hub's Swap tab pushed, for its row's hint (DEV-510). */
   inlineRecipientRegistration: 'idle' | 'checking' | 'registered' | 'unregistered' | 'unknown';
   /**
-   * The net deposit value the last Review press was refused on as below the
-   * pool minimum, for the request it priced. The hub shows it as "You receive
-   * privately" while its form still matches, so the headline and the refusal
-   * name one number. From that press's own quote: nothing is fetched for it.
+   * The sized note from Review, or the net deposit from a below-minimum
+   * refusal, bound to the request that priced it. The widget reuses this
+   * result locally; it never starts another SDK estimate for its headline.
    */
   inlineQuotedNet: InlineQuotedNet | null;
   syncInlineForm: (patch: InlineSwapFormPatch) => void;
@@ -330,7 +334,9 @@ const SwapModalContext = createContext<SwapModalContextType>({
   isOpen: false,
   inlineActive: false,
   inlineStep: 'input',
+  inlineIsQuoting: false,
   inlineMode: 'wallet',
+  inlineSlippage: 0.005,
   inlineSend: false,
   inlineRecipientRegistration: 'idle',
   inlineQuotedNet: null,
@@ -366,6 +372,12 @@ type QuoteSnapshot = {
   destinationName: string;
   slippage: number;
   crossChain: boolean;
+  // The notes the quote was priced on (SDK 1.2.0 sends their count). Confirm
+  // relays exactly this set, or re-quotes for the set it selects.
+  inputCommitments: Hex[];
+  // Set after a failed attempt: the next Confirm re-quotes before proving,
+  // so a refused relay is never retried on the same commitment.
+  requote?: boolean;
 };
 
 /**
@@ -545,10 +557,6 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
   const [inlineSendPreferred, setInlineSendPreferred] = useState(false);
   const inlineSend = inlineBase && inlineSendPreferred;
   const [reshieldSnapshot, setReshieldSnapshot] = useState<ReshieldSnapshot | null>(null);
-  // Review disclosures. Collapsed by default so the default screen carries
-  // only what the decision needs: what you pay, the relayer fee, and the note
-  // you end up holding. Everything else is one tap away.
-  const [reshieldDetailsOpen, setReshieldDetailsOpen] = useState(false);
   const [reshieldHintOpen, setReshieldHintOpen] = useState(false);
   // Set when the reshield confirmed on-chain but the new note could not be
   // stored locally. The funds are safe; the balance just needs a sync.
@@ -654,38 +662,31 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       gas: readings,
     });
   }, [snapshot, chainId, feePricing]);
-  // Reshield: the relayer fee is the gas it re-bills; a cross-chain one also
-  // spends part of the input on the bridge's native fee, which is destination
-  // gas. Everything else the input loses on the way to the new note is swap,
-  // bridge and vetting cost.
+  // Price the sized note, including output-to-note costs. Destination
+  // surplus returned to the fallback is retained value, not a fee. Both the
+  // note and surplus are estimates; execution can select a different route.
   const reshieldFeeBreakdown = useMemo(() => {
     if (!reshieldSnapshot) return null;
     const { estimate, fromToken, outputToken, destinationChainId, grossWei } = reshieldSnapshot;
     const inUsd = feePricing.tokenUsdOf(chainId, fromToken.address, fromToken.symbol);
     const outUsd = feePricing.tokenUsdOf(destinationChainId, outputToken.address, outputToken.symbol);
-    // Into a share pool the swap buys the underlying (or the coin) and the
-    // router mints the share, so the swap's output is in the underlying's units.
-    const funding = conversionFundingToken(outputToken.address, destinationChainId);
-    const fundingUnits = conversionFundingUnits(getConfiguredYieldDeploymentForAsset(destinationChainId, outputToken.address), outputToken);
-    const fundingUsd = funding.toLowerCase() === NATIVE_ASSET_ADDRESS
-      ? feePricing.nativeUsdOf(destinationChainId)
-      : feePricing.tokenUsdOf(destinationChainId, funding, fundingUnits.symbol);
     const feeWei = BigInt(estimate.feeAmount || '0');
     const amountUsd = tokenUsd(grossWei, fromToken.decimals, inUsd);
     const relayerFeeUsd = tokenUsd(feeWei, fromToken.decimals, inUsd);
-    const outputUsd = tokenUsd(BigInt(estimate.estimatedOutput || '0'), fundingUnits.decimals, fundingUsd);
+    const noteUsd = tokenUsd(BigInt(estimate.noteValue), outputToken.decimals, outUsd);
     if (amountUsd === null || relayerFeeUsd === null) return null;
     const crossChain = destinationChainId !== chainId;
     const shareInput = !!getKnownTokenMetadata(fromToken.address, chainId)?.yieldShare;
     const bridgeGasWei = crossChain && !shareInput ? grossWei - feeWei - BigInt(estimate.netSwapAmount || '0') : 0n;
     const bridgeGasUsd = bridgeGasWei > 0n ? tokenUsd(bridgeGasWei, fromToken.decimals, inUsd) ?? 0 : 0;
-    const vettingUsd = tokenUsd(BigInt(estimate.vettingFee || '0'), outputToken.decimals, outUsd) ?? 0;
     const readings: FeeGasReading[] = [{ chainId, gasPriceWei: feePricing.gasPriceOf(chainId) }];
     if (crossChain) readings.push({ chainId: destinationChainId, gasPriceWei: feePricing.gasPriceOf(destinationChainId) });
     return buildFeeBreakdown({
       amountUsd,
       networkUsd: relayerFeeUsd + bridgeGasUsd,
-      swapUsd: outputUsd === null ? null : Math.max(0, amountUsd - relayerFeeUsd - bridgeGasUsd - outputUsd) + vettingUsd,
+      // Cross-chain delivery surplus is not exposed by the SDK. A cost
+      // total would incorrectly count that unknown retained value as a fee.
+      swapUsd: crossChain || noteUsd === null ? null : Math.max(0, amountUsd - relayerFeeUsd - noteUsd),
       gas: readings,
     });
   }, [reshieldSnapshot, chainId, feePricing]);
@@ -704,22 +705,16 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     // (ppETH -> ETH); a plain symbol passes through unchanged.
     return { decimals: units.decimals, symbol: displayTokenSymbol(units.symbol) };
   }, [reshieldSnapshot]);
-  // What the deposit leaves behind between the swap's minimum and the note
-  // (about 1% by the SDK's sizing), so Review adds up. Null when a share note
-  // cannot be priced yet: the row is hidden rather than guessed.
+  // Expected output left after the entire deposit budget. No share-rate
+  // conversion: the note's valuation is not its deposit's consumption.
   const reshieldHeldBackWei = useMemo(() => {
     if (!reshieldSnapshot) return null;
-    const { estimate, outputToken, destinationChainId, display } = reshieldSnapshot;
-    const isShareTarget = !!getConfiguredYieldDeploymentForAsset(destinationChainId, outputToken.address);
-    const rate = isShareTarget ? rateFor(destinationChainId, outputToken.address) : undefined;
-    if (isShareTarget && !rate) return null;
-    return reshieldHeldBack({
-      minOutputWei: BigInt(estimate.estimatedMinOutput || '0'),
-      noteValueWei: display.newNoteValueWei,
-      vettingFeeWei: BigInt(estimate.vettingFee || '0'),
-      share: rate ? { assetsPerShare: rate.assetsPerShare, shareDecimals: rate.shareDecimals } : undefined,
-    });
-  }, [reshieldSnapshot, rateFor]);
+    const { estimate, outputToken, destinationChainId } = reshieldSnapshot;
+    if (destinationChainId !== chainId) return null;
+    const units = reshieldSwapUnits ?? outputToken;
+    const quantum = 10n ** BigInt(Math.max(0, units.decimals - displayFractionDigits(units.symbol)));
+    return displayedReshieldSurplus(BigInt(estimate.estimatedOutput), BigInt(estimate.totalDepositCost), quantum);
+  }, [reshieldSnapshot, reshieldSwapUnits, chainId]);
   const [isQuoting, setIsQuoting] = useState(false);
   const [swapError, setSwapError] = useState<string | null>(null);
   const [quotedNet, setQuotedNet] = useState<InlineQuotedNet | null>(null);
@@ -1845,6 +1840,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         setSwapError(picked.error);
         return;
       }
+      const quotedInputs = picked.notes.map((n) => n.commitment as Hex);
 
       const resolved = await resolveSwapSession({
         isCurrent,
@@ -1877,6 +1873,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         slippage: requestSlippage,
         ...(SWAP_DENY_EXCHANGES.length > 0 ? { denyExchanges: SWAP_DENY_EXCHANGES } : {}),
         ...(requestCrossChain ? { toChainId: requestDestination, fallbackAddress: requestRecipient } : {}),
+        // The relayer prices the quote per note spent, so it is quoted on the
+        // exact set Confirm will relay (only the count leaves the browser).
+        inputCommitments: quotedInputs,
       });
 
       // Only the newest request (with an unchanged form) may commit state.
@@ -1895,6 +1894,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         destinationName: getChainConfig(requestDestination)?.displayName ?? `Chain ${requestDestination}`,
         slippage: requestSlippage,
         crossChain: requestCrossChain,
+        inputCommitments: quotedInputs,
       });
       setStep('review');
       log('info', 'Swap', 'Swap quote prepared', {
@@ -2005,6 +2005,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         setSwapError(picked.error);
         return;
       }
+      // Priced on the notes Confirm will spend: the relayer charges per note,
+      // and only their count leaves the browser.
+      const estimateInputs = picked.notes.map((n) => n.commitment as Hex);
 
       const resolved = await resolveSwapSession({
         isCurrent,
@@ -2068,6 +2071,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
             // The same route runReshieldCrosschain will take, so Review shows
             // the number Confirm executes.
             denyExchanges: [...CROSS_CHAIN_DENY_EXCHANGES],
+            inputCommitments: estimateInputs,
           });
         // Refuse a note the far-side gas would reduce to a sliver (Pat's
         // 20 USDC -> mainnet reviewed as "0 ETH" and then failed at relay).
@@ -2101,6 +2105,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
             output: { symbol: requestOutputToken.symbol, decimals: requestOutputToken.decimals },
             slippage: requestSlippage,
             ...(requestSendTo ? { transfer: true } : {}),
+            inputCommitments: estimateInputs,
           },
         );
         estimate = flow3.estimate;
@@ -2125,6 +2130,16 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         ...(requestSendTo ? { recipient: requestSendTo } : {}),
         ...(requestSendTo && requestBlind ? { recipientBlind: true } : {}),
       });
+      // Reuse this request's sized note in the widget. No preview RPC or
+      // relayer quote is needed, and existing invalidation clears it on edits.
+      setQuotedNet({
+        sourceChainId: chainId,
+        grossWei,
+        inputToken: requestFromToken.address,
+        outputToken: requestOutputToken.address,
+        destinationChainId: requestDestination,
+        wei: display.newNoteValueWei,
+      });
       setStep('review');
       if (noticeOnSuccess) setSwapError(noticeOnSuccess);
       log('info', 'Swap', 'Reshield estimate prepared', {
@@ -2140,6 +2155,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       const netWei = depositBelowMinimumValue(err);
       if (netWei !== null) {
         setQuotedNet({
+          sourceChainId: chainId,
           grossWei,
           inputToken: requestFromToken.address,
           outputToken: requestOutputToken.address,
@@ -2195,7 +2211,6 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     invalidateQuoteRequests();
     setSnapshot(null);
     setReshieldSnapshot(null);
-    setReshieldDetailsOpen(false);
     setReshieldHintOpen(false);
     setSwapError(null);
     setSwapUnavailable(false);
@@ -2272,10 +2287,45 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     // Same refresh-at-confirm as the withdraw flow: the relayer's commitments
     // live ~60s and review dwell eats into that. Re-price the same order and
     // only bounce the user when it moved against them (REFRESH_DRIFT_BPS).
+    //
+    // Notes are selected FIRST: the relayer prices the quote per note spent
+    // (SDK 1.2.0 sends the count), so the quote the relay carries has to be
+    // for the set selected here. A different set than Review priced, or a
+    // previous attempt that failed (a refused relay is never retried on the
+    // same commitment), re-quotes for this set before anything is proved.
+    setStep('executing');
+    setSwapError(null);
+    setExecutingLabel('Selecting notes…');
+    let inputCommitments: Hex[];
+    try {
+      // Yield so React can COMMIT the line above before the scan below.
+      // selectApprovedNotes is synchronous and can run for seconds on a large
+      // note set, and it was starting in the same tick as the state change, so
+      // the browser never painted: pressing Confirm looked frozen, then the
+      // screen jumped straight to a later stage (QA, 2026-09-22).
+      await paintFrame();
+      const picked = selectApprovedNotes(snap.fromToken, snap.grossWei);
+      // Preserve the helper's own diagnosis: an unresolved approval state is a
+      // refresh race, not an insufficient balance, and conflating them sends the
+      // user to look at a balance that is fine.
+      if ('error' in picked) throw new Error(picked.error);
+      await refuseIfSelectionPendingRelay(picked.notes);
+      inputCommitments = picked.notes.map((n) => n.commitment as Hex);
+    } catch (err) {
+      log('error', 'Swap', 'Swap failed', { error: String(err) });
+      if (!live()) return;
+      setSwapError(swapErrorText(err, 'The swap failed.'));
+      setStep('review');
+      return;
+    }
     let activePrepared = snap.prepared;
-    if (!hasUsableCommitmentLifetime(getPreparedQuoteExpiration(snap.prepared), Date.now())) {
+    let quotedInputs = snap.inputCommitments;
+    if (
+      snap.requote
+      || !sameInputNoteSet(quotedInputs, inputCommitments)
+      || !hasUsableCommitmentLifetime(getPreparedQuoteExpiration(snap.prepared), Date.now())
+    ) {
       try {
-        setStep('executing');
         setExecutingLabel('Refreshing relayer quote…');
         const { createRelayerInteractor } = await import('@/services/sdk-runtime');
         // The re-quote binds a fresh commitment to the processor too; the
@@ -2298,6 +2348,7 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
           ...(snap.crossChain
             ? { toChainId: snap.destinationChainId, ...(snap.fallbackAddress ? { fallbackAddress: snap.fallbackAddress } : {}) }
             : {}),
+          inputCommitments,
         });
         if (!live()) return;
         const drift = validateRefreshedSwapQuote(snap.prepared, fresh);
@@ -2306,7 +2357,8 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
           throw new Error('The refreshed relayer quote had already expired when it arrived.');
         }
         activePrepared = fresh;
-        setSnapshot({ ...snap, prepared: fresh, display: freshDisplay });
+        quotedInputs = inputCommitments;
+        setSnapshot({ ...snap, prepared: fresh, display: freshDisplay, inputCommitments, requote: false });
         log('info', 'Swap', 'Refreshed the swap commitment at confirm', { fee: fresh.feeAmount, estOut: fresh.estimatedOutput });
       } catch (refreshErr) {
         if (!live()) return;
@@ -2324,21 +2376,6 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
     setStep('executing');
     setSwapError(null);
     try {
-      setExecutingLabel('Selecting notes…');
-      // Yield so React can COMMIT the line above before the scan below.
-      // selectApprovedNotes is synchronous and can run for seconds on a large
-      // note set, and it was starting in the same tick as the state change, so
-      // the browser never painted: pressing Confirm looked frozen, then the
-      // screen jumped straight to a later stage (QA, 2026-09-22).
-      await paintFrame();
-      const picked = selectApprovedNotes(snap.fromToken, snap.grossWei);
-      // Preserve the helper's own diagnosis: an unresolved approval state is a
-      // refresh race, not an insufficient balance, and conflating them sends the
-      // user to look at a balance that is fine.
-      if ('error' in picked) throw new Error(picked.error);
-      const selection = { notes: picked.notes };
-      await refuseIfSelectionPendingRelay(selection.notes);
-
       const session = (await ensureInitialized()) as PoolSession;
       // buildRelayWithdrawAndSwapParams re-validates the whole quote (gross
       // binding, zero addresses, mode minimums) and THROWS on violation —
@@ -2347,7 +2384,8 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         prepared: activePrepared,
         poolChainId: chainId,
         grossWei: snap.grossWei,
-        inputCommitments: selection.notes.map((n) => n.commitment),
+        inputCommitments,
+        quotedInputCommitments: quotedInputs,
         tokenId: snap.fromToken.address as Address,
         outputToken: snap.outputToken.address as Address,
         recipientAddress: snap.recipient,
@@ -2373,6 +2411,8 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
         setSwapError(
           'The swap transaction reverted on-chain. The exit, swap, and payout rolled back together and your notes were NOT spent. You can review and try again.',
         );
+        // That commitment is spent on chain: the retry re-quotes first.
+        setSnapshot((cur) => (cur ? { ...cur, requote: true } : cur));
         setStep('review');
         return;
       }
@@ -2394,6 +2434,10 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       submittedRef.current = false;
       // Stale runs must not repaint a reopened/reset modal (codex).
       if (!live()) return;
+      // A refused relay must not be retried on the same commitment: the next
+      // Confirm re-quotes for the same note set and proves again with the new
+      // fee (relayer gas-pricing checklist).
+      setSnapshot((cur) => (cur ? { ...cur, requote: true } : cur));
       setSwapError(swapErrorText(err, 'The swap failed.'));
       setStep('review');
     }
@@ -2808,13 +2852,15 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
       isOpen,
       inlineActive: isOpen && inlineHubActive,
       inlineStep: step,
+      inlineIsQuoting: isQuoting,
       inlineMode: mode,
+      inlineSlippage: slippage,
       inlineSend: isOpen && inlineSend,
       inlineRecipientRegistration: isOpen ? swapSendRegistration : 'idle',
       inlineQuotedNet: isOpen && inlineHubActive && !inlineSend ? quotedNet : null,
       syncInlineForm,
     }),
-    [openSwapModal, closeSwapModal, isOpen, inlineHubActive, inlineSend, step, mode, swapSendRegistration, syncInlineForm, quotedNet],
+    [openSwapModal, closeSwapModal, isOpen, inlineHubActive, inlineSend, step, isQuoting, mode, slippage, swapSendRegistration, syncInlineForm, quotedNet],
   );
 
   const explorerUrl = txHash ? getExplorerTxUrl(txChainId ?? chainId, txHash) : null;
@@ -3298,40 +3344,51 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                   </View>
                 )}
 
-                {/* Grouped BY LEG, each group captioned with its own token.
-                    The flat eight-row table read as inconsistent units ("why
-                    is the relayer fee in USDC and the vetting fee in ETH?")
-                    when both are correct and simply belong to different legs:
-
-                      pool exit  → the relayer prices its 900k-gas relay in the
-                                   token it withdraws (relayer
-                                   evm.quote.service.ts quoteSwap: nativeToToken
-                                   with assetConfig(asset).decimals), so the fee
-                                   is in the token you spend;
-                      deposit    → Entrypoint.deposit charges
-                                   calcFee(_value, assetConfigs[_asset].
-                                   vettingFeeBPS) on the asset being DEPOSITED
-                                   (Entrypoint.sol:72), which on a reshield is
-                                   the swap OUTPUT, so it is in the token you
-                                   receive.
-
-                    Symbols come from the same SwapTokenInfo the numbers were
-                    formatted with (shapeReshieldForDisplay's input/output), so
-                    a caption can never relabel the other leg's units. */}
-                <View className="w-full gap-[8px] rounded-control border border-border p-[16px]">
-                  <Text className="text-[10px] tracking-[0.4px] text-text-muted font-pp-semi-bold">
-                    YOU PAY · {displayTokenSymbol(reshieldSnapshot.fromToken.symbol)}
-                  </Text>
+                {/* Fees retain their own token units; the sized note is shown below. */}
+                <View className="w-full gap-[8px] rounded-control border border-border p-[16px]" testID="reshield-fee-breakdown">
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[13px] text-text-muted font-pp-medium">You swap</Text>
-                    <BalanceAmount view={balanceDisplay(formatUnits(reshieldSnapshot.grossWei, reshieldSnapshot.fromToken.decimals), reshieldSnapshot.fromToken.symbol, chainId)} className="text-[13px] text-text font-pp-regular" />
+                    <BalanceAmount showHint={false} view={balanceDisplay(formatUnits(reshieldSnapshot.grossWei, reshieldSnapshot.fromToken.decimals), reshieldSnapshot.fromToken.symbol, chainId)} className="text-[13px] text-text font-pp-regular" />
                   </View>
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[13px] text-text-muted font-pp-medium">Relayer fee</Text>
-                    <BalanceAmount view={costView(balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.feeAmount), reshieldSnapshot.fromToken.decimals), reshieldSnapshot.fromToken.symbol, chainId), reshieldSnapshot.destinationChainId === chainId ? {
+                    <BalanceAmount showHint={false} view={costView(balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.feeAmount), reshieldSnapshot.fromToken.decimals), reshieldSnapshot.fromToken.symbol, chainId), reshieldSnapshot.destinationChainId === chainId ? {
                       gross: balanceDisplay(formatUnits(reshieldSnapshot.grossWei, reshieldSnapshot.fromToken.decimals), reshieldSnapshot.fromToken.symbol, chainId),
                       net: balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.netSwapAmount), swapInputUnits(chainId, reshieldSnapshot.fromToken.address, reshieldSnapshot.fromToken).decimals), swapInputUnits(chainId, reshieldSnapshot.fromToken.address, reshieldSnapshot.fromToken).symbol, chainId),
                     } : undefined)} className="text-[13px] text-text font-pp-regular" />
+                  </View>
+                  <View className="flex-row flex-wrap items-center justify-between gap-[8px]" testID="reshield-lifi-fee-row">
+                    <Text className="text-[13px] text-text-muted font-pp-medium">LI.FI fee (estimated)</Text>
+                    <Text className="text-[13px] text-text font-pp-regular">{lifiFeeText(reshieldSnapshot.estimate.feeCosts) ?? '—'}</Text>
+                  </View>
+                  {/* Named for the leg that charges it. The Entrypoint takes
+                      it on the DEPOSIT, so it is in the deposited token. */}
+                  <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
+                    <Text className="text-[13px] text-text-muted font-pp-medium">Pool vetting fee</Text>
+                    <BalanceAmount view={balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.vettingFee), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).decimals), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />
+                  </View>
+                  {/* Expected destination output left after deposit costs. */}
+                  {(reshieldSnapshot.destinationChainId !== chainId || (reshieldHeldBackWei !== null && reshieldHeldBackWei > 0n)) && (
+                    <View className="flex-row flex-wrap items-center justify-between gap-[8px]" testID="reshield-dust-row">
+                      <HoverHint
+                        hint={reshieldSnapshot.destinationChainId === chainId
+                          ? 'Estimated surplus after creating your new shielded note. The relayer receives this amount.'
+                          : 'Estimated surplus after creating your new shielded note. Your fallback address receives this amount as a public transfer.'}
+                        wrap
+                        testID="reshield-dust-hint"
+                      >
+                        <View className="flex-row items-center gap-[6px]">
+                          <Text className="text-[13px] text-text-muted font-pp-medium">{reshieldSnapshot.destinationChainId === chainId ? 'Dust to relayer' : 'Dust to fallback address'}</Text>
+                          {/* nw-keep(data-color): glyph color is a runtime theme token (vector-icon sink) */}
+                          <Ionicons name="information-circle-outline" size={14} color={colors.textMuted} />
+                        </View>
+                      </HoverHint>
+                      {reshieldHeldBackWei === null ? <Text className="text-[13px] text-text font-pp-regular">—</Text> : <BalanceAmount view={balanceDisplay(formatUnits(reshieldHeldBackWei, (reshieldSwapUnits ?? reshieldSnapshot.outputToken).decimals), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />}
+                    </View>
+                  )}
+                  <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
+                    <Text className="text-[13px] text-text-muted font-pp-medium">Max slippage</Text>
+                    <Text className="text-[13px] text-text font-pp-regular">{slippageLabel(reshieldSnapshot.slippage)}</Text>
                   </View>
                   <FeeWarning breakdown={reshieldFeeBreakdown} testID="reshield-fee-warning" />
                 </View>
@@ -3347,9 +3404,9 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                       is BELOW the swap minimum by design (an extra 1% safety
                       cut plus the vetting fee), so showing the swap minimum as
                       the outcome would promise more than the deposit creates. */}
-                  <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
+                  <View testID="reshield-note-row" className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[13px] text-text-muted font-pp-medium">
-                      {reshieldSnapshot.recipient ? 'New shielded note for them (at least)' : 'New shielded note (at least)'}
+                      {reshieldSnapshot.recipient ? 'New shielded note for them (estimated)' : 'New shielded note (estimated)'}
                     </Text>
                     <BalanceAmount view={balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-bold" showUsd />
                   </View>
@@ -3389,65 +3446,6 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                       ? 'Amounts are fixed at submission. The source transaction is atomic; destination delivery can fail and pay the public fallback wallet.'
                       : 'Amounts are fixed at submission. The transaction is atomic: if it fails, nothing leaves the pool.'}
                   </Text>
-                )}
-
-                {/* The rest of the breakdown, one tap away. Every row still
-                    carries its own symbol, so a USDC line and an ETH line can
-                    never be read as one currency. */}
-                <Pressable
-                  className="w-full flex-row items-center gap-[6px]"
-                  onPress={() => setReshieldDetailsOpen((open) => !open)}
-                  accessibilityRole="button"
-                  accessibilityState={{ expanded: reshieldDetailsOpen }}
-                  testID="reshield-details-toggle"
-                  hitSlop={8}
-                >
-                  <Text className="text-[12px] text-text-secondary font-pp-medium">Details</Text>
-                  <Text className="text-[12px] text-text-muted">{reshieldDetailsOpen ? '▴' : '▾'}</Text>
-                </Pressable>
-                {reshieldDetailsOpen && (
-                  <View className="w-full gap-[8px] rounded-control border border-border p-[16px]" testID="reshield-details">
-                    <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
-                      <Text className="text-[13px] text-text-muted font-pp-medium">Swapped after fee</Text>
-                      <BalanceAmount view={balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.netSwapAmount), swapInputUnits(chainId, reshieldSnapshot.fromToken.address, reshieldSnapshot.fromToken).decimals), swapInputUnits(chainId, reshieldSnapshot.fromToken.address, reshieldSnapshot.fromToken).symbol, chainId)} className="text-[13px] text-text font-pp-regular" />
-                    </View>
-                    <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
-                      <Text className="text-[13px] text-text-muted font-pp-medium">Swap output (est.)</Text>
-                      <BalanceAmount view={balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.estimatedOutput), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).decimals), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />
-                    </View>
-                    <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
-                      <Text className="text-[13px] text-text-muted font-pp-medium">Swap output (min.)</Text>
-                      <BalanceAmount view={balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.estimatedMinOutput), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).decimals), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />
-                    </View>
-                    {/* Named for the leg that charges it. The Entrypoint takes
-                        it on the DEPOSIT, so it is in the deposited token. */}
-                    <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
-                      <Text className="text-[13px] text-text-muted font-pp-medium">Pool vetting fee on the new note</Text>
-                      <BalanceAmount view={balanceDisplay(formatUnits(BigInt(reshieldSnapshot.estimate.vettingFee), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).decimals), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />
-                    </View>
-                    {/* The gap between the swap's minimum output and the new note,
-                        as its own line so the figures above add up (DEV-822). */}
-                    {reshieldSnapshot.destinationChainId === chainId && reshieldHeldBackWei !== null && reshieldHeldBackWei > 0n && (
-                      <View className="flex-row flex-wrap items-center justify-between gap-[8px]" testID="reshield-dust-row">
-                        <Text className="text-[13px] text-text-muted font-pp-medium">Dust (goes to the relayer)</Text>
-                        <BalanceAmount view={balanceDisplay(formatUnits(reshieldHeldBackWei, (reshieldSwapUnits ?? reshieldSnapshot.outputToken).decimals), (reshieldSwapUnits ?? reshieldSnapshot.outputToken).symbol, reshieldSnapshot.destinationChainId)} className="text-[13px] text-text font-pp-regular" />
-                      </View>
-                    )}
-                    <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
-                      <Text className="text-[13px] text-text-muted font-pp-medium">Max slippage</Text>
-                      <Text className="text-[13px] text-text font-pp-regular">{slippageLabel(reshieldSnapshot.slippage)}</Text>
-                    </View>
-                    {/* Guide §10 asks for dust to be surfaced even same-chain: the
-                        deposit is sized below the swap's minimum output. Same
-                        chain, the remainder is swept to the relayer rather than
-                        returned. Cross-chain, it is paid to the fallback address
-                        the user set for the far side (a public transfer). */}
-                    <Text className="text-[12px] leading-[17px] text-text-muted font-pp-regular">
-                      {reshieldSnapshot.destinationChainId === chainId
-                        ? 'Dust, the part of the swap output the new note does not hold, goes to the relayer.'
-                        : `Dust, the part of the swap output the new note does not hold, is paid to ${reshieldSnapshot.fallbackAddress ? `${reshieldSnapshot.fallbackAddress.slice(0, 6)}…${reshieldSnapshot.fallbackAddress.slice(-4)}` : 'your fallback address'} as a public transfer.`}
-                    </Text>
-                  </View>
                 )}
 
                 <View className="w-full flex-row flex-wrap justify-center gap-[10px]">
@@ -3491,11 +3489,11 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                       plain symbol passes through. */}
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[13px] text-text-muted font-pp-medium">You swap</Text>
-                    <BalanceAmount view={balanceDisplay(snapshot.amountText, snapshot.fromToken.symbol, chainId)} className="text-[13px] text-text font-pp-regular" />
+                    <BalanceAmount showHint={false} view={balanceDisplay(snapshot.amountText, snapshot.fromToken.symbol, chainId)} className="text-[13px] text-text font-pp-regular" />
                   </View>
                   <View className="flex-row flex-wrap items-center justify-between gap-[8px]">
                     <Text className="text-[13px] text-text-muted font-pp-medium">Relayer fee</Text>
-                    <BalanceAmount view={costView(balanceDisplay(snapshot.display.relayerFee, snapshot.fromToken.symbol, chainId), {
+                    <BalanceAmount showHint={false} view={costView(balanceDisplay(snapshot.display.relayerFee, snapshot.fromToken.symbol, chainId), {
                       gross: balanceDisplay(snapshot.amountText, snapshot.fromToken.symbol, chainId),
                       net: balanceDisplay(snapshot.display.netSwapped, snapshot.fromToken.symbol, chainId),
                     })} className="text-[13px] text-text font-pp-regular" />
@@ -3653,14 +3651,14 @@ export function SwapModalProvider({ children }: { children: React.ReactNode }) {
                 {!(delivery?.status === 'recovered' || delivery?.status === 'failed') && (
                   <Text className="w-full text-center text-[12px] text-text-muted font-pp-regular">
                     <FigureText text={reshieldSnapshot.destinationChainId !== chainId && reshieldSnapshot.recipient && delivery?.status === 'done'
-                      ? `At least ${balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} was deposited as a new shielded note for ${reshieldSnapshot.recipient.slice(0, 6)}…${reshieldSnapshot.recipient.slice(-4)} on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`}. They will see it after their next sync.`
+                      ? `Approximately ${balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} was deposited as a new shielded note for ${reshieldSnapshot.recipient.slice(0, 6)}…${reshieldSnapshot.recipient.slice(-4)} on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`}. They will see it after their next sync.`
                       : reshieldSnapshot.destinationChainId !== chainId && reshieldSnapshot.recipient
-                      ? `At least ${balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} is being deposited as a new shielded note for ${reshieldSnapshot.recipient.slice(0, 6)}…${reshieldSnapshot.recipient.slice(-4)} on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`}. The deposit follows this transaction and can take a few minutes.`
+                      ? `Approximately ${balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} is being deposited as a new shielded note for ${reshieldSnapshot.recipient.slice(0, 6)}…${reshieldSnapshot.recipient.slice(-4)} on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`}. The deposit follows this transaction and can take a few minutes.`
                       : reshieldSnapshot.destinationChainId !== chainId
-                      ? `At least ${balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} as a new shielded note on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`}. The transaction above is this chain's leg; the deposit over there follows and can take a few minutes, and it becomes spendable once that pool's association set includes it.`
+                      ? `Approximately ${balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} as a new shielded note on ${getChainConfig(reshieldSnapshot.destinationChainId)?.displayName ?? `chain ${reshieldSnapshot.destinationChainId}`}. The transaction above is this chain's leg; the deposit over there follows and can take a few minutes, and it becomes spendable once that pool's association set includes it.`
                       : reshieldSnapshot.recipient
-                        ? `At least ${balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} was deposited as a new shielded note for ${reshieldSnapshot.recipient.slice(0, 6)}…${reshieldSnapshot.recipient.slice(-4)}. They will see it after their next sync, and it becomes spendable once the pool's association set includes it.`
-                        : `At least ${balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} as a new shielded note. It becomes spendable once the pool's association set includes it.`} />
+                        ? `Approximately ${balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} was deposited as a new shielded note for ${reshieldSnapshot.recipient.slice(0, 6)}…${reshieldSnapshot.recipient.slice(-4)}. They will see it after their next sync, and it becomes spendable once the pool's association set includes it.`
+                        : `Approximately ${balanceDisplay(formatUnits(reshieldSnapshot.display.newNoteValueWei, reshieldSnapshot.outputToken.decimals), reshieldSnapshot.outputToken.symbol, reshieldSnapshot.destinationChainId).text} as a new shielded note. It becomes spendable once the pool's association set includes it.`} />
                   </Text>
                 )}
                 {/* Live status of the far leg, same tracker flow 1 uses. Without

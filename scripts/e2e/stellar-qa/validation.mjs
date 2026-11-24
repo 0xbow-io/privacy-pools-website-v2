@@ -1,0 +1,8 @@
+import {launchChrome} from '../../lib/chrome.mjs';
+import assert from 'node:assert/strict';
+const b=await launchChrome({headless:true});try {const p=await b.newPage({viewport:{width:1440,height:1100}});p.setDefaultTimeout(10000);console.log('LOAD');await p.goto('http://localhost:8093/?env=staging&qa=funded&qaFlow=shield&qaStage=input',{waitUntil:'domcontentloaded',timeout:45000});await p.waitForFunction(()=>window.__stellarQaDone,{timeout:45000});
+console.log('READY');for(const tab of ['shield','withdraw','send','request']){console.log('CHECK',tab);await p.getByTestId('hub-tab-'+tab).click();await p.waitForTimeout(800);const panel=p.getByTestId('hub-page-'+tab),input=panel.getByTestId('hub-amount-input');await input.fill('1.123456789');assert.equal(await input.inputValue(),'1.1234567');await input.fill('0');
+if(tab==='shield'){await input.fill('0.1');await p.getByTestId('hub-cta-shield').click();await p.waitForTimeout(500);assert.equal(await p.evaluate(()=>window.__stellarQaCalls.length),0);}
+if(tab==='withdraw'||tab==='send'){const recipient=p.getByTestId(tab==='withdraw'?'withdraw-recipient-input':'send-recipient-input');await recipient.fill('0x0000000000000000000000000000000000000001');await input.fill('10');const button=p.getByRole('button',{name:tab==='withdraw'?'Withdraw':'Review Transfer',exact:true});assert.equal(await button.getAttribute('aria-disabled'),'true');await recipient.fill('GCFIRY65OQE7DFP5KLNS2PF2LVZMUZYJX4OZIEQ36N2IQANUB5XVYOJR');await input.fill('1000');assert.equal(await button.getAttribute('aria-disabled'),'true');}
+assert.equal(await p.evaluate(()=>window.__stellarQaCalls.length),0);console.log('PASS precision and invalid input',tab);}
+}finally{await b.close();}

@@ -2,6 +2,25 @@
 
 All notable changes to the Privacy Pools v2 web app are documented in this file.
 
+## [1.7.0] - 2026-11-24
+
+### Added
+- Stellar testnet (staging only): testnet XLM in the action widget, with the session unlocked before withdrawal review (#111).
+- Circuit artifacts include witness graphs (#128).
+
+### Changed
+- SDK 1.2.0: swap and reshield quotes carry the number of notes the relay spends, so the relayer prices multi-note swaps correctly (#129).
+- Swap shows the estimated shielded note with its fees and dust before Review, sized the same way the SDK executor sizes it (#112).
+- Relay errors show short copy instead of raw relayer HTTP text, including when a quoted fee no longer covers the cost (#126).
+- Dollar figures always show two decimals (#127).
+
+### Fixed
+- The activity feed no longer drops about a third of its rows: rows are keyed on chain and type, not the per-table event id alone (#124).
+- A relayed withdrawal that reverts because the approved set moved is proved again once and retried (#125).
+- Withdraw on another chain's portfolio row opens that chain's pool, the Shield card on a pool page starts on that pool's asset and keeps its pay token selected, and the My transactions filters are no longer clipped (#127, #130).
+- A chain whose snapshot lands mid-sweep is scanned instead of skipped (#127).
+- Testnet and staging (`?env=staging`) withdrawals no longer fail with `PoolVault_InvalidTransactProof`: both default to the Sepolia V8 deployment, whose verifier keys match the app's circuits, with its relayer, keystore and ASP registry. Existing V9 testnet notes stay on V9. Prod is unchanged (#113).
+
 ## [1.6.2] - 2026-11-20
 
 ### Changed

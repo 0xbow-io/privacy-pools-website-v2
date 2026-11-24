@@ -8,6 +8,7 @@
 import { formatEther, keccak256, parseEther, stringToBytes } from 'viem';
 import { existsSync, writeFileSync } from 'node:fs';
 import { accountFromKey, client, envValue, fundAccount, mintEphemeral, paymentRequestEth, requireFunds, sweepTo } from './funding';
+import { relaySupportsBatchWithdrawals } from '../../config/relayer-eras';
 import { coreFixtureKey } from './core-fixture';
 
 // 0.004 was not enough: a FIRST deposit from a brand-new key also pays for the
@@ -60,6 +61,9 @@ if (GROUP !== 'all' && !GROUPS.includes(GROUP as never)) {
   throw new Error(`unknown E2E_GROUP "${GROUP}" (one of: all, ${GROUPS.join(', ')})`);
 }
 const runs = (group: typeof GROUPS[number]) => GROUP === 'all' || GROUP === group;
+const BATCH_ENABLED = envValue('EXPO_PUBLIC_BATCH_WITHDRAWALS') === 'true'
+  && relaySupportsBatchWithdrawals(11155111, envValue('EXPO_PUBLIC_SEPOLIA_POOL_ADDRESS'));
+if (!BATCH_ENABLED) console.log('SKIP batch withdrawal: disabled by configuration or unsupported by the Sepolia relay');
 const PHASE_DIR = process.env.E2E_PHASE_DIR;
 const phaseFlag = (name: string) => { if (PHASE_DIR) writeFileSync(`${PHASE_DIR}/${name}`, ''); };
 const phaseGate = async (name: string) => {
@@ -193,7 +197,7 @@ try {
     // consolidate.ts and batch-withdraw.ts derive their accounts from the key
     // they are handed and fund them from it.
     await prepare('consolidate: fold small notes of one lineage', ['scripts/e2e/consolidate.ts'], { E2E_ACCOUNT_A_PK: treasuryKey });
-    await prepare('batch withdrawal via account C', ['scripts/e2e/batch-withdraw.ts'], { E2E_ACCOUNT_A_PK: treasuryKey });
+    if (BATCH_ENABLED) await prepare('batch withdrawal via account C', ['scripts/e2e/batch-withdraw.ts'], { E2E_ACCOUNT_A_PK: treasuryKey });
     await awaitPrepared();
   }
   phaseFlag('seeded');
@@ -219,7 +223,7 @@ try {
     if (GROUP === 'all') {
       // The second local wave.
       await prepare('consolidate: fold small notes of one lineage', ['scripts/e2e/consolidate.ts'], { E2E_ACCOUNT_A_PK: treasuryKey });
-      await prepare('batch withdrawal via account C', ['scripts/e2e/batch-withdraw.ts'], { E2E_ACCOUNT_A_PK: treasuryKey });
+      if (BATCH_ENABLED) await prepare('batch withdrawal via account C', ['scripts/e2e/batch-withdraw.ts'], { E2E_ACCOUNT_A_PK: treasuryKey });
       await awaitPrepared();
     }
     // Same-label dust consolidation: fold the 2..5 smallest notes of one
@@ -228,7 +232,7 @@ try {
       ['scripts/e2e/consolidate.ts'], { E2E_ACCOUNT_A_PK: treasuryKey });
     // Batch withdrawal (N deposits -> N proofs -> one relayer call) on its own
     // derived account C.
-    outcomes['batch withdrawal (multiple proofs)'] = await run('batch withdrawal via account C',
+    if (BATCH_ENABLED) outcomes['batch withdrawal (multiple proofs)'] = await run('batch withdrawal via account C',
       ['scripts/e2e/batch-withdraw.ts'], { E2E_ACCOUNT_A_PK: treasuryKey });
   }
   if (runs('payment')) {

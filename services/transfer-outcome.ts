@@ -41,8 +41,64 @@ export function isConfirmedRevert(message: string): boolean {
  */
 export function isRelayerRefusal(message: string): boolean {
   if (isConfirmedRevert(message)) return false;
-  return /PoolVault transact failed|The contract function .?transact.? reverted|PoolVault_[A-Za-z]+/i
-    .test(message);
+  return isRelayerFeeShort(message)
+    || /PoolVault transact failed|The contract function .?transact.? reverted|PoolVault_[A-Za-z]+/i.test(message);
+}
+
+/**
+ * The relayer re-prices the relay right before it signs and refuses when the
+ * quoted fee no longer pays for the gas it now measures (prod Ethereum, Swap
+ * USDC to USDT, 2026-11-21, verbatim on screen):
+ *
+ *   HTTP 400: {"message":"RelaySwaps executeUnwrapped rejected: the quoted
+ *   relay fee no longer covers the transaction cost (fee worth ... wei; cost
+ *   ... wei = 3011116 gas × 246180172 wei/gas). This transaction needs 3011116
+ *   gas but the relayer prices it at 2300000 gas on this chain, so a new quote
+ *   will not cover it until the relayer's gas budget is raised. Request a new
+ *   quote and retry later.", ...}
+ *
+ * A pre-broadcast refusal: nothing was signed or sent. Two cases share the
+ * opening sentence. Plain drift (gas price moved since the quote) is fixed by
+ * a fresh quote. The budget case is not: the relayer prices every quote at a
+ * fixed per-chain gas budget below what this transaction needs, so a new quote
+ * fails the same way until the relayer's config changes.
+ */
+const RELAY_FEE_SHORT = /quoted relay fee no longer covers the transaction cost/i;
+const RELAYER_GAS_BUDGET_SHORT = /relayer prices it at \d+ gas|relayer's gas budget is raised/i;
+
+export function isRelayerFeeShort(message: string): boolean {
+  return RELAY_FEE_SHORT.test(message);
+}
+
+/** isRelayerFeeShort where a fresh quote cannot help: the relayer's gas budget is too low. */
+export function isRelayerGasBudgetShort(message: string): boolean {
+  return isRelayerFeeShort(message) && RELAYER_GAS_BUDGET_SHORT.test(message);
+}
+
+type RelayFlow = 'withdrawal' | 'transfer' | 'swap';
+
+/** The user-facing sentence for isRelayerFeeShort, budget or drift, with the flow named. */
+export function relayerFeeShortMessage(flow: RelayFlow, message: string): string {
+  return isRelayerGasBudgetShort(message)
+    ? `This ${flow} can't go through the relayer right now. Nothing was sent. Please try again later.`
+    : `The relayer fee went up since you reviewed this ${flow}. Nothing was sent. Review again for a fresh quote.`;
+}
+
+/**
+ * The relayer's raw HTTP answer ("HTTP 400: {...json...}"), which must never
+ * be shown as is. The full text stays in the log and error report.
+ */
+export function isRawRelayerHttpAnswer(message: string): boolean {
+  return /\bHTTP \d{3}\b/.test(message) || /"statusCode"\s*:\s*\d{3}/.test(message);
+}
+
+/**
+ * The short line for a relayer answer no rule recognises. It may follow a
+ * broadcast (the relayer turns a failed write into a 400 too), so it never
+ * says nothing was sent.
+ */
+export function relayerAnswerFallbackMessage(flow: RelayFlow): string {
+  return `The relayer could not complete this ${flow}. Check your balance before you try again.`;
 }
 
 /**

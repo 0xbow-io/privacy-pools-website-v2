@@ -74,7 +74,7 @@ export function formatUsdLabel(usdText: string): string {
 export function usdChipLabel(preset: string, priceUsd: number): string {
   const usd = (parseFloat(preset) || 0) * priceUsd;
   if (!(usd > 0)) return preset;
-  if (usd < 1) return `$${usd.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+  if (usd < 1) return `$${usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   // Whole dollars, rounded BEFORE the cutoff ($9.99 of a floored $10 preset
   // reads $10), so $999.78 reads $1k, never a long "$1,000".
   const whole = Math.round(usd);

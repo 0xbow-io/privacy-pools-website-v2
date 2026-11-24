@@ -156,7 +156,7 @@ try {
   // pass because an empty page says nothing wrong. That is how `bnb` sat red
   // for a week reading like a product bug, so the not-found card is now its
   // own check and no assertion here is allowed to pass on a dead page.
-  for (const [chain, asset] of [['ethereum', 'usdc'], ['ethereum', 'usdt'], ['bsc', 'usdt']] as const) {
+  for (const [chain, asset] of [['ethereum', 'usdc'], ['ethereum', 'usdt'], ['arbitrum', 'usdc'], ['bsc', 'usdt']] as const) {
     await page.goto(`${BASE}/chains/${chain}/${asset}?env=prod`, { waitUntil: 'domcontentloaded' });
     // Settle on the asset being named OR the not-found card, so a dead page
     // fails its own check immediately instead of burning the budget. Never on
@@ -169,6 +169,13 @@ try {
       `${label}: the deep link reaches the pool, not the not-found card`,
       NOT_FOUND_LINE.exec(body)?.[0] ?? '',
     );
+    const payToken = page.getByTestId('hub-shield-pay-token');
+    const expectedPayToken = `Pay token: ${asset.toUpperCase()}`;
+    // A pool heading can say USDC even when Shield has fallen back to ETH.
+    await payToken.and(page.getByLabel(expectedPayToken, { exact: true }))
+      .waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {});
+    const actualPayToken = await payToken.getAttribute('aria-label');
+    check(actualPayToken === expectedPayToken, `${label}: Shield selects the underlying pay token`, actualPayToken);
     check(!CLOSED_LINE.test(body), `${label}: the pool page never says deposits are closed`, CLOSED_LINE.exec(body)?.[0] ?? '');
     check(!CONVERSION_REFUSAL.test(body), `${label}: no conversion refusal`, CONVERSION_REFUSAL.exec(body)?.[0] ?? '');
     check(!SHARE_NAME.test(body), `${label}: the share is not named`, SHARE_NAME.exec(body)?.[0] ?? '');

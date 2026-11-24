@@ -71,6 +71,7 @@ import { useLeafGate } from '@/hooks/use-leaf-gate';
 import { selectSuiNotes, maxSuiLineageTotal, SUI_SINGLE_NOTE_ERROR, type SuiNoteSelection } from '@/services/sui-witness/note-selection';
 import type { StoredSuiNote } from '@/services/sui-witness/note-store';
 import { ChainLogo, chainLogoChainFor } from '@/components/ui/chain-logo';
+import { relaySupportsBatchWithdrawals } from '@/config/relayer-eras';
 import { BATCH_WITHDRAWALS_ENABLED, LEGACY_CONFIG, TEST_MODE } from '@/config/env';
 import {
   batchProgressFraction,
@@ -162,6 +163,7 @@ import {
   isSwapExitSelection,
   isSwapUnavailableError,
   prepareValidatedSwapQuote,
+  sameInputNoteSet,
   selectSwapInputNotes,
   type PreparedSwapQuoteLike,
   type SwapQuoteDisplay,
@@ -197,10 +199,10 @@ import { OpShell } from '@/components/op-shell';
 import { HubErrorBoundary } from '@/components/home/hub-error-boundary';
 import { useInlineOpsCapable } from '@/hooks/use-inline-ops-capable';
 import { isUnknownKeystoreRoot, keystoreRootRefreshingMessage } from '@/services/keystore-root-error';
-import { isRelayerNullifierInFlight, isRelayerOutOfGas, isRelayerRateLimited, isRelayerUnreachable, isRelayWaitTimeout, relayerOutOfGasMessage, relayerRateLimitedMessage, relayInFlightMessage, timedOutRelayTxHash } from '@/services/transfer-outcome';
+import { isRawRelayerHttpAnswer, isRelayerFeeShort, isRelayerNullifierInFlight, isRelayerOutOfGas, isRelayerRateLimited, isRelayerUnreachable, isRelayWaitTimeout, relayerAnswerFallbackMessage, relayerFeeShortMessage, relayerOutOfGasMessage, relayerRateLimitedMessage, relayInFlightMessage, timedOutRelayTxHash } from '@/services/transfer-outcome';
 import { aspBusyMessage } from '@/services/asp-backoff';
 import { aspBackoff } from '@/services/egress-fetch';
-import { onRelayedTxHash } from '@/services/relayed-receipt';
+import { onRelayCalled, onRelayedTxHash } from '@/services/relayed-receipt';
 import { isPendingRelayBlocked, landedTxHash } from '@/services/pending-relays-core';
 import { createPendingRelaySettleWatch } from '@/services/pending-relays-store';
 import { PendingRelayNotice } from '@/components/pending-relay-notice';
@@ -214,6 +216,15 @@ import { setReceiveSetup } from '@/services/receive-setup';
 import { tokenAmountLabel, displayTokenSymbol, isShareSymbol, netSharesWei, presetChipLabel, previewReceiveFigure, shareReviewHeadline, swapRateText } from '@/services/share-display';
 import { sdkErrorText, type ErrorUnits } from '@/services/sdk-error-amounts';
 import { RelayFeeIncreasedError, relayWithdrawalWithFreshQuote } from '@/services/relayed-withdrawal';
+import { associationSetRootWatch } from '@/services/public-asp-cache';
+import {
+  associationSetMovedPast,
+  isPlainRelayRevert,
+  proofAssociationSetRoot,
+  RelayedRevertError,
+  RELAYED_REVERT_CHECK_STATUS,
+  STALE_ASP_ROOT_RETRY_STATUS,
+} from '@/services/stale-asp-root';
 import { PREVIEW_REDEEM_ABI } from '@/services/deposit-limits';
 import { useBackHandler } from '@/hooks/use-back-handler';
 import { useNativeMockBlock } from '@/hooks/use-native-mock-block';
@@ -501,6 +512,13 @@ type WithdrawSwapSnapshot = {
   sessionKey: string;
   /** Modal-operation epoch at quote time (bumped on every open/close). */
   epoch: number;
+  /**
+   * The notes the quote was priced on (SDK 1.2.0 sends their count). Confirm
+   * relays exactly this set, or re-quotes for the set it selects.
+   */
+  inputCommitments: Hex[];
+  /** Set after a failed attempt: the next Confirm re-quotes before proving. */
+  requote?: boolean;
 };
 
 function resolveTokenSymbol(tokenId: string, chainId?: number): string {
@@ -1711,7 +1729,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // on, Max on a share balance spanning several proofs went straight to
   // prepareBatchWithdraw and paid ppUSDC under a USDC label (codex P1 on
   // d6abfcd). Until batch redemption exists, a share is single-proof only.
-  const batchEnabled = BATCH_WITHDRAWALS_ENABLED && !isSui && !selectedIsShare;
+  const batchEnabled = BATCH_WITHDRAWALS_ENABLED && !isSui && !selectedIsShare
+    && relaySupportsBatchWithdrawals(chainId, getChainConfig(chainId)?.contracts?.poolAddress);
   // A full-balance withdrawal needs batching only when its exact note topology
   // spans more than one proof (one lineage of >5 notes, or several lineages).
   // Derived from note counts, never float amounts.
@@ -1774,6 +1793,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
   // "Unshielding" and "left after" figures include it.
   const stellarFeeWei = stellarFeeFor(suiWithdraw.inputCount || 1, suiWithdraw.want);
   const suiAmountError = useMemo(() => {
+    // A locked Stellar session has not decrypted its balance yet.
+    if (isStellar && !stellarSession.unlocked) return null;
     if (!isSui || suiWithdraw.want <= 0n || suiWithdraw.selection) return null;
     if (suiWithdraw.want > suiWithdraw.activeTotal) {
       // Funds that exist but are not approved yet are not "insufficient".
@@ -1786,7 +1807,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
     return isStellar
       ? `One withdrawal can spend up to ${WITHDRAW_MAX_INPUTS} notes (${(Number(availableWei) / altScale).toFixed(4)} ${altSymbol}). Withdraw that first, then the rest.`
       : SUI_SINGLE_NOTE_ERROR;
-  }, [isSui, isStellar, altScale, altSymbol, suiWithdraw, stellarSession.pendingTotal, availableWei]);
+  }, [isSui, isStellar, altScale, altSymbol, suiWithdraw, stellarSession.unlocked, stellarSession.pendingTotal, availableWei]);
   // Remaining means the WHOLE approved shielded balance, not just the selected
   // inputs' change. With mixed labels (or notes beyond the five-input cap),
   // subtracting from `availableWei` hid untouched notes on Review.
@@ -2201,11 +2222,21 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
 
   const handleReviewWithdrawal = useCallback(async () => {
     withdrawPhaseRef.current = 'validate';
+    // Quote selection needs decrypted notes, so Stellar must unlock before
+    // review too. Leave the populated form in place for the next press.
+    if (isStellar && !stellarSession.unlocked) {
+      const epoch = modalEpochRef.current;
+      try { await stellarSession.unlock(); }
+      catch (error) {
+        if (modalEpochRef.current === epoch) reportWithdrawError(stellarActionError(error));
+      }
+      return;
+    }
     // Locked wallet session: the press IS the request to sign in. Prompt for the
     // one-time signature and stop here; the balance and the form's validation
     // only mean anything once the notes can be decrypted, so there is nothing to
     // review yet and nothing to continue into.
-    // EVM session only: Sui/Stellar unlock inside their own confirm paths.
+    // EVM's keys are managed separately from the Stellar session above.
     if (!isSui && !keysReadyRef.current && identityMode !== 'key') {
       log('debug', 'Withdraw', 'locked session: prompting for the keystore signature');
       openSeedDerivationModal();
@@ -2532,6 +2563,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           );
           return;
         }
+        const quotedInputs = selection.notes.map((n) => n.commitment as Hex);
         const session = sdkReady && poolSession ? poolSession : await ensureInitialized();
         if (!isCurrent()) return;
         if (!session) throw new Error('SDK initialization did not complete.');
@@ -2572,6 +2604,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           ...(crossChainReceive
             ? { toChainId: receiveChainId, fallbackAddress: resolvedRecipient as Address }
             : {}),
+          // The relayer prices per note spent: quote the set Confirm relays.
+          // Only the count leaves the browser.
+          inputCommitments: quotedInputs,
         });
         // Only the newest request (with an unchanged form) may commit state.
         if (!isCurrent()) return;
@@ -2597,6 +2632,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           ...(crossChainReceive ? { fallbackAddress: resolvedRecipient as Address } : {}),
           sessionKey,
           epoch: reviewEpoch,
+          inputCommitments: quotedInputs,
         });
         setCountdown(expiresIn);
         log('info', 'Withdraw', 'Receive-as swap quote prepared', {
@@ -3144,8 +3180,32 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       // order, re-priced — and only refuse if the re-price moved against them
       // beyond REFRESH_DRIFT_BPS (services/intent-swaps.ts). A refresh is one
       // relayer POST carrying no note-derived value.
+      //
+      // The relayer prices the quote per note spent (SDK 1.2.0 sends the
+      // count), so the quote has to be for the set relayed below. Selected
+      // here with the same rule as the relay step; a different set than Review
+      // priced, or a previous attempt that failed, re-quotes first, so a
+      // refused relay is never retried on the same commitment.
+      const selectSwapExitInputs = (): Hex[] | null => {
+        if (spendableCommitments === null) return null;
+        const notes = (noteManager?.getNotes({ status: NoteStatus.ACTIVE }) ?? []).filter(
+          (n) =>
+            String(n.tokenId).toLowerCase() === String(snap.inputToken.address).toLowerCase()
+            && BigInt(n.value) > 0n
+            && spendableCommitments.has(n.commitment),
+        );
+        const picked = selectSwapInputNotes(notes, snap.grossWei);
+        return picked.covered ? picked.notes.map((n) => n.commitment as Hex) : null;
+      };
+      const confirmInputs = selectSwapExitInputs();
       let activePrepared = snap.prepared;
-      if (!hasUsableCommitmentLifetime(getPreparedQuoteExpiration(snap.prepared), Date.now())) {
+      let quotedInputs = snap.inputCommitments;
+      const requoteInputs = confirmInputs !== null
+        && (snap.requote === true || !sameInputNoteSet(quotedInputs, confirmInputs))
+        ? confirmInputs
+        : null;
+      if (requoteInputs || !hasUsableCommitmentLifetime(getPreparedQuoteExpiration(snap.prepared), Date.now())) {
+        const refreshInputs = requoteInputs ?? quotedInputs;
         try {
           withdrawPhaseRef.current = 'quote';
           setLoadingMessage('Refreshing relayer quote...');
@@ -3171,6 +3231,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
             ...(crossChain
               ? { toChainId: snap.destinationChainId, ...(snap.fallbackAddress ? { fallbackAddress: snap.fallbackAddress } : {}) }
               : {}),
+            inputCommitments: refreshInputs,
           });
           if (!isSameOperation()) return;
           const drift = validateRefreshedSwapQuote(snap.prepared, fresh);
@@ -3179,7 +3240,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
             throw new Error('The refreshed relayer quote had already expired when it arrived.');
           }
           activePrepared = fresh;
-          setSwapSnapshot({ ...snap, prepared: fresh, display: freshDisplay });
+          quotedInputs = refreshInputs;
+          setSwapSnapshot({ ...snap, prepared: fresh, display: freshDisplay, inputCommitments: refreshInputs, requote: false });
           log('info', 'Withdraw', 'Refreshed the swap commitment at confirm', {
             fee: fresh.feeAmount, estOut: fresh.estimatedOutput,
           });
@@ -3207,14 +3269,8 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       try {
         setLoadingMessage('Selecting notes...');
         if (spendableCommitments === null) throw new Error('Note approval state is no longer available. Review again.');
-        const swapActiveNotes = (noteManager?.getNotes({ status: NoteStatus.ACTIVE }) ?? []).filter(
-          (n) =>
-            String(n.tokenId).toLowerCase() === String(snap.inputToken.address).toLowerCase()
-            && BigInt(n.value) > 0n
-            && spendableCommitments.has(n.commitment),
-        );
-        const selection = selectSwapInputNotes(swapActiveNotes, snap.grossWei);
-        if (!selection.covered) throw new Error('The selected notes no longer cover this amount. Review again.');
+        const relayInputs = selectSwapExitInputs();
+        if (!relayInputs) throw new Error('The selected notes no longer cover this amount. Review again.');
         const session = sdkReady && poolSession ? poolSession : await ensureInitialized();
         if (!session) throw new Error('SDK initialization did not complete.');
         // buildRelayWithdrawAndSwapParams re-validates the whole quote (gross
@@ -3229,7 +3285,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           prepared: activePrepared,
           poolChainId: snap.poolChainId,
           grossWei: snap.grossWei,
-          inputCommitments: selection.notes.map((n) => n.commitment as Hex),
+          inputCommitments: relayInputs,
+          // The set the active quote was priced on: the builder refuses any other.
+          quotedInputCommitments: quotedInputs,
           tokenId: snap.inputToken.address,
           outputToken: snap.outputToken.address as Address,
           recipientAddress: snap.recipient,
@@ -3265,6 +3323,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         // without persisting note updates. Only status === true swapped.
         if (!isSuccessfulSwapReceipt(receipt)) {
           log('error', 'Withdraw', 'Withdraw-and-swap transaction reverted', { txHash: hash });
+          setSwapSnapshot((cur) => (cur ? { ...cur, requote: true } : cur));
           if (isSameOperation()) {
             reportWithdrawError(
               'The transaction reverted on-chain. The exit, swap, and payout rolled back together and your notes were NOT spent. You can try again.',
@@ -3306,6 +3365,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         // the /swap route.
         const message = err instanceof Error ? err.message : String(err);
         log('error', 'Withdraw', `Withdraw-and-swap failed: ${message}`);
+        // A refused relay is never retried on the same commitment: the next
+        // Confirm re-quotes for the same note set and proves again.
+        setSwapSnapshot((cur) => (cur ? { ...cur, requote: true } : cur));
         // The receipt wait can run out on a swap the relayer DID broadcast
         // (DEV-458). Without a hash to watch, this used to just sit marked
         // pending forever: if the swap later landed, the pending notice could
@@ -4480,13 +4542,29 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           });
           // Our own wait (services/relayed-receipt.ts) names no hash in its
           // timeout, so the hash is the one heard as the relayer returned it.
-          const heard: { hash: string | null } = { hash: null };
+          const heard: { hash: string | null; proofRoot: bigint | null } = { hash: null, proofRoot: null };
           const stopHearing = onRelayedTxHash((hash, method) => {
             if (method && WITHDRAW_RELAY_METHOD.test(method)) { heard.hash = hash; withdrawPhaseRef.current = 'confirm'; }
           });
+          // The association-set root this proof was built against, read from
+          // the relay request in memory, so a revert can be told apart as a
+          // moved root (services/stale-asp-root.ts). Nothing is sent.
+          const stopHearingCall = onRelayCalled((method, params) => {
+            if (WITHDRAW_RELAY_METHOD.test(method)) heard.proofRoot = proofAssociationSetRoot(params);
+          });
           try {
-            return await session.relayWithdraw(option);
+            const receipt = await session.relayWithdraw(option);
+            // Mined and reverted: the SDK returns before persisting anything,
+            // so the notes are untouched. relayWithdrawalWithFreshQuote decides
+            // whether a moved root explains it and proves once more.
+            if (receipt && typeof receipt === 'object' && (receipt as { status?: unknown }).status === false) {
+              const revertedHash = (receipt as { txHash?: unknown }).txHash;
+              log('warn', 'Withdraw', 'Relayed withdrawal reverted on-chain; notes not spent', { txHash: revertedHash });
+              throw new RelayedRevertError(heard.proofRoot, typeof revertedHash === 'string' ? revertedHash : heard.hash);
+            }
+            return receipt;
           } catch (relayErr) {
+            if (relayErr instanceof RelayedRevertError) throw relayErr;
             const relayMessage = relayErr instanceof Error ? relayErr.message : String(relayErr);
             const timedOutHash = timedOutRelayTxHash(relayMessage)
               ?? (isRelayWaitTimeout(relayMessage) && heard.hash ? heard.hash as `0x${string}` : null);
@@ -4496,6 +4574,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
             return { txHash: timedOutHash, status: undefined } as unknown as Awaited<ReturnType<typeof session.relayWithdraw>>;
           } finally {
             stopHearing();
+            stopHearingCall();
           }
         };
         // The fresh quote is fetched and checked first; relayOnce moves to submit.
@@ -4507,8 +4586,18 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
           relay: relayOnce,
           onStaleAspRoot: (staleErr) => {
             log('warn', 'Withdraw', 'Association-set root rotated mid-flight; re-proving once', { relayMessage: staleErr.message });
-            setLoadingMessage('The approval set just updated. Re-proving your withdrawal...');
+            setLoadingMessage(STALE_ASP_ROOT_RETRY_STATUS);
           },
+          onRevert: () => {
+            if (isSameOperation()) setLoadingMessage(RELAYED_REVERT_CHECK_STATUS);
+          },
+          // Compared against the root the feed grid holds, and at most a wait
+          // for its next wall-clock refresh: no request is sent for the check.
+          rootMoved: async (proofRoot, wait) => associationSetMovedPast(
+            proofRoot,
+            await associationSetRootWatch(chainId),
+            { wait },
+          ),
         }).catch((feeErr: unknown) => {
           // A fee above the reviewed one (outside the jitter allowance) is
           // refused before proving, so nothing was sent: back to the form for a
@@ -4552,7 +4641,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         ? (relayReceiptResult as { status?: unknown }).status
         : undefined;
       if (sdkStatus === false) {
-        throw new Error('Withdrawal transaction reverted on-chain. Your notes were NOT spent.');
+        throw new RelayedRevertError(null, relayTxHash);
       }
       if (sdkStatus !== true) {
         // PRIVACY: confirm from bulk chain data, NOT by polling this client's
@@ -4769,10 +4858,13 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
       // nothing about whose problem it was or whether funds moved.
       reportWithdrawError(
         isRelayerOutOfGas(message) ? relayerOutOfGasMessage('withdrawal')
+          : isRelayerFeeShort(message) ? relayerFeeShortMessage('withdrawal', message)
           : isUnknownKeystoreRoot(message) ? keystoreRootRefreshingMessage('withdrawal')
           : isPendingRelayBlocked(message) ? message
             : isRelayerNullifierInFlight(message) ? relayInFlightMessage('withdrawal')
-              : message === WITHDRAW_PENDING_MESSAGE ? message
+              : message === WITHDRAW_PENDING_MESSAGE || isPlainRelayRevert(err) ? message
+                // The relayer's raw "HTTP 400: {...}" never reaches the screen.
+                : (err as { name?: string } | null)?.name === 'RelayerRejected' && isRawRelayerHttpAnswer(shownError(err)) ? relayerAnswerFallbackMessage('withdrawal')
                 : `Withdrawal failed: ${shownError(err)}`,
         err,
         'relay',
@@ -5730,7 +5822,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     </View>
                     <View className="items-end gap-[1px]">
                       <Text className="font-pp-mono text-[13px] text-text">{grossNum === null ? 'Estimate unavailable' : groupThousands(balanceDisplay(swapSnapshot ? formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals) : String(grossNum), swapSnapshot ? swapReviewInputSymbol : selectedToken, swapSnapshot?.poolChainId ?? chainId).text)}</Text>
-                      {grossUsd !== null && <Text className="font-pp-sans text-[11.5px] text-text-muted">${grossUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}</Text>}
+                      {grossUsd !== null && <Text className="font-pp-sans text-[11.5px] text-text-muted">{formatUsdBalance(grossUsd)}</Text>}
                     </View>
                   </View>
                   <View className="h-[1px] self-stretch bg-border-light" />
@@ -5755,7 +5847,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                     </View>
                     <View className="items-end gap-[1px]">
                       <Text className="font-pp-mono text-[13px] text-text">{groupThousands(netLabel)}</Text>
-                      {netUsd != null ? <Text className="font-pp-sans text-[11.5px] text-text-muted">${netUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}</Text> : null}
+                      {netUsd != null ? <Text className="font-pp-sans text-[11.5px] text-text-muted">{formatUsdBalance(netUsd)}</Text> : null}
                     </View>
                   </View>
                   <View className="h-[1px] self-stretch bg-border-light" />
@@ -5907,7 +5999,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                       </Text>
                     </Text>
                     {reviewGross !== null && <Text className="text-[14px] text-text font-pp-regular">
-                      ${(balanceDisplay(swapSnapshot ? formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals) : String(reviewGross), swapSnapshot ? swapReviewInputSymbol : selectedToken, swapSnapshot?.poolChainId ?? chainId).usd).toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                      {formatUsdBalance(balanceDisplay(swapSnapshot ? formatUnits(swapSnapshot.grossWei, swapSnapshot.inputToken.decimals) : String(reviewGross), swapSnapshot ? swapReviewInputSymbol : selectedToken, swapSnapshot?.poolChainId ?? chainId).usd)}
                     </Text>}
                   </View>
                   {/* Vertical Divider */}
@@ -5937,7 +6029,7 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
                         : reviewNetUsd;
                       return usd != null ? (
                         <Text className="text-[14px] text-text font-pp-regular">
-                          ${usd.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                          {formatUsdBalance(usd)}
                         </Text>
                       ) : null;
                     })()}

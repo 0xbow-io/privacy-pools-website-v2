@@ -306,7 +306,7 @@ export function normalizeUsd(value: string | undefined | null): string | null {
   if (!trimmed) return null;
   const numeric = Number(trimmed.replace(/[$,]/g, ''));
   if (!Number.isFinite(numeric) || numeric <= 0) return null;
-  return `$${numeric.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+  return `$${numeric.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 /** Decimal string for a base-unit hex/bigint amount, trailing zeros trimmed. */
@@ -1459,6 +1459,7 @@ export function hexToBigInt(value: Hex | string | bigint): bigint {
 
 /** `estimateReshieldAmount` result — decimal strings, plus the note size. */
 export interface ReshieldEstimateLike {
+  feeCosts?: import('@privacy-pools-v2/sdk').SwapQuoteResult['feeCosts'];
   feeAmount: string;
   netSwapAmount: string;
   estimatedOutput: string;
@@ -1495,6 +1496,8 @@ export interface ReshieldSessionLike {
     outputToken: Address;
     dustRecipient?: Address;
     slippage?: number;
+    /** The notes the relay will spend. Only their count reaches the relayer (SDK 1.2.0). */
+    inputCommitments?: Hash[];
   }): Promise<ReshieldEstimateLike>;
   // The result carries the pendingNote for the NEW output note. It must be
   // kept: relayReshield persists the spent inputs and the input-asset change,
@@ -1511,6 +1514,8 @@ export interface ReshieldSessionLike {
     totalDepositCost: string;
     dustRecipient?: Address;
     slippage?: number;
+    /** Same set as the estimate and the relay; only the count is sent. */
+    inputCommitments?: Hash[];
   }): Promise<PreparedReshieldQuoteLike>;
   relayReshield(params: {
     inputCommitments: Hash[];
@@ -1848,6 +1853,11 @@ export async function estimateReshieldForReview(
      * yield share before any number is shown.
      */
     transfer?: boolean;
+    /**
+     * The notes Confirm will spend. The relayer prices per note, so Review is
+     * estimated on the same set; only the count leaves the browser.
+     */
+    inputCommitments: Hash[];
   },
 ): Promise<{ estimate: ReshieldEstimateLike; display: ReshieldDisplay }> {
   assertIntentDepositTarget(params.outputToken, params.chainId);
@@ -1870,6 +1880,7 @@ export async function estimateReshieldForReview(
     amount: toHex(params.grossWei),
     tokenId: params.inputToken,
     outputToken: params.outputToken,
+    inputCommitments: params.inputCommitments,
     ...(params.slippage !== undefined ? { slippage: params.slippage } : {}),
   });
   if (hexToBigInt(estimate.noteValue) <= 0n) {
@@ -1982,6 +1993,9 @@ async function runReshieldOnce(
     amount: gross,
     tokenId: params.inputToken,
     outputToken: params.outputToken,
+    // The set the relay below spends: every relayer quote of the flow is
+    // priced on its count (SDK 1.2.0), and nothing else about it is sent.
+    inputCommitments: params.inputCommitments,
     ...(params.slippage !== undefined ? { slippage: params.slippage } : {}),
   });
 
@@ -2029,6 +2043,7 @@ async function runReshieldOnce(
     outputToken: params.outputToken,
     depositResult,
     totalDepositCost: estimate.totalDepositCost,
+    inputCommitments: params.inputCommitments,
     ...(params.slippage !== undefined ? { slippage: params.slippage } : {}),
   });
 
@@ -2193,6 +2208,8 @@ export interface ReshieldCrosschainSessionLike {
     fallbackAddress?: Address;
     slippage?: number;
     denyExchanges?: string[];
+    /** The notes the relay will spend. Only their count reaches the relayer (SDK 1.2.0). */
+    inputCommitments?: Hash[];
   }): Promise<ReshieldCrosschainEstimateLike>;
   prepareReshieldCrosschainQuote(params: {
     relayerInfo: unknown;
@@ -2206,6 +2223,8 @@ export interface ReshieldCrosschainSessionLike {
     totalDepositCost: string;
     slippage?: number;
     denyExchanges?: string[];
+    /** Same set as the estimate and the relay; only the count is sent. */
+    inputCommitments?: Hash[];
   }): Promise<PreparedReshieldCrosschainQuoteLike>;
   relayReshieldCrosschain(params: {
     inputCommitments: Hash[];
@@ -2441,6 +2460,8 @@ export async function runReshieldCrosschain(
         toChainType: RESHIELD_DESTINATION_CHAIN_TYPE,
         fallbackAddress: params.fallbackAddress,
         denyExchanges,
+        // The set the relay below spends; only its count is sent (SDK 1.2.0).
+        inputCommitments: params.inputCommitments,
         ...(params.slippage !== undefined ? { slippage: params.slippage } : {}),
       });
       if (refit && hexToBigInt(estimate.noteValue) > refit.noteValue) {
@@ -2513,6 +2534,7 @@ export async function runReshieldCrosschain(
         depositResult,
         totalDepositCost: estimate.totalDepositCost,
         denyExchanges,
+        inputCommitments: params.inputCommitments,
         ...(params.slippage !== undefined ? { slippage: params.slippage } : {}),
       });
       break;
@@ -2703,12 +2725,40 @@ export function isReshieldFeeDrift(err: unknown): boolean {
 }
 
 /**
+ * SDK 1.2.0: a same-chain reshield sizes its deposit from the swap's guaranteed
+ * output, and `prepareReshieldQuote` throws `ReshieldQuoteMoved` when the fresh
+ * quote no longer fits the deposit proved from the estimate (price fell:
+ * `direction: "short"`, or rose: `"surplus"`). Nothing is committed when it
+ * throws, and both directions take the same remedy: estimate again, prove the
+ * deposit at the new size, prepare again. Matched by name, like the other SDK
+ * refusals here, so a second copy of the SDK class cannot slip past it.
+ */
+export function isReshieldQuoteMoved(err: unknown): boolean {
+  return err instanceof Error && err.name === 'ReshieldQuoteMoved';
+}
+
+/**
+ * The price kept moving through every bounded re-estimate. Nothing was signed
+ * or spent. A rate-moved refusal, so the modal re-estimates Review before it
+ * asks the user to try again.
+ */
+export class ReshieldQuoteMovedError extends ReshieldRateMovedError {
+  constructor() {
+    super('The price moved while preparing the swap. Nothing was signed or spent. Try again.');
+    this.name = 'ReshieldQuoteMovedError';
+  }
+}
+
+/**
  * Flow 3 with the retry the cross-chain flow already had. On Ethereum the
  * relayer fee is several dollars and moves between the estimate and the
  * committed quote, so "This route needs 18.5243 USDT but only 18.2191 USDT is
  * left after the fee" hit a 25 USDT swap repeatedly (Mike, 2026-09-28). Each
  * attempt re-estimates against the current fee, and the consent floor still
- * refuses a result worse than the one reviewed.
+ * refuses a result worse than the one reviewed. `ReshieldQuoteMoved` (SDK
+ * 1.2.0) takes the same path: every attempt re-estimates, re-proves the deposit
+ * and prepares again on the same note set, and the last one ends in
+ * ReshieldQuoteMovedError instead of another loop.
  */
 export async function runReshield(
   session: ReshieldSessionLike,
@@ -2727,7 +2777,13 @@ export async function runReshield(
         },
       });
     } catch (err) {
-      if (relayStarted || attempt >= RESHIELD_FEE_DRIFT_MAX_ATTEMPTS || !isReshieldFeeDrift(err)) throw err;
+      const quoteMoved = isReshieldQuoteMoved(err);
+      if (relayStarted || !(quoteMoved || isReshieldFeeDrift(err))) throw err;
+      // Bounded: past the last attempt a moving price is reported, not chased.
+      if (attempt >= RESHIELD_FEE_DRIFT_MAX_ATTEMPTS) {
+        if (quoteMoved) throw new ReshieldQuoteMovedError();
+        throw err;
+      }
       // A cancelled or superseded modal gets the refusal, not another proof.
       if (params.shouldContinue && !params.shouldContinue()) throw err;
     }

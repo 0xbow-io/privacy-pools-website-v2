@@ -21,7 +21,9 @@ import { artifactsVercelConfig, blobShas, mergeManifests } from './artifacts-man
 const SRC = new URL('../public/artifacts', import.meta.url).pathname;
 const STAGE = new URL('../.artifacts-stage', import.meta.url).pathname;
 const PROJECT = 'privacy-pools-artifacts';
-const SCOPE = '0xbow';
+// The 0xbow team and the project above, by id, so a team-scoped token can deploy without `vercel link`.
+const TEAM_ID = 'team_OSoxBgnBdtzFXUpHYOVKvD4Q';
+const PROJECT_ID = 'prj_UlsPoAbXJ9s9bqzirYh13oH5XEEk';
 const DEFAULT_ORIGIN = JSON.parse(readFileSync(new URL('../config/artifacts-origin.json', import.meta.url), 'utf8')).default;
 const envOrigin = process.env.EXPO_PUBLIC_ARTIFACTS_ORIGIN?.trim().replace(/\/+$/, '') ?? '';
 const ORIGIN = envOrigin.startsWith('https://') ? envOrigin : DEFAULT_ORIGIN;
@@ -85,11 +87,14 @@ console.log(`staged version ${version}, serving ${kept.length} versions (${kept.
 if (process.argv.includes('--dry-run')) process.exit(0);
 
 // CI has no login: a team token comes in through VERCEL_TOKEN and is passed as a flag.
+// The project is named by id through VERCEL_ORG_ID / VERCEL_PROJECT_ID instead of
+// `vercel link`: link loads the token's user, and a token scoped to the 0xbow team
+// has none, so it failed with "User not found. (404)". Neither id is a secret.
 const tokenArgs = process.env.VERCEL_TOKEN ? ['--token', process.env.VERCEL_TOKEN] : [];
+const vercelEnv = { ...process.env, VERCEL_ORG_ID: TEAM_ID, VERCEL_PROJECT_ID: PROJECT_ID };
 const run = (args) => {
-  const out = spawnSync('vercel', [...args, ...tokenArgs], { cwd: STAGE, stdio: 'inherit' });
+  const out = spawnSync('vercel', [...args, ...tokenArgs], { cwd: STAGE, stdio: 'inherit', env: vercelEnv });
   if (out.status !== 0) process.exit(out.status ?? 1);
 };
-run(['link', '--yes', '--project', PROJECT, '--scope', SCOPE]);
-run(['deploy', '--prod', '--yes', '--scope', SCOPE]);
+run(['deploy', '--prod', '--yes']);
 console.log(`published /artifacts/${version}/ on ${PROJECT}`);

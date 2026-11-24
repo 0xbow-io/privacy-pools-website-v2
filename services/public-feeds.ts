@@ -1,3 +1,5 @@
+import { feedSwapPreviewConfig, SWAP_PREVIEW_CONFIG_INTERVAL_MS } from '@/services/swap-preview-config';
+import { fetchSwapPreviewConfigs } from '@/services/swap-preview-config-feed';
 import { BULK_REGISTRY_INTERVAL_MS, refreshBulkKeystoreRegistry } from '@/services/keystore-bulk-feed';
 /**
  * THE list of public feeds this app fetches.
@@ -225,6 +227,7 @@ export function startPublicFeeds(): void {
     // Register a fixed scope set so chain selection never starts a new feed.
     // Raw and mapped views share the same cached, in-flight price response.
     for (const chainId of supportedEvmChainIds) {
+      publicFeeds.register({ key: feedSwapPreviewConfig(chainId), intervalMs: SWAP_PREVIEW_CONFIG_INTERVAL_MS, fetch: () => fetchSwapPreviewConfigs(chainId) });
       // The chain's gas price, from which the relayer's transfer fee is
       // estimated (services/transfer-fee-estimate.ts). One parameterless RPC
       // read per chain: the relayer is never asked, so its load does not

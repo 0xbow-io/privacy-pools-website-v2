@@ -10,6 +10,7 @@ import {
   formatTokenUnits,
   shapeSwapQuoteForDisplay,
   buildRelayWithdrawAndSwapParams,
+  sameInputNoteSet,
   selectSwapInputNotes,
   isSuccessfulSwapReceipt,
   isSwapUnavailableError,
@@ -344,6 +345,7 @@ describe('buildRelayWithdrawAndSwapParams', () => {
       poolChainId: SEPOLIA,
       grossWei: GROSS,
       inputCommitments: ['0xaaaa'],
+      quotedInputCommitments: ['0xaaaa'],
       tokenId: ETH,
       outputToken: USDC,
       recipientAddress: RECIPIENT,
@@ -367,6 +369,7 @@ describe('buildRelayWithdrawAndSwapParams', () => {
       poolChainId: SEPOLIA,
       grossWei: GROSS,
       inputCommitments: ['0xaaaa'],
+      quotedInputCommitments: ['0xaaaa'],
       tokenId: ETH,
       outputToken: USDC,
       recipientAddress: RECIPIENT,
@@ -382,6 +385,7 @@ describe('buildRelayWithdrawAndSwapParams', () => {
       poolChainId: SEPOLIA,
       grossWei: GROSS + 1n,
       inputCommitments: ['0xaaaa'],
+      quotedInputCommitments: ['0xaaaa'],
       tokenId: ETH,
       outputToken: USDC,
       recipientAddress: RECIPIENT,
@@ -392,10 +396,45 @@ describe('buildRelayWithdrawAndSwapParams', () => {
       poolChainId: SEPOLIA,
       grossWei: GROSS,
       inputCommitments: ['0xaaaa'],
+      quotedInputCommitments: ['0xaaaa'],
       tokenId: ETH,
       outputToken: USDC,
       recipientAddress: ZERO_ADDRESS,
     })).toThrow(/zero address/);
+  });
+});
+
+describe('quoted note set (SDK 1.2.0 per-note relay pricing)', () => {
+  const A = ('0x' + 'a'.repeat(64)) as `0x${string}`;
+  const B = ('0x' + 'b'.repeat(64)) as `0x${string}`;
+  const C = ('0x' + 'c'.repeat(64)) as `0x${string}`;
+
+  test('sameInputNoteSet ignores order and case, nothing else', () => {
+    expect(sameInputNoteSet([A, B], [B, A])).toBe(true);
+    expect(sameInputNoteSet([A], [A.toUpperCase().replace('0X', '0x')])).toBe(true);
+    expect(sameInputNoteSet([A], [A, B])).toBe(false);
+    expect(sameInputNoteSet([A, B], [A, C])).toBe(false);
+    expect(sameInputNoteSet([A, A], [A, B])).toBe(false);
+    expect(sameInputNoteSet([], [])).toBe(true);
+  });
+
+  test('the relay refuses a note set the quote was not priced on', () => {
+    const base = {
+      prepared: makePrepared(),
+      poolChainId: SEPOLIA,
+      grossWei: GROSS,
+      tokenId: ETH,
+      outputToken: USDC,
+      recipientAddress: RECIPIENT,
+    };
+    // Quoted for one note, relaying two: the relayer would refuse it for gas.
+    expect(() => buildRelayWithdrawAndSwapParams({ ...base, inputCommitments: [A, B], quotedInputCommitments: [A] }))
+      .toThrow(/notes this swap would spend changed/);
+    // Same count, different notes: still not the set that was quoted.
+    expect(() => buildRelayWithdrawAndSwapParams({ ...base, inputCommitments: [A, C], quotedInputCommitments: [A, B] }))
+      .toThrow(/notes this swap would spend changed/);
+    const ok = buildRelayWithdrawAndSwapParams({ ...base, inputCommitments: [B, A], quotedInputCommitments: [A, B] });
+    expect(ok.inputCommitments).toEqual([B, A]);
   });
 });
 

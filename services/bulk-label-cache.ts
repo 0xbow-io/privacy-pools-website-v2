@@ -138,6 +138,9 @@ type Owner = {
   held: boolean;
   lastError?: unknown;
   waiters: Set<() => void>;
+  /** Refreshes started so far, and the start number of the last one that succeeded. */
+  started: number;
+  succeeded: number;
 };
 
 /** How long a read of an owned chain waits for the owner's next refresh when
@@ -166,7 +169,7 @@ export function createBulkLabelCache(deps: BulkLabelCacheDeps) {
   const ownerOf = (chainId: number): Owner => {
     let owner = owners.get(chainId);
     if (!owner) {
-      owner = { attempted: false, held: false, waiters: new Set() };
+      owner = { attempted: false, held: false, waiters: new Set(), started: 0, succeeded: 0 };
       owners.set(chainId, owner);
     }
     return owner;
@@ -334,10 +337,12 @@ export function createBulkLabelCache(deps: BulkLabelCacheDeps) {
         owner.held = false;
       }
       owner.attempted = true;
+      const run = ++owner.started;
       try {
         const list = await load(source, chainId, poolKey, true);
         owner.held = true;
         owner.lastError = undefined;
+        owner.succeeded = Math.max(owner.succeeded, run);
         return { root: entries.get(poolKey)?.root ?? null, size: list.length };
       } catch (error) {
         owner.lastError = error;
@@ -345,6 +350,44 @@ export function createBulkLabelCache(deps: BulkLabelCacheDeps) {
       } finally {
         for (const wake of [...owner.waiters]) wake();
       }
+    },
+
+    /**
+     * The root the owner last brought for this pool, or null when nothing is
+     * held (or no owner refreshes the chain). A pure read, never a request.
+     */
+    heldRoot(chainId: number, poolKey: string): string | null {
+      const owner = owners.get(chainId);
+      const entry = entries.get(poolKey);
+      if (!deps.owns?.(chainId) || !owner?.held || owner.poolKey !== poolKey || !entry) return null;
+      return entry.root;
+    },
+
+    /**
+     * The root held after the owner's next successful refresh that STARTS
+     * after this call, or null at the deadline (or when no owner refreshes the
+     * chain). Waits on the grid's own clock and never sends a request, so a
+     * caller can ask "has the set moved?" without timing anything to itself.
+     * A refresh already running when this is called does not count: its root
+     * probe may predate the moment the caller cares about.
+     */
+    nextRefresh(chainId: number, poolKey: string, timeoutMs: number = OWNED_READ_WAIT_MS): Promise<string | null> {
+      if (!deps.owns?.(chainId)) return Promise.resolve(null);
+      const owner = ownerOf(chainId);
+      const after = owner.started;
+      return new Promise<string | null>((resolve) => {
+        const finish = () => {
+          if (owner.succeeded <= after) return;
+          clearTimeout(timer);
+          owner.waiters.delete(finish);
+          resolve(owner.poolKey === poolKey ? (entries.get(poolKey)?.root ?? null) : null);
+        };
+        const timer = setTimeout(() => {
+          owner.waiters.delete(finish);
+          resolve(null);
+        }, timeoutMs);
+        owner.waiters.add(finish);
+      });
     },
 
     /** The same cached fetch, as a membership set for label classification. */
