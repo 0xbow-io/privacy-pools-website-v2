@@ -19,6 +19,7 @@ All notable changes to the Privacy Pools v2 web app are documented in this file.
 - A relayed withdrawal that reverts because the approved set moved is proved again once and retried (#125).
 - Withdraw on another chain's portfolio row opens that chain's pool, the Shield card on a pool page starts on that pool's asset and keeps its pay token selected, and the My transactions filters are no longer clipped (#127, #130).
 - A chain whose snapshot lands mid-sweep is scanned instead of skipped (#127).
+- Testnet and staging (`?env=staging`) withdrawals no longer fail with `PoolVault_InvalidTransactProof`: both default to the Sepolia V8 deployment, whose verifier keys match the app's circuits, with its relayer, keystore and ASP registry. Existing V9 testnet notes stay on V9. Prod is unchanged (#113).
 
 ## [1.6.2] - 2026-11-20
 
