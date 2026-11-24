@@ -85,6 +85,17 @@ describe('Stellar partial viewing key', () => {
     expect(res.verified).toBe(false);
   });
 
+  test('a receipt naming another transaction than the one that minted its note fails', async () => {
+    const commitment = await sdkCommitment(BOB, '0x1234', '0x989680', '0xabc');
+    // Minted by SEND_TX; the receipt claims WITHDRAW_TX.
+    const res = await verifyStellarPartialViewingKey(bundle(commitment, { txHash: WITHDRAW_TX as never }), deps(history({ sendOut: commitment })));
+    expect(res).toMatchObject({ hashMatch: true, onChain: false, verified: false, onChainTimestampSec: null });
+    expect(res.error).toContain('different transaction');
+    // The minting tx matches whatever its spelling.
+    const ok = await verifyStellarPartialViewingKey(bundle(commitment, { txHash: SEND_TX.slice(2).toUpperCase() as never }), deps(history({ sendOut: commitment })));
+    expect(ok.verified).toBe(true);
+  });
+
   test('a consistent bundle that was never minted is not verified', async () => {
     const commitment = await sdkCommitment(ME, '0x99', '0x989680', '0xabc');
     const res = await verifyStellarPartialViewingKey(bundle(commitment, { ownerAddress: ME as never, noteSecret: '0x99' as never }), deps(history({})));
@@ -101,7 +112,7 @@ describe('Stellar partial viewing key', () => {
 
 describe('Stellar history lookups', () => {
   test('deposit outputs count as on chain', () => {
-    expect(stellarCommitmentOnChain(history({ deposit: '0x5' }), `0x${'0'.repeat(63)}5`)).toEqual({ onChain: true, timestampSec: 1_790_000_000 });
+    expect(stellarCommitmentOnChain(history({ deposit: '0x5' }), `0x${'0'.repeat(63)}5`)).toEqual({ onChain: true, txHash: DEPOSIT_TX, timestampSec: 1_790_000_000 });
   });
 
   test('an exit is tied only to the exact exited note', () => {

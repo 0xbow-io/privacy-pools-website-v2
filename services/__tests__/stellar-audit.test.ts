@@ -125,13 +125,17 @@ describe('Stellar tx hash spellings', () => {
 
 describe('withStellarHistoryPending', () => {
   test('an unlocked Stellar account waits for its first history read', () => {
-    expect(withStellarHistoryPending([], { selected: true, unlocked: true, indexed: false })).toEqual([202]);
-    expect(withStellarHistoryPending([11155111], { selected: true, unlocked: true, indexed: false })).toEqual([11155111, 202]);
+    expect(withStellarHistoryPending([], { selected: true, unlocked: true, noteOrigins: null })).toEqual([202]);
+    expect(withStellarHistoryPending([11155111], { selected: true, unlocked: true, noteOrigins: null })).toEqual([11155111, 202]);
   });
 
-  test('nothing to wait for once indexed, while locked, or with another chain selected', () => {
-    expect(withStellarHistoryPending([], { selected: true, unlocked: true, indexed: true })).toEqual([]);
-    expect(withStellarHistoryPending([], { selected: true, unlocked: false, indexed: false })).toEqual([]);
-    expect(withStellarHistoryPending([1], { selected: false, unlocked: true, indexed: false })).toEqual([1]);
+  test('an index a failed refresh left incomplete still blocks the export: received transfers would be missing', () => {
+    expect(withStellarHistoryPending([], { selected: true, unlocked: true, noteOrigins: { complete: false } })).toEqual([202]);
+  });
+
+  test('nothing to wait for once completely indexed, while locked, or with another chain selected', () => {
+    expect(withStellarHistoryPending([], { selected: true, unlocked: true, noteOrigins: { complete: true } })).toEqual([]);
+    expect(withStellarHistoryPending([], { selected: true, unlocked: false, noteOrigins: null })).toEqual([]);
+    expect(withStellarHistoryPending([1], { selected: false, unlocked: true, noteOrigins: null })).toEqual([1]);
   });
 });

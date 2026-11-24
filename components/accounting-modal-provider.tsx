@@ -254,7 +254,7 @@ export function AccountingModalProvider({ children }: { children: React.ReactNod
   // Stellar's equivalent is the account's first read of the pool history: until
   // then its sends, withdrawals and exits have no rows.
   const pendingChainIds = useMemo(
-    () => withStellarHistoryPending(data.historyPendingChainIds, { selected: isStellar, unlocked: stellar.unlocked, indexed: stellar.noteOrigins !== null }),
+    () => withStellarHistoryPending(data.historyPendingChainIds, { selected: isStellar, unlocked: stellar.unlocked, noteOrigins: stellar.noteOrigins }),
     [data.historyPendingChainIds, isStellar, stellar.unlocked, stellar.noteOrigins],
   );
   const historyReady = pendingChainIds.length === 0;

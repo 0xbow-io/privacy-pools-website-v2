@@ -53,8 +53,8 @@ function sameCommitment(a: string, b: string): boolean {
   try { return BigInt(a) === BigInt(b); } catch { return String(a).toLowerCase() === String(b).toLowerCase(); }
 }
 
-/** Whether a commitment was minted on chain (a deposit or a transact output), and when. */
-export function stellarCommitmentOnChain(history: StellarPoolHistory, commitment: string): { onChain: boolean; timestampSec: number | null } {
+/** Whether a commitment was minted on chain (a deposit or a transact output), in which tx, and when. */
+export function stellarCommitmentOnChain(history: StellarPoolHistory, commitment: string): { onChain: boolean; txHash: string | null; timestampSec: number | null } {
   let txHash: string | null = null;
   for (const d of history.deposits) {
     if (sameCommitment(d.outputCommitment, commitment)) { txHash = d.txHash; break; }
@@ -64,9 +64,9 @@ export function stellarCommitmentOnChain(history: StellarPoolHistory, commitment
       if (t.outputCommitments.some((c) => sameCommitment(c, commitment))) { txHash = t.txHash; break; }
     }
   }
-  if (!txHash) return { onChain: false, timestampSec: null };
+  if (!txHash) return { onChain: false, txHash: null, timestampSec: null };
   const time = history.txAt.get(stellarTxKey(txHash))?.time ?? 0;
-  return { onChain: true, timestampSec: time > 0 ? time : null };
+  return { onChain: true, txHash, timestampSec: time > 0 ? time : null };
 }
 
 /**
@@ -113,8 +113,19 @@ export async function verifyStellarPartialViewingKey(bundle: PartialViewingKeyV1
   try {
     // The recomputed commitment, never the claimed one: a forged commitment
     // field cannot borrow another note's presence on chain.
-    const { onChain, timestampSec } = stellarCommitmentOnChain(await deps.loadHistory(), recomputed);
-    return { hashMatch, recomputedCommitment: recomputed, onChain, onChainTimestampSec: timestampSec, verified: hashMatch && onChain };
+    const minted = stellarCommitmentOnChain(await deps.loadHistory(), recomputed);
+    // The receipt names its transaction: the note must have been minted in
+    // exactly that one, or a real note could vouch for an unrelated tx.
+    const sameTx = minted.txHash !== null && stellarTxKey(minted.txHash) === stellarTxKey(String(bundle.txHash ?? ''));
+    const onChain = minted.onChain && sameTx;
+    return {
+      hashMatch,
+      recomputedCommitment: recomputed,
+      onChain,
+      onChainTimestampSec: onChain ? minted.timestampSec : null,
+      verified: hashMatch && onChain,
+      ...(minted.onChain && !sameTx ? { error: 'This note was created in a different transaction than the one this receipt names.' } : {}),
+    };
   } catch (err) {
     return { ...base, recomputedCommitment: recomputed, hashMatch, error: `On-chain check failed: ${message(err)}` };
   }

@@ -95,16 +95,17 @@ export function findBySpelling<T>(txHash: string, find: (h: string) => T | null 
 
 /**
  * The chains whose history the accounting export still waits for, with
- * Stellar added while its account is unlocked but has not read the pool's
- * history yet: its sends, withdrawals and exits are rebuilt from that read, so
- * exporting before it would drop them, the way an EVM chain whose history has
- * not loaded would.
+ * Stellar added while its account is unlocked but has no COMPLETE read of the
+ * pool's history: its sends, withdrawals and exits are rebuilt from that read,
+ * and received transfers only from a complete one, so exporting before it (or
+ * after a refresh that failed and left the index incomplete) would drop them,
+ * the way an EVM chain whose history has not loaded would.
  */
 export function withStellarHistoryPending(
   pending: readonly number[],
-  stellar: { selected: boolean; unlocked: boolean; indexed: boolean },
+  stellar: { selected: boolean; unlocked: boolean; noteOrigins: { complete: boolean } | null | undefined },
 ): number[] {
-  const waiting = stellar.selected && stellar.unlocked && !stellar.indexed;
+  const waiting = stellar.selected && stellar.unlocked && stellar.noteOrigins?.complete !== true;
   if (!waiting || pending.includes(STELLAR_TESTNET_ID)) return [...pending];
   return [...pending, STELLAR_TESTNET_ID];
 }
