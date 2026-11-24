@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
-import { claimSetupLegMessage, claimSetupPlan, claimSetupSteps, type ClaimFundingView } from '@/services/claim-setup-steps';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { claimProgressSurface, claimSetupLegMessage, claimSetupPlan, claimSetupSteps, type ClaimFundingView } from '@/services/claim-setup-steps';
+
+const ROOT = join(new URL('.', import.meta.url).pathname, '..', '..');
+const read = (rel: string) => readFileSync(join(ROOT, rel), 'utf8');
 
 const GWEI = 1_000_000_000n;
 const ETH = 10n ** 18n;
@@ -72,5 +78,35 @@ describe('claim page names the one-time setup', () => {
     ].join(' ');
     expect(all).not.toContain('—');
     expect(all).not.toMatch(/\bpp(ETH|USDC|USDT)\b/);
+  });
+});
+
+describe('the setup comes before the claim progress (review, 0xmatthewb)', () => {
+  test('setup shows its own line, the staged progress only once the claim itself runs', () => {
+    expect(claimProgressSurface({ anchoring: true, claimPhase: 'setup' })).toBe('setup-line');
+    expect(claimProgressSurface({ anchoring: true, claimPhase: 'claim' })).toBe('progress');
+    expect(claimProgressSurface({ anchoring: false, claimPhase: 'setup' })).toBe('none');
+  });
+
+  test('the claim enters setup before the registration, and leaves it before proving', () => {
+    const src = read('hooks/use-note-import.ts');
+    const claimStart = src.indexOf('const importOnChain = useCallback(');
+    const enter = src.indexOf("setClaimPhase('setup')", claimStart);
+    const register = src.indexOf('await sendRegistrationLegs(registration', claimStart);
+    const leave = src.indexOf("setClaimPhase('claim')", register);
+    const prove = src.indexOf('setStatusMessage(healedNotes.length > 1 ? `Generating proof', claimStart);
+    expect(claimStart).toBeGreaterThan(-1);
+    expect(enter).toBeGreaterThan(claimStart);
+    expect(register).toBeGreaterThan(enter);
+    expect(leave).toBeGreaterThan(register);
+    expect(prove).toBeGreaterThan(leave);
+  });
+
+  test('both claim surfaces gate the progress on claimProgressSurface', () => {
+    for (const rel of ['app/import-note/[encoded].tsx', 'components/import-note-modal-provider.tsx']) {
+      const src = read(rel);
+      expect(src).toContain("claimProgressSurface({ anchoring: status === 'anchoring', claimPhase }) === 'progress' ? (");
+      expect(src).not.toMatch(/\{status === 'anchoring' \? \(\s*<FlowProgress/);
+    }
   });
 });

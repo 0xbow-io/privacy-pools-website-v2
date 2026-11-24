@@ -27,6 +27,7 @@ import { FigureText } from '@/components/ui/share-figure';
 import { decodeNoteReceiptFromUrl, extractNoteReceiptEncoded } from '@/services/note-receipt';
 import { useSessionChainId } from '@/hooks/use-session-chain-id';
 import { useReceiptChainSwitch } from '@/hooks/use-receipt-chain-switch';
+import { claimProgressSurface } from '@/services/claim-setup-steps';
 import {
   parseSuiNoteReceipt,
   suiReceiptToStoredNote,
@@ -468,7 +469,7 @@ export function ImportNoteModalProvider({ children }: { children: React.ReactNod
 
               {/* Same staged horizontal progress as the shield/send flows for
                   the on-chain add; the quick device merge keeps a status line. */}
-              {status === 'anchoring' && claimPhase !== 'setup' ? (
+              {claimProgressSurface({ anchoring: status === 'anchoring', claimPhase }) === 'progress' ? (
                 <FlowProgress message={statusMessage} />
               ) : busy && statusMessage ? (
                 <View className="rounded-control border border-[#98B975] bg-[#F5FAEE] px-[14px] py-[12px]">

@@ -71,6 +71,19 @@ export function claimSetupSteps(plan: ClaimSetupPlan): { setup: string; claim: s
   return { setup, claim: '2. Claim: sent by a relayer, no wallet transaction.' };
 }
 
+/**
+ * What the claim shows while it runs. The setup's status line comes BEFORE the
+ * staged progress, never inside it: the setup prompts ("confirm in your
+ * wallet") read as the progress bar's Confirm step, and its phase never steps
+ * back, so the bar sat on Confirm while proving had not started (review,
+ * 0xmatthewb). Switching surfaces also remounts the progress, so the claim's
+ * own steps start again from Prepare once the setup is done.
+ */
+export function claimProgressSurface(args: { anchoring: boolean; claimPhase: 'setup' | 'claim' }): 'setup-line' | 'progress' | 'none' {
+  if (!args.anchoring) return 'none';
+  return args.claimPhase === 'setup' ? 'setup-line' : 'progress';
+}
+
 /** The status line while a setup transaction is out. */
 export function claimSetupLegMessage(leg: number, total: number, stage: 'confirm' | 'confirming'): string {
   const which = total > 1 ? ` ${leg} of ${total}` : '';

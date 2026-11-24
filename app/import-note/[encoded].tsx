@@ -33,7 +33,7 @@ import { isViewingKeyGasShort, usePublishViewingKey } from '@/hooks/use-publish-
 import { useKeystoreRegistrationModal } from '@/components/keystore-registration-modal-provider';
 import { formatGasTopUp } from '@/services/gas-top-up';
 import { FeeWarning } from '@/components/fee-warning';
-import { claimSetupPlan, claimSetupSteps } from '@/services/claim-setup-steps';
+import { claimProgressSurface, claimSetupPlan, claimSetupSteps } from '@/services/claim-setup-steps';
 import { useWalletTokens } from '@/components/wallet-tokens-provider';
 import { NATIVE_ASSET_ADDRESS } from '@/config/environments';
 import { useFeePricing } from '@/hooks/use-fee-pricing';
@@ -436,7 +436,7 @@ function EvmImportNoteScreen() {
             {/* On-chain add = the same staged flow as shield/send, so it gets
                 the same horizontal progress. The quick device merge keeps a
                 plain status line. */}
-            {status === 'anchoring' && claimPhase !== 'setup' ? (
+            {claimProgressSurface({ anchoring: status === 'anchoring', claimPhase }) === 'progress' ? (
               <FlowProgress message={statusMessage} />
             ) : busy && statusMessage ? (
               <Text className="font-pp-regular text-[12px] leading-[18px] text-primary">{statusMessage}</Text>
