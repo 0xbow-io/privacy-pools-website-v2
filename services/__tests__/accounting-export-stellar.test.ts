@@ -16,11 +16,13 @@ const { buildStellarNoteOrigins, deriveStellarActivity, reconstructStellarSpends
 const { findBySpelling, stellarSentDisclosures } = await import('@/services/stellar/stellar-audit');
 const { mergeMyTransactions } = await import('@/services/transfer-direction');
 const { getTokenMetadata } = await import('@/config/tokens');
+const { findWithdrawRecipientIn, upsertWithdrawRecipient } = await import('@/services/withdraw-recipients-core');
 type Hex = import('@/services/sdk-types').Hex;
 type Note = import('@/services/sdk-types').Note;
 
 const ME = 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H';
 const PAYEE = 'GCFONE23AB7Y6C5YZOMKUKGETPIAJA4QOYLS5VNS4JHBGKRZCPYHDLW7';
+const WITHDRAW_PAYEE = 'GAIH3ULLFQ4DGSECF2AR555KZ4KNDGEKN4AFI4SU2M7B43MGK3QJZNSR';
 const XLM = 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC';
 const NK = '0x5';
 const CTX = { chainId: 202, chainName: 'Stellar Testnet', symbol: 'XLM', decimals: 7, priceUsd: 0, ownAddress: ME };
@@ -45,31 +47,36 @@ const note = (c: number, value: bigint, status: string, label = '0xabc') => ({
 });
 
 /** Deposit 2 XLM, send 0.5, withdraw 0.5 (gross), exit the change, and receive 0.7 from someone else. */
-function stellarAccount() {
+function stellarAccount(opts: { secondPayment?: boolean } = {}) {
   const notes = [
     note(1, 20_000_000n, 'SPENT'),
     note(2, 15_000_000n, 'SPENT'),
     note(3, 10_000_000n, 'EXITED'),
     note(5, 7_000_000n, 'ACTIVE', '0xdef'),
+    // A second payment from the same sender's lineage, in a later tx.
+    ...(opts.secondPayment ? [note(6, 3_000_000n, 'ACTIVE', '0xdef')] : []),
   ];
   const transacts = [
     { txHash: tx(2), outputCommitments: ['0x2', '0x777'], nullifierHashes: [nullifierOf(1)], withdrawnValue: '0x0', asset: XLM },
     { txHash: tx(3), outputCommitments: ['0x3'], nullifierHashes: [nullifierOf(2)], withdrawnValue: '0x4c4b40', asset: XLM },
     // Someone else's send to us.
     { txHash: tx(5), outputCommitments: ['0x5', '0x555'], nullifierHashes: ['0x123'], withdrawnValue: '0x0', asset: XLM },
+    ...(opts.secondPayment ? [{ txHash: tx(6), outputCommitments: ['0x6', '0x666'], nullifierHashes: ['0x124'], withdrawnValue: '0x0', asset: XLM }] : []),
   ];
   const spends = reconstructStellarSpends({ notes, transacts, nullifyingKey: NK, hashService: fakeHash });
   const origins = buildStellarNoteOrigins({
     notes,
     deposits: [{ txHash: tx(1), outputCommitment: '0x1', depositor: ME }],
     transacts,
-    logs: [1, 2, 3, 4, 5].map((i) => ({ transactionHash: tx(i), ledger: `0x${(500 + i).toString(16)}`, ledgerClosedAt: `2026-09-30T10:0${i}:00Z` })),
+    logs: [1, 2, 3, 4, 5, 6].map((i) => ({ transactionHash: tx(i), ledger: `0x${(500 + i).toString(16)}`, ledgerClosedAt: `2026-09-30T10:0${i}:00Z` })),
     spends,
     ragequits: [{ txHash: tx(4), commitment: '0x3' }],
   });
   const activity = deriveStellarActivity(notes, origins, {
     ...CTX,
     sentRecipient: stellarSentRecipientLookup([{ txHash: `0x${tx(2)}`, recipient: PAYEE, chainId: 202 }], 202),
+    // What the withdraw modal records (the real store's upsert), under the receipt's spelling.
+    withdrawRecipient: (h) => findWithdrawRecipientIn(withdrawRecorded, h, 202),
   });
   return { notes: notes as unknown as Note[], rows: mergeMyTransactions([], activity.rows) };
 }
@@ -82,13 +89,14 @@ const sentStore = new Map([[`0x${tx(2)}`, stellarSentDisclosures({
   amount: 5_000_000n,
   notes: [{ commitment: '0x777', ownerAddress: PAYEE, noteSecret: '0x42', value: pad(5_000_000n), tokenId: XLM, label: '0xabc' }],
 })]]);
+const withdrawRecorded = upsertWithdrawRecipient([], { txHash: `0x${tx(3).toUpperCase()}`, chainId: 202, recipient: WITHDRAW_PAYEE, timestamp: 1 });
 const feeStore = new Map([
   [`0x${tx(3)}`, { feeAmount: '0x493e0' }], // 0.03 XLM inside the withdrawal
   [`0x${tx(2)}`, { feeAmount: '0x186a0' }], // 0.01 XLM on top of the send
 ]);
 
-function items() {
-  const { notes, rows } = stellarAccount();
+function items(opts: { secondPayment?: boolean } = {}) {
+  const { notes, rows } = stellarAccount(opts);
   return buildAccountingItems({
     mineRows: rows,
     notes,
@@ -119,6 +127,21 @@ describe('Stellar accounting items', () => {
     // Public: CSV only, the gross that left the pool.
     expect(byType.withdraw).toMatchObject({ bundles: null, value: '5000000' });
     expect(byType.exit).toMatchObject({ bundles: null, value: '10000000', label: '0xabc' });
+  });
+
+  test('two payments from the same lineage are two receipts, each by its own tx', () => {
+    const received = items({ secondPayment: true }).filter((it) => it.type === 'transfer-in').sort((a, b) => a.timestamp - b.timestamp);
+    expect(received.map((it) => [it.txHash, BigInt(it.value)])).toEqual([[tx(5), 7_000_000n], [tx(6), 3_000_000n]]);
+    expect(received.map((it) => it.bundles?.[0]?.commitment)).toEqual([pad(5n), pad(6n)]);
+    // Our own spends' outputs (the change) are never receipts.
+    expect(items({ secondPayment: true }).some((it) => it.type === 'transfer-in' && [tx(2), tx(3)].includes(it.txHash))).toBe(false);
+  });
+
+  test('a withdrawal made on this device names its recorded payee, so a recipient filter finds it', () => {
+    const [withdrawal] = items().filter((it) => it.type === 'withdraw');
+    // Recorded under the receipt's 0x, upper-case spelling; the row has it bare. The StrKey keeps its case.
+    expect(withdrawal.counterparty).toBe(WITHDRAW_PAYEE);
+    expect(withdrawal.counterparty?.toLowerCase().includes(WITHDRAW_PAYEE.slice(0, 8).toLowerCase())).toBe(true);
   });
 });
 

@@ -12,7 +12,7 @@
 import type { SentNoteDisclosure } from '@/services/audit-receipt';
 import type { Address, Hash, Hex, Secret } from '@/services/sdk-types';
 import type { StellarSentClaim } from '@/services/stellar/stellar-sent-claims';
-import { STELLAR_TESTNET_ID } from '@/config/stellar-deployment';
+import { STELLAR_TESTNET_CONTRACTS, STELLAR_TESTNET_ID } from '@/config/stellar-deployment';
 
 /** A recipient note as the SDK returns it from a send (or as a claim keeps it). */
 export type StellarRecipientNote = {
@@ -71,6 +71,29 @@ export function stellarSentDisclosures(input: {
     });
   }
   return total === amount ? out : [];
+}
+
+/**
+ * The fee record a relayed Stellar spend leaves (services/withdraw-fees-store),
+ * as the EVM paths write it: a send's or a paid request's fee comes on top of
+ * the amount (kind 'transfer'), a withdrawal's is inside what left the pool
+ * (kind 'withdrawal'). Null when the relay charged nothing.
+ */
+export function stellarRelayFeeRecord(input: {
+  txHash: string;
+  fee: bigint | null | undefined;
+  kind: 'transfer' | 'withdrawal';
+  nowMs: number;
+}): { txHash: string; feeAmount: string; tokenAddress: string; chainId: number; timestamp: number; kind: 'transfer' | 'withdrawal' } | null {
+  if (!input.txHash || input.fee == null || input.fee <= 0n) return null;
+  return {
+    txHash: input.txHash,
+    feeAmount: `0x${input.fee.toString(16)}`,
+    tokenAddress: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
+    chainId: STELLAR_TESTNET_ID,
+    timestamp: input.nowMs,
+    kind: input.kind,
+  };
 }
 
 /**

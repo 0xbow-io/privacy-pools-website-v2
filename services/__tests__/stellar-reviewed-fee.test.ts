@@ -13,7 +13,7 @@ import { feeWithinReviewed, relayerFeeJitterAllowance, transferFeeBudget } from 
 const source = readFileSync(new URL('../stellar/stellar-account.ts', import.meta.url), 'utf8');
 const ast = ts.createSourceFile('stellar-account.ts', source, ts.ScriptTarget.Latest, true);
 const account = ast.statements.find(ts.isClassDeclaration)!;
-const methods = ['relayOnce', 'withdraw', 'keepClaim'];
+const methods = ['relayOnce', 'withdraw', 'keepClaim', 'payPaymentRequest'];
 const body = account.members.filter(m => ts.isMethodDeclaration(m) && methods.includes(m.name.getText(ast))).map(m => m.getText(ast)).join('\n');
 const code = ts.transpileModule(`class Account { ${body} }; return new Account();`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 function harness() {
@@ -80,4 +80,17 @@ test('closing a claim during its fresh quote prevents the relay', async () => {
   // The original optional-parameters call shape remains supported.
   expect(await account.keepClaim(['0x1'])).toEqual({ txHash: '0x1' });
   expect(relays).toBe(1);
+});
+
+test('paying a blind request returns the fee the relay charged, for the payer to record', async () => {
+  const account = harness();
+  Object.assign(account, {
+    enqueue: (fn: () => unknown) => fn(), requireSigner: () => ({ address: 'G', generation: 1 }),
+    ensureSession: async () => ({}), ensureRegistered: async () => {}, assertStillBound: () => {},
+    connectRelayer: async () => ({}), refreshLocal: async () => {},
+    withTransferRelayer: (_relayer: unknown, fn: () => unknown) => fn(),
+    relayOnce: async () => ({ txReceipt: { status: true, txHash: '0xabc' }, fee: 317289n }),
+  });
+  const request = { tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId };
+  expect(await account.payPaymentRequest({ maxFee: 2849562n, request, inputCommitments: ['0x1'] })).toEqual({ txHash: '0xabc', fee: 317289n });
 });

@@ -173,7 +173,7 @@ export type OnChainNoteIndexParams = {
 /** The subset of the ASP event snapshot this index consumes. */
 export type EventSnapshotLike = {
   snapshotBlockNumber: string;
-  deposits?: Array<{ outputCommitment: string; blockTimestamp: string; blockNumber?: string }>;
+  deposits?: Array<{ outputCommitment: string; blockTimestamp: string; blockNumber?: string; txHash?: string }>;
   transacts?: Array<{
     outputCommitments?: string[];
     nullifierHashes?: string[];
@@ -220,6 +220,10 @@ type Built = {
   /** commitment -> block that produced it, for healing a dropped ASP
    *  timestamp from the chain (getBlock(block).timestamp). */
   sourceBlocks: Map<string, Hex>;
+  /** commitment -> hash of the tx whose event minted it (a deposit output or a
+   *  transact output), from the same bulk events. Absent when the source row
+   *  carried no tx hash. */
+  mintTx: Map<string, string>;
 };
 
 export class OnChainNoteIndex {
@@ -309,6 +313,15 @@ export class OnChainNoteIndex {
   }
 
   /**
+   * Hash of the tx whose Deposited / Transacted event minted a commitment, from
+   * the same bulk events as {@link hasCommitment}; null when absent or when the
+   * row carried no tx hash. Never a lookup of its own.
+   */
+  mintingTxHash(commitment: Hash): string | null {
+    return this.built().mintTx.get(key(commitment)) ?? null;
+  }
+
+  /**
    * Whether a nullifier appears in any Transacted / Ragequit event, independent
    * of whether its block timestamp resolved. THE spent check.
    */
@@ -380,6 +393,7 @@ export class OnChainNoteIndex {
       unverified: [],
       chainVerified: new Set(),
       sourceBlocks: new Map(),
+      mintTx: new Map(),
     };
 
     const snapshotBlock = await this.applySnapshot(next);
@@ -499,6 +513,7 @@ export class OnChainNoteIndex {
       unverified: [],
       chainVerified: new Set(),
       sourceBlocks: new Map(),
+      mintTx: new Map(),
     };
     // A row claiming a block beyond the snapshot's own advertised boundary is
     // self-inconsistent; letting it into the heal queue hands the ASP a lever
@@ -513,6 +528,7 @@ export class OnChainNoteIndex {
     for (const deposit of snapshot.deposits ?? []) {
       const c = key(deposit.outputCommitment);
       staged.observedCommitments.add(c);
+      if (deposit.txHash) staged.mintTx.set(c, deposit.txHash);
       const ts = isoToHexSeconds(deposit.blockTimestamp);
       if (ts) staged.commitments.set(c, ts);
       {
@@ -526,6 +542,7 @@ export class OnChainNoteIndex {
       const nulls = (transact.nullifierHashes ?? []).map(key);
       for (const c of outs) {
         staged.observedCommitments.add(c);
+        if (transact.txHash) staged.mintTx.set(c, transact.txHash);
         if (ts) staged.commitments.set(c, ts);
         {
         const sb = healSourceBlock(transact.blockNumber);
@@ -666,9 +683,15 @@ export class OnChainNoteIndex {
 
     // Presence and spent state first, from every event, before any timestamp
     // work can fail.
-    for (const d of deposits) target.observedCommitments.add(key(d.outputCommitment));
+    for (const d of deposits) {
+      target.observedCommitments.add(key(d.outputCommitment));
+      if (d.txHash) target.mintTx.set(key(d.outputCommitment), String(d.txHash));
+    }
     for (const t of transacts) {
-      for (const c of t.outputCommitments) target.observedCommitments.add(key(c));
+      for (const c of t.outputCommitments) {
+        target.observedCommitments.add(key(c));
+        if (t.txHash) target.mintTx.set(key(c), String(t.txHash));
+      }
       for (const n of t.nullifierHashes) target.spentNullifiers.add(key(n));
     }
     for (const r of ragequits) {
@@ -1053,6 +1076,7 @@ function mergeInto(target: Built, staged: Built): void {
   for (const k of staged.spentNullifiers) target.spentNullifiers.add(k);
   for (const k of staged.chainVerified) target.chainVerified.add(k);
   for (const [k, v] of staged.sourceBlocks) target.sourceBlocks.set(k, v);
+  for (const [k, v] of staged.mintTx) target.mintTx.set(k, v);
   target.transacts.push(...staged.transacts);
 }
 
@@ -1099,6 +1123,7 @@ export function parseEventSnapshot(raw: unknown): EventSnapshotLike {
       outputCommitment: row.outputCommitment,
       blockTimestamp: row.blockTimestamp,
       blockNumber: optBlock(row.blockNumber, `deposits[${i}]`),
+      txHash: typeof row.txHash === 'string' ? row.txHash : undefined,
     };
   });
   const transacts = arr(s.transacts, 'transacts').map((t, i) => {

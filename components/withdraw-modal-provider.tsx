@@ -3035,7 +3035,9 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         });
         setTxHash(result.txHash);
         setTxChainId(STELLAR_TESTNET_ID);
-        recordRecipientUseForActiveOwner(recipient, STELLAR_TESTNET_ID);
+        // Keyed by the tx, as an EVM withdrawal records it: the chain names no
+        // payee, and the history row and accounting export read it from here.
+        recordWithdrawRecipientEverywhere({ txHash: result.txHash, chainId: STELLAR_TESTNET_ID, recipient, timestamp: Date.now() });
         // The relayer fee inside what left the pool, as an EVM withdrawal
         // records it: the accounting export splits it out of the gross.
         if (result.fee > 0n) {

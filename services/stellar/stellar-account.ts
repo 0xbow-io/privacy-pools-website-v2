@@ -1479,7 +1479,8 @@ class StellarAccount {
       if (!result.txReceipt.status) throw new Error('The transfer transaction failed on-chain.');
       onStage?.('syncing');
       await this.refreshLocal(session, address);
-      return { txHash: String(result.txReceipt.txHash) };
+      // The relayer fee paid on top of the request, for the payer's records.
+      return { txHash: String(result.txReceipt.txHash), fee: result.fee };
     });
   }
 

@@ -288,6 +288,7 @@ export async function verifyPartialViewingKey(bundle: PartialViewingKeyV1): Prom
 
   let onChain = false;
   let onChainTimestampSec: number | null = null;
+  let mintError: string | undefined;
   try {
     const sdkSetup = await import('@/services/sdk-runtime');
     const { getChainConfig } = await import('@/config/chains');
@@ -321,8 +322,14 @@ export async function verifyPartialViewingKey(bundle: PartialViewingKeyV1): Prom
     // Presence, not timestamp: a commitment can be on-chain while its
     // timestamp fails leaf verification, and "is this note real" must not
     // hinge on the latter.
-    onChain = noteIndex.hasCommitment(recomputed);
-    const tsRaw = noteIndex.commitmentTimestamp(recomputed);
+    const minted = receiptMintVerdict({
+      present: noteIndex.hasCommitment(recomputed),
+      mintTxHash: noteIndex.mintingTxHash(recomputed),
+      receiptTxHash: String(bundle.txHash ?? ''),
+    });
+    onChain = minted.onChain;
+    mintError = minted.error;
+    const tsRaw = onChain ? noteIndex.commitmentTimestamp(recomputed) : null;
     onChainTimestampSec = tsRaw ? Number(BigInt(tsRaw)) : null;
   } catch (err) {
     return {
@@ -339,7 +346,29 @@ export async function verifyPartialViewingKey(bundle: PartialViewingKeyV1): Prom
     onChain,
     onChainTimestampSec,
     verified: hashMatch && onChain,
+    ...(mintError ? { error: mintError } : {}),
   };
+}
+
+/**
+ * Whether a receipt's note was minted in the transaction the receipt names.
+ * A real note must not vouch for an unrelated tx, so presence alone is not
+ * enough: the Deposited / Transacted event that minted the commitment must
+ * carry the receipt's txHash. Answered only from the bulk events the presence
+ * check already read (no request names the tx or the note); when that data
+ * carries no tx hash for the commitment, it fails closed rather than look the
+ * transaction up.
+ */
+export function receiptMintVerdict(input: { present: boolean; mintTxHash: string | null; receiptTxHash: string }): { onChain: boolean; error?: string } {
+  if (!input.present) return { onChain: false };
+  if (!input.mintTxHash) {
+    return { onChain: false, error: 'Could not confirm which transaction created this note, so the receipt was not verified.' };
+  }
+  const norm = (h: string) => h.trim().toLowerCase().replace(/^0x/, '');
+  if (!input.receiptTxHash || norm(input.mintTxHash) !== norm(input.receiptTxHash)) {
+    return { onChain: false, error: 'This note was created in a different transaction than the one this receipt names.' };
+  }
+  return { onChain: true };
 }
 // ===========================================================================
 // Proof of origin — for a PUBLIC withdrawal/exit, prove the funds are clean

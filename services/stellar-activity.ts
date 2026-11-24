@@ -93,6 +93,8 @@ export type StellarActivityContext = {
   ownAddress: string;
   /** Payee this device recorded for one of its sends, if any (local store). */
   sentRecipient?: (txHash: string) => string | null;
+  /** Payee this device recorded for one of its withdrawals, if any (local store). */
+  withdrawRecipient?: (txHash: string) => string | null;
   /** Blind deposits this account made FOR someone (DEV-499), from its saved claims. */
   sentDeposits?: readonly { txHash: string | null; recipient: string; amount: string; tokenId: string; createdAt: number }[];
   /** Deposits this account made for other accounts (this device's record). */
@@ -364,7 +366,29 @@ export function deriveStellarActivity(
       byLabel.set(label, group);
     }
     const receivedByTx = new Map<string, { note: StellarActivityNote; origin: StellarNoteOrigin; sum: bigint; order: number }>();
-    for (const group of byLabel.values()) {
+    const addReceived = (e: { note: StellarActivityNote; origin: StellarNoteOrigin; order: number }) => {
+      const raw = toBig(e.note.value);
+      const key = canonicalTx(e.origin.txHash);
+      if (raw === null || !key) return;
+      const acc = receivedByTx.get(key);
+      if (acc) acc.sum += raw;
+      else receivedByTx.set(key, { note: e.note, origin: e.origin, sum: raw, order: e.order });
+    };
+    if (origins.spends) {
+      // With this account's spends known (its keys were in memory for the
+      // read), every incoming payment counts, one per creating tx, as on EVM:
+      // a note made by someone else's deposit, or by a transact that is not
+      // one of ours (whose outputs to us are change). A second payment from
+      // the same lineage is its own receipt, not part of the first.
+      const ownSpendTx = new Set(origins.spends.map((s) => canonicalTx(s.txHash)));
+      for (const e of own) {
+        const origin = e.origin;
+        if (!origin) continue;
+        if (origin.kind === 'deposit' ? isOwnDeposit(origin) : ownSpendTx.has(canonicalTx(origin.txHash))) continue;
+        addReceived({ note: e.note, origin, order: e.order });
+      }
+    }
+    for (const group of origins.spends ? [] : byLabel.values()) {
       // Notes made after the index was read (our own flow's outputs) have no
       // origin yet; they are necessarily later, so they never decide the entry.
       const known = group.filter((e) => !!e.origin) as Array<{ note: StellarActivityNote; origin: StellarNoteOrigin; order: number }>;
@@ -381,14 +405,8 @@ export function deriveStellarActivity(
         entries = known.filter((e) => e.origin.ledger === first);
         if (new Set(entries.map((e) => canonicalTx(e.origin.txHash))).size !== 1) continue;
       }
-      for (const e of entries) {
-        const raw = toBig(e.note.value);
-        const key = canonicalTx(e.origin.txHash);
-        if (raw === null || !key) continue;
-        const acc = receivedByTx.get(key);
-        if (acc) acc.sum += raw;
-        else receivedByTx.set(key, { note: e.note, origin: e.origin, sum: raw, order: e.order });
-      }
+      // Without keys, only the lineage's entry can be told from change.
+      for (const e of entries) addReceived(e);
     }
     for (const { note, origin, sum } of [...receivedByTx.values()].sort((a, b) => a.order - b.order)) {
       rows.push({
@@ -473,7 +491,8 @@ export function deriveStellarActivity(
     const isTransfer = spend.kind === 'transfer';
     if (isTransfer) sentCount += 1;
     else withdrawalCount += 1;
-    const payee = isTransfer ? ctx.sentRecipient?.(spend.txHash) ?? '' : '';
+    // The chain names neither payee; this device's own records do, for its own spends.
+    const payee = (isTransfer ? ctx.sentRecipient?.(spend.txHash) : ctx.withdrawRecipient?.(spend.txHash)) ?? '';
     rows.push({
       ...eventRow(spend.txHash, spend.tokenId, raw, spend.time, ctx),
       address: shortAddress(payee),

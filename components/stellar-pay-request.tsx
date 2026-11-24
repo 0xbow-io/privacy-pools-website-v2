@@ -34,6 +34,8 @@ import type { PendingLabel } from '@/services/stellar/stellar-account';
 import { StellarLabelRetryNotice } from '@/components/stellar-label-retry';
 import type { Note as UiNote } from '@/services/sdk-types';
 import { CARD_SHADOW } from '@/components/ui/web-style-shims';
+import { stellarRelayFeeRecord } from '@/services/stellar/stellar-audit';
+import { recordWithdrawFee } from '@/services/withdraw-fees-store';
 
 /** The payer-facing text for a failed Stellar pay attempt. */
 export function stellarPayErrorMessage(e: unknown): string {
@@ -206,6 +208,14 @@ export function StellarPayRequestScreen({ encoded }: { encoded: string }) {
         onStage: (stage) => setStatus(describeStellarStage(stage)),
       });
       setPaidTx(result.txHash);
+      // The relayer fee came on top of the request, as on the EVM payment path:
+      // without it the payer's history and accounting understate the spend.
+      try {
+        const fee = stellarRelayFeeRecord({ txHash: result.txHash, fee: result.fee, kind: 'transfer', nowMs: Date.now() });
+        if (fee) recordWithdrawFee(fee);
+      } catch (e) {
+        console.warn('[stellar] could not record the relayer fee', e);
+      }
     } catch (e) {
       setError(stellarPayErrorMessage(e));
     } finally {

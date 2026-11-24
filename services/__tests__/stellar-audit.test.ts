@@ -3,11 +3,49 @@ import { describe, expect, mock, test } from 'bun:test';
 import {
   findBySpelling,
   stellarClaimDisclosures,
+  stellarRelayFeeRecord,
   stellarSentDisclosures,
   stellarTxHashSpellings,
   withStellarHistoryPending,
 } from '@/services/stellar/stellar-audit';
 import type { StellarSentClaim } from '@/services/stellar/stellar-sent-claims';
+import { findWithdrawFeeIn, upsertWithdrawFee } from '@/services/withdraw-fees-core';
+import { findWithdrawRecipientIn, upsertWithdrawRecipient } from '@/services/withdraw-recipients-core';
+
+describe('Stellar relay fee records', () => {
+  test("a paid blind request's fee is stored as a transfer fee the payer's export finds", () => {
+    const record = stellarRelayFeeRecord({ txHash: '0xABC', fee: 317_289n, kind: 'transfer', nowMs: 5 });
+    expect(record).toEqual({
+      txHash: '0xABC', feeAmount: '0x4d769', tokenAddress: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC',
+      chainId: 202, timestamp: 5, kind: 'transfer',
+    });
+    expect(findWithdrawFeeIn(upsertWithdrawFee([], record!), '0xabc')?.feeAmount).toBe('0x4d769');
+  });
+
+  test('no record when the relay charged nothing', () => {
+    expect(stellarRelayFeeRecord({ txHash: '0xabc', fee: 0n, kind: 'transfer', nowMs: 5 })).toBeNull();
+    expect(stellarRelayFeeRecord({ txHash: '0xabc', fee: undefined, kind: 'withdrawal', nowMs: 5 })).toBeNull();
+  });
+});
+
+describe('Stellar withdrawal payees in the recipient store', () => {
+  const G = 'GCFONE23AB7Y6C5YZOMKUKGETPIAJA4QOYLS5VNS4JHBGKRZCPYHDLW7';
+  const H = 'ab'.repeat(32);
+
+  test('a StrKey payee is kept with its case and found from either hash spelling', () => {
+    const list = upsertWithdrawRecipient([], { txHash: `0x${H.toUpperCase()}`, chainId: 202, recipient: G, timestamp: 1 });
+    expect(list).toHaveLength(1);
+    expect(findWithdrawRecipientIn(list, H, 202)).toBe(G);
+    expect(findWithdrawRecipientIn(list, `0x${H}`, 202)).toBe(G);
+    expect(findWithdrawRecipientIn(list, H, 1)).toBeNull();
+  });
+
+  test('EVM entries are unchanged: lowercased, and junk is still refused', () => {
+    const evm = upsertWithdrawRecipient([], { txHash: `0x${H}`, chainId: 1, recipient: `0x${'AB'.repeat(20)}`, timestamp: 1 });
+    expect(findWithdrawRecipientIn(evm, `0x${H}`, 1)).toBe(`0x${'ab'.repeat(20)}`);
+    expect(upsertWithdrawRecipient([], { txHash: `0x${H}`, chainId: 202, recipient: 'not-an-address', timestamp: 1 })).toEqual([]);
+  });
+});
 
 const ME = 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H';
 const BOB = 'GCFONE23AB7Y6C5YZOMKUKGETPIAJA4QOYLS5VNS4JHBGKRZCPYHDLW7';
