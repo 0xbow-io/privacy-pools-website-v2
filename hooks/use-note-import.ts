@@ -1,12 +1,16 @@
 import { useCallback, useRef, useState } from 'react';
 import { useActiveEvmChain } from '@/hooks/use-active-evm-chain';
 import { useSessionChainId } from '@/hooks/use-session-chain-id';
-import { useAccount, usePublicClient, useSendTransaction, useSignTypedData, useSwitchChain } from 'wagmi';
+import { useAccount, useConfig, usePublicClient, useSendTransaction, useSignTypedData, useSwitchChain } from 'wagmi';
 
+import { getAccount } from 'wagmi/actions';
+import { registrationOwnerUnchanged } from '@/services/wallet-tx-fees';
+import { clearRegistrationBatch } from '@/services/registration-batch';
+import { submitWalletRegistrationBatch } from '@/services/wallet-registration-batch';
 import { usePoolSession } from '@/hooks/use-pool-session';
 import { useRelayerQuote } from '@/hooks/use-relayer';
 import { useDebug } from '@/components/debug-provider';
-import { useKeystoreRegistrationModal } from '@/components/keystore-registration-modal-provider';
+import { REGISTRATION_OWNER_CHANGED, useKeystoreRegistrationModal } from '@/components/keystore-registration-modal-provider';
 import { getChainConfig, isSupportedEvmChainId } from '@/config/chains';
 import { LEGACY_CONFIG } from '@/config/env';
 import { registrationTopUpEnabled, supportsColdStartClaim } from '@/config/cold-start';
@@ -188,6 +192,7 @@ async function checkLinkApproval(notes: readonly Note[], chainId: number): Promi
  */
 export function useNoteImport() {
   const { address } = useAccount();
+  const wagmiConfig = useConfig();
   // The chain this flow ACTS ON — the app's selection, not the wallet's.
   //
   // This was useChainId(), which returns wagmi's config state = the WALLET's
@@ -650,6 +655,7 @@ export function useNoteImport() {
   // confirmed. Shared by the claim and the DEV-493 register-only offer.
   const sendRegistrationLegs = useCallback(async (
     registration: KeystoreRegistration,
+    live: () => boolean,
     onLeg?: (leg: number, total: number, stage: 'confirm' | 'confirming') => void,
   ) => {
     // A public client is REQUIRED here: without it a reverted registration
@@ -662,35 +668,38 @@ export function useNoteImport() {
     // unlock's viewing key onto another unlock's registration.
     const refusal = ownRegistrationResultRefusal(chainId, sessionAddress, registration);
     if (refusal) throw new Error(refusal);
-    const total = (registration.keystoreCalldata ? 1 : 0) + (registration.viewingKeyCalldata ? 1 : 0);
-    let leg = 0;
-    if (registration.keystoreCalldata) {
-      onLeg?.(++leg, total, 'confirm');
-      const keystoreHash = await sendTransactionAsync({
-        chainId,
-        to: registration.keystoreCalldata.to,
-        data: registration.keystoreCalldata.data,
-        value: BigInt(registration.keystoreCalldata.value),
-      });
-      onLeg?.(leg, total, 'confirming');
-      const keystoreReceipt = await publicClient.waitForTransactionReceipt({ hash: keystoreHash, timeout: 180_000 });
-      // viem RESOLVES for a reverted tx — the status field is the only signal.
-      if (keystoreReceipt.status !== 'success') {
-        throw new Error('Inbox setup failed on-chain. Your funds are still saved on this device. Retry.');
+    if (!address) throw new Error(REGISTRATION_OWNER_CHANGED);
+    const checkOwner = () => {
+      if (!registrationOwnerUnchanged({ owner: address, chainId, current: getAccount(wagmiConfig) })) {
+        throw new Error(REGISTRATION_OWNER_CHANGED);
       }
-    }
-    if (registration.viewingKeyCalldata) {
-      onLeg?.(++leg, total, 'confirm');
-      const viewingKeyHash = await sendTransactionAsync({
-        chainId,
-        to: registration.viewingKeyCalldata.to,
-        data: registration.viewingKeyCalldata.data,
-        value: BigInt(registration.viewingKeyCalldata.value),
-      });
-      onLeg?.(leg, total, 'confirming');
-      const viewingKeyReceipt = await publicClient.waitForTransactionReceipt({ hash: viewingKeyHash, timeout: 180_000 });
-      if (viewingKeyReceipt.status !== 'success') {
-        throw new Error('Account setup failed on-chain. Your funds are still saved on this device. Retry.');
+    };
+    const beforeFirstSend = () => {
+      if (!live()) throw new Error('Claim setup was closed before the wallet prompt.');
+      checkOwner();
+    };
+    const batch = await submitWalletRegistrationBatch(wagmiConfig, {
+      owner: address, chainId,
+      keystoreCalldata: registration.keystoreCalldata,
+      viewingKeyCalldata: registration.viewingKeyCalldata,
+      beforeSend: beforeFirstSend,
+      onAwaitingWallet: waiting => onLeg?.(1, 1, waiting ? 'confirm' : 'confirming'),
+    });
+    if (batch && !batch.success) throw new Error('Inbox setup failed on-chain. Your funds are still saved on this device. Retry.');
+    if (!batch) {
+      const calls = [registration.keystoreCalldata, registration.viewingKeyCalldata].filter(call => call != null);
+      for (const [index, call] of calls.entries()) {
+        if (index === 0) beforeFirstSend();
+        else checkOwner();
+        onLeg?.(index + 1, calls.length, 'confirm');
+        const hash = await sendTransactionAsync({
+          account: address, chainId, to: call.to, data: call.data, value: BigInt(call.value),
+        });
+        onLeg?.(index + 1, calls.length, 'confirming');
+        const receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 180_000 });
+        if (receipt.status !== 'success') {
+          throw new Error('Inbox setup failed on-chain. Your funds are still saved on this device. Retry.');
+        }
       }
     }
     try {
@@ -701,7 +710,8 @@ export function useNoteImport() {
     markRegistered(sessionAddress, chainId);
     confirmedRegistration(sessionAddress, chainId, true);
     setReceiveSetup(sessionAddress, chainId, 'complete', 'onchain');
-  }, [publicClient, sendTransactionAsync, chainId, keystoreManager, markRegistered, sessionAddress]);
+    checkOwner();
+  }, [address, wagmiConfig, publicClient, sendTransactionAsync, chainId, keystoreManager, markRegistered, sessionAddress]);
 
   // DEV-493: register the wallet without claiming (see registerOffer).
   const registerWalletOnly = useCallback(async () => {
@@ -723,11 +733,12 @@ export function useNoteImport() {
         if (!registration.keystoreCalldata && !registration.viewingKeyCalldata) {
           throw new Error('On-chain setup is unavailable for this session.');
         }
-        await sendRegistrationLegs(registration);
+        await sendRegistrationLegs(registration, live);
       } else {
         // "Already registered" means ANY keys (SDK 1.0.2): only ours count.
         const refusal = ownRegistrationResultRefusal(chainId, sessionAddress, registration);
         if (refusal) throw new Error(refusal);
+        clearRegistrationBatch(address, chainId);
         setReceiveSetup(sessionAddress, chainId, 'complete', 'onchain');
       }
       if (live()) {
@@ -1305,6 +1316,7 @@ export function useNoteImport() {
           // unlock onto another unlock's registration strands the funds.
           const refusal = ownRegistrationResultRefusal(chainId, sessionAddress, registration);
           if (refusal) throw new Error(refusal);
+          clearRegistrationBatch(owner, chainId);
           setReceiveSetup(sessionAddress, chainId, 'complete', 'onchain');
         }
         if (!registration.alreadyRegistered && !registration.keystoreCalldata && !registration.viewingKeyCalldata) {
@@ -1336,11 +1348,17 @@ export function useNoteImport() {
               throw new Error('The network fee currently exceeds this amount, so it cannot be added right now. Nothing was sent. It stays saved on this device. Retry later.');
             }
           }
-          if (live()) setClaimPhase('setup');
-          await sendRegistrationLegs(registration, (leg, total, stage) => {
+          if (live()) {
+            setClaimPhase('setup');
+            setStatusMessage('Checking wallet setup…');
+          }
+          await sendRegistrationLegs(registration, live, (leg, total, stage) => {
             if (live()) setStatusMessage(claimSetupLegMessage(leg, total, stage));
           });
-          if (live()) setClaimPhase('claim');
+          if (live()) {
+            setClaimPhase('claim');
+            setStatusMessage('Preparing claim…');
+          }
         }
 
         const transferQuotes = relayerTransferQuotes(chainId);

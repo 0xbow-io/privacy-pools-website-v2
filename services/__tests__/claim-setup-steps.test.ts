@@ -11,7 +11,7 @@ describe('claim page names the one-time setup', () => {
   test('probed self-funded: steps shown, two confirmations unregistered, one partial', () => {
     expect(claimSetupPlan({ setupState: 'unregistered', funding: { source: 'probed', kind: 'self-funded' } })).toEqual({ kind: 'setup', confirmations: 2 });
     expect(claimSetupPlan({ setupState: 'partial', funding: { source: 'probed', kind: 'self-funded' } })).toEqual({ kind: 'setup', confirmations: 1 });
-    expect(claimSetupSteps({ kind: 'setup', confirmations: 2 })?.setup).toContain('2 wallet confirmations');
+    expect(claimSetupSteps({ kind: 'setup', confirmations: 2 })?.setup).toContain('up to 2 wallet confirmations');
     expect(claimSetupSteps({ kind: 'setup', confirmations: 1 })?.setup).toContain('1 wallet confirmation,');
   });
 

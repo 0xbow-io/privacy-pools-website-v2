@@ -59,15 +59,15 @@ export function claimSetupPlan(args: { setupState: ReceiveSetupState; funding: C
 }
 
 function confirmationsText(n: number): string {
-  return n === 1 ? '1 wallet confirmation' : `${n} wallet confirmations`;
+  return n === 1 ? '1 wallet confirmation' : `up to ${n} wallet confirmations`;
 }
 
 /** The two steps, shown before Claim is pressed. Null when there is no setup. */
 export function claimSetupSteps(plan: ClaimSetupPlan): { setup: string; claim: string } | null {
   if (plan.kind === 'none') return null;
   const setup = plan.kind === 'setup'
-    ? `1. One-time setup: ${confirmationsText(plan.confirmations)}, you pay gas once.`
-    : '1. One-time setup, first claim with this wallet only: up to 2 wallet confirmations, you pay gas once.';
+    ? `1. One-time setup: ${confirmationsText(plan.confirmations)}, network fees apply.`
+    : '1. If your wallet needs setup: up to 2 wallet confirmations, network fees apply.';
   return { setup, claim: '2. Claim: sent by a relayer, no wallet transaction.' };
 }
 

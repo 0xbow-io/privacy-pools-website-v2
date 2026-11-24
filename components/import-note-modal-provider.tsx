@@ -468,7 +468,7 @@ export function ImportNoteModalProvider({ children }: { children: React.ReactNod
 
               {/* Same staged horizontal progress as the shield/send flows for
                   the on-chain add; the quick device merge keeps a status line. */}
-              {status === 'anchoring' ? (
+              {status === 'anchoring' && claimPhase !== 'setup' ? (
                 <FlowProgress message={statusMessage} />
               ) : busy && statusMessage ? (
                 <View className="rounded-control border border-[#98B975] bg-[#F5FAEE] px-[14px] py-[12px]">

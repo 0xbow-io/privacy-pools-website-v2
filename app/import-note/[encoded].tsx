@@ -436,7 +436,7 @@ function EvmImportNoteScreen() {
             {/* On-chain add = the same staged flow as shield/send, so it gets
                 the same horizontal progress. The quick device merge keeps a
                 plain status line. */}
-            {status === 'anchoring' ? (
+            {status === 'anchoring' && claimPhase !== 'setup' ? (
               <FlowProgress message={statusMessage} />
             ) : busy && statusMessage ? (
               <Text className="font-pp-regular text-[12px] leading-[18px] text-primary">{statusMessage}</Text>
