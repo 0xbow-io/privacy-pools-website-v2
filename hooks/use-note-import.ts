@@ -65,6 +65,7 @@ import {
 import { expectTransferRelay } from '@/services/transfer-relay-outputs';
 import { ownRegistrationResultRefusal } from '@/services/keystore-scope';
 import { confirmedRegistration } from '@/services/keystore-registry-events';
+import { claimSetupLegMessage } from '@/services/claim-setup-steps';
 
 export type NoteImportStatus =
   | 'idle'
@@ -239,6 +240,10 @@ export function useNoteImport() {
 
   const [status, setStatus] = useState<NoteImportStatus>('idle');
   const [statusMessage, setStatusMessage] = useState('');
+  // Which part of an on-chain claim is running: the wallet's one-time setup
+  // (its own transactions) or the relayed claim. A user took the setup prompts
+  // for the claim itself, so the page names the setup while it runs.
+  const [claimPhase, setClaimPhase] = useState<'setup' | 'claim'>('claim');
   const [errMessage, setErrMessage] = useState<string | null>(null);
   // Generation guard: reset()/a new run invalidates any in-flight run's
   // completion, so a claim finished after the modal closed (or after another
@@ -639,7 +644,10 @@ export function useNoteImport() {
   type KeystoreRegistration = Awaited<ReturnType<Awaited<ReturnType<typeof ensureInitialized>>['prepareRegisterKeystore']>>;
   // The self-funded registration legs (auth policy, then viewing key), each
   // confirmed. Shared by the claim and the DEV-493 register-only offer.
-  const sendRegistrationLegs = useCallback(async (registration: KeystoreRegistration) => {
+  const sendRegistrationLegs = useCallback(async (
+    registration: KeystoreRegistration,
+    onLeg?: (leg: number, total: number, stage: 'confirm' | 'confirming') => void,
+  ) => {
     // A public client is REQUIRED here: without it a reverted registration
     // would go unnoticed and the note would be labelled anchored while its
     // inbox was never set up. Fail closed instead.
@@ -650,13 +658,17 @@ export function useNoteImport() {
     // unlock's viewing key onto another unlock's registration.
     const refusal = ownRegistrationResultRefusal(chainId, sessionAddress, registration);
     if (refusal) throw new Error(refusal);
+    const total = (registration.keystoreCalldata ? 1 : 0) + (registration.viewingKeyCalldata ? 1 : 0);
+    let leg = 0;
     if (registration.keystoreCalldata) {
+      onLeg?.(++leg, total, 'confirm');
       const keystoreHash = await sendTransactionAsync({
         chainId,
         to: registration.keystoreCalldata.to,
         data: registration.keystoreCalldata.data,
         value: BigInt(registration.keystoreCalldata.value),
       });
+      onLeg?.(leg, total, 'confirming');
       const keystoreReceipt = await publicClient.waitForTransactionReceipt({ hash: keystoreHash, timeout: 180_000 });
       // viem RESOLVES for a reverted tx — the status field is the only signal.
       if (keystoreReceipt.status !== 'success') {
@@ -664,12 +676,14 @@ export function useNoteImport() {
       }
     }
     if (registration.viewingKeyCalldata) {
+      onLeg?.(++leg, total, 'confirm');
       const viewingKeyHash = await sendTransactionAsync({
         chainId,
         to: registration.viewingKeyCalldata.to,
         data: registration.viewingKeyCalldata.data,
         value: BigInt(registration.viewingKeyCalldata.value),
       });
+      onLeg?.(leg, total, 'confirming');
       const viewingKeyReceipt = await publicClient.waitForTransactionReceipt({ hash: viewingKeyHash, timeout: 180_000 });
       if (viewingKeyReceipt.status !== 'success') {
         throw new Error('Account setup failed on-chain. Your funds are still saved on this device. Retry.');
@@ -788,6 +802,7 @@ export function useNoteImport() {
     // A completion from a superseded run must not touch shared state.
     const live = () => runIdRef.current === runId;
     setStatus('anchoring');
+    setClaimPhase('claim');
     setErrMessage(null);
     setApprovalBlock(null);
     // This run's own confirmed quote is the only thing allowed to set this
@@ -1317,8 +1332,11 @@ export function useNoteImport() {
               throw new Error('The network fee currently exceeds this amount, so it cannot be added right now. Nothing was sent. It stays saved on this device. Retry later.');
             }
           }
-          if (live()) setStatusMessage('Setting up your inbox…');
-          await sendRegistrationLegs(registration);
+          if (live()) setClaimPhase('setup');
+          await sendRegistrationLegs(registration, (leg, total, stage) => {
+            if (live()) setStatusMessage(claimSetupLegMessage(leg, total, stage));
+          });
+          if (live()) setClaimPhase('claim');
         }
 
         const transferQuotes = relayerTransferQuotes(chainId);
@@ -1550,6 +1568,7 @@ export function useNoteImport() {
   return {
     status,
     statusMessage,
+    claimPhase,
     errMessage,
     busy,
     done,

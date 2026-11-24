@@ -1,6 +1,7 @@
 import { Pressable, Text } from 'react-native';
 
 import { IS_STAGING_ONLY_HOST, applyAppEnvironment, withAppEnvironmentQuery } from '@/config/app-environment';
+import type { ReceiptChainSwitch } from '@/hooks/use-receipt-chain-switch';
 import type { ReceiptChain } from '@/services/receipt-chain';
 
 /** Reload into the environment that serves the chain, keeping this URL. */
@@ -23,19 +24,43 @@ function switchTo(other: NonNullable<ReceiptChain['otherEnvironment']>): void {
  * Environment switch and offer it (DEV-457). The switch reloads the same URL,
  * so a receipt LINK survives it and a pasted one does not.
  */
-export function ReceiptWrongNetworkCopy({ chain, textClassName, pasted = false, noun = 'receipt' }: {
+export function ReceiptWrongNetworkCopy({ chain, textClassName, pasted = false, noun = 'receipt', chainSwitch }: {
   chain: ReceiptChain;
   textClassName: string;
   /** A pasted receipt (the import modal) does not survive the reload. */
   pasted?: boolean;
   /** What the link is: a receipt to import, or a payment request to pay (DEV-485). */
   noun?: 'receipt' | 'request';
+  /**
+   * The page's own switch to this chain (useReceiptChainSwitch), when it can
+   * make one. The page tries it by itself; this shows progress, then a one tap
+   * retry if the wallet declined or could not switch.
+   */
+  chainSwitch?: ReceiptChainSwitch;
 }) {
   const verb = noun === 'request' ? 'pay' : 'import';
   if (!chain.supported) {
     return <Text className={textClassName}>This {noun} is for {chain.name}, which this app does not support.</Text>;
   }
   const other = chain.otherEnvironment;
+  if (!other && chainSwitch && chainSwitch.target !== null) {
+    if (chainSwitch.switching) {
+      return <Text className={textClassName}>Switching to {chain.name}. Confirm in your wallet if it asks.</Text>;
+    }
+    return (
+      <>
+        <Text className={textClassName}>This {noun} is for {chain.name}.</Text>
+        <Pressable
+          testID="receipt-switch-chain"
+          accessibilityRole="button"
+          onPress={chainSwitch.switchNow}
+          className="self-start rounded-control border border-warning px-[10px] py-[6px]"
+        >
+          <Text className="font-pp-medium text-[12px] text-warning">Switch to {chain.name}</Text>
+        </Pressable>
+      </>
+    );
+  }
   if (!other) {
     return <Text className={textClassName}>This {noun} is for {chain.name}. Switch the app to {chain.name} to {verb} it.</Text>;
   }

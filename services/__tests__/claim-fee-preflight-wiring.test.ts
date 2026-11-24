@@ -19,7 +19,7 @@ describe('self-funded claim checks the fee before registering', () => {
     const registerStart = source.indexOf('session.prepareRegisterKeystore()', claimStart);
     expect(registerStart).toBeGreaterThan(-1);
     // Both legs are sent by sendRegistrationLegs since DEV-493.
-    const firstSend = source.indexOf('await sendRegistrationLegs(registration)', registerStart);
+    const firstSend = source.indexOf('await sendRegistrationLegs(registration', registerStart);
     expect(firstSend).toBeGreaterThan(registerStart);
     expect(source.slice(registerStart, firstSend)).not.toContain('sendTransactionAsync(');
     const preflight = source.slice(registerStart, firstSend);
