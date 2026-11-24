@@ -692,11 +692,11 @@ export function useNoteImport() {
         if (index === 0) beforeFirstSend();
         else checkOwner();
         onLeg?.(index + 1, calls.length, 'confirm');
-        const hash = await sendTransactionAsync({
+        const registrationTxHash = await sendTransactionAsync({
           account: address, chainId, to: call.to, data: call.data, value: BigInt(call.value),
         });
         onLeg?.(index + 1, calls.length, 'confirming');
-        const receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 180_000 });
+        const receipt = await publicClient.waitForTransactionReceipt({ hash: registrationTxHash, timeout: 180_000 });
         if (receipt.status !== 'success') {
           throw new Error('Inbox setup failed on-chain. Your funds are still saved on this device. Retry.');
         }

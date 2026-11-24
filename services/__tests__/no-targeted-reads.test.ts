@@ -207,16 +207,8 @@ describe('privacy: no targeted commitment/nullifier reads on user-reachable path
     const CLAIM_PATH = (rel: string) =>
       rel === 'hooks/use-note-import.ts' || rel.startsWith('app/import-note/');
 
-    // The ONLY permitted arguments: hashes this wallet itself just submitted via
-    // sendTransactionAsync, a few lines above each call, during the cold-start
-    // registration leg. Waiting on your own transaction reveals nothing to the
-    // provider that it did not just receive from you. Both are verified by
-    // reading the surrounding code, not by their names - add to this list only
-    // after doing the same, and never to make a failing scan pass.
-    const OWN_SUBMITTED_HASHES = ['keystoreHash', 'viewingKeyHash'];
-    const isOwnSubmittedWait = (line: string) =>
-      OWN_SUBMITTED_HASHES.some((id) => new RegExp(String.raw`hash\s*:\s*${id}\b`).test(line));
-
+    // The sequential setup loop waits only for the transaction this wallet
+    // just submitted. No hash from the transfer link may reach a receipt read.
     const offenders: string[] = [];
     let scanned = 0;
     let allowed = 0;
@@ -231,16 +223,16 @@ describe('privacy: no targeted commitment/nullifier reads on user-reachable path
           // Prose may name the removed calls to explain why they are gone.
           if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
           if (!RECEIPT_OR_BLOCK_READS.test(line)) return;
-          if (isOwnSubmittedWait(line)) { allowed += 1; return; }
+          if (rel === 'hooks/use-note-import.ts' && /\bwaitForTransactionReceipt\(\{\s*hash:\s*registrationTxHash\s*,/.test(line)) {
+            allowed += 1;
+            return;
+          }
           offenders.push(`${rel}:${i + 1}: ${trimmed}`);
         });
       }
     }
 
-    // The exemptions must still EXIST. If the cold-start waits are refactored
-    // away, this list should shrink rather than sit here permitting a name that
-    // some future code could reuse for a note-derived hash.
-    expect(allowed).toBe(OWN_SUBMITTED_HASHES.length);
+    expect(allowed).toBe(1);
 
     // A rename would otherwise make this pass by scanning nothing.
     expect(scanned).toBeGreaterThan(0);
