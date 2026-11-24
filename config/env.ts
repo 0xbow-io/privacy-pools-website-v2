@@ -1,5 +1,6 @@
 import { alchemyHostFor, buildRpcOrder } from '@/config/rpc-order';
 import { ActivePoolSelection } from '@/config/pool-profile';
+import { SEPOLIA_DEFAULT_POOL } from '@/config/sepolia-deployment';
 import { ACTIVE_ENVIRONMENT } from '@/config/environments';
 
 function normalizeBaseUrl(url: string): string {
@@ -235,32 +236,19 @@ export function getPayUrlBase(): string | undefined {
 // internal-testing "0xbow-v1" deploy (v2-monorepo sepolia-0xbow-v1.md).
 // The entrypoint address is intentionally NOT here: it is resolved at runtime
 // from the ASP /entrypoints API.
-// V9 deployment (sepolia-deployment-v9.md) — the relayer moved to V9, so the
-// frontend follows. Entrypoint auto-selects per pool because
-// resolveEntrypointChainConfig matches the configured pool against /entrypoints.
-//
-// The in-app pool switcher (config/pool-profile.ts) can re-point the WHOLE
-// app at any other pool the ASP lists — the pool/entrypoint/fromBlock come
-// from the /entrypoints feed at selection time; only the keystore (absent
-// from the feed) is mapped per known vault below, falling back to the
-// current keystore for unmapped pools. Env overrides still win.
-const SEPOLIA_DEFAULT_POOL = {
-  // V9 (2026-05-31 redeploy)
-  pool: '0x09b94d3127019298757a6ceeb7911922085f7c01',
-  keystore: '0x6d264acb9c3a7a3105c29470afe2f5f1ec203c73',
-  fromBlock: '10932483',
-} as const;
-
+// V8's verifier keys match the frontend ceremony artifacts. Both the testnet
+// hostname and ?env=staging use these defaults; entrypoint resolution matches
+// this vault in the ASP feed. Explicit pool selections and env overrides remain.
 // Keystore addresses for pools whose deployment used a different keystore
 // than the current default — keyed by pool vault (lowercase).
 const SEPOLIA_KEYSTORE_BY_VAULT: Record<string, string> = {
-  // Pre-cutover V8 pool (poolId 1 in /entrypoints, entrypoint 0x3191ed61…)
-  '0x4deceef285a24ca05999870887c895042731d7cb': '0x5b8883a2f8339560d8ebfeaabf93ce4e7056c4ca',
+  '0x09b94d3127019298757a6ceeb7911922085f7c01': '0x6d264acb9c3a7a3105c29470afe2f5f1ec203c73',
 };
 
 export const SEPOLIA_DEFAULT_POOL_ADDRESS = SEPOLIA_DEFAULT_POOL.pool;
 
-const selectedVault = ActivePoolSelection?.poolVault.toLowerCase();
+const selectedVault = (getEnv(process.env.EXPO_PUBLIC_SEPOLIA_POOL_ADDRESS)
+  ?? ActivePoolSelection?.poolVault)?.toLowerCase();
 
 export const SEPOLIA_POOL_ADDRESS = getEnv(
   process.env.EXPO_PUBLIC_SEPOLIA_POOL_ADDRESS,
@@ -268,12 +256,14 @@ export const SEPOLIA_POOL_ADDRESS = getEnv(
 export const SEPOLIA_KEYSTORE_ADDRESS = getEnv(
   process.env.EXPO_PUBLIC_SEPOLIA_KEYSTORE_ADDRESS,
 ) ?? (selectedVault ? (SEPOLIA_KEYSTORE_BY_VAULT[selectedVault] ?? SEPOLIA_DEFAULT_POOL.keystore) : SEPOLIA_DEFAULT_POOL.keystore);
-// ASPRegistry contract (V9 deploy) — the v2.0 SDK's ASPClient anchors
-// association-set leaves to its on-chain `latestASPRoot`. Default mirrors
-// the SDK's DEPLOYMENTS constant.
+// ASP roots must be checked against the registry owned by the selected pool.
+const SEPOLIA_ASP_REGISTRY_BY_VAULT: Record<string, string> = {
+  '0x09b94d3127019298757a6ceeb7911922085f7c01': '0x35d29efdcf067599ab4a53cf40229477f0b1ca9c',
+};
 export const SEPOLIA_ASP_REGISTRY_ADDRESS = getEnv(
   process.env.EXPO_PUBLIC_SEPOLIA_ASP_REGISTRY_ADDRESS,
-) ?? '0x35d29efdcf067599ab4a53cf40229477f0b1ca9c';
+) ?? (selectedVault ? SEPOLIA_ASP_REGISTRY_BY_VAULT[selectedVault] : undefined)
+  ?? SEPOLIA_DEFAULT_POOL.aspRegistry;
 export const SEPOLIA_FROM_BLOCK = BigInt(
   getEnv(process.env.EXPO_PUBLIC_SEPOLIA_FROM_BLOCK)
     ?? (ActivePoolSelection ? String(ActivePoolSelection.fromBlock) : SEPOLIA_DEFAULT_POOL.fromBlock),

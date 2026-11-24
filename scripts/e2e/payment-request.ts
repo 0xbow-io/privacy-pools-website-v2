@@ -17,7 +17,7 @@ import { envValue, paymentRequestEth } from './funding';
 import { parseEther } from 'viem';
 import {
   account, accountFromKey, openApp, signIn, tab, enterAmount, clickButton, clickWhenReady,
-  unlockIfPrompted, sleep,
+  registerSepoliaFixture, unlockIfPrompted, sleep,
   requestPillSymbol,
   payPrivateRequest, ensurePaymentFunding, selectToken, accountNotes,
 } from './lib';
@@ -76,11 +76,13 @@ payer.page.on('console', (msg) => {
 let payUrl: string | null = null;
 
 try {
+  await signIn(payee.page);
+  await registerSepoliaFixture(payee.page);
   await signIn(payer.page);
+  await registerSepoliaFixture(payer.page);
   await ensurePaymentFunding(payer.page, payer.appLogs, payerAccount().address, amount,
     process.argv.includes('--prepare-next-payment') ? 2 : 1, fixtureBarrier);
   // ---- A creates the request -------------------------------------------------
-  await signIn(payee.page);
   if (!(await tab(payee.page, 'Request'))) {
     record('create request', false, 'Request tab never became active');
   } else {
