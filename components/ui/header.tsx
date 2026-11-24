@@ -801,8 +801,8 @@ export function Header({ overlay = false }: { overlay?: boolean }) {
                           </Text>
                         </Pressable>
                       )}
-                      {/* EVM X25519 key only; Sui sessions derive a different one. */}
-                      {!connectedIsNonEvm && (
+                      {/* EVM and Stellar keys (each from its own account's signature); Sui derives another. */}
+                      {(!connectedIsNonEvm || connectedIsStellar) && (
                         <Pressable
                           className="flex-row items-center gap-[10px] rounded-pill px-[12px] py-[10px] hover:bg-background-secondary"
                           onPress={() => { setActionsDropdownOpen(false); openViewingKey(); }}

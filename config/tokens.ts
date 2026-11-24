@@ -2,6 +2,7 @@ import { sameSymbol } from '@/services/symbol-match';
 import { getChainConfig } from '@/config/chains';
 import { ACTIVE_ENVIRONMENT, NATIVE_ASSET_ADDRESS, type TokenMetadata } from '@/config/environments';
 import { isConfiguredYieldUnderlying } from '@/config/yield';
+import { STELLAR_TESTNET_CONTRACTS } from '@/config/stellar-deployment';
 
 // The token registry and the native sentinel live with the environment
 // records (config/environments.ts): prod and staging each carry their own
@@ -45,9 +46,19 @@ function suiCoinTypeMetadata(tokenAddress: string): TokenMetadata | undefined {
   };
 }
 
+// The Stellar asset contract (a C… StrKey) of native XLM. Never an EVM address,
+// so the per-chain registry has no entry for it and the fallback would read it
+// as an 18-decimal "CDLZFC" token (an accounting export, a verify page).
+function stellarAssetMetadata(tokenAddress: string): TokenMetadata | undefined {
+  if (tokenAddress.toUpperCase() !== STELLAR_TESTNET_CONTRACTS.nativeAssetContractId.toUpperCase()) return undefined;
+  return { symbol: 'XLM', address: tokenAddress, decimals: 7, isNative: true };
+}
+
 export function getTokenMetadata(tokenAddress: string, chainId?: number): TokenMetadata {
   const suiCoin = suiCoinTypeMetadata(tokenAddress);
   if (suiCoin) return suiCoin;
+  const stellarAsset = stellarAssetMetadata(tokenAddress);
+  if (stellarAsset) return stellarAsset;
 
   const normalizedAddress = tokenAddress.toLowerCase();
   const chainTokens = chainId ? KNOWN_TOKENS_BY_CHAIN[chainId] : undefined;

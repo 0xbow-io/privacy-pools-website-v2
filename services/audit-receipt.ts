@@ -227,12 +227,27 @@ export interface VerifyResult {
 }
 
 /**
+ * A Stellar bundle is checked by services/stellar/stellar-audit-verify.ts:
+ * its owner and asset are StrKeys that the commitment binds through Stellar's
+ * field conversions, and its pool is read from the Stellar event archive. Only
+ * a build that serves Stellar has the chain, so elsewhere it stays unsupported.
+ */
+async function isStellarChain(chainId: number): Promise<boolean> {
+  const { getChainConfig } = await import('@/config/chains');
+  return getChainConfig(chainId)?.chainType === 'stellar';
+}
+
+/**
  * Recompute a note's commitment from the disclosed preimage using the
  * SDK's Poseidon chain (the exact functions the SDK uses to mint notes).
  * Lazy-imports the SDK setup so importing this module stays cheap.
  * Exported so the offline smoke test can exercise the real path.
  */
 export async function recomputeCommitment(bundle: PartialViewingKeyV1): Promise<Hash> {
+  if (await isStellarChain(bundle.chainId)) {
+    const { recomputeStellarCommitment } = await import('@/services/stellar/stellar-audit-verify');
+    return recomputeStellarCommitment(bundle);
+  }
   const { createNoteComputationService } = await import('@/services/sdk-runtime');
   const ncs = await createNoteComputationService();
   const noteAddressHash = ncs.computeNoteAddressHash(bundle.ownerAddress, bundle.noteSecret);
@@ -250,6 +265,10 @@ export async function recomputeCommitment(bundle: PartialViewingKeyV1): Promise<
  * doesn't pull snarkjs/Poseidon until it actually runs.
  */
 export async function verifyPartialViewingKey(bundle: PartialViewingKeyV1): Promise<VerifyResult> {
+  if (await isStellarChain(bundle.chainId)) {
+    const { verifyStellarPartialViewingKey } = await import('@/services/stellar/stellar-audit-verify');
+    return verifyStellarPartialViewingKey(bundle);
+  }
   const base: VerifyResult = {
     hashMatch: false,
     recomputedCommitment: null,
@@ -460,6 +479,10 @@ export interface OriginVerifyResult {
 }
 
 export async function verifyOriginProof(p: OriginProofV1): Promise<OriginVerifyResult> {
+  if (await isStellarChain(p.chainId)) {
+    const { verifyStellarOriginProof } = await import('@/services/stellar/stellar-audit-verify');
+    return verifyStellarOriginProof(p);
+  }
   const base: OriginVerifyResult = {
     noteCommitment: null, noteOnChain: false, targetLinked: false,
     withdrawnValue: null, withdrawnBlock: null, aspStatus: 'unavailable', verified: false,

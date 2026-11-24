@@ -7,6 +7,8 @@ import { useTheme } from '@/components/theme-provider';
 import { Colors } from '@/constants/theme';
 import { usePoolSession } from '@/hooks/use-pool-session';
 import { useActiveEvmChain } from '@/hooks/use-active-evm-chain';
+import { useChainRouter } from '@/hooks/use-chain-router';
+import { useStellarSession } from '@/hooks/use-stellar-session';
 import { getChainConfig } from '@/config/chains';
 import { LEGACY_CONFIG } from '@/config/env';
 import { buildViewingKeyOverview, VIEWING_KEY_FACTS } from '@/services/viewing-key-overview';
@@ -54,12 +56,22 @@ export function ViewingKeyModalProvider({ children }: { children: React.ReactNod
   // The derived X25519 PUBLIC key and whether the on-chain Keystore publishes
   // the same one. Only the public half is ever read here; the private half
   // decrypts the whole history and stays on the device.
-  const derivedViewingPublicKey = useMemo(() => {
+  // Stellar derives its own key pair from the Varial account's signature, and
+  // its keystore is a Soroban contract: the Stellar account store holds the
+  // public half and reads the published one on its sync clock, so this modal
+  // only displays them (opening it causes no request).
+  const { isStellar } = useChainRouter();
+  const stellar = useStellarSession();
+  const evmDerivedViewingPublicKey = useMemo(() => {
     if (!keysReady || !keystoreManager) return null;
     try { return String(keystoreManager.getViewingKeyPair().publicKey); } catch { return null; }
   }, [keysReady, keystoreManager]);
+  const derivedViewingPublicKey = isStellar ? stellar.viewingPublicKey : evmDerivedViewingPublicKey;
   // undefined = read in flight; null = read failed; the zero key = nothing published.
-  const [onChainViewingKey, setOnChainViewingKey] = useState<string | null | undefined>(undefined);
+  const [evmOnChainViewingKey, setOnChainViewingKey] = useState<string | null | undefined>(undefined);
+  const onChainViewingKey = isStellar ? stellar.onChainViewingKey : evmOnChainViewingKey;
+  const signedIn = isStellar ? stellar.wallet.isConnected : isConnected || !!sessionAddress;
+  const keysDerived = isStellar ? stellar.unlocked : keysReady;
   const viewingKeyOverview = useMemo(
     () => buildViewingKeyOverview(derivedViewingPublicKey, onChainViewingKey),
     [derivedViewingPublicKey, onChainViewingKey],
@@ -77,7 +89,7 @@ export function ViewingKeyModalProvider({ children }: { children: React.ReactNod
   // Read the published viewing key while open. Same lookup the transfer
   // precheck's cache uses (the bulk ASP viewing-key registry).
   useEffect(() => {
-    if (!isOpen || !viewingKeyOwner || !derivedViewingPublicKey) return;
+    if (isStellar || !isOpen || !viewingKeyOwner || !derivedViewingPublicKey) return;
     setOnChainViewingKey(undefined);
     const cfg = getChainConfig(activeEvmChainId);
     if (!cfg?.contracts) return;
@@ -95,7 +107,7 @@ export function ViewingKeyModalProvider({ children }: { children: React.ReactNod
     };
     read();
     return onRegistrySynced(read);
-  }, [isOpen, viewingKeyOwner, derivedViewingPublicKey, activeEvmChainId]);
+  }, [isStellar, isOpen, viewingKeyOwner, derivedViewingPublicKey, activeEvmChainId]);
 
   const copy = useCallback(async (text: string) => {
     try {
@@ -153,7 +165,7 @@ export function ViewingKeyModalProvider({ children }: { children: React.ReactNod
 
               {/* The PUBLIC key: what senders encrypt to. Safe to show and copy.
                   The private key is never rendered anywhere. */}
-              {isConnected || sessionAddress ? (
+              {signedIn ? (
                 <View className="gap-[6px]">
                   <View className="flex-row items-center justify-between gap-[8px] rounded-[4px] border border-border-light bg-card-background px-[12px] py-[9px]">
                     <Text
@@ -162,7 +174,7 @@ export function ViewingKeyModalProvider({ children }: { children: React.ReactNod
                       testID="viewing-key-public"
                       accessibilityLabel={viewingKeyOverview.publicKey ? `Public viewing key ${viewingKeyOverview.publicKey}` : 'Public viewing key'}
                     >
-                      {viewingKeyOverview.shortKey ?? (keysReady ? '—' : 'Sign in to derive your key')}
+                      {viewingKeyOverview.shortKey ?? (keysDerived ? '—' : 'Sign in to derive your key')}
                     </Text>
                     <Text className="font-pp-medium text-[10px] tracking-[0.3px] text-text-muted">public viewing key</Text>
                     {viewingKeyOverview.publicKey ? (

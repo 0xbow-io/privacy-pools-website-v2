@@ -119,6 +119,7 @@ import type { Transaction } from '@/components/pools-provider';
 import { resolveConfiguredEntrypoint } from '@/services/pool-entrypoint';
 import { invalidateTransactionCaches } from '@/services/cache';
 import { recordWithdrawFee } from '@/services/withdraw-fees-store';
+import { STELLAR_TESTNET_CONTRACTS } from '@/config/stellar-deployment';
 import { recordReceiveAs } from '@/services/swap-bookkeeping';
 import { recordOwnWithdrawal } from '@/services/withdraw-bookkeeping';
 import { recordWithdrawRecipient } from '@/services/withdraw-recipients-store';
@@ -3035,6 +3036,22 @@ export function WithdrawModalProvider({ children }: { children: React.ReactNode 
         setTxHash(result.txHash);
         setTxChainId(STELLAR_TESTNET_ID);
         recordRecipientUseForActiveOwner(recipient, STELLAR_TESTNET_ID);
+        // The relayer fee inside what left the pool, as an EVM withdrawal
+        // records it: the accounting export splits it out of the gross.
+        if (result.fee > 0n) {
+          try {
+            recordWithdrawFee({
+              txHash: result.txHash,
+              feeAmount: `0x${result.fee.toString(16)}`,
+              tokenAddress: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
+              chainId: STELLAR_TESTNET_ID,
+              timestamp: Date.now(),
+              kind: 'withdrawal',
+            });
+          } catch (e) {
+            log('warn', 'Withdraw', 'Failed to stamp withdrawal fee record', { err: e instanceof Error ? e.message : String(e) });
+          }
+        }
         log('info', 'Withdraw', `Stellar withdraw submitted: ${result.txHash}`);
         if (isSameOperation()) setStep('success');
       } catch (err) {

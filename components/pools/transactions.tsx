@@ -34,6 +34,7 @@ import { usePoolSession } from '@/hooks/use-pool-session';
 import { useWalletUnlockGate } from '@/hooks/use-wallet-unlock-gate';
 import { useStellarWallet } from '@/components/stellar-wallet-provider';
 import { findStellarSentClaim } from '@/services/stellar/stellar-account';
+import { findBySpelling, stellarClaimDisclosures } from '@/services/stellar/stellar-audit';
 import { useSeedDerivationModal } from '@/components/seed-derivation-modal-provider';
 import { Card } from '@/components/ui/card';
 import { TooltipPortal } from '@/components/ui/tooltip-portal';
@@ -2503,7 +2504,10 @@ export function Transactions({
         ...(data.transactOutputsByTx?.get(tx.txHash.toLowerCase()) ?? []),
       ]
       : [];
-    const sentAudits = findSentAuditsForRow(tx.txHash, rowNoteCommitments);
+    // A Stellar row's hash may be spelled without the 0x its send recorded.
+    const sentAudits = tx.chainId === STELLAR_TESTNET_ID && tx.txHash
+      ? findBySpelling(tx.txHash, (h) => findSentAuditsForRow(h, rowNoteCommitments), (list) => list.length === 0) ?? []
+      : findSentAuditsForRow(tx.txHash, rowNoteCommitments);
     // A swap's own tx also holds the source side's change: its key is the output's.
     const swapLabels = isSwapRow(tx) ? tx.swapOut.labels : null;
     const ownedNote = tx.txHash
@@ -2605,12 +2609,18 @@ export function Transactions({
         },
       });
     }
-    if (sentAudits.length > 0) {
+    // A Stellar send keeps no EVM receipt: a registered one records its
+    // disclosures at send time, a one-time one keeps them in its claim.
+    const stellarRow = tx.chainId === STELLAR_TESTNET_ID;
+    const proofAudits = sentAudits.length > 0 ? sentAudits : stellarClaimDisclosures(STELLAR_TESTNET_ID, stellarClaim);
+    if (proofAudits.length > 0) {
       // Disclosures exist exactly for out-of-band sends (unregistered
       // recipient), so the one-time receipt link is rebuildable here. Valid
       // even after the recipient claimed: importing is idempotent and the
       // import reconcile re-derives the real note status.
-      items.push({
+      // Not on Stellar: an EVM receipt link does not import there, and a
+      // one-time send's own link is the claim link above.
+      if (!stellarRow) items.push({
         key: 'receipt-link',
         label: 'Copy payment link',
         icon: <Ionicons name="link-outline" size={16} color={colors.text} />,
@@ -2644,9 +2654,9 @@ export function Transactions({
         label: 'Export transaction proof',
         icon: <Ionicons name="shield-checkmark-outline" size={16} color={colors.text} />,
         // One key per recipient note — a multi-lineage send disclosed several.
-        onPress: () => launchFromDrawer(drawerHost, () => openAuditExport(sentAudits.map((d) => buildSentPaymentKey(d)))),
+        onPress: () => launchFromDrawer(drawerHost, () => openAuditExport(proofAudits.map((d) => buildSentPaymentKey(d)))),
       });
-    } else if (tx.chainId !== STELLAR_TESTNET_ID && isDepositRecoverable(tx) && tx.txHash) {
+    } else if (!stellarRow && isDepositRecoverable(tx) && tx.txHash) {
       // A deposit this wallet made for someone else, with NO local disclosure
       // for it - this browser never saw the send, or its storage is gone. The
       // sender's own on-chain backup (services/blind-deposit-backup.ts) is the
@@ -2705,8 +2715,8 @@ export function Transactions({
           })();
         },
       });
-    } else if (ownedNote && !isOutgoingTransfer && tx.chainId !== STELLAR_TESTNET_ID) {
-      // The proof verifier reads EVM pools only, so a Stellar proof would not verify.
+    } else if (ownedNote && !isOutgoingTransfer) {
+      // A Stellar proof is checked against the Stellar pool (services/stellar/stellar-audit-verify.ts).
       items.push({
         key: 'audit-key',
         label: 'Export transaction proof',
@@ -2756,8 +2766,8 @@ export function Transactions({
     // the funds come from a clean (ASP-approved) lineage you control. Only
     // provable when you hold a note in that lineage on this device — make that
     // state obvious rather than failing silently.
-    // EVM pools only, like the proof export above: a Stellar origin proof would not verify.
-    if ((tx.type === 'Withdrawal' || tx.type === 'Exit') && tx.chainId !== STELLAR_TESTNET_ID) {
+    // A Stellar proof is checked against the Stellar pool, like the proof export above.
+    if (tx.type === 'Withdrawal' || tx.type === 'Exit') {
       const oType: 'withdraw' | 'exit' = tx.type === 'Exit' ? 'exit' : 'withdraw';
       const provable = canProveOrigin(rowNotes as never, {
         type: oType, txHash: tx.txHash as `0x${string}`, label: (tx.label ?? null) as `0x${string}` | null,
@@ -2788,7 +2798,8 @@ export function Transactions({
               type: oType,
               txHash: tx.txHash as `0x${string}`,
               label: (tx.label ?? null) as `0x${string}` | null,
-              recipient: tx.fullAddress as `0x${string}`,
+              // A Stellar withdrawal row names no recipient.
+              recipient: (tx.fullAddress || undefined) as `0x${string}` | undefined,
               value: tx.rawAmount,
               tokenId: tx.tokenAddress as `0x${string}`,
             },

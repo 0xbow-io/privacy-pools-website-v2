@@ -30,7 +30,8 @@ test('transfer accepts a binding fee above the old cap and refuses only when sel
   await expect(account.relayOnce(session, relayer(2849563n), transfer(2849562n))).rejects.toThrow("The notes picked for this payment can't cover it.");
   expect(calls).toBe(0);
   await account.relayOnce(session, relayer(2849562n), transfer(2849562n));
-  await account.relayOnce(session, relayer(317289n), transfer(2849562n));
+  // The committed fee comes back for the sender's records.
+  expect((await account.relayOnce(session, relayer(317289n), transfer(2849562n))).fee).toBe(317289n);
   expect(calls).toBe(2);
 });
 
@@ -51,10 +52,10 @@ test('withdrawal rejects a fee above review before relay and accepts reviewed fe
   await expect(account.withdraw(params)).rejects.toThrow('fee went up');
   expect(calls).toBe(0);
   fee = params.reviewedFee + relayerFeeJitterAllowance(params.reviewedFee);
-  expect(await account.withdraw(params)).toEqual({ txHash: '0x1' });
+  expect(await account.withdraw(params)).toEqual({ txHash: '0x1', fee });
   expect(calls).toBe(1);
   fee = 2849562n;
-  expect(await account.withdraw({ ...params, reviewedFee: fee })).toEqual({ txHash: '0x1' });
+  expect(await account.withdraw({ ...params, reviewedFee: fee })).toEqual({ txHash: '0x1', fee });
   expect(calls).toBe(2);
 });
 

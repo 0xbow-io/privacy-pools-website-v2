@@ -19,6 +19,11 @@ import { useNotes } from '@/hooks/use-notes';
 import { useLiveNotesChainId } from '@/hooks/use-live-notes-chain-id';
 import { usePoolSession } from '@/hooks/use-pool-session';
 import { findSentAudits } from '@/services/audit-store';
+import { useChainRouter } from '@/hooks/use-chain-router';
+import { useStellarSession } from '@/hooks/use-stellar-session';
+import { findStellarSentClaim } from '@/services/stellar/stellar-account';
+import { findBySpelling, stellarClaimDisclosures, withStellarHistoryPending } from '@/services/stellar/stellar-audit';
+import { STELLAR_TESTNET_ID } from '@/config/stellar-deployment';
 import { buildSentTxHashSet, findSentTransfer } from '@/services/sent-transfers-store';
 import { buildWithdrawFeeTxHashSet } from '@/services/withdraw-fees-store';
 import { isInternalSpendRow, mergeMyTransactions } from '@/services/transfer-direction';
@@ -85,6 +90,23 @@ export function AccountingModalProvider({ children }: { children: React.ReactNod
   // Identity mode gates payer-address ownership: with an imported account key
   // the connected wallet is only the payer, never the ledger's identity.
   const { identityMode, sessionAddress } = usePoolSession();
+  // Stellar: its activity rows come from the account's own notes and the
+  // pool's history (services/stellar-activity.ts), already in data.lineageRows
+  // while Stellar is selected. What the modal adds is the history gate and the
+  // one-time sends' disclosures, kept by the sender as claim links.
+  const { isStellar } = useChainRouter();
+  const stellar = useStellarSession();
+  const stellarAddress = isStellar && stellar.wallet.isConnected ? stellar.wallet.address ?? null : null;
+  // A Stellar row's hash may be spelled without the 0x its send recorded.
+  const findSentAuditsAnyChain = useCallback((txHash: string) => {
+    const kept = findSentAudits(txHash);
+    if (kept.length > 0 || !stellarAddress) return kept;
+    return findBySpelling(txHash, findSentAudits, (list) => list.length === 0)
+      ?? stellarClaimDisclosures(STELLAR_TESTNET_ID, findStellarSentClaim(stellarAddress, txHash));
+  }, [stellarAddress]);
+  const findFeeAnyChain = useCallback((txHash: string) => (
+    findWithdrawFee(txHash) ?? (stellarAddress ? findBySpelling(txHash, findWithdrawFee) : null)
+  ), [stellarAddress]);
   const [isOpen, setIsOpen] = useState(false);
   // Multi-select: defaults to ALL types, deselectable.
   const [selectedTypes, setSelectedTypes] = useState<Set<AcctType>>(() => new Set(TYPES.map((t) => t.key)));
@@ -179,9 +201,9 @@ export function AccountingModalProvider({ children }: { children: React.ReactNod
     myDeposits: data.myDeposits,
     myExits: data.myExits,
     evmChainId: data.defaultChainId,
-    findSentAudits,
+    findSentAudits: findSentAuditsAnyChain,
     findSentTransfer,
-  }), [mineRows, notes, notesByChain, data.transferTxHashes, data.transferClassificationReady, data.myDeposits, data.myExits, data.defaultChainId]);
+  }), [mineRows, notes, notesByChain, data.transferTxHashes, data.transferClassificationReady, data.myDeposits, data.myExits, data.defaultChainId, findSentAuditsAnyChain]);
 
   const fromTs = parseDay(from, false);
   const toTs = parseDay(to, true);
@@ -229,7 +251,12 @@ export function AccountingModalProvider({ children }: { children: React.ReactNod
 
   // A chain whose history has not loaded hides its deposits and spends, and
   // its notes would export as income. Nothing leaves the modal until it has.
-  const pendingChainIds = data.historyPendingChainIds;
+  // Stellar's equivalent is the account's first read of the pool history: until
+  // then its sends, withdrawals and exits have no rows.
+  const pendingChainIds = useMemo(
+    () => withStellarHistoryPending(data.historyPendingChainIds, { selected: isStellar, unlocked: stellar.unlocked, indexed: stellar.noteOrigins !== null }),
+    [data.historyPendingChainIds, isStellar, stellar.unlocked, stellar.noteOrigins],
+  );
   const historyReady = pendingChainIds.length === 0;
   const syncingCopy = historyReady
     ? null
@@ -285,7 +312,7 @@ export function AccountingModalProvider({ children }: { children: React.ReactNod
       // tested); the modal wires the device-backed fee store, notes and share rates.
       const csv = await buildKoinlyCsv(items, {
         notes,
-        findFee: findWithdrawFee,
+        findFee: findFeeAnyChain,
         shareConversion: (it) => {
           const series = book?.get(shareRateKey(it.chainId, it.tokenId));
           return series ? shareConversionAt(series, { timestampSec: it.timestamp / 1000 }) : null;
@@ -301,7 +328,7 @@ export function AccountingModalProvider({ children }: { children: React.ReactNod
     } finally {
       setExporting(false);
     }
-  }, [koinlyItems, notes, book]);
+  }, [koinlyItems, notes, book, findFeeAnyChain]);
 
   const value = useMemo(() => ({ openAccounting, closeAccounting }), [openAccounting, closeAccounting]);
   const qrTooBig = !!exported && exported.length > QR_MAX;

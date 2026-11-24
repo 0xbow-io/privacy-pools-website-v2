@@ -21,6 +21,8 @@ export interface TransferOnceSession {
   relayTransfer(option: Record<string, unknown>): Promise<{
     txReceipt: { status: boolean; txHash: unknown };
     spentNullifiersConfirmed?: boolean;
+    /** A registered recipient's notes, with their secrets (the SDK's own `finalizeTransfer`). */
+    recipientNotes?: { commitment: unknown; ownerAddress?: unknown; noteSecret?: unknown; value: unknown; tokenId: unknown; label: unknown }[];
   }>;
   /** The SDK's transfer delegate (`PoolSession.delegates.transfer`), reached for its pure local helpers only. */
   delegates: {
@@ -171,5 +173,6 @@ export async function relayTransferOnce(
     selectedQuote: { relayerInfo, quote },
   });
   if (result.spentNullifiersConfirmed === false) throw new Error('The relayer reported a transaction that is not this transfer.');
-  return result;
+  // The committed fee this send paid on top of the amount, for the sender's own records.
+  return { ...result, fee };
 }

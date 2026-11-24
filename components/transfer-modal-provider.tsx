@@ -1833,7 +1833,7 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
         const inputCommitments = pick.selectedNotes.map((n) => n.commitment as `0x${string}`);
         transferPhaseRef.current = 'proof';
         const onStage = (stage: Parameters<typeof describeStellarStage>[0]) => { if (!live()) return; transferPhaseRef.current = stellarErrorReportStage(stage); setLoadingMessage(describeStellarStage(stage)); };
-        let result: { txHash: string };
+        let result: { txHash: string; fee?: bigint; disclosures?: SentNoteDisclosure[] };
         if (oneTime) {
           const { buildStellarClaimUrl } = await import('@/services/stellar/stellar-claim-url');
           const sent = await stellarSession.sendOneTime({
@@ -1896,6 +1896,31 @@ export function TransferModalProvider({ children }: { children: React.ReactNode 
           });
         } catch (e) {
           log('warn', 'Transfer', 'Failed to stamp sent-transfer record', { err: e instanceof Error ? e.message : String(e) });
+        }
+        // The relayer fee paid on top, and the recipient's notes as a proof of
+        // this payment (a send to a registered account; a one-time send's claim
+        // is already kept): the same local records an EVM send leaves, so the
+        // accounting export books the fee and can disclose this payment alone.
+        if (result.fee !== undefined && result.fee > 0n) {
+          try {
+            recordWithdrawFee({
+              txHash: result.txHash,
+              feeAmount: `0x${result.fee.toString(16)}`,
+              tokenAddress: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId,
+              chainId: STELLAR_TESTNET_ID,
+              timestamp: Date.now(),
+              kind: 'transfer',
+            });
+          } catch (e) {
+            log('warn', 'Transfer', 'Failed to stamp relayer-fee record', { err: e instanceof Error ? e.message : String(e) });
+          }
+        }
+        if (result.disclosures && result.disclosures.length > 0) {
+          try {
+            recordSentAuditsVerified(result.disclosures);
+          } catch (e) {
+            log('warn', 'Transfer', 'Failed to stamp sent-audit records', { err: e instanceof Error ? e.message : String(e) });
+          }
         }
         log('info', 'Transfer', `Stellar transfer submitted: ${result.txHash}`);
         if (live()) setStep('success');
