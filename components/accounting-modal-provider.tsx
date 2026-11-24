@@ -24,6 +24,8 @@ import { useStellarSession } from '@/hooks/use-stellar-session';
 import { findStellarSentClaim } from '@/services/stellar/stellar-account';
 import { findBySpelling, stellarClaimDisclosures, withStellarHistoryPending } from '@/services/stellar/stellar-audit';
 import { STELLAR_TESTNET_ID } from '@/config/stellar-deployment';
+import { stellarUnlockErrorTitle } from '@/services/stellar/stellar-copy';
+import { useToast } from '@/components/toast-provider';
 import { buildSentTxHashSet, findSentTransfer } from '@/services/sent-transfers-store';
 import { buildWithdrawFeeTxHashSet } from '@/services/withdraw-fees-store';
 import { isInternalSpendRow, mergeMyTransactions } from '@/services/transfer-direction';
@@ -251,16 +253,23 @@ export function AccountingModalProvider({ children }: { children: React.ReactNod
 
   // A chain whose history has not loaded hides its deposits and spends, and
   // its notes would export as income. Nothing leaves the modal until it has.
-  // Stellar's equivalent is the account's first read of the pool history: until
-  // then its sends, withdrawals and exits have no rows.
+  // Stellar's equivalent is a complete read of the pool history by the unlocked
+  // account. A connected wallet that has not unlocked since a reload shows
+  // cached notes only, so its export waits too, and asks it to sign in.
+  const stellarConnected = isStellar && stellar.wallet.isConnected;
+  const stellarLocked = stellarConnected && !stellar.unlocked && stellar.status !== 'unlocking';
   const pendingChainIds = useMemo(
-    () => withStellarHistoryPending(data.historyPendingChainIds, { selected: isStellar, unlocked: stellar.unlocked, noteOrigins: stellar.noteOrigins }),
-    [data.historyPendingChainIds, isStellar, stellar.unlocked, stellar.noteOrigins],
+    () => withStellarHistoryPending(data.historyPendingChainIds, { selected: isStellar, connected: stellarConnected, noteOrigins: stellar.noteOrigins }),
+    [data.historyPendingChainIds, isStellar, stellarConnected, stellar.noteOrigins],
   );
   const historyReady = pendingChainIds.length === 0;
   const syncingCopy = historyReady
     ? null
     : `Syncing ${joinChainNames(pendingChainIds.map((cid) => getChainConfig(cid)?.displayName || `chain ${cid}`))} history…`;
+  const { toast: errorToast } = useToast();
+  const unlockStellar = useCallback(() => {
+    stellar.unlock().catch((caught: unknown) => { errorToast({ title: stellarUnlockErrorTitle(caught), variant: 'destructive' }); });
+  }, [stellar, errorToast]);
   const historyReadyRef = useRef(historyReady);
   useEffect(() => { historyReadyRef.current = historyReady; }, [historyReady]);
 
@@ -461,7 +470,16 @@ export function AccountingModalProvider({ children }: { children: React.ReactNod
 
                 {/* Share proof — viewing keys (deposits/transfers). Withdrawals
                     & exits are public, so they have no key to share here. */}
-                {syncingCopy ? (
+                {stellarLocked ? (
+                  <Pressable
+                    testID="accounting-stellar-sign-in"
+                    onPress={unlockStellar}
+                    accessibilityRole="button"
+                    className="items-center rounded-inner bg-background-secondary p-[12px] active:opacity-70"
+                  >
+                    <Text className="text-center font-pp-medium text-[12px] leading-[17px] text-text">Sign in to export your Stellar activity</Text>
+                  </Pressable>
+                ) : syncingCopy ? (
                   <View testID="accounting-history-syncing" className="flex-row items-center justify-center gap-[8px] rounded-inner bg-background-secondary p-[12px]">
                     {/* nw-keep(data-color): sync glyph color is a runtime theme token into the vector-icon sink */}
                     <Ionicons name="sync-outline" size={14} color={colors.textSecondary} />

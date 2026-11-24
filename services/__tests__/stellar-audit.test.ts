@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, mock, test } from 'bun:test';
 
 import {
   findBySpelling,
@@ -124,18 +124,42 @@ describe('Stellar tx hash spellings', () => {
 });
 
 describe('withStellarHistoryPending', () => {
-  test('an unlocked Stellar account waits for its first history read', () => {
-    expect(withStellarHistoryPending([], { selected: true, unlocked: true, noteOrigins: null })).toEqual([202]);
-    expect(withStellarHistoryPending([11155111], { selected: true, unlocked: true, noteOrigins: null })).toEqual([11155111, 202]);
+  test('a connected Stellar wallet waits for its first history read', () => {
+    expect(withStellarHistoryPending([], { selected: true, connected: true, noteOrigins: null })).toEqual([202]);
+    expect(withStellarHistoryPending([11155111], { selected: true, connected: true, noteOrigins: null })).toEqual([11155111, 202]);
   });
 
   test('an index a failed refresh left incomplete still blocks the export: received transfers would be missing', () => {
-    expect(withStellarHistoryPending([], { selected: true, unlocked: true, noteOrigins: { complete: false } })).toEqual([202]);
+    expect(withStellarHistoryPending([], { selected: true, connected: true, noteOrigins: { complete: false } })).toEqual([202]);
   });
 
-  test('nothing to wait for once completely indexed, while locked, or with another chain selected', () => {
-    expect(withStellarHistoryPending([], { selected: true, unlocked: true, noteOrigins: { complete: true } })).toEqual([]);
-    expect(withStellarHistoryPending([], { selected: true, unlocked: false, noteOrigins: null })).toEqual([]);
-    expect(withStellarHistoryPending([1], { selected: false, unlocked: true, noteOrigins: null })).toEqual([1]);
+  test('nothing to wait for once completely indexed, with no wallet, or with another chain selected', () => {
+    expect(withStellarHistoryPending([], { selected: true, connected: true, noteOrigins: { complete: true } })).toEqual([]);
+    expect(withStellarHistoryPending([], { selected: true, connected: false, noteOrigins: null })).toEqual([]);
+    expect(withStellarHistoryPending([1], { selected: false, connected: true, noteOrigins: null })).toEqual([1]);
+  });
+});
+
+describe('Stellar export after a page reload', () => {
+  test('a connected wallet still locked shows cached notes only, so the export stays blocked until unlocked and indexed', async () => {
+    mock.module('react-native', () => ({
+      Platform: { OS: 'web', select: (o: Record<string, unknown>) => o.web ?? o.default },
+    }));
+    const { stellarAccount } = await import('@/services/stellar/stellar-account');
+    const internals = stellarAccount as unknown as { buildSession: () => Promise<unknown>; set: (p: Record<string, unknown>) => void };
+    const signer = { getAddress: async () => '', getNetworkPassphrase: async () => '', signTransaction: async (x: string) => x } as never;
+    stellarAccount.bind(null, null);
+    // What a reload leaves: the wallet reconnects, the account binds, nothing unlocks.
+    stellarAccount.bind(ME, signer);
+    const locked = stellarAccount.getSnapshot();
+    expect(locked.unlocked).toBe(false);
+    expect(withStellarHistoryPending([], { selected: true, connected: true, noteOrigins: locked.noteOrigins })).toEqual([202]);
+    // Unlocking alone is not enough: the export waits for a complete index.
+    internals.buildSession = async () => ({});
+    await stellarAccount.ensureSession();
+    expect(withStellarHistoryPending([], { selected: true, connected: true, noteOrigins: stellarAccount.getSnapshot().noteOrigins })).toEqual([202]);
+    internals.set({ noteOrigins: { byCommitment: {}, complete: true } });
+    expect(withStellarHistoryPending([], { selected: true, connected: true, noteOrigins: stellarAccount.getSnapshot().noteOrigins })).toEqual([]);
+    stellarAccount.bind(null, null);
   });
 });
