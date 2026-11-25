@@ -140,6 +140,10 @@ export function useStellarSession() {
     registered: snapshot.registered,
     // Same account guard as the notes: never pair one account's notes with another's index.
     noteOrigins: storeMatchesWallet ? snapshot.noteOrigins : null,
+    /** The account's PUBLIC viewing key once unlocked (the private half never leaves the session). */
+    viewingPublicKey: storeMatchesWallet ? snapshot.viewingPublicKey : null,
+    /** The published key from the last sync: undefined before it, null when unreadable. */
+    onChainViewingKey: storeMatchesWallet ? snapshot.onChainViewingKey : undefined,
     /** This account's blind payment requests and whether each was paid. */
     paymentRequests: storeMatchesWallet ? snapshot.paymentRequests : EMPTY_REQUESTS,
     error: snapshot.error,

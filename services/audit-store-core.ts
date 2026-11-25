@@ -72,6 +72,39 @@ export function mergeSentAudits(
 }
 
 /**
+ * Whether a stored disclosure belongs to a tx: its own hash, or the source-chain
+ * swap a bridged deposit was paid with (rows and claim links made before the
+ * bridge delivered still carry that one).
+ */
+export function disclosureMatchesTx(d: SentNoteDisclosure, txHash: string): boolean {
+  const needle = txHash.toLowerCase();
+  return String(d.txHash).toLowerCase() === needle
+    || (!!d.sourceTxHash && String(d.sourceTxHash).toLowerCase() === needle);
+}
+
+/**
+ * A cross-chain shield for someone else (DEV-489) records its claim disclosure
+ * under the SOURCE-chain swap, the only hash known at broadcast. The bridge
+ * mints the note in its own tx on the pool's chain, and a receipt must name
+ * that one to verify. Once delivery reports it, the disclosures move to the
+ * destination tx and keep the source hash, so the rows that know only the
+ * source still find them. Empty when nothing is stored under the source.
+ */
+export function rekeyBridgedAudits(
+  current: readonly SentNoteDisclosure[],
+  sourceTxHash: string,
+  destinationTxHash: string,
+  chainId: number,
+): SentNoteDisclosure[] {
+  const source = sourceTxHash.toLowerCase();
+  const dest = destinationTxHash.toLowerCase();
+  if (!source || !dest || source === dest) return [];
+  return current
+    .filter((d) => d.chainId === chainId && String(d.txHash).toLowerCase() === source)
+    .map((d) => ({ ...d, txHash: dest as SentNoteDisclosure['txHash'], sourceTxHash: source as SentNoteDisclosure['txHash'] }));
+}
+
+/**
  * The provisional key an out-of-band transfer stores its recipient
  * disclosures under BEFORE broadcast, when no tx hash exists yet (DEV-413).
  *

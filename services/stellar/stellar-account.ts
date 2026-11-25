@@ -110,6 +110,8 @@ import { assertStellarRequestLive, buildStellarRequestDeposit } from '@/services
 import { envScopedStorageKey } from '@/config/app-environment';
 import { buildStellarNoteOrigins, canonicalCommitment, reconstructStellarSpends, type StellarNoteOrigins } from '@/services/stellar-activity';
 import { withSigningWindow } from '@/services/stellar/stellar-signing-window';
+import { stellarSentDisclosures } from '@/services/stellar/stellar-audit';
+import { publishedStellarViewingKey } from '@/services/stellar/stellar-viewing-key';
 
 import { rowStatus, type RowStatus } from '@/services/registration-rows';
 import { registerStellarAccount, stellarRegistrationStatus } from '@/services/stellar/stellar-registration';
@@ -140,6 +142,17 @@ export interface StellarAccountSnapshot {
    * for the activity rows (services/stellar-activity.ts).
    */
   noteOrigins: StellarNoteOrigins | null;
+  /**
+   * The PUBLIC half of this account's viewing key, derived with the session
+   * keys (memory only, like them). The private half is never put here.
+   */
+  viewingPublicKey: string | null;
+  /**
+   * The viewing key the keystore publishes for this account, from its bulk
+   * event history on the sync clock: undefined before the first read, null
+   * when the read failed, the zero key when nothing is published.
+   */
+  onChainViewingKey: string | null | undefined;
   /**
    * The blind payment requests this account holds (made here or restored
    * from a backup), and whether the SDK has seen one paid. From the
@@ -178,6 +191,8 @@ const EMPTY: StellarAccountSnapshot = {
   registered: null,
   registrationStatus: undefined,
   noteOrigins: null,
+  viewingPublicKey: null,
+  onChainViewingKey: undefined,
   paymentRequests: [],
   lastSyncedAt: null,
   error: null,
@@ -192,7 +207,7 @@ class StellarAccount {
   // Unlocked accounts the user switched away from, by address. Memory only.
   private readonly unlockedSessions = new Map<
     string,
-    { sessionPromise: Promise<StellarPoolSession>; rpc: IndexedStellarRpcInteractor | null; nullifyingKey: string | null; noteOrigins: StellarNoteOrigins | null }
+    { sessionPromise: Promise<StellarPoolSession>; rpc: IndexedStellarRpcInteractor | null; nullifyingKey: string | null; noteOrigins: StellarNoteOrigins | null; viewingPublicKey: string | null; onChainViewingKey: string | null | undefined }
   >();
   // The relayer, set only while a relayed withdrawal or transfer runs (see buildSession).
   private activeRelayer: IRelayerInteractor<StellarAddress> | null = null;
@@ -252,7 +267,7 @@ class StellarAccount {
     // Switching away from an unlocked account keeps its session in memory under
     // its own address. Signing out clears every one. Never persisted.
     if (previous && this.sessionPromise && this.snapshot.unlocked) {
-      this.unlockedSessions.set(previous, { sessionPromise: this.sessionPromise, rpc: this.rpc, nullifyingKey: this.nullifyingKey, noteOrigins: this.snapshot.noteOrigins });
+      this.unlockedSessions.set(previous, { sessionPromise: this.sessionPromise, rpc: this.rpc, nullifyingKey: this.nullifyingKey, noteOrigins: this.snapshot.noteOrigins, viewingPublicKey: this.snapshot.viewingPublicKey, onChainViewingKey: this.snapshot.onChainViewingKey });
     }
     if (!address && !opts.keepSessions) this.unlockedSessions.clear();
     const restored = address ? this.unlockedSessions.get(address) : undefined;
@@ -271,7 +286,7 @@ class StellarAccount {
       notes: address ? readCachedNotes(address) : [],
       paymentRequests: address ? readCachedRequests(address) : [],
       keptSessions: this.unlockedSessions.size > 0,
-      ...(restored ? { unlocked: true, status: 'ready' as const, noteOrigins: restored.noteOrigins } : {}),
+      ...(restored ? { unlocked: true, status: 'ready' as const, noteOrigins: restored.noteOrigins, viewingPublicKey: restored.viewingPublicKey, onChainViewingKey: restored.onChainViewingKey } : {}),
     };
     for (const listener of this.listeners) listener();
   }
@@ -383,7 +398,7 @@ class StellarAccount {
     session: StellarPoolSession,
     relayer: IRelayerInteractor<StellarAddress>,
     params: TransferOnceAction & { maxFee: bigint },
-  ): Promise<TransferResult<StellarAddress, StellarLog>> {
+  ): Promise<TransferResult<StellarAddress, StellarLog> & { fee: bigint }> {
     const sdk = await loadStellarSdk();
     return (await relayTransferOnce(
       session as unknown as TransferOnceSession,
@@ -395,7 +410,7 @@ class StellarAccount {
         maxInputs: sdk.MAX_INPUTS,
         maxOutputs: sdk.MAX_OUTPUTS,
       },
-    )) as unknown as TransferResult<StellarAddress, StellarLog>;
+    )) as unknown as TransferResult<StellarAddress, StellarLog> & { fee: bigint };
   }
 
   /**
@@ -432,7 +447,11 @@ class StellarAccount {
     // user switched away from must not replace the current one's.
     if (this.snapshot.address === address) this.rpc = rpc;
     const protocolKeys = await deriveProtocolKeys(sdk, address, signer);
-    if (this.snapshot.address === address) this.nullifyingKey = String(protocolKeys.privateNullifyingKey);
+    if (this.snapshot.address === address) {
+      this.nullifyingKey = String(protocolKeys.privateNullifyingKey);
+      // Only the public half, which senders encrypt to; the private one stays in the session.
+      this.set({ viewingPublicKey: String((protocolKeys as { viewingPublicKey?: unknown }).viewingPublicKey ?? '') || null });
+    }
     const session = await sdk.StellarPoolSessionBuilder.create({
       chainId: STELLAR_TESTNET_ID,
       ownerAddress: address,
@@ -552,6 +571,26 @@ class StellarAccount {
   }
 
   /**
+   * The X25519 key this account has published (the zero key when none), or
+   * null when it cannot be read: the latest ViewingKeySet for it in the
+   * keystore's whole event history, ONE bulk read by contract id (the request
+   * the SDK's keystore sync makes), searched locally. No request names the
+   * account (services/stellar/stellar-viewing-key.ts). Only the sync pass calls it.
+   */
+  private async readPublishedViewingKey(address: string): Promise<string | null> {
+    const rpc = this.rpc;
+    if (!rpc) return null;
+    try {
+      const sdk = await loadStellarSdk();
+      const page = await rpc.getEvents({ contractId: STELLAR_TESTNET_CONTRACTS.keystoreContractId });
+      return publishedStellarViewingKey(page.events, address, sdk.decodeScVal);
+    } catch (error) {
+      console.warn('[stellar] could not read the keystore event history', error);
+      return null;
+    }
+  }
+
+  /**
    * The on-chain origin of each held note, from the pool's whole event history:
    * ONE bulk read by contract id (no start ledger, so from the deployment), the
    * exact request note discovery makes. Nothing in it is derived from a note;
@@ -632,12 +671,16 @@ class StellarAccount {
           // it, so how many notes discovery finds changes no request.
           const rpc = this.rpc;
           const pass = <T,>(fn: () => Promise<T>) => (rpc ? rpc.withEventPage(fn) : fn());
-          const { registered, noteOrigins } = await pass(async () => {
+          const { registered, onChainViewingKey, noteOrigins } = await pass(async () => {
             await session.discoverNotes();
             if (address) await this.persist(session, address);
-            const [exportedNow, registeredNow] = await Promise.all([
+            // The published viewing key comes from the keystore's whole event history,
+            // on every tick of the sync clock: never when the Viewing Key modal
+            // opens, so opening it causes no request.
+            const [exportedNow, registeredNow, viewingKeyNow] = await Promise.all([
               session.exportAccount(),
               session.isKeystoreRegistered().catch(() => null),
+              address ? this.readPublishedViewingKey(address) : Promise.resolve(null),
             ]);
             // Same clock tick, same bulk read the discovery above makes (pool
             // contract id from the deployment ledger). A failure keeps the last
@@ -646,7 +689,7 @@ class StellarAccount {
               console.warn('[stellar] could not read the pool event history for activity', error);
               return null;
             });
-            return { registered: registeredNow, noteOrigins: origins };
+            return { registered: registeredNow, onChainViewingKey: viewingKeyNow, noteOrigins: origins };
           });
           // A deposit may finish while the event history is being read. Export
           // again locally so this sync cannot replace its note with an older view.
@@ -661,6 +704,8 @@ class StellarAccount {
             notes: exported.notes,
             paymentRequests: requestStates(exported),
             registered,
+            // A failed read keeps the last one: the key only changes by a registration.
+            onChainViewingKey: onChainViewingKey ?? this.snapshot.onChainViewingKey ?? null,
             // Only a changed index is published: an identical one would re-run
             // every activity derivation on each tick for nothing.
             // A failed read keeps the last index but marks it incomplete: the
@@ -912,6 +957,7 @@ class StellarAccount {
       onStage?.('proving');
       this.activeRelayer = relayer;
       let receipt;
+      let paidFee = 0n;
       try {
         // One committed quote and one proof. prepareWithdraw would quote, then
         // prove self-submit calldata that relayWithdraw discards and proves
@@ -925,6 +971,7 @@ class StellarAccount {
         const { quote } = selectedQuote;
         // Selection reserved the reviewed fee and the shared EVM allowance.
         const fee = BigInt(quote.feeAmount);
+        paidFee = fee;
         if (!feeWithinReviewed(fee, params.reviewedFee)) throw new RelayFeeIncreasedError(params.reviewedFee, fee);
         const option = {
           inputCommitments: params.inputCommitments,
@@ -944,7 +991,8 @@ class StellarAccount {
       if (!receipt.status) throw new Error('The relayed withdrawal failed on-chain.');
       onStage?.('syncing');
       await this.refreshLocal(session, address);
-      return { txHash: receipt.txHash as string };
+      // The relayer's fee, inside what left the pool: the sender's records split it out.
+      return { txHash: receipt.txHash as string, fee: paidFee };
     });
   }
 
@@ -986,7 +1034,21 @@ class StellarAccount {
       if (!result.txReceipt.status) throw new Error('The transfer transaction failed on-chain.');
       onStage?.('syncing');
       await this.refreshLocal(session, address);
-      return { txHash: result.txReceipt.txHash as string };
+      const txHash = result.txReceipt.txHash as string;
+      return {
+        txHash,
+        // Paid on top of `amount`.
+        fee: result.fee,
+        // The recipient's notes with their secrets, for this transfer's proof
+        // (an accountant's partial viewing key), as an EVM send keeps them.
+        disclosures: stellarSentDisclosures({
+          chainId: STELLAR_TESTNET_ID,
+          txHash,
+          recipient: params.recipient,
+          amount: params.amount,
+          notes: result.recipientNotes as never,
+        }),
+      };
     });
   }
 
@@ -1030,7 +1092,7 @@ class StellarAccount {
       const relay = trackTransferRelay(relayer);
       // Relayed like any transfer: the relayer submits through the relay contract, so this
       // account does not appear on the transaction. One quote, one proof.
-      let result: TransferResult<StellarAddress, StellarLog>;
+      let result: TransferResult<StellarAddress, StellarLog> & { fee: bigint };
       try {
         result = await this.withTransferRelayer(relay.relayer, () =>
           this.relayOnce(session, relay.relayer, {
@@ -1079,7 +1141,7 @@ class StellarAccount {
       setSentClaimTx(sentClaimsStorage(), SENT_CLAIMS_KEY, saved.id, txHash);
       onStage?.('syncing');
       await this.refreshLocal(session, address);
-      return { txHash, notes: saved.notes.map((n) => ({ ...n, txHash })) };
+      return { txHash, fee: result.fee, notes: saved.notes.map((n) => ({ ...n, txHash })) };
     });
   }
 
@@ -1417,7 +1479,8 @@ class StellarAccount {
       if (!result.txReceipt.status) throw new Error('The transfer transaction failed on-chain.');
       onStage?.('syncing');
       await this.refreshLocal(session, address);
-      return { txHash: String(result.txReceipt.txHash) };
+      // The relayer fee paid on top of the request, for the payer's records.
+      return { txHash: String(result.txReceipt.txHash), fee: result.fee };
     });
   }
 

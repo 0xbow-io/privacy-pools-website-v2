@@ -1980,6 +1980,7 @@ function RealPoolsProvider({ children }: { children: ReactNode }) {
           priceUsd: priceMap['XLM'] || priceMap['xlm'] || 0,
           ownAddress: stellarWallet.isConnected ? stellarWallet.address ?? '' : '',
           sentRecipient: stellarSentRecipientLookup(readAllSentTransfers(), STELLAR_TESTNET_ID),
+          withdrawRecipient: ((recorded) => (txHash: string) => findWithdrawRecipientIn(recorded, txHash, STELLAR_TESTNET_ID))(readAllWithdrawRecipients()),
           sentDeposits: stellarWallet.isConnected && stellarWallet.address
             ? listStellarSentDeposits(stellarWallet.address).map((c) => ({
               txHash: c.txHash, recipient: c.recipient, amount: c.amount, tokenId: c.notes[0]?.tokenId ?? '', createdAt: c.createdAt,

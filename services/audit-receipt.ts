@@ -46,6 +46,8 @@ export interface PartialViewingKeyV1 {
   label: Hash;
   /** Optional human memo, e.g. "May 2026 salary — Bob". */
   memo?: string;
+  /** A bridged deposit's source-chain swap (informational); `txHash` is the minting tx. */
+  sourceTxHash?: Hash;
   /** Informational only (not part of verification). Unix ms. */
   createdAt?: number;
 }
@@ -179,6 +181,8 @@ export interface SentNoteDisclosure {
   tokenId: Address;
   value: Hex;
   label: Hash;
+  /** A bridged deposit: the source-chain swap that paid for it; `txHash` is then the minting tx. */
+  sourceTxHash?: Hash;
 }
 
 /** Build a disclosure bundle for a payment the user sent. */
@@ -195,6 +199,7 @@ export function buildSentPaymentKey(d: SentNoteDisclosure, memo?: string): Parti
     value: d.value,
     label: d.label,
     memo,
+    ...(d.sourceTxHash ? { sourceTxHash: d.sourceTxHash } : {}),
     createdAt: Date.now(),
   };
 }
@@ -223,7 +228,23 @@ export interface VerifyResult {
   onChainTimestampSec: number | null;
   /** True only when both the hash matches AND the commitment is on-chain. */
   verified: boolean;
+  /**
+   * The note is on chain, but the tx the receipt names minted nothing in this
+   * pool: a bridged deposit's source-chain swap. That tx was not checked.
+   */
+  sourceTxUnchecked?: boolean;
   error?: string;
+}
+
+/**
+ * A Stellar bundle is checked by services/stellar/stellar-audit-verify.ts:
+ * its owner and asset are StrKeys that the commitment binds through Stellar's
+ * field conversions, and its pool is read from the Stellar event archive. Only
+ * a build that serves Stellar has the chain, so elsewhere it stays unsupported.
+ */
+async function isStellarChain(chainId: number): Promise<boolean> {
+  const { getChainConfig } = await import('@/config/chains');
+  return getChainConfig(chainId)?.chainType === 'stellar';
 }
 
 /**
@@ -233,6 +254,10 @@ export interface VerifyResult {
  * Exported so the offline smoke test can exercise the real path.
  */
 export async function recomputeCommitment(bundle: PartialViewingKeyV1): Promise<Hash> {
+  if (await isStellarChain(bundle.chainId)) {
+    const { recomputeStellarCommitment } = await import('@/services/stellar/stellar-audit-verify');
+    return recomputeStellarCommitment(bundle);
+  }
   const { createNoteComputationService } = await import('@/services/sdk-runtime');
   const ncs = await createNoteComputationService();
   const noteAddressHash = ncs.computeNoteAddressHash(bundle.ownerAddress, bundle.noteSecret);
@@ -250,6 +275,10 @@ export async function recomputeCommitment(bundle: PartialViewingKeyV1): Promise<
  * doesn't pull snarkjs/Poseidon until it actually runs.
  */
 export async function verifyPartialViewingKey(bundle: PartialViewingKeyV1): Promise<VerifyResult> {
+  if (await isStellarChain(bundle.chainId)) {
+    const { verifyStellarPartialViewingKey } = await import('@/services/stellar/stellar-audit-verify');
+    return verifyStellarPartialViewingKey(bundle);
+  }
   const base: VerifyResult = {
     hashMatch: false,
     recomputedCommitment: null,
@@ -269,6 +298,8 @@ export async function verifyPartialViewingKey(bundle: PartialViewingKeyV1): Prom
 
   let onChain = false;
   let onChainTimestampSec: number | null = null;
+  let mintError: string | undefined;
+  let sourceTxUnchecked = false;
   try {
     const sdkSetup = await import('@/services/sdk-runtime');
     const { getChainConfig } = await import('@/config/chains');
@@ -302,8 +333,16 @@ export async function verifyPartialViewingKey(bundle: PartialViewingKeyV1): Prom
     // Presence, not timestamp: a commitment can be on-chain while its
     // timestamp fails leaf verification, and "is this note real" must not
     // hinge on the latter.
-    onChain = noteIndex.hasCommitment(recomputed);
-    const tsRaw = noteIndex.commitmentTimestamp(recomputed);
+    const minted = receiptMintVerdict({
+      present: noteIndex.hasCommitment(recomputed),
+      mintTxHash: noteIndex.mintingTxHash(recomputed),
+      receiptTxHash: String(bundle.txHash ?? ''),
+      namedTxMintsInPool: noteIndex.isPoolMintTx(String(bundle.txHash ?? '')),
+    });
+    onChain = minted.onChain;
+    mintError = minted.error;
+    sourceTxUnchecked = minted.sourceTxUnchecked === true;
+    const tsRaw = onChain ? noteIndex.commitmentTimestamp(recomputed) : null;
     onChainTimestampSec = tsRaw ? Number(BigInt(tsRaw)) : null;
   } catch (err) {
     return {
@@ -320,8 +359,44 @@ export async function verifyPartialViewingKey(bundle: PartialViewingKeyV1): Prom
     onChain,
     onChainTimestampSec,
     verified: hashMatch && onChain,
+    ...(mintError ? { error: mintError } : {}),
+    ...(sourceTxUnchecked ? { sourceTxUnchecked: true } : {}),
   };
 }
+
+/**
+ * Whether a receipt's note was minted in the transaction the receipt names.
+ * A real note must not vouch for an unrelated tx, so presence alone is not
+ * enough: the Deposited / Transacted event that minted the commitment must
+ * carry the receipt's txHash. Answered only from the bulk events the presence
+ * check already read (no request names the tx or the note); when that data
+ * carries no tx hash for the commitment, it fails closed rather than look the
+ * transaction up.
+ *
+ * A cross-chain shield (a deposit paid from another chain, DEV-489) is minted
+ * by the bridge in its own tx on the pool's chain, while a receipt issued
+ * before delivery names the SOURCE-chain swap. That hash minted nothing in this
+ * pool, so it is not a mismatch: the note is verified, and the named tx is
+ * reported as not checked here. A mismatch is a named tx that DID mint in this
+ * pool, and minted something else.
+ */
+export function receiptMintVerdict(input: {
+  present: boolean;
+  mintTxHash: string | null;
+  receiptTxHash: string;
+  /** The named tx minted some note in this pool (same bulk events). */
+  namedTxMintsInPool: boolean;
+}): { onChain: boolean; error?: string; sourceTxUnchecked?: boolean } {
+  if (!input.present) return { onChain: false };
+  if (!input.mintTxHash) {
+    return { onChain: false, error: 'Could not confirm which transaction created this note, so the receipt was not verified.' };
+  }
+  const norm = (h: string) => h.trim().toLowerCase().replace(/^0x/, '');
+  if (input.receiptTxHash && norm(input.mintTxHash) === norm(input.receiptTxHash)) return { onChain: true };
+  if (input.receiptTxHash && !input.namedTxMintsInPool) return { onChain: true, sourceTxUnchecked: true };
+  return { onChain: false, error: 'This note was created in a different transaction than the one this receipt names.' };
+}
+
 // ===========================================================================
 // Proof of origin — for a PUBLIC withdrawal/exit, prove the funds are clean
 // (ASP-approved) and that you control them, by disclosing a note you hold in
@@ -460,6 +535,10 @@ export interface OriginVerifyResult {
 }
 
 export async function verifyOriginProof(p: OriginProofV1): Promise<OriginVerifyResult> {
+  if (await isStellarChain(p.chainId)) {
+    const { verifyStellarOriginProof } = await import('@/services/stellar/stellar-audit-verify');
+    return verifyStellarOriginProof(p);
+  }
   const base: OriginVerifyResult = {
     noteCommitment: null, noteOnChain: false, targetLinked: false,
     withdrawnValue: null, withdrawnBlock: null, aspStatus: 'unavailable', verified: false,

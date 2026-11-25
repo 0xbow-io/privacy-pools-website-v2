@@ -12,7 +12,7 @@ import { Platform } from 'react-native';
 import { envScopedStorageKey } from '@/config/app-environment';
 import * as SecureStore from 'expo-secure-store';
 import type { SentNoteDisclosure } from '@/services/audit-receipt';
-import { mergeSentAudits, readStoredAudits, sentAuditsForRow, type StoredAuditsResult } from '@/services/audit-store-core';
+import { disclosureMatchesTx, mergeSentAudits, readStoredAudits, rekeyBridgedAudits, sentAuditsForRow, type StoredAuditsResult } from '@/services/audit-store-core';
 
 // Environment-scoped (config/app-environment.ts): prod and staging deploy on the
 // same chain ids, so a chain-keyed record must not cross between worlds.
@@ -155,8 +155,24 @@ export function dropSentAudits(txHash: string): void {
 /** Every disclosure recorded for a tx (one per recipient note). */
 export function findSentAudits(txHash: string | null | undefined): SentNoteDisclosure[] {
   if (!txHash) return [];
-  const needle = txHash.toLowerCase();
-  return readAll().filter((x) => x.txHash.toLowerCase() === needle);
+  // Its own hash, or the source swap of a bridged deposit (see rekeyBridgedSentAudits).
+  return readAll().filter((x) => disclosureMatchesTx(x, txHash));
+}
+
+/**
+ * A bridged deposit delivered: move its disclosures from the source-chain swap
+ * to the tx that minted the note on the pool's chain, so a receipt made from
+ * them names the minting tx. The source-keyed rows are dropped only once the
+ * new ones are proven stored (same rule as the provisional re-key above).
+ */
+export function rekeyBridgedSentAudits(sourceTxHash: string, destinationTxHash: string, chainId: number): boolean {
+  const current = readAllResult();
+  if (!current.ok) return false;
+  const rekeyed = rekeyBridgedAudits(current.list, sourceTxHash, destinationTxHash, chainId);
+  if (rekeyed.length === 0) return false;
+  if (!recordSentAuditsVerified(rekeyed)) return false;
+  dropSentAudits(sourceTxHash);
+  return true;
 }
 
 export function findSentAudit(txHash: string | null | undefined): SentNoteDisclosure | null {

@@ -63,7 +63,8 @@ describe('every payout path records', () => {
   });
 
   test('Withdraw Stellar and Sui (relayed and direct) record the reviewed recipient', () => {
-    expect(withdraw).toContain('recordRecipientUseForActiveOwner(recipient, STELLAR_TESTNET_ID);');
+    // Stellar records through the same wrapper as EVM: the per-tx payee and the history.
+    expect(withdraw).toContain('recordWithdrawRecipientEverywhere({ txHash: result.txHash, chainId: STELLAR_TESTNET_ID, recipient, timestamp: Date.now() });');
     expect((withdraw.match(/recordRecipientUseForActiveOwner\(suiRecipient, SUI_TESTNET_ID\);/g) ?? []).length).toBe(2);
   });
 

@@ -13,7 +13,7 @@ import { feeWithinReviewed, relayerFeeJitterAllowance, transferFeeBudget } from 
 const source = readFileSync(new URL('../stellar/stellar-account.ts', import.meta.url), 'utf8');
 const ast = ts.createSourceFile('stellar-account.ts', source, ts.ScriptTarget.Latest, true);
 const account = ast.statements.find(ts.isClassDeclaration)!;
-const methods = ['relayOnce', 'withdraw', 'keepClaim'];
+const methods = ['relayOnce', 'withdraw', 'keepClaim', 'payPaymentRequest'];
 const body = account.members.filter(m => ts.isMethodDeclaration(m) && methods.includes(m.name.getText(ast))).map(m => m.getText(ast)).join('\n');
 const code = ts.transpileModule(`class Account { ${body} }; return new Account();`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 function harness() {
@@ -30,7 +30,8 @@ test('transfer accepts a binding fee above the old cap and refuses only when sel
   await expect(account.relayOnce(session, relayer(2849563n), transfer(2849562n))).rejects.toThrow("The notes picked for this payment can't cover it.");
   expect(calls).toBe(0);
   await account.relayOnce(session, relayer(2849562n), transfer(2849562n));
-  await account.relayOnce(session, relayer(317289n), transfer(2849562n));
+  // The committed fee comes back for the sender's records.
+  expect((await account.relayOnce(session, relayer(317289n), transfer(2849562n))).fee).toBe(317289n);
   expect(calls).toBe(2);
 });
 
@@ -51,10 +52,10 @@ test('withdrawal rejects a fee above review before relay and accepts reviewed fe
   await expect(account.withdraw(params)).rejects.toThrow('fee went up');
   expect(calls).toBe(0);
   fee = params.reviewedFee + relayerFeeJitterAllowance(params.reviewedFee);
-  expect(await account.withdraw(params)).toEqual({ txHash: '0x1' });
+  expect(await account.withdraw(params)).toEqual({ txHash: '0x1', fee });
   expect(calls).toBe(1);
   fee = 2849562n;
-  expect(await account.withdraw({ ...params, reviewedFee: fee })).toEqual({ txHash: '0x1' });
+  expect(await account.withdraw({ ...params, reviewedFee: fee })).toEqual({ txHash: '0x1', fee });
   expect(calls).toBe(2);
 });
 
@@ -79,4 +80,17 @@ test('closing a claim during its fresh quote prevents the relay', async () => {
   // The original optional-parameters call shape remains supported.
   expect(await account.keepClaim(['0x1'])).toEqual({ txHash: '0x1' });
   expect(relays).toBe(1);
+});
+
+test('paying a blind request returns the fee the relay charged, for the payer to record', async () => {
+  const account = harness();
+  Object.assign(account, {
+    enqueue: (fn: () => unknown) => fn(), requireSigner: () => ({ address: 'G', generation: 1 }),
+    ensureSession: async () => ({}), ensureRegistered: async () => {}, assertStillBound: () => {},
+    connectRelayer: async () => ({}), refreshLocal: async () => {},
+    withTransferRelayer: (_relayer: unknown, fn: () => unknown) => fn(),
+    relayOnce: async () => ({ txReceipt: { status: true, txHash: '0xabc' }, fee: 317289n }),
+  });
+  const request = { tokenId: STELLAR_TESTNET_CONTRACTS.nativeAssetContractId };
+  expect(await account.payPaymentRequest({ maxFee: 2849562n, request, inputCommitments: ['0x1'] })).toEqual({ txHash: '0xabc', fee: 317289n });
 });

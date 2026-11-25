@@ -69,7 +69,7 @@ import { StellarLabelRetryNotice } from '@/components/stellar-label-retry';
 import { isStellarAccountAddress } from '@/services/stellar/stellar-request';
 import type { PendingLabel } from '@/services/stellar/stellar-account';
 import { recordOutgoingDeposit } from '@/services/outgoing-deposits-store';
-import { recordSentAuditsVerified, dropSentAudits } from '@/services/audit-store';
+import { recordSentAuditsVerified, dropSentAudits, rekeyBridgedSentAudits } from '@/services/audit-store';
 import { UNSAVED_CLAIM_WARNING } from '@/services/unsaved-claim-warning-copy';
 import { buildBlindDepositBackup, webRandomFill, type BlindDepositBackupResult } from '@/services/blind-deposit-backup';
 import { commitmentKey, swapDepositRecipient, type BlindSwapRecipientInput, type BuiltClaimNote } from '@/services/swap-deposit-recipient';
@@ -4057,6 +4057,18 @@ export function DepositModalProvider({ children }: { children: React.ReactNode }
           try { await bridgeDepsRef.current.refreshNotes(); } catch { /* best-effort */ }
         }
         if (outcome === 'deposited') {
+          // A deposit for someone else paid from this chain (DEV-489) stored its
+          // claim disclosure under the source swap; the note was minted by the
+          // bridge's own tx on the pool's chain, which a receipt must name to
+          // verify. The hash comes from this same status answer: no new request.
+          const destinationTx = status.receiving?.txHash;
+          if (destinationTx) {
+            try {
+              rekeyBridgedSentAudits(bridgeWatch.txHash, destinationTx, bridgeWatch.toChainId);
+            } catch (rekeyErr) {
+              bridgeDepsRef.current.log('warn', 'Deposit', 'Could not re-key the bridged claim disclosure', rekeyErr);
+            }
+          }
           // Delivered AND deposited: NOW the destination note exists, so refresh
           // against delivery rather than the fixed timers, which can only guess.
           try { await bridgeDepsRef.current.refreshNotes(); } catch { /* best-effort */ }

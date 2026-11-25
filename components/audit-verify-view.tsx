@@ -208,6 +208,9 @@ export function AuditVerifyView({ initialEncoded }: { initialEncoded?: string })
               <Ionicons name="checkmark-circle" size={20} color={colors.success} />
               <Text className="flex-1 font-pp-regular text-[13px] leading-[18px] text-success">
                 Verified onchain. The transaction values below are confirmed.
+                {result.sourceTxUnchecked
+                  ? ' This deposit was bridged from another network. The source transaction this receipt names was not checked.'
+                  : ''}
               </Text>
             </View>
           ) : (
