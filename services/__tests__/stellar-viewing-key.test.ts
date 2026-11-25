@@ -140,6 +140,16 @@ describe('the published key, from the keystore event history', () => {
     expect(publishedStellarViewingKey(events, B, decodeScVal)).toBe(`0x${'bb'.repeat(32)}`);
   });
 
+  test('events as Soroban RPC serves them (type "contract") are read by their first topic', async () => {
+    const { publishedStellarViewingKey } = await import('@/services/stellar/stellar-viewing-key');
+    const { decodeScVal } = await import('@privacy-pools-v2/stellar-sdk');
+    const rpcShaped = { ...(await keystoreEvent('0000000000000000100-0000000000', A, KEY_A)), type: 'contract' };
+    expect(publishedStellarViewingKey([rpcShaped], A, decodeScVal)).toBe(KEY_A);
+    // And a "contract" event whose topic names something else is still ignored.
+    const other = { ...(await keystoreEvent('0000000000000000200-0000000000', A, `0x${'cc'.repeat(32)}`, 'auth_policy_set')), type: 'contract' };
+    expect(publishedStellarViewingKey([rpcShaped, other], A, decodeScVal)).toBe(KEY_A);
+  });
+
   test('an account that never set a key reads as unpublished, not unknown', async () => {
     const { publishedStellarViewingKey, ZERO_VIEWING_KEY } = await import('@/services/stellar/stellar-viewing-key');
     const { decodeScVal } = await import('@privacy-pools-v2/stellar-sdk');

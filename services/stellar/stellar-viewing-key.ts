@@ -48,7 +48,14 @@ export function publishedStellarViewingKey(
   const ordered = [...events].sort((a, b) => String(a.id ?? '').localeCompare(String(b.id ?? '')));
   for (const event of ordered) {
     try {
-      const name = event.type ?? String(decode(event.topics[0] ?? ''));
+      // The name is the first topic. Soroban RPC sets `type` to the event kind
+      // ("contract"), so it is only a fallback for a topic this cannot decode.
+      let name: string;
+      try {
+        name = String(decode(event.topics[0] ?? ''));
+      } catch {
+        name = event.type ?? '';
+      }
       if (name !== VIEWING_KEY_SET) continue;
       if (String(decode(event.topics[1] ?? '')) !== account) continue;
       const data = decode(event.data) as Record<string, unknown> | null;

@@ -322,6 +322,20 @@ export class OnChainNoteIndex {
   }
 
   /**
+   * Whether a tx minted any note in this pool, per the same bulk events
+   * (Deposited / Transacted that carried a hash). False for a tx on another
+   * chain, such as a bridged deposit's source swap. Never a lookup of its own.
+   */
+  isPoolMintTx(txHash: string): boolean {
+    const needle = String(txHash ?? '').trim().toLowerCase().replace(/^0x/, '');
+    if (!needle) return false;
+    for (const h of this.built().mintTx.values()) {
+      if (h.trim().toLowerCase().replace(/^0x/, '') === needle) return true;
+    }
+    return false;
+  }
+
+  /**
    * Whether a nullifier appears in any Transacted / Ragequit event, independent
    * of whether its block timestamp resolved. THE spent check.
    */
