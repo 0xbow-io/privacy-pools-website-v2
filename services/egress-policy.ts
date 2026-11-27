@@ -219,6 +219,8 @@ export const ASP_ROUTES: AspRoute[] = [
   },
   { path: /^\/global\/public\/statistics$/ },
   { path: new RegExp(`^/${CHAIN}/public/asset-statistics$`), headers: ['x-asset'] },
+  // Every asset's statistics in one read that names no asset (asp-v2#252).
+  { path: new RegExp(`^/${CHAIN}/public/asset-statistics/all$`) },
   { path: /^\/global\/public\/token-prices$/, params: ['chainId'] },
   { path: new RegExp(`^/${CHAIN}/public/assets-stats$`) },
   // The yield feeds behind "yield earned". Both are ASSET-level bulk data: the

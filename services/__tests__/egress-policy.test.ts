@@ -100,6 +100,12 @@ describe('ASP route allowlist', () => {
       .toEqual({ allowed: true });
   });
 
+  test('allows every asset\'s statistics, which name no asset', () => {
+    expect(checkAspRequest(get('/11155111/public/asset-statistics/all'))).toEqual({ allowed: true });
+    expect(checkAspRequest(get('/11155111/public/asset-statistics/all', { 'X-Asset': ADDRESS })).allowed).toBe(false);
+    expect(checkAspRequest(get(`/11155111/public/asset-statistics/all?entrypoint=${ADDRESS}`)).allowed).toBe(false);
+  });
+
   test('refuses an undeclared query parameter on a declared route', () => {
     const verdict = checkAspRequest(get('/association-set/leaves?chainId=11155111&label=' + LABEL));
     expect(verdict.allowed).toBe(false);
