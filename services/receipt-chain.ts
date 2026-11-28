@@ -103,6 +103,41 @@ export function resolveReceiptChain(
 }
 
 /**
+ * The chain a link page may switch the app to by itself, or null.
+ *
+ * A receipt for a chain this environment serves used to stop at "Switch the
+ * app to Ethereum to import it" with the claim button disabled, when the app
+ * can make that switch itself (the same `selectChain` the network picker uses,
+ * which asks a connected wallet). Only then: a chain another environment serves
+ * needs a reload into that environment (the explicit Environment button), and
+ * an id no picker here offers must never be selected (`selectable` is this
+ * build's selectable EVM chains).
+ */
+export function receiptSwitchTarget(args: {
+  linkChainId: number | undefined;
+  sessionChainId: number;
+  chain: ReceiptChain;
+  selectable: (chainId: number) => boolean;
+}): number | null {
+  const { linkChainId, sessionChainId, chain, selectable } = args;
+  if (linkChainId === undefined || linkChainId === sessionChainId) return null;
+  if (!chain.supported || chain.otherEnvironment) return null;
+  return selectable(linkChainId) ? linkChainId : null;
+}
+
+/**
+ * Whether a page should try the switch on its own now. One attempt per chain
+ * and wallet connection state: a declined prompt is not repeated (the page
+ * offers a button instead), but a wallet that connects after the first try
+ * (it reconnects late, or the user connects it) gets asked once, because the
+ * app's selection then follows the wallet back to its own chain.
+ */
+export function receiptAutoSwitchKey(target: number | null, connection: 'connected' | 'disconnected' | 'pending'): string | null {
+  if (target === null || connection === 'pending') return null;
+  return `${target}:${connection}`;
+}
+
+/**
  * Why a payment request on a chain this environment does not serve cannot be
  * paid here, naming where it can (DEV-485). It replaced "Unsupported chain in
  * payment request (chainId 10)", which named neither the chain nor the fix.

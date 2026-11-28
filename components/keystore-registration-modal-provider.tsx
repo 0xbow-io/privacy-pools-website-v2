@@ -6,8 +6,7 @@ import { Pressable, Text, View } from 'react-native';
 import { RegistrationModalFrame, REGISTRATION_TITLE as DEFAULT_TITLE, REGISTRATION_BODY as DEFAULT_BODY, REGISTRATION_PRIMARY as DEFAULT_PRIMARY } from '@/components/ui/registration-modal-frame';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAccount, useConfig, usePublicClient, useSwitchChain } from 'wagmi';
-import { getAccount, getConnectorClient } from 'wagmi/actions';
-import { getCapabilities, getCallsStatus, sendCalls } from 'viem/actions';
+import { getAccount } from 'wagmi/actions';
 import type { Address as ViemAddress, Hex } from 'viem';
 import { useShareNameText } from '@/hooks/use-share-rates';
 
@@ -68,7 +67,9 @@ import { ownRegistrationResultRefusal } from '@/services/keystore-scope';
 import { confirmedRegistration } from '@/services/keystore-registry-events';
 import { REGISTRATION_INCOMPATIBLE_MESSAGE } from '@/services/keystore-identity-status';
 import { sendWalletTransaction } from '@/services/wallet-send-refusal';
-import { clearRegistrationBatch, hasPendingRegistrationBatch, RegistrationBatchPendingError, submitRegistrationBatch } from '@/services/registration-batch';
+import { clearRegistrationBatch, hasPendingRegistrationBatch, RegistrationBatchPendingError } from '@/services/registration-batch';
+
+import { submitWalletRegistrationBatch } from '@/services/wallet-registration-batch';
 
 export const REGISTRATION_CLOSED_BEFORE_PROMPT = 'Registration was closed before the wallet prompt. Nothing was sent.';
 export const REGISTRATION_OWNER_CHANGED =
@@ -970,18 +971,8 @@ export function KeystoreRegistrationModalProvider({ children }: { children: Reac
           if (ownsUi()) setAwaitingWallet(false);
         }
       };
-      let batchClient: Awaited<ReturnType<typeof getConnectorClient>> | undefined;
-      const getBatchClient = async () => batchClient ??= await getConnectorClient(wagmiConfig, { account: runOwner, chainId });
-      const batch = await submitRegistrationBatch({
-        getCapabilities: async () => getCapabilities(await getBatchClient(), { account: runOwner, chainId }),
-        sendCalls: ({ calls, id }) => sendCalls(batchClient!, {
-          account: runOwner, chain: batchClient!.chain, forceAtomic: true, id,
-          calls: calls.map(call => ({ to: call.to as ViemAddress, data: call.data as Hex, value: BigInt(call.value ?? 0) })),
-        }),
-        getCallsStatus: async (id) => getCallsStatus(await getBatchClient(), { id }),
-      }, {
-        owner: runOwner, chainId,
-        calls: [keystoreCalldata, viewingKeyCalldata].filter((call) => call != null).map(call => ({ ...call, value: String(call.value) })),
+      const batch = await submitWalletRegistrationBatch(wagmiConfig, {
+        owner: runOwner, chainId, keystoreCalldata, viewingKeyCalldata,
         beforeSend: () => {
           if (!deliversToCaller()) throw new Error(REGISTRATION_CLOSED_BEFORE_PROMPT);
           if (!registrationOwnerUnchanged({ owner: runOwner, chainId, current: getAccount(wagmiConfig) })) throw new Error(REGISTRATION_OWNER_CHANGED);

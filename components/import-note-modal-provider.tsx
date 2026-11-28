@@ -26,6 +26,8 @@ import { useShareRates } from '@/hooks/use-share-rates';
 import { FigureText } from '@/components/ui/share-figure';
 import { decodeNoteReceiptFromUrl, extractNoteReceiptEncoded } from '@/services/note-receipt';
 import { useSessionChainId } from '@/hooks/use-session-chain-id';
+import { useReceiptChainSwitch } from '@/hooks/use-receipt-chain-switch';
+import { claimProgressSurface } from '@/services/claim-setup-steps';
 import {
   parseSuiNoteReceipt,
   suiReceiptToStoredNote,
@@ -74,6 +76,7 @@ export function ImportNoteModalProvider({ children }: { children: React.ReactNod
   const {
     status,
     statusMessage,
+    claimPhase,
     errMessage,
     busy,
     done,
@@ -253,6 +256,8 @@ export function ImportNoteModalProvider({ children }: { children: React.ReactNod
   const sessionChainId = useSessionChainId();
   const chainMismatch = receipt?.chainId !== undefined && receipt.chainId !== sessionChainId;
   const receiptChainInfo = receiptChain(receiptChainId);
+  // Switch the app to the pasted receipt's chain instead of telling the user to.
+  const chainSwitch = useReceiptChainSwitch({ linkChainId: receipt?.chainId, sessionChainId, chain: receiptChainInfo, paused: busy || !isOpen });
   const importsDisabled = !recipientMatches || !keysReady || busy || done || chainMismatch;
   const showDecodeError = input.trim().length > 0 && !note && !suiNote && !suiParse.error;
 
@@ -399,7 +404,7 @@ export function ImportNoteModalProvider({ children }: { children: React.ReactNod
 
               {note && chainMismatch ? (
                 <View className="gap-[8px] rounded-control border border-warning bg-warning-bg px-[14px] py-[12px]">
-                  <ReceiptWrongNetworkCopy pasted chain={receiptChainInfo} textClassName="font-pp-regular text-[12px] leading-[18px] text-warning" />
+                  <ReceiptWrongNetworkCopy pasted chain={receiptChainInfo} chainSwitch={chainSwitch} textClassName="font-pp-regular text-[12px] leading-[18px] text-warning" />
                 </View>
               ) : note && !effectiveAddress ? (
                 <View className="gap-[10px] rounded-control border border-border bg-success-bg px-[14px] py-[12px]">
@@ -464,7 +469,7 @@ export function ImportNoteModalProvider({ children }: { children: React.ReactNod
 
               {/* Same staged horizontal progress as the shield/send flows for
                   the on-chain add; the quick device merge keeps a status line. */}
-              {status === 'anchoring' ? (
+              {claimProgressSurface({ anchoring: status === 'anchoring', claimPhase }) === 'progress' ? (
                 <FlowProgress message={statusMessage} />
               ) : busy && statusMessage ? (
                 <View className="rounded-control border border-[#98B975] bg-[#F5FAEE] px-[14px] py-[12px]">
@@ -535,7 +540,7 @@ export function ImportNoteModalProvider({ children }: { children: React.ReactNod
                       disabled={importsDisabled}
                     >
                       <Text className="font-pp-medium text-[14px] text-button-primary-text">
-                        {status === 'anchoring' ? 'Adding…' : 'Add to shielded balance'}
+                        {status === 'anchoring' ? (claimPhase === 'setup' ? 'One-time setup…' : 'Adding…') : 'Add to shielded balance'}
                       </Text>
                     </Pressable>
                   )}

@@ -1,5 +1,7 @@
-import { expect, test } from 'bun:test';
-import { createWalletClient, custom, type Hex } from 'viem';
+import { expect, spyOn, test } from 'bun:test';
+import { createConfig, connect, mock } from '@wagmi/core';
+import { submitWalletRegistrationBatch } from '../wallet-registration-batch';
+import { createWalletClient, custom, http, type Hex } from 'viem';
 import { bsc } from 'viem/chains';
 import { getCapabilities, getCallsStatus, sendCalls } from 'viem/actions';
 import type { BatchCall } from '../wallet-batch';
@@ -27,6 +29,7 @@ function wallet() {
     onCapabilities: () => {},
   };
   const provider = { request: async ({ method, params }: { method: string; params?: any }) => {
+    if (method === 'eth_chainId') return '0x38';
     if (method === 'wallet_getCapabilities') {
       state.onCapabilities();
       return { '0x38': { atomic: { status: state.supported ? 'supported' : 'unsupported' } } };
@@ -63,12 +66,28 @@ function wallet() {
   };
   const args = { owner: account, chainId: 56, calls, beforeSend: () => {}, promptTimeoutMs: 20 };
   const run = () => submitRegistrationBatch(deps, args);
-  return { state, args, run, sent, checked };
+  return { state, args, run, sent, checked, provider };
 }
 
 test('sends both registration calls atomically through viem, with the bound owner and chain', async () => {
   const w = wallet();
-  expect((await w.run())?.success).toBe(true);
+  const config = createConfig({
+    chains: [bsc], transports: { [bsc.id]: http() },
+    connectors: [mock({ accounts: [w.args.owner] })], storage: null,
+  });
+  const connector = config.connectors[0];
+  await connect(config, { connector });
+  const provider = spyOn(connector, 'getProvider').mockResolvedValue(custom(w.provider)({ retryCount: 0 }));
+  try {
+    const result = await submitWalletRegistrationBatch(config, {
+      owner: w.args.owner, chainId: bsc.id,
+      keystoreCalldata: calls[0], viewingKeyCalldata: calls[1],
+      beforeSend: () => {},
+    });
+    expect(result?.success).toBe(true);
+  } finally {
+    provider.mockRestore();
+  }
   expect(w.sent).toHaveLength(1);
   expect(w.sent[0]).toMatchObject({ from: w.args.owner, chainId: '0x38', atomicRequired: true });
   expect(w.sent[0].calls.map((call: any) => call.data)).toEqual(calls.map(call => call.data));

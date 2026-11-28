@@ -17,6 +17,7 @@ import { isStellarClaimLink } from '@/services/stellar/stellar-claim';
 import { StellarClaimNoteScreen } from '@/components/stellar-claim-note';
 import { usePoolSession } from '@/hooks/use-pool-session';
 import { useSessionChainId } from '@/hooks/use-session-chain-id';
+import { useReceiptChainSwitch } from '@/hooks/use-receipt-chain-switch';
 import { useShareLinkPayload } from '@/hooks/use-share-link-payload';
 import { useNoteImport } from '@/hooks/use-note-import';
 import { useLinkApproval } from '@/hooks/use-link-approval';
@@ -32,6 +33,7 @@ import { isViewingKeyGasShort, usePublishViewingKey } from '@/hooks/use-publish-
 import { useKeystoreRegistrationModal } from '@/components/keystore-registration-modal-provider';
 import { formatGasTopUp } from '@/services/gas-top-up';
 import { FeeWarning } from '@/components/fee-warning';
+import { claimProgressSurface, claimSetupPlan, claimSetupSteps } from '@/services/claim-setup-steps';
 import { useWalletTokens } from '@/components/wallet-tokens-provider';
 import { NATIVE_ASSET_ADDRESS } from '@/config/environments';
 import { useFeePricing } from '@/hooks/use-fee-pricing';
@@ -68,6 +70,9 @@ function EvmImportNoteScreen() {
   const {
     status,
     statusMessage,
+    claimPhase,
+    claimFunding,
+    relayCanRegister,
     errMessage,
     busy,
     done,
@@ -103,7 +108,7 @@ function EvmImportNoteScreen() {
 
   // A relayed claim sets the auth policy but not the viewing key, so the claim
   // isn't finished until the viewing key is published.
-  const { partial: setupPartial } = useReceiveSetup(receiptChainId);
+  const { partial: setupPartial, state: setupState } = useReceiveSetup(receiptChainId);
   const { publishViewingKey } = usePublishViewingKey(receiptChainId);
   const { openFinishSetup } = useKeystoreRegistrationModal();
   const [finish, setFinish] = useState<{ busy: boolean; message: string; error: string | null; gasShort: boolean }>(
@@ -182,15 +187,18 @@ function EvmImportNoteScreen() {
   const feePricing = useFeePricing(receiptChainId);
   const transferFeeFor = useTransferFeeEstimate(receiptChainId);
   const walletTokensOn = useWalletTokens();
+  // Read from data the page already holds (wallet balances, fee pricing).
+  // undefined / null: not loaded yet, or the read failed.
+  const nativeBalanceWei = walletTokensOn(receiptChainId).find((t) => t.address.toLowerCase() === NATIVE_ASSET_ADDRESS)?.balance;
+  const claimGasPriceWei = feePricing.gasPriceOf(receiptChainId);
+  const walletPays = nativeBalanceWei !== undefined && claimGasPriceWei !== null
+    && decideRegistrationPath({ supported: true, balanceWei: nativeBalanceWei, gasPriceWei: claimGasPriceWei }).reason === 'funded';
   const claimFeeBreakdown = useMemo(() => {
     if (!note || !token?.known) return null;
     const perNote = transferFeeFor(note.tokenId);
     if (perNote === null) return null;
     const claimed = receipt?.notes ?? [];
     const gasPriceWei = feePricing.gasPriceOf(receiptChainId);
-    const nativeWei = walletTokensOn(receiptChainId).find((t) => t.address.toLowerCase() === NATIVE_ASSET_ADDRESS)?.balance;
-    const walletPays = nativeWei !== undefined && gasPriceWei !== null
-      && decideRegistrationPath({ supported: true, balanceWei: nativeWei, gasPriceWei }).reason === 'funded';
     const count = walletPays ? BigInt(claimed.length) : 1n;
     return relayedSpendBreakdown({
       chainId: receiptChainId,
@@ -202,7 +210,18 @@ function EvmImportNoteScreen() {
       gasPriceWei,
       nativeUsd: feePricing.nativeUsdOf(receiptChainId),
     });
-  }, [note, receipt, token, transferFeeFor, feePricing, receiptChainId, walletTokensOn]);
+  }, [note, receipt, token, transferFeeFor, feePricing, receiptChainId, walletPays]);
+  // A wallet that pays its own setup sends it as wallet transactions before
+  // the relayed claim; a user took those prompts for the claim. Name both steps.
+  // The claim's own funding decision once it has one; until then the same
+  // rule over what the page holds, hedged whenever an input is unknown.
+  const setupSteps = claimSetupSteps(claimSetupPlan({
+    setupState,
+    funding: claimFunding
+      ? { source: 'probed', kind: claimFunding.kind }
+      : { source: 'estimate', balanceWei: nativeBalanceWei, gasPriceWei: claimGasPriceWei, relayCanRegister },
+  }));
+  const inSetup = status === 'anchoring' && claimPhase === 'setup';
   const receiptChainInfo = receiptChain(receiptChainId);
   const chainName = receiptChainInfo.name;
   const nativeCurrency = getChainConfig(receiptChainId)?.nativeCurrency ?? { symbol: 'ETH', decimals: 18 };
@@ -249,6 +268,8 @@ function EvmImportNoteScreen() {
   // old behavior.
   const sessionChainId = useSessionChainId();
   const chainMismatch = receipt?.chainId !== undefined && receipt.chainId !== sessionChainId;
+  // Switch the app to the receipt's chain instead of telling the user to.
+  const chainSwitch = useReceiptChainSwitch({ linkChainId: receipt?.chainId, sessionChainId, chain: receiptChainInfo, paused: busy });
   const baseDisabled = !recipientMatches || !keysReady || busy || chainMismatch;
 
   // A note is spendable only once the ASP approves the sender's deposit. Read
@@ -354,8 +375,8 @@ function EvmImportNoteScreen() {
 
             {chainMismatch ? (
               <View className="gap-[6px] border border-warning bg-warning-bg px-[14px] py-[12px]">
-                <Text className="font-pp-semi-bold text-[13px] text-warning">Wrong network</Text>
-                <ReceiptWrongNetworkCopy chain={receiptChainInfo} textClassName="font-pp-regular text-[12px] leading-[18px] text-warning" />
+                <Text className="font-pp-semi-bold text-[13px] text-warning">{chainSwitch.switching ? 'Switching network' : 'Wrong network'}</Text>
+                <ReceiptWrongNetworkCopy chain={receiptChainInfo} chainSwitch={chainSwitch} textClassName="font-pp-regular text-[12px] leading-[18px] text-warning" />
               </View>
             ) : !effectiveAddress ? (
               <View className="gap-[6px] border border-border bg-success-bg px-[14px] py-[12px]">
@@ -415,7 +436,7 @@ function EvmImportNoteScreen() {
             {/* On-chain add = the same staged flow as shield/send, so it gets
                 the same horizontal progress. The quick device merge keeps a
                 plain status line. */}
-            {status === 'anchoring' ? (
+            {claimProgressSurface({ anchoring: status === 'anchoring', claimPhase }) === 'progress' ? (
               <FlowProgress message={statusMessage} />
             ) : busy && statusMessage ? (
               <Text className="font-pp-regular text-[12px] leading-[18px] text-primary">{statusMessage}</Text>
@@ -513,6 +534,7 @@ function EvmImportNoteScreen() {
                   >
                     <Text className="font-pp-semi-bold text-[15px] text-button-primary-text">
                       {status === 'anchored' ? 'Payment claimed ✓'
+                        : inSetup ? 'One-time setup…'
                         : status === 'anchoring' ? 'Claiming…'
                         : approvalCopy ? approvalCopy.button
                         : approvalChecking ? 'Checking approval…'
@@ -528,6 +550,12 @@ function EvmImportNoteScreen() {
                     The exact figure would be better still, but the fee
                     commitment lives ~60s, so quoting here and confirming later
                     risks an expiry - tracked separately. */}
+                {canAnchorOnChain && !done && !approvalBlocked && setupSteps && (status !== 'anchoring' || inSetup) && (
+                  <View testID="claim-setup-steps" className="gap-[2px] px-[16px] pt-[8px]">
+                    <Text className={`font-pp-regular text-[11px] leading-[15px] ${inSetup ? 'text-primary' : 'text-text-secondary'}`}>{setupSteps.setup}</Text>
+                    <Text className="font-pp-regular text-[11px] leading-[15px] text-text-secondary">{setupSteps.claim}</Text>
+                  </View>
+                )}
                 {canAnchorOnChain && !done && !approvalBlocked && (
                   <Text className="px-[16px] pt-[8px] font-pp-regular text-[11px] leading-[15px] text-text-secondary">
                     A relayer submits this for you, so your address stays private. Its fee is 0.1% plus gas.
