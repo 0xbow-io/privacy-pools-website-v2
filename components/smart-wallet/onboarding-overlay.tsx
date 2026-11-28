@@ -10,6 +10,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useAccount } from 'wagmi';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { Colors } from '@/constants/theme';
 import { useTheme } from '@/components/theme-provider';
@@ -87,9 +88,18 @@ export function SmartWalletOnboardingOverlay() {
       // surfaced via context error
     }
   };
-  const onRecover = async () => {
+  const onRecover = async (securityKey = false) => {
     try {
-      await recover();
+      await recover(securityKey ? { securityKey: true } : undefined);
+    } catch {
+      // surfaced via context error
+    }
+  };
+  // A security key (YubiKey and other FIDO2 keys) is offered wherever the
+  // passkey is, as the alternative next to it.
+  const onCreateWithSecurityKey = async () => {
+    try {
+      await create({ securityKey: true });
     } catch {
       // surfaced via context error
     }
@@ -181,9 +191,27 @@ export function SmartWalletOnboardingOverlay() {
           </Pressable>
 
           {!hasExisting && passkeyAvailable && (
-            <Pressable onPress={onRecover} disabled={busy} className="h-[46px] items-center justify-center self-stretch">
+            <Pressable onPress={() => { void onCreateWithSecurityKey(); }} disabled={busy} className="h-[46px] flex-row items-center justify-center gap-[8px] self-stretch" testID="smart-wallet-create-security-key">
+              {/* nw-keep(data-color): key glyph color is a runtime theme token into the vector-icon sink */}
+              <Ionicons name="key-outline" size={16} color={colors.text} />
+              <Text className="font-pp-medium text-[14px] text-text">
+                Create with a security key
+              </Text>
+            </Pressable>
+          )}
+
+          {!hasExisting && passkeyAvailable && (
+            <Pressable onPress={() => { void onRecover(); }} disabled={busy} className="h-[46px] items-center justify-center self-stretch">
               <Text className="font-pp-medium text-[14px] text-tint">
                 Recover with passkey
+              </Text>
+            </Pressable>
+          )}
+
+          {!hasExisting && passkeyAvailable && (
+            <Pressable onPress={() => { void onRecover(true); }} disabled={busy} className="h-[46px] items-center justify-center self-stretch" testID="smart-wallet-recover-security-key">
+              <Text className="font-pp-medium text-[14px] text-tint">
+                Recover with security key
               </Text>
             </Pressable>
           )}

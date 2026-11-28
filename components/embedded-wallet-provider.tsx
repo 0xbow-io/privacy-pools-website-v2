@@ -14,6 +14,7 @@ import {
   type EmbeddedWalletMeta,
 } from '@/services/embedded-wallet';
 import { smartWalletActive } from '@/config/smart-wallet';
+import { SECURITY_KEY_NO_PRF_MESSAGE } from '@/services/passkey-choice';
 
 // Drives the embedded (passkey smart-account) wallet: create, unlock, wipe, and
 // hooking it up to wagmi so the rest of the app (SDK provider, deposit, etc.)
@@ -28,11 +29,11 @@ interface EmbeddedWalletContextValue {
   busy: boolean;
   error: string | null;
   // Create a fresh wallet (no seedphrase) and connect it.
-  create: () => Promise<void>;
+  create: (opts?: { securityKey?: boolean }) => Promise<void>;
   // Unlock an existing wallet (passkey/biometric prompt) and connect it.
   unlock: () => Promise<void>;
   // Recover from the passkey alone (no local state) and connect it.
-  recover: () => Promise<void>;
+  recover: (opts?: { securityKey?: boolean }) => Promise<void>;
   // Forget the wallet entirely (after disconnect).
   wipe: () => Promise<void>;
 }
@@ -42,6 +43,10 @@ const EmbeddedWalletContext = createContext<EmbeddedWalletContextValue | null>(n
 function humanizeError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
   switch (msg) {
+    case 'SECURITY_KEY_PRF_UNSUPPORTED':
+      return SECURITY_KEY_NO_PRF_MESSAGE;
+    case 'SECURITY_KEY_PROMPT_CLOSED':
+      return 'The security key prompt was closed or timed out. Try again.';
     case 'PASSKEY_PRF_UNSUPPORTED':
       return "This device's passkey can't secure the wallet key. Try a device with a built-in authenticator.";
     case 'NO_EMBEDDED_WALLET':
@@ -96,11 +101,11 @@ export function EmbeddedWalletProvider({ children }: { children: ReactNode }) {
     await connectAsync({ connector: embeddedConn });
   }, [connectAsync, embeddedConn]);
 
-  const create = useCallback(async () => {
+  const create = useCallback(async (opts?: { securityKey?: boolean }) => {
     setBusy(true);
     setError(null);
     try {
-      const wallet = await createWallet();
+      const wallet = await createWallet(undefined, opts?.securityKey ? { authenticator: 'security-key' } : undefined);
       setActiveEmbeddedWallet(wallet.privateKey);
       await connectEmbedded();
       await refresh();
@@ -130,11 +135,11 @@ export function EmbeddedWalletProvider({ children }: { children: ReactNode }) {
     }
   }, [connectEmbedded, refresh]);
 
-  const recover = useCallback(async () => {
+  const recover = useCallback(async (opts?: { securityKey?: boolean }) => {
     setBusy(true);
     setError(null);
     try {
-      const wallet = await recoverWallet();
+      const wallet = await recoverWallet(opts?.securityKey ? { authenticator: 'security-key' } : undefined);
       setActiveEmbeddedWallet(wallet.privateKey);
       await connectEmbedded();
       await refresh();
