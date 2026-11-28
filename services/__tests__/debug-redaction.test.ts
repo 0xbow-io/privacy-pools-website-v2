@@ -534,7 +534,7 @@ describe('?debugsafe=1', () => {
   test('nothing set means neither', () => {
     expect(resolveDebugSafe('', false)).toEqual({ safe: false, debug: false });
   });
-  test('the safe level is the no-spending-keys one', () => {
-    expect(DEBUG_SAFE_LEVEL).toBe('no-spending-keys');
+  test('the safe level drops the viewing key', () => {
+    expect(DEBUG_SAFE_LEVEL).toBe('no-viewing-key');
   });
 });
