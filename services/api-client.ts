@@ -25,6 +25,7 @@ import type {
   PpUsdcVaultMetricsResponse,
   PpUsdcApyWindow,
   AssetStatisticsResponse,
+  AllAssetStatisticsResponse,
   PointsEpochsResponse,
   PointsRateLeavesResponse,
 } from '@/services/api-types';
@@ -255,6 +256,14 @@ class APIClient {
       // checksummed addresses with 404 (kimi round 1, latent until asp-v2 #92).
       headers: { 'X-Asset': tokenAddress.toLowerCase() },
     });
+  }
+
+  /**
+   * Every enabled asset's statistics on a chain, one entry per pool, in one
+   * request that names no asset (asp-v2#252). 404s on an ASP that predates it.
+   */
+  getAllAssetStatistics(chainId: number | string): Promise<AllAssetStatisticsResponse> {
+    return this.request<AllAssetStatisticsResponse>(`/${chainId}/public/asset-statistics/all`);
   }
 
   getTokenPrices(chainId?: string): Promise<TokenPricesResponse> {

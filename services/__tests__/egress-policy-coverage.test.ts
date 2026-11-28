@@ -77,6 +77,7 @@ describe('real request construction reaches the egress allowlist', () => {
           ['getGlobalEvents', () => api.getGlobalEvents({ page: 2, perPage: 100, action: 'transfer', status: 'pending', chainId: 11155111, token: ADDRESS, includeRagequit: true, entrypoint: ADDRESS })],
           ['getGlobalStatistics', () => api.getGlobalStatistics()],
           ['getAssetStatistics', () => api.getAssetStatistics(11155111, ADDRESS)],
+          ['getAllAssetStatistics', () => api.getAllAssetStatistics(11155111)],
           ['getTokenPrices', () => api.getTokenPrices()],
           ['getTokenPrices', () => api.getTokenPrices('11155111')],
           ['getAssetsStats', () => api.getAssetsStats('all')],
@@ -114,8 +115,10 @@ describe('real request construction reaches the egress allowlist', () => {
       }
       const event = sent.find((r) => r.url.includes('perPage='));
       expect(new URL(event!.url).searchParams.size).toBe(8);
-      const asset = sent.find((r) => r.url.includes('/asset-statistics'));
+      const asset = sent.find((r) => new URL(r.url).pathname.endsWith('/asset-statistics'));
       expect(new Headers(asset!.init?.headers).get('x-asset')).toBe(ADDRESS);
+      const list = sent.find((r) => r.url === `${ASP}/11155111/public/asset-statistics/all`);
+      expect(new Headers(list!.init?.headers).get('x-asset')).toBeNull();
       expect(sent.some((r) => r.url === `${ASP}/association-set/305/leaves`)).toBe(true);
       // The epoch rows carry Hex epoch numbers; the rate-leaves path stays decimal.
       expect(sent.some((r) => new URL(r.url).pathname === '/11155111/public/points/epochs/3/rate-leaves')).toBe(true);

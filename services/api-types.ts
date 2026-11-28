@@ -352,6 +352,8 @@ export interface AssetsStatsResponse {
 export interface AssetStatistics {
   asset: string;
   chainId: string;
+  /** The entrypoint of the pool these figures cover (asp-v2#252); absent from an older ASP. */
+  entrypoint?: string;
   tokenSymbol: string;
   tokenAddress: string;
   allTime: TimeBasedStats;
@@ -360,6 +362,17 @@ export interface AssetStatistics {
 
 export interface AssetStatisticsResponse {
   asset: AssetStatistics;
+  cacheTimestamp: string;
+}
+
+/**
+ * GET /:chainId/public/asset-statistics/all (asp-v2#252): every enabled asset
+ * of the chain's enabled pools, one entry per pool, sorted by asset then
+ * entrypoint. Each entry is what the X-Asset read answers for that asset and
+ * pool. `cacheTimestamp` is when the oldest entry was calculated.
+ */
+export interface AllAssetStatisticsResponse {
+  assets: (AssetStatistics & { entrypoint: string })[];
   cacheTimestamp: string;
 }
 
