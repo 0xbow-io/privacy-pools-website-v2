@@ -1,4 +1,6 @@
-# Real Sepolia shield / withdraw / send through the UI, on every PR push.
+# Real Sepolia shield / withdraw / send through the UI, on every push to a PR
+# that isn't a draft, and when a draft is marked ready for review. A draft skips
+# it, so a PR still being iterated doesn't hold the shared accounts.
 #
 # Parallel groups (fund, then core, payment and fixtures, then one `journey`
 # verdict); the phase rules are in scripts/e2e/ci.ts.
@@ -10,15 +12,16 @@ name: e2e-sepolia
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs: {}
 # One run at a time across the whole repo: the fixed accounts have shared
 # state (their shielded notes and nullifiers), so concurrent runs would spend the
 # same notes and fight each other. Queue, never cancel, so a run always reaches
-# its sweep step.
+# its sweep step. A draft's run skips every job, so it gets a group of its own:
+# in the shared one it would replace another PR's pending run.
 concurrency:
-  group: e2e-sepolia-accounts
+  group: ${{ github.event.pull_request.draft && format('e2e-sepolia-draft-{0}', github.run_id) || 'e2e-sepolia-accounts' }}
   cancel-in-progress: false
 
 # The barrier between groups reads this run's job steps.
@@ -30,6 +33,7 @@ jobs:
   # A tops up B and the fixtures treasury (derived from A's key) BEFORE the
   # groups start, so no two runners ever send from the same wallet.
   fund:
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -196,7 +200,7 @@ jobs:
   # One verdict under the old check name.
   journey:
     needs: [fund, group]
-    if: always()
+    if: ${{ always() && !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
       - name: Every group passed
