@@ -576,3 +576,19 @@ export function redactRecordingParts<P extends { entries: Array<{ message: strin
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
+
+/**
+ * `?debugsafe=1`: a support link for users who should only be able to hand the
+ * team a level that can neither move their funds nor keep decrypting their notes. Debug mode turns on as usual,
+ * but the export dialog offers one fixed level and describes it without the
+ * word "key" (Pat, 2026-11-19: a user refused the full dialog because the
+ * wording sounded unsafe). An explicit `?debug=1` turns the restriction off.
+ */
+export const DEBUG_SAFE_LEVEL: RedactionLevel = 'no-viewing-key';
+
+export function resolveDebugSafe(search: string, stored: boolean): { safe: boolean; debug: boolean } {
+  const params = new URLSearchParams(search);
+  const safeQuery = params.get('debugsafe') === '1';
+  const debugQuery = params.get('debug') === '1';
+  return { safe: safeQuery || (stored && !debugQuery), debug: safeQuery || debugQuery };
+}
